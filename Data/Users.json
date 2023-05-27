@@ -1,0 +1,31 @@
+{
+    "SARGENT#2319": [{
+        "event": "join",
+        "sound": "ALERT"
+    }],
+    "quiécaralho#4644": [{
+        "event": "join",
+        "sound": "ALLAH"
+    }],
+    "Syzo#1859": [{
+        "event": "leave",
+        "sound": "GOODBYE"
+    }],
+    "Enon#1968": [{
+        "event": "join",
+        "sound": "FART"
+    }],
+    "sopustos#1568": [{
+            "event": "leave",
+            "sound": "XFART"
+        },
+        {
+            "event": "join",
+            "sound": "MEXI"
+        }
+    ],
+    "Darkout#3795": [{
+        "event": "join",
+        "sound": "HELLO"
+    }]
+}
