@@ -14,8 +14,16 @@ load_dotenv()
 bot_token = os.getenv('DISCORD_BOT_TOKEN')
 FFMPEG_PATH = os.getenv('FFMPEG_PATH')
 
-# Load Data
-with open('Data/Sounds.json') as f:
+# Get the absolute path of the script file
+script_path = os.path.abspath(__file__)
+
+# Get the directory of the script
+script_dir = os.path.dirname(script_path)
+
+# Construct the absolute sounds file path
+sounds_path = os.path.join(script_dir, 'Data', 'Sounds.json')
+
+with open(sounds_path, 'r') as f:
     sound_keys = json.load(f)
     # Example of Sounds.json
     """
@@ -30,9 +38,10 @@ with open('Data/Sounds.json') as f:
     ] 
     """
 
+# Construct the absolute users file path
+users_path = os.path.join(script_dir, 'Data', 'Users.json')
 
-
-with open('Data/Users.json') as f:
+with open(users_path, 'r', encoding='utf-8') as f:
     user_data = json.load(f)
     # Example of Users.json
     """ 
@@ -54,7 +63,7 @@ with open('Data/Users.json') as f:
     """
 
 # Load Variables from Data
-SOUNDS = {sound: os.getenv(f'SOUND_{sound}') for sound in sound_keys}
+SOUNDS = {sound: os.getenv(f'SOUND_{sound}') for sound in sound_keys}# these are urls with .mp3 files
 USERS = {user: [SoundEventFactory.create_sound_event(user, event['event'], SOUNDS[event['sound']]) for event in events] for user, events in user_data.items()}
 
 last_channel = {}
@@ -81,9 +90,9 @@ async def on_ready():
 @bot.event
 async def on_voice_state_update(member, before, after):
     member_str = str(member)
-    
     # Check if the member is in the user list and if the member is in a voice channel (before or after) 
     if member_str in USERS:
+        
         if before.channel is None or (before.channel != after.channel and after.channel is not None):
             event = "join"
             channel = after.channel

@@ -7,14 +7,30 @@
         "event": "join",
         "sound": "ALLAH"
     }],
+    "DontLoveIt#5852": [{
+        "event": "join",
+        "sound": "TUDUNU"
+    }],
+    "Emmerlich#0412": [{
+        "event": "join",
+        "sound": "ZORLAK"
+    }],
     "Syzo#1859": [{
         "event": "leave",
         "sound": "GOODBYE"
+    }, {
+        "event": "join",
+        "sound": "AFRICANO"
     }],
     "Enon#1968": [{
         "event": "join",
         "sound": "FART"
     }],
+    "Henrik#5302": [{
+        "event": "join",
+        "sound": "DONNIE"
+    }],
+    
     "sopustos#1568": [{
             "event": "leave",
             "sound": "XFART"
