@@ -2,6 +2,8 @@ import asyncio,discord,os,json
 from discord.ext import commands
 from Classes.SoundEventFactory import SoundEventFactory
 from dotenv import load_dotenv
+import asyncio
+from Classes.SoundDownloader import SoundDownloader
 
 # Intents
 intents = discord.Intents(guilds=True, voice_states=True)
@@ -68,6 +70,19 @@ USERS = {user: [SoundEventFactory.create_sound_event(user, event['event'], SOUND
 
 last_channel = {}
 
+def get_largest_voice_channel(guild):
+    """Find the voice channel with the most members."""
+    largest_channel = None
+    largest_size = 0
+
+    for channel in guild.voice_channels:
+        if len(channel.members) > largest_size:
+            largest_channel = channel
+            largest_size = len(channel.members)
+
+    return largest_channel
+
+
 async def disconnect_all_bots(guild):
     if bot.voice_clients:
         for vc_bot in bot.voice_clients:
@@ -83,9 +98,25 @@ async def play_audio(channel, audio_file):
 
     await voice_client.disconnect()
 
+
+sound_downloader = SoundDownloader()
+
+async def download_sound_periodically():
+    while True:
+        sound_downloader.download_sound()
+        await asyncio.sleep(1)  # Wait for 1 second after downloading
+        for guild in bot.guilds:  # For each server the bot is a member of
+            channel = get_largest_voice_channel(guild)  # Get the largest voice channel
+            if channel is not None:  # If we found a voice channel
+                await disconnect_all_bots(guild)
+                await play_audio(channel, r"C:\Users\netco\Downloads\random.mp3")  # Play the downloaded sound
+        await asyncio.sleep(3600)  # Wait for 1h
+
+
 @bot.event
 async def on_ready():
     print(f"We have logged in as {bot.user}")
+    bot.loop.create_task(download_sound_periodically())
 
 @bot.event
 async def on_voice_state_update(member, before, after):
