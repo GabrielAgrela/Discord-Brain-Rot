@@ -30,9 +30,11 @@ class BotBehavior:
     async def play_audio(self, channel, audio_file):
         voice_client = await channel.connect()
         voice_client.play(discord.FFmpegPCMAudio(executable=self.ffmpeg_path, source=audio_file))
-        while voice_client.is_playing():
-            await asyncio.sleep(.1)
-        await voice_client.disconnect()
+        await asyncio.sleep(5) # Wait for 5 seconds
+        if voice_client.is_connected():
+            await voice_client.disconnect()
+
+
 
     async def update_bot_status_once(self):
         if hasattr(self.bot, 'next_download_time'):
@@ -48,14 +50,21 @@ class BotBehavior:
 
     async def download_sound_periodically(self):
         while True:
-            self.sound_downloader.download_sound()
-            await asyncio.sleep(1)
-            for guild in self.bot.guilds:
-                channel = self.get_largest_voice_channel(guild)
-                if channel is not None:
-                    await self.disconnect_all_bots(guild)
-                    await self.play_audio(channel, r"C:\Users\netco\Downloads\random.mp3")
-            sleep_time = random.uniform(600, 3600)
-            self.bot.next_download_time = time.time() + sleep_time
-            await self.update_bot_status_once()
-            await asyncio.sleep(sleep_time)
+            try:
+                self.sound_downloader.download_sound()
+                await asyncio.sleep(1)
+                for guild in self.bot.guilds:
+                    channel = self.get_largest_voice_channel(guild)
+                    if channel is not None:
+                        await self.disconnect_all_bots(guild)
+                        await self.play_audio(channel, r"C:\Users\netco\Downloads\random.mp3")
+                sleep_time = random.uniform(600, 3600)
+                self.bot.next_download_time = time.time() + sleep_time
+                while time.time() < self.bot.next_download_time:
+                    await self.update_bot_status_once()
+                    await asyncio.sleep(60)
+                await asyncio.sleep(sleep_time)
+            except Exception as e:
+                print(f"An error occurred: {e}")
+                await asyncio.sleep(60) # if an error occurred, try again in 1 minute
+
