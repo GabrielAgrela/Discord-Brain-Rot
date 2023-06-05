@@ -10,6 +10,7 @@ class BotBehavior:
         self.ffmpeg_path = ffmpeg_path
         self.sound_downloader = SoundDownloader()
         self.last_channel = {}
+        self.playback_done = asyncio.Event()
 
     def get_largest_voice_channel(self, guild):
         """Find the voice channel with the most members."""
@@ -29,8 +30,22 @@ class BotBehavior:
 
     async def play_audio(self, channel, audio_file):
         voice_client = await channel.connect()
-        voice_client.play(discord.FFmpegPCMAudio(executable=self.ffmpeg_path, source=audio_file))
-        await asyncio.sleep(5) # Wait for 5 seconds
+        self.playback_done.clear() # Clearing the flag before starting the audio
+
+        def after_playing(error):
+            if error:
+                print(f'Error in playback: {error}')
+            else:
+                self.playback_done.set()
+
+        voice_client.play(
+            discord.FFmpegPCMAudio(executable=self.ffmpeg_path, source=audio_file),
+            after=after_playing
+        )
+
+        # Wait for the audio to finish playing
+        await self.playback_done.wait()
+
         if voice_client.is_connected():
             await voice_client.disconnect()
 
@@ -39,9 +54,15 @@ class BotBehavior:
     async def update_bot_status_once(self):
         if hasattr(self.bot, 'next_download_time'):
             time_left = self.bot.next_download_time - time.time()
-            minutes = round(time_left / 60)
-            activity = discord.Activity(name=f'an explosion in ~{minutes}m', type=discord.ActivityType.playing)
-            await self.bot.change_presence(activity=activity)
+            if time_left > 0:
+                minutes = round(time_left / 60)
+                if minutes == 0:
+                    activity = discord.Activity(name=f'explosion imminent!!!', type=discord.ActivityType.playing)
+                else:
+                    activity = discord.Activity(name=f'an explosion in ~{minutes}m', type=discord.ActivityType.playing)
+                await self.bot.change_presence(activity=activity)
+
+
 
     async def update_bot_status(self):
         while True:
@@ -57,13 +78,19 @@ class BotBehavior:
                     channel = self.get_largest_voice_channel(guild)
                     if channel is not None:
                         await self.disconnect_all_bots(guild)
-                        await self.play_audio(channel, r"C:\Users\netco\Downloads\random.mp3")
-                sleep_time = random.uniform(600, 3600)
+                sleep_time = random.uniform(3600, 10000)
                 self.bot.next_download_time = time.time() + sleep_time
+                print("time ", time.time(), " next ", self.bot.next_download_time, " diff  ",  time.time()-self.bot.next_download_time)
                 while time.time() < self.bot.next_download_time:
                     await self.update_bot_status_once()
                     await asyncio.sleep(60)
-                await asyncio.sleep(sleep_time)
+                # Playing the audio after ensuring that time_left has reached 0 or less
+                for guild in self.bot.guilds:
+                    channel = self.get_largest_voice_channel(guild)
+                    if channel is not None:
+                        await self.play_audio(channel, r"C:\Users\netco\Downloads\random.mp3")
+                    else:
+                        await asyncio.sleep(sleep_time)
             except Exception as e:
                 print(f"An error occurred: {e}")
                 await asyncio.sleep(60) # if an error occurred, try again in 1 minute
