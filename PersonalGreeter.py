@@ -23,7 +23,9 @@ async def on_ready():
 
 @bot.event
 async def on_voice_state_update(member, before, after):
+    
     member_str = str(member)
+    print(member_str)
     if member_str in USERS:
         if before.channel is None or (before.channel != after.channel and after.channel is not None):
             event = "join"

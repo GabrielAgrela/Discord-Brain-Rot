@@ -1,5 +1,5 @@
 {
-    "SARGENT#2319": [{
+    "sargentt#0": [{
         "event": "join",
         "sound": "ALERT"
     }],
@@ -7,18 +7,19 @@
         "event": "join",
         "sound": "ALLAH"
     }],
-    "DontLoveIt#5852": [{
+    "dontloveit#0": [{
         "event": "join",
-        "sound": "TUDUNU"
+        "sound": "BRUNOCARVALHO"
     }],
-    "Emmerlich#0412": [{
+    "emmerlich#0": [{
         "event": "join",
         "sound": "ZORLAK"
     }],
-    "Syzo#1859": [{
+    "syzoo#0": [{
         "event": "leave",
         "sound": "GOODBYE"
-    }, {
+    }, 
+    {
         "event": "join",
         "sound": "AFRICANO"
     }],
@@ -26,12 +27,12 @@
         "event": "join",
         "sound": "FART"
     }],
-    "Henrik#5302": [{
+    "henrik72#0": [{
         "event": "join",
         "sound": "DONNIE"
     }],
     
-    "sopustos#1568": [{
+    "sopustos#0": [{
             "event": "leave",
             "sound": "XFART"
         },
@@ -40,7 +41,7 @@
             "sound": "MEXI"
         }
     ],
-    "Darkout#3795": [{
+    "darkout371#0": [{
         "event": "join",
         "sound": "HELLO"
     }]
