@@ -5,10 +5,10 @@ from Classes.Environment import Environment
 from Classes.Bot import Bot
 from Classes.SoundEventsLoader import SoundEventLoader
 from Classes.BotBehaviour import BotBehavior
-intents = discord.Intents(guilds=True, voice_states=True)
+intents = discord.Intents(guilds=True, voice_states=True, messages=True, message_content=True)
 
 env = Environment()
-bot = Bot(command_prefix="!", intents=intents, token=env.bot_token, ffmpeg_path=env.ffmpeg_path)
+bot = Bot(command_prefix="*", intents=intents, token=env.bot_token, ffmpeg_path=env.ffmpeg_path)
 
 loader = SoundEventLoader(os.path.abspath(__file__))
 USERS, SOUNDS = loader.load_sound_events()
@@ -20,6 +20,12 @@ async def on_ready():
     print(f"We have logged in as {bot.user}")
     bot.loop.create_task(behavior.download_sound_periodically())
     bot.loop.create_task(behavior.update_bot_status())
+
+
+@bot.command(name='entra')
+async def play_random(ctx):
+    print("Command triggered")
+    await behavior.download_sound_and_play()
 
 @bot.event
 async def on_voice_state_update(member, before, after):

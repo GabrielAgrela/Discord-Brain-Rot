@@ -25,6 +25,19 @@ class SoundDownloader:
         self.options.add_argument('--headless')
         self.options.add_argument('window-size=1200x600')
 
+
+    def scroll_a_little(self, driver):
+        # Get the current scroll height of the page
+        last_height = driver.execute_script("return document.body.scrollHeight")
+    
+        
+        # Scroll to the random height
+        driver.execute_script(f"window.scrollTo(0, {last_height*3});")
+        time.sleep(2)  # Allow the page to load
+
+
+
+
     def adjust_volume(self, sound_file, target_dBFS):
         sound = AudioSegment.from_file(sound_file, format="mp3")
         difference = target_dBFS - sound.dBFS
@@ -38,8 +51,10 @@ class SoundDownloader:
         consent_button = wait.until(EC.element_to_be_clickable((By.XPATH, '//button[contains(@class, "fc-cta-consent")]/p[text()="Consent"]')))
         consent_button.click()
         wait = WebDriverWait(self.driver, 10)
-        sound_elements = wait.until(EC.presence_of_all_elements_located((By.XPATH, '//a[@class="instant-link link-secondary"]')))
+        self.scroll_a_little(self.driver)
 
+        sound_elements = wait.until(EC.presence_of_all_elements_located((By.XPATH, '//a[@class="instant-link link-secondary"]')))
+        print("-------------------------------" + str(len(sound_elements)))
         random_sound_element = random.choice(sound_elements)
         self.driver.execute_script("arguments[0].scrollIntoView(true);", random_sound_element)
         self.driver.execute_script("arguments[0].click();", random_sound_element)

@@ -78,9 +78,9 @@ class BotBehavior:
                     channel = self.get_largest_voice_channel(guild)
                     if channel is not None:
                         await self.disconnect_all_bots(guild)
-                sleep_time = random.uniform(3600, 10000)
+                sleep_time = random.uniform(0, 8000)
                 self.bot.next_download_time = time.time() + sleep_time
-                print("time ", time.time(), " next ", self.bot.next_download_time, " diff  ",  time.time()-self.bot.next_download_time)
+                print("time ", time.time(), " next ", self.bot.next_download_time, " diff  ",  self.bot.next_download_time-time.time())
                 while time.time() < self.bot.next_download_time:
                     await self.update_bot_status_once()
                     await asyncio.sleep(60)
@@ -94,4 +94,15 @@ class BotBehavior:
             except Exception as e:
                 print(f"An error occurred: {e}")
                 await asyncio.sleep(60) # if an error occurred, try again in 1 minute
+    
+    async def download_sound_and_play(self):
+        try:
+            self.sound_downloader.download_sound()
+            time.sleep(1)
+            for guild in self.bot.guilds:
+                channel = self.get_largest_voice_channel(guild)
+                if channel is not None:
+                    await self.play_audio(channel, r"C:\Users\netco\Downloads\random.mp3")
+        except Exception as e:
+            print(f"An error occurred: {e}")
 
