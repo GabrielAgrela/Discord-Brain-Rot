@@ -13,7 +13,8 @@ from pydub import AudioSegment
 
 class SoundDownloader:
     def __init__(self):
-        self.service = Service(ChromeDriverManager().install())
+        self.service = Service(ChromeDriverManager(version="114.0.5735.90").install())
+
         self.options = webdriver.ChromeOptions()
 
         self.options.add_experimental_option("prefs", {

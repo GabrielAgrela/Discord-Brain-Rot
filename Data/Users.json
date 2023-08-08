@@ -15,6 +15,10 @@
         "event": "join",
         "sound": "ZORLAK"
     }],
+    "N3XT#6093": [{
+        "event": "join",
+        "sound": "VOUCAGAR"
+    }],
     "syzoo#0": [{
         "event": "leave",
         "sound": "GOODBYE"
@@ -23,10 +27,16 @@
         "event": "join",
         "sound": "AFRICANO"
     }],
-    "Enon#1968": [{
-        "event": "join",
-        "sound": "FART"
-    }],
+    
+    "enonone#0": [{
+            "event": "leave",
+            "sound": "FEET"
+        },
+        {
+            "event": "join",
+            "sound": "CRINGE"
+        }
+    ],
     "henrik72#0": [{
         "event": "join",
         "sound": "DONNIE"
