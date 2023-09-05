@@ -29,12 +29,15 @@ async def on_ready():
     print(f"We have logged in as {bot.user}")
     bot.loop.create_task(behavior.download_sound_periodically())
     bot.loop.create_task(behavior.update_bot_status())
+    await behavior.download_sound_and_play()
 
 
 @bot.command(name='entra')
 async def play_random(ctx):
     print("Command triggered")
-    await behavior.download_sound_and_play()
+    asyncio.create_task(behavior.download_sound_and_play())
+
+    print("test2")
 
 @bot.command(name='score')
 async def show_scores(ctx):
@@ -98,7 +101,7 @@ async def on_voice_state_update(member, before, after):
                 await asyncio.sleep(1)
                 if behavior.last_channel[member_str] == channel:
                     for guild in bot.guilds:
-                        await behavior.disconnect_all_bots(guild)
+                        #await behavior.disconnect_all_bots(guild)
                         if channel:
                             await behavior.play_audio(channel, user_event.sound)
                         break

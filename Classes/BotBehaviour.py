@@ -3,6 +3,8 @@ import time
 import discord
 import random
 from Classes.SoundDownloader import SoundDownloader
+import os
+import glob
 
 class BotBehavior:
     def __init__(self, bot, ffmpeg_path):
@@ -29,7 +31,12 @@ class BotBehavior:
                     await vc_bot.disconnect()
 
     async def play_audio(self, channel, audio_file):
-        voice_client = await channel.connect()
+        print("im in1")
+        try:
+            voice_client = await channel.connect()
+        except:
+            voice_client = discord.utils.get(self.bot.voice_clients, guild=channel.guild)
+            print("im in")
         self.playback_done.clear() # Clearing the flag before starting the audio
 
         def after_playing(error):
@@ -38,16 +45,24 @@ class BotBehavior:
             else:
                 self.playback_done.set()
 
-        voice_client.play(
-            discord.FFmpegPCMAudio(executable=self.ffmpeg_path, source=audio_file),
-            after=after_playing
-        )
+        
+        try:
+            
+            voice_client.play(
+                discord.FFmpegPCMAudio(executable=self.ffmpeg_path, source= audio_file),
+                after=after_playing
+            )
+        except Exception as e:
+            print(f"An error occurred: {e}")
+            time.sleep(1)
+            await self.play_audio(channel, audio_file)
 
+        print("playing")
         # Wait for the audio to finish playing
         await self.playback_done.wait()
 
-        if voice_client.is_connected():
-            await voice_client.disconnect()
+       # if voice_client.is_connected():
+           # await voice_client.disconnect()
 
 
 
@@ -56,7 +71,7 @@ class BotBehavior:
             time_left = self.bot.next_download_time - time.time()
             if time_left > 0:
                 minutes = round(time_left / 60)
-                if minutes == 0:
+                if minutes < 2:
                     activity = discord.Activity(name=f'explosion imminent!!!', type=discord.ActivityType.playing)
                 else:
                     activity = discord.Activity(name=f'an explosion in ~{minutes}m', type=discord.ActivityType.playing)
@@ -72,13 +87,13 @@ class BotBehavior:
     async def download_sound_periodically(self):
         while True:
             try:
-                self.sound_downloader.download_sound()
+                await self.sound_downloader.download_sound(False)
                 await asyncio.sleep(1)
                 for guild in self.bot.guilds:
                     channel = self.get_largest_voice_channel(guild)
-                    if channel is not None:
-                        await self.disconnect_all_bots(guild)
-                sleep_time = random.uniform(0, 8000)
+                    #if channel is not None:
+                        #await self.disconnect_all_bots(guild)
+                sleep_time = random.uniform(0, 800)
                 self.bot.next_download_time = time.time() + sleep_time
                 print("time ", time.time(), " next ", self.bot.next_download_time, " diff  ",  self.bot.next_download_time-time.time())
                 while time.time() < self.bot.next_download_time:
@@ -88,7 +103,9 @@ class BotBehavior:
                 for guild in self.bot.guilds:
                     channel = self.get_largest_voice_channel(guild)
                     if channel is not None:
-                        await self.play_audio(channel, r"H:\bup82623\Downloads\random.mp3")
+                        list_of_files = glob.glob('H:/bup82623/Downloads/*')
+                        latest_file = max(list_of_files, key=os.path.getctime)
+                        await self.play_audio(channel, latest_file)
                     else:
                         await asyncio.sleep(sleep_time)
             except Exception as e:
@@ -101,8 +118,11 @@ class BotBehavior:
             for guild in self.bot.guilds:
                 channel = self.get_largest_voice_channel(guild)
                 if channel is not None:
-                    await self.play_audio(channel, r"H:\bup82623\Downloads\random.mp3")
-                    self.sound_downloader.download_sound()
+                    list_of_files = glob.glob('H:/bup82623/Downloads/*')
+                    latest_file = max(list_of_files, key=os.path.getctime)
+                    asyncio.create_task(self.play_audio(channel, latest_file))
+                    print("playing")
+                    asyncio.create_task(self.sound_downloader.download_sound())
         except Exception as e:
             print(f"An error occurred: {e}")
 

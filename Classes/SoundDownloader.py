@@ -45,8 +45,12 @@ class SoundDownloader:
         difference = target_dBFS - sound.dBFS
         adjusted_sound = sound.apply_gain(difference)
         adjusted_sound.export(sound_file, format="mp3")
+        print("")
 
-    def download_sound(self):
+    #def get_latest_mp3_in_downloads(self):
+        
+
+    async def download_sound(self, manual=True):
         print("01 " + time.strftime("%H:%M:%S", time.localtime()))
         self.driver = webdriver.Chrome(service=self.service, options=self.options)
         print("02 " + time.strftime("%H:%M:%S", time.localtime()))
@@ -68,16 +72,16 @@ class SoundDownloader:
         download_button = wait.until(EC.element_to_be_clickable((By.XPATH, '//a[contains(@class, "instant-page-extra-button btn btn-primary")][contains(text(),"Download MP3")]')))
         print("4 " + time.strftime("%H:%M:%S", time.localtime()))
         self.driver.execute_script("arguments[0].click();", download_button)
+        time.sleep(2)
+        try:
+            list_of_files = glob.glob('H:/bup82623/Downloads/*')
+            latest_file = max(list_of_files, key=os.path.getctime)
+            self.adjust_volume(latest_file, -20.0)
+            print("5 " + time.strftime("%H:%M:%S", time.localtime()))
+            self.driver.quit()
+        except:
+            print("error ")
+            self.driver.quit()
         #time.sleep(2)
 
-        list_of_files = glob.glob('H:/bup82623/Downloads/*')
-        latest_file = max(list_of_files, key=os.path.getctime)
-        new_file_path = r"H:\bup82623\Downloads\random.mp3"
-        if os.path.exists(new_file_path): 
-            os.remove(new_file_path)
-        os.rename(latest_file, new_file_path)
-        self.adjust_volume(new_file_path, -20.0)
-        print("5 " + time.strftime("%H:%M:%S", time.localtime()))
-        #time.sleep(2)
-
-        self.driver.quit()
+        
