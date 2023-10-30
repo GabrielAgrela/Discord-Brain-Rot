@@ -8,6 +8,7 @@ import glob
 import threading
 from Classes.AudioDatabase import AudioDatabase
 from Classes.PlayHistoryDatabase import PlayHistoryDatabase
+from Classes.TTS import TTS
 
 class BotBehavior:
     def __init__(self, bot, ffmpeg_path):
@@ -17,9 +18,10 @@ class BotBehavior:
         self.last_channel = {}
         self.playback_done = asyncio.Event()
         # Usage example
-        self.db = AudioDatabase('Data/soundsDB.csv')
+        self.db = AudioDatabase('Data/soundsDB.csv', self.bot)
         self.player_history_db = PlayHistoryDatabase('Data/play_history.csv',self.db, self.bot)
         self.sound_downloader = SoundDownloader(self.db)
+        self.TTS = TTS(self,bot)
         
 
     def get_largest_voice_channel(self, guild):
@@ -38,14 +40,14 @@ class BotBehavior:
                 if vc_bot.guild == guild:
                     await vc_bot.disconnect()
 
-    async def play_audio(self, channel, audio_file,user, is_entrance=False):
+    async def play_audio(self, channel, audio_file,user, is_entrance=False, is_tts=False):
         self.player_history_db.add_entry(audio_file, user)
         voice_client = discord.utils.get(self.bot.voice_clients, guild=channel.guild)
         bot_channel = discord.utils.get(self.bot.guilds[0].text_channels, name='bot')
         
-        if bot_channel and not is_entrance:
+        if bot_channel and not is_entrance and not is_tts:
             embed = discord.Embed(
-                title=f"🔊 **{audio_file.split('/')[-1].replace('.mp3', '')} SOUNDS** 🔊",
+                title=f"🔊 **{audio_file.split('/')[-1].replace('.mp3', '')}** 🔊",
                 color=discord.Color.red()
             )
             #delete last message
@@ -78,7 +80,7 @@ class BotBehavior:
 
         try:
             
-            print(audio_file)
+            print("playing ", audio_file, " to ", channel)
             voice_client.play(
                 discord.FFmpegPCMAudio(executable=self.ffmpeg_path, source=audio_file),
                 after=after_playing
@@ -90,7 +92,6 @@ class BotBehavior:
             except:
                 pass
 
-        print("playing")
         # Wait for the audio to finish playing
         await self.playback_done.wait()
 
@@ -134,7 +135,7 @@ class BotBehavior:
     
                         random_file = self.db.get_random_filename()
                         
-                        await self.play_audio(channel, random_file)
+                        await self.play_audio(channel, random_file, "periodic function")
                     else:
                         await asyncio.sleep(sleep_time)
             except Exception as e:
@@ -147,7 +148,6 @@ class BotBehavior:
                 channel = self.get_largest_voice_channel(guild)
                 if channel is not None:
                     asyncio.create_task(self.play_audio(channel, self.db.get_random_filename(),"admin"))
-                    print("playing")
         except Exception as e:
             print(f"An error occurred: {e}")
 
@@ -159,6 +159,7 @@ class BotBehavior:
     
     async def play_request(self, id, user):
         distance, filename = self.db.get_most_similar_filename(id)
+        print ("sim ",distance)
         for guild in self.bot.guilds:
             channel = self.get_largest_voice_channel(guild)
             if channel is not None:
@@ -169,9 +170,11 @@ class BotBehavior:
 
     async def change_filename(self, oldfilename, newfilename):
         print("oldfilename: ", oldfilename, " newfilename: ", newfilename)
-        self.db.modify_filename(oldfilename, newfilename)
+        await self.db.modify_filename(oldfilename, newfilename)
                     
-            
+    async def tts(self,behavior, speech):
+        print("stt: ", speech)
+        await self.TTS.save_as_mp3(speech)     
     
     
 

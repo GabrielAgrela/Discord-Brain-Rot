@@ -3,10 +3,12 @@ import random
 import os
 import difflib
 import discord
+import Levenshtein
 
 class AudioDatabase:
-    def __init__(self, csv_filename):
+    def __init__(self, csv_filename, bot):
         self.csv_filename = csv_filename
+        self.bot = bot
 
     def add_entry(self, filename, original_filename=None):
         
@@ -21,7 +23,7 @@ class AudioDatabase:
         else:
             print("No similar filename found. Entry not added.")
 
-    def modify_filename(self, old_filename, new_filename):
+    async def modify_filename(self, old_filename, new_filename):
         print(f"Modifying {old_filename} to {new_filename}")
         sim, old_filename = self.get_most_similar_filename(old_filename)
         
@@ -42,7 +44,16 @@ class AudioDatabase:
                     return
                 
                 self._write_data(data)
-                print(f"Modified {old_filename} to {new_filename}")
+                bot_channel = discord.utils.get(self.bot.guilds[0].text_channels, name='bot')
+        
+                embed = discord.Embed(
+                    title=f"Modified {old_filename} to {new_filename}",
+                    color=discord.Color.purple()
+                )
+                #delete last message
+                await bot_channel.send(embed=embed)
+
+                print()
                 return
         
         print(f"Filename not found: {old_filename}")
@@ -71,9 +82,10 @@ class AudioDatabase:
             with open(self.csv_filename, mode='r', newline='', encoding='utf-8') as file:
                 reader = csv.reader(file)
                 filenames = [row[0] for row in reader]
-                print(f"Read {len(filenames)} filenames")
         return filenames
     
+    
+
     def get_most_similar_filename(self, query_filename):
         filenames = self._read_filenames()
         if not filenames:
@@ -82,13 +94,18 @@ class AudioDatabase:
         most_similar_filename = None
         max_similarity = 0
         for filename in filenames:
+            # Clean and preprocess filenames and query
+            clean_query = query_filename.replace("*play ", "").lower()
+            clean_filename = filename.replace(".mp3", "").lower()
             
-            similarity = difflib.SequenceMatcher(None, query_filename.replace("*play ",""), filename.replace(".mp3","")).ratio() * 100
+            similarity = Levenshtein.ratio(clean_query, clean_filename) * 100
             if similarity > max_similarity:
                 max_similarity = similarity
                 most_similar_filename = filename
                 
-        return max_similarity,most_similar_filename
+        
+        return max_similarity, most_similar_filename
+
     
     def get_id_by_filename(self, query_filename):
         similarity, most_similar_filename = self.get_most_similar_filename(query_filename)

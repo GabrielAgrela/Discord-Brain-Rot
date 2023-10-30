@@ -20,7 +20,8 @@ user_scores = defaultdict(int)
 # Dictionary to store the timestamps for each command invocation
 user_timestamps = defaultdict(list)
 
-intents = discord.Intents(guilds=True, voice_states=True, messages=True, message_content=True)
+intents = discord.Intents(guilds=True, voice_states=True, messages=True, message_content=True, members=True)
+
 
 env = Environment()
 bot = Bot(command_prefix="*", intents=intents, token=env.bot_token, ffmpeg_path=env.ffmpeg_path)
@@ -35,7 +36,7 @@ file_name = 'play_requests.csv'
 @bot.event
 async def on_ready():
     print(f"We have logged in as {bot.user}")
-    bot.loop.create_task(behavior.download_sound_periodically())
+    #bot.loop.create_task(behavior.download_sound_periodically())
     bot.loop.create_task(behavior.play_sound_periodically())
     bot.loop.create_task(behavior.update_bot_status())
 
@@ -59,7 +60,14 @@ async def play_requested(ctx):
         asyncio.run_coroutine_threadsafe(behavior.play_random_sound(), bot.loop)
         return
     
-
+@bot.command(name='tts')
+async def tts(ctx):
+    parts = ctx.message.content.split(" ")[1:]
+    
+    # Join the words back together into a string
+    rest_of_message = " ".join(parts)
+    
+    await behavior.tts(behavior,rest_of_message)
 
 @bot.command(name='change')
 async def play_requested(ctx):

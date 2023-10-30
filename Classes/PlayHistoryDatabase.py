@@ -3,6 +3,7 @@ from collections import Counter
 from datetime import datetime
 import discord
 import random
+import time
 
 class PlayHistoryDatabase:
     def __init__(self, csv_filename, db, bot):
@@ -42,8 +43,8 @@ class PlayHistoryDatabase:
             
             # Creating the embed with the random color
             embed = discord.Embed(
-                title=f"🎶 **SOUND {filename.upper()} PLAYED {count} TIMES** 🎶",
-                color=random_color
+                title=f"🎶 **{filename.upper()} PLAYED {count} TIMES** 🎶",
+                color=discord.Color.green()
             )
             
             # Adding a field to display the play count
@@ -70,24 +71,35 @@ class PlayHistoryDatabase:
 
         # Sort users by total play counts in descending order
         top_users = user_counts.most_common()
-
         # Create and send an embed for each top user
         for i, (username, total_plays) in enumerate(top_users, 1):
-            # Generate a random color
-            random_color = discord.Color.from_rgb(random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
-            
-            # Creating the embed with the random color
-            embed = discord.Embed(
-                title=f"🔊 **{username.replace('#0', '').upper()} PLAYED {total_plays} SOUNDS** 🔊",
-                color=random_color
-            )
+            if(username != "admin" and username != "periodic function"):
+                # Generate a random color
+                random_color = discord.Color.from_rgb(random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
+                print(username)
+                embed = discord.Embed(
+                    title=f"🔊 **{username.replace('#0', '').upper()} PLAYED {total_plays} SOUNDS** 🔊",
+                    color=discord.Color.dark_blue()
+                )
 
-            # Get and sort the sounds played by the user
-            top_sounds = sound_counts_per_user[username].most_common()
-            for j, (sound_id, count) in enumerate(top_sounds, 1):
-                if count > 2:  # Only include sounds played more than twice
-                    filename = self.db.get_filename_by_id(int(sound_id))  # Getting filename by sound_id
-                    embed.add_field(name=f"🎶 {filename} - {count} times", value=f"", inline=False)
-            
-            # Send the embed to the channel
-            await bot_channel.send(embed=embed)
+                # Find the discord user by username
+                user = discord.utils.get(self.bot.get_all_members(), name=username.split('#')[0], discriminator=username.split('#')[1])
+                
+                if user and user.avatar:
+                    embed.set_thumbnail(url=user.avatar.url)
+                elif username.split('#')[0] == "syzoo":
+                    embed.set_thumbnail(url="https://media.npr.org/assets/img/2017/09/12/macaca_nigra_self-portrait-3e0070aa19a7fe36e802253048411a38f14a79f8-s800-c85.webp")
+                elif user:
+                    embed.set_thumbnail(url=user.default_avatar.url)
+                    
+                
+                # Get and sort the sounds played by the user
+                top_sounds = sound_counts_per_user[username].most_common()
+                for j, (sound_id, count) in enumerate(top_sounds, 1):
+                    if count > 2:  # Only include sounds played more than twice
+                        filename = self.db.get_filename_by_id(int(sound_id))  # Getting filename by sound_id
+                        embed.add_field(name=f"🎶 {filename} - {count} times", value=f"", inline=False)
+                
+                # Send the embed to the channel
+                await bot_channel.send(embed=embed)
+
