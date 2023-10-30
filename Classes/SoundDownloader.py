@@ -15,7 +15,8 @@ from selenium.webdriver.chrome.service import Service
 import shutil
 
 class SoundDownloader:
-    def __init__(self):
+    def __init__(self,db):
+        self.db = db
         self.service = Service()
         self.options = webdriver.ChromeOptions()
         self.options.add_argument('--log-level=3')
@@ -59,7 +60,10 @@ class SoundDownloader:
             if not os.path.exists(os.path.join(destination_folder, os.path.basename(latest_file))):
                 print(self.__class__.__name__,":Moving file to " + destination_folder)
                 shutil.move(latest_file, os.path.join(destination_folder, os.path.basename(latest_file)))
+                self.db.add_entry(os.path.basename(latest_file))
+                
             else:
+                
                 print(self.__class__.__name__,": Sound already exists")
                 print(self.__class__.__name__,": Removing file")
                 os.remove(latest_file)

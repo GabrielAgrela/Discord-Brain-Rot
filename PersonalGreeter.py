@@ -65,6 +65,13 @@ async def play_requested(ctx):
 async def play_requested(ctx):
     await behavior.change_filename(ctx.message.content.split(" ")[1], ctx.message.content.split(" ")[2])
 
+@bot.command(name='top')
+async def top(ctx):
+    if ctx.message.content.split(" ")[1] == "sounds":
+        await behavior.player_history_db.write_top_played_sounds()
+    elif ctx.message.content.split(" ")[1] == "users":
+        await behavior.player_history_db.write_top_users()
+
 @bot.command(name='list')
 async def list_sounds(ctx):
     await behavior.list_sounds()

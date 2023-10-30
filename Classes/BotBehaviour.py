@@ -13,12 +13,13 @@ class BotBehavior:
     def __init__(self, bot, ffmpeg_path):
         self.bot = bot
         self.ffmpeg_path = ffmpeg_path
-        self.sound_downloader = SoundDownloader()
+        
         self.last_channel = {}
         self.playback_done = asyncio.Event()
         # Usage example
         self.db = AudioDatabase('Data/soundsDB.csv')
-        self.player_history_db = PlayHistoryDatabase('Data/play_history.csv',self.db)
+        self.player_history_db = PlayHistoryDatabase('Data/play_history.csv',self.db, self.bot)
+        self.sound_downloader = SoundDownloader(self.db)
         
 
     def get_largest_voice_channel(self, guild):
@@ -38,14 +39,17 @@ class BotBehavior:
                     await vc_bot.disconnect()
 
     async def play_audio(self, channel, audio_file,user, is_entrance=False):
-        print("USER------------", user)
         self.player_history_db.add_entry(audio_file, user)
         voice_client = discord.utils.get(self.bot.voice_clients, guild=channel.guild)
         bot_channel = discord.utils.get(self.bot.guilds[0].text_channels, name='bot')
         
         if bot_channel and not is_entrance:
+            embed = discord.Embed(
+                title=f"🔊 **{audio_file.split('/')[-1].replace('.mp3', '')} SOUNDS** 🔊",
+                color=discord.Color.red()
+            )
             #delete last message
-            await bot_channel.send(f"🎶{audio_file.split('/')[-1].replace('.mp3', '')}🎶")
+            await bot_channel.send(embed=embed)
             
             
         audio_file = "H:/bup82623/Downloads/sounds/"+audio_file

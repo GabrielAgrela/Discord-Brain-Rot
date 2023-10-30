@@ -2,17 +2,24 @@ import csv
 import random
 import os
 import difflib
-
+import discord
 
 class AudioDatabase:
     def __init__(self, csv_filename):
         self.csv_filename = csv_filename
 
-    def add_filename(self, filename):
-        with open(self.csv_filename, mode='a', newline='', encoding='utf-8') as file:
-            writer = csv.writer(file)
-            writer.writerow([filename])
-        print(f"Filename added: {filename}")
+    def add_entry(self, filename, original_filename=None):
+        
+        if filename:
+            data = self._read_data()
+            new_id = len(data) + 1  # Assigning the next ID based on the number of existing rows
+
+            with open(self.csv_filename, mode='a', newline='', encoding='utf-8') as file:
+                writer = csv.writer(file)
+                writer.writerow([filename, new_id, filename])
+                print(f"Entry added: id: {new_id}, Filename: {filename}, Original Filename: {filename}")
+        else:
+            print("No similar filename found. Entry not added.")
 
     def modify_filename(self, old_filename, new_filename):
         print(f"Modifying {old_filename} to {new_filename}")
@@ -46,7 +53,6 @@ class AudioDatabase:
             with open(self.csv_filename, mode='r', newline='', encoding='utf-8') as file:
                 reader = csv.DictReader(file)
                 data = [row for row in reader]
-                print(f"Read {len(data)} rows")
         return data
 
     def _write_data(self, data):
@@ -82,7 +88,6 @@ class AudioDatabase:
                 max_similarity = similarity
                 most_similar_filename = filename
                 
-        print(f"Maximum similarity is: {max_similarity:.2f}%")
         return max_similarity,most_similar_filename
     
     def get_id_by_filename(self, query_filename):
@@ -92,10 +97,18 @@ class AudioDatabase:
             data = self._read_data()
             for row in data:
                 if row['Filename.mp3'] == most_similar_filename:
-                    print(f"Most similar filename: {most_similar_filename} with similarity of {similarity:.2f}%.")
                     return row['id']
                     
         print("No similar filename found.")
         return None
 
-
+    def get_filename_by_id(self, query_id):
+        data = self._read_data()  # Reading the data from the CSV
+        for row in data:
+            
+            if int(row['id']) == int(query_id):  # Comparing ids as integers
+                filename = row['Filename.mp3']
+                return filename  # Returning the filename if id is found
+            
+        print(f"No filename found for id: {query_id}")  # Printing a message if no matching id is found
+        return None  # Returning None if no matching id is found
