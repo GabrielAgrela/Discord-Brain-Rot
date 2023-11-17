@@ -102,4 +102,3 @@ class PlayHistoryDatabase:
                 
                 # Send the embed to the channel
                 await bot_channel.send(embed=embed)
-

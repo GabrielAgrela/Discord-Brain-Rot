@@ -9,5 +9,3 @@ class Bot(commands.Bot):
 
     def run_bot(self):
         self.run(self.token)
-
-
