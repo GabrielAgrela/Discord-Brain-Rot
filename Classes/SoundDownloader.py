@@ -56,7 +56,7 @@ class SoundDownloader:
             latest_file = max(list_of_files, key=os.path.getctime)
             print(self.__class__.__name__,": Adjusting sound volume")
             self.adjust_volume(latest_file, -20.0)
-            destination_folder = 'H:/bup82623/Downloads/sounds/'
+            destination_folder = 'D:/eu/sounds/'
             if not os.path.exists(os.path.join(destination_folder, os.path.basename(latest_file))):
                 print(self.__class__.__name__,":Moving file to " + destination_folder)
                 shutil.move(latest_file, os.path.join(destination_folder, os.path.basename(latest_file)))

@@ -15,11 +15,15 @@ class BotBehavior:
         self.bot = bot
         self.ffmpeg_path = ffmpeg_path
         
+        self.temp_channel = ""
         self.last_channel = {}
         self.playback_done = asyncio.Event()
         # Usage example
-        self.db = AudioDatabase('Data/soundsDB.csv', self.bot)
-        self.player_history_db = PlayHistoryDatabase('Data/play_history.csv',self.db, self.bot)
+        self.script_dir = os.path.dirname(__file__)  # Get the directory of the current script
+        self.db_path = os.path.join(self.script_dir, "../Data/soundsDB.csv")
+        self.ph_path = os.path.join(self.script_dir, "../Data/play_history.csv")
+        self.db = AudioDatabase(self.db_path, self.bot)
+        self.player_history_db = PlayHistoryDatabase(self.ph_path,self.db, self.bot)
         self.sound_downloader = SoundDownloader(self.db)
         self.TTS = TTS(self,bot)
         
@@ -42,6 +46,10 @@ class BotBehavior:
 
     async def play_audio(self, channel, audio_file,user, is_entrance=False, is_tts=False):
         self.player_history_db.add_entry(audio_file, user)
+        #make channel be the current channel
+        if channel == "":
+            channel = self.temp_channel
+        self.temp_channel = channel
         voice_client = discord.utils.get(self.bot.voice_clients, guild=channel.guild)
         bot_channel = discord.utils.get(self.bot.guilds[0].text_channels, name='bot')
         
@@ -54,45 +62,40 @@ class BotBehavior:
             await bot_channel.send(embed=embed)
             
             
-        audio_file = "H:/bup82623/Downloads/sounds/"+audio_file
-        # If the bot is already connected to a voice channel in the guild
+        audio_file_path = f"D:/eu/sounds/{audio_file}"
+        voice_client = discord.utils.get(self.bot.voice_clients, guild=channel.guild)
+
         if voice_client:
+            # Move to new channel if needed and stop current audio if playing
+            if voice_client.channel != channel:
+                await voice_client.move_to(channel)
             if voice_client.is_playing():
                 voice_client.stop()
-            # Check if the bot is not in the target channel
-            if voice_client.channel != channel:
-                await voice_client.move_to(channel)  # Move the bot to the new channel
         else:
-            # Connect to the target channel if the bot was not connected to any channel
             try:
                 voice_client = await channel.connect()
             except Exception as e:
                 print(f"Error connecting to channel: {e}")
                 return
 
-        self.playback_done.clear()  # Clearing the flag before starting the audio
+        self.playback_done.clear()
 
         def after_playing(error):
             if error:
                 print(f'Error in playback: {error}')
-            else:
-                self.playback_done.set()
+            self.playback_done.set()
 
         try:
-            
-            print("playing ", audio_file, " to ", channel)
+            print("playing ", audio_file_path, " to ", channel)
             voice_client.play(
-                discord.FFmpegPCMAudio(executable=self.ffmpeg_path, source=audio_file),
+                discord.FFmpegPCMAudio(executable=self.ffmpeg_path, source=audio_file_path),
                 after=after_playing
             )
+            print("playing2 ", audio_file_path, " to ", channel)
         except Exception as e:
             print(f"An error occurred: {e}")
-            try:
-                await voice_client.disconnect()
-            except:
-                pass
+            await voice_client.disconnect()
 
-        # Wait for the audio to finish playing
         await self.playback_done.wait()
 
 
@@ -186,7 +189,7 @@ class BotBehavior:
                     bot_channel = discord.utils.get(self.bot.guilds[0].text_channels, name='bot')
                     
                     if bot_channel:
-                        with open("Data/soundsDB.csv", 'rb') as file:
+                        with open(self.db_path, 'rb') as file:
                             # Sending the .csv file to the chat
                             await bot_channel.send(file=discord.File(file, 'Data/soundsDB.csv'))
                         print(f"csv sent to the chat.")

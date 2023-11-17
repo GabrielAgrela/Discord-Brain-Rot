@@ -3,7 +3,7 @@
         "event": "join",
         "sound": "ALERT"
     }],
-    "quiécaralho#4644": [{
+    "quiecaralho#0": [{
         "event": "join",
         "sound": "ALLAH"
     }],
@@ -34,14 +34,13 @@
         },
         {
             "event": "join",
-            "sound": "CRINGE"
+            "sound": "FEET"
         }
     ],
     "henrik72#0": [{
         "event": "join",
         "sound": "DONNIE"
     }],
-    
     "sopustos#0": [{
             "event": "leave",
             "sound": "XFART"

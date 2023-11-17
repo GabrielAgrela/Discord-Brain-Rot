@@ -34,8 +34,8 @@ class AudioDatabase:
                 
                 try:
                     # Check if new_filename already exists
-                    if not os.path.exists("H:/bup82623/Downloads/sounds/" + new_filename + ".mp3"):
-                        os.rename("H:/bup82623/Downloads/sounds/" + old_filename, "H:/bup82623/Downloads/sounds/" + new_filename + ".mp3")
+                    if not os.path.exists("D:/eu/sounds/" + new_filename + ".mp3"):
+                        os.rename("D:/eu/sounds/" + old_filename, "D:/eu/sounds/" + new_filename + ".mp3")
                     else:
                         print("file already exists")
                         return
