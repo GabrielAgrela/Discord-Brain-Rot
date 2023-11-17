@@ -83,15 +83,15 @@ class BotBehavior:
         def after_playing(error):
             if error:
                 print(f'Error in playback: {error}')
+            print("playing3")
             self.playback_done.set()
 
         try:
-            print("playing ", audio_file_path, " to ", channel)
+            print(f"Current WebSocket latency: {self.bot.latency*1000:.2f} ms")
             voice_client.play(
                 discord.FFmpegPCMAudio(executable=self.ffmpeg_path, source=audio_file_path),
                 after=after_playing
             )
-            print("playing2 ", audio_file_path, " to ", channel)
         except Exception as e:
             print(f"An error occurred: {e}")
             await voice_client.disconnect()
