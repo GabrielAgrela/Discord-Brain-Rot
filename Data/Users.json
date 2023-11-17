@@ -3,26 +3,32 @@
         "event": "join",
         "sound": "ALERT"
     }],
-    "quiécaralho#4644": [{
+
+    "quiécaralho#0": [{
         "event": "join",
         "sound": "ALLAH"
     }],
+
     "dontloveit#0": [{
         "event": "join",
         "sound": "BRUNOCARVALHO"
     }],
+
     "emmerlich#0": [{
         "event": "join",
         "sound": "ZORLAK"
     }],
-    "N3XT#6093": [{
+
+    "N3XT#0": [{
         "event": "join",
         "sound": "VOUCAGAR"
     }],
+
     "syzoo#0": [{
         "event": "leave",
         "sound": "GOODBYE"
-    }, 
+    },
+
     {
         "event": "join",
         "sound": "AFRICANO"
@@ -37,6 +43,7 @@
             "sound": "CRINGE"
         }
     ],
+
     "henrik72#0": [{
         "event": "join",
         "sound": "DONNIE"
@@ -51,6 +58,7 @@
             "sound": "MEXI"
         }
     ],
+    
     "darkout371#0": [{
         "event": "join",
         "sound": "HELLO"
