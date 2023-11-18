@@ -98,17 +98,17 @@ class AudioDatabase:
         filenames = self._read_filenames()
         if not filenames:
             return None, None
-
+        #Clear query_filename of commands and spaces
         query_filename = query_filename.replace("*p ", "").replace(" ", "-").lower()
-        print(query_filename)
 
         highest_score = 0
         most_similar_filename = None
 
         for filename in filenames:
+            #Clear db's filename of .mp3
             filename = filename.replace(".mp3", "").lower()
+            #from here-on there should be the comparison of the clean query_filename with the db's filename
             score = fuzz.token_sort_ratio(query_filename, filename)
-            # Additional weight if the query word appears in the filename
             if query_filename in filename.lower():
                 score += 20
                 if score > 100:
@@ -118,6 +118,7 @@ class AudioDatabase:
                 highest_score = score
                 most_similar_filename = filename
 
+        #return with .mp3 for comparison (fix this later, kinda stinky)
         return highest_score, most_similar_filename+".mp3"
 
 
