@@ -110,9 +110,10 @@ class AudioDatabase:
             #from here-on there should be the comparison of the clean query_filename with the db's filename
             score = fuzz.token_sort_ratio(query_filename, filename)
             if query_filename in filename.lower():
-                score += 20
-                if score > 100:
-                    score = 100
+                if score != 100:
+                    score += 20
+                    if score > 99:
+                        score = 99
             
             if score > highest_score:
                 highest_score = score
