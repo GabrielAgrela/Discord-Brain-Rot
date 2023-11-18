@@ -28,6 +28,14 @@ class AudioDatabase:
                 print(f"Entry added: id: {new_id}, Filename: {filename}, Original Filename: {filename}")
         else:
             print("No similar filename found. Entry not added.")
+    
+    def check_if_sound_exists(self, filename):
+        print(f"Checking if {filename} exists")
+        data = self._read_data()
+        for row in data:
+            if row['originalfilename'] == filename:
+                return True
+        return False
 
     async def modify_filename(self, old_filename, new_filename):
         print(f"Modifying {old_filename} to {new_filename}")

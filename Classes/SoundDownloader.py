@@ -36,7 +36,7 @@ class SoundDownloader:
             self.driver.get("https://www.myinstants.com/en/index/pt/")
             print(self.__class__.__name__,": Opening MyInstants")
             wait = WebDriverWait(self.driver, 0)
-            consent_button = wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="tyche_cmp_modal"]/div/div/div/div[5]/div[2]/a')))
+            consent_button = wait.until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[3]/div[2]/div[1]/div[2]/div[2]/button[1]/p')))
             print(self.__class__.__name__,": Clicking consent button")
             consent_button.click()
             print(self.__class__.__name__,": Scrolling down to get more sounds")
@@ -57,7 +57,7 @@ class SoundDownloader:
             print(self.__class__.__name__,": Adjusting sound volume")
             self.adjust_volume(latest_file, -20.0)
             destination_folder = 'D:/eu/sounds/'
-            if not os.path.exists(os.path.join(destination_folder, os.path.basename(latest_file))):
+            if not os.path.exists(os.path.join(destination_folder, os.path.basename(latest_file))) and not self.db.check_if_sound_exists(os.path.basename(latest_file)):
                 print(self.__class__.__name__,":Moving file to " + destination_folder)
                 shutil.move(latest_file, os.path.join(destination_folder, os.path.basename(latest_file)))
                 self.db.add_entry(os.path.basename(latest_file))

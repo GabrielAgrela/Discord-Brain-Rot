@@ -36,7 +36,7 @@ file_name = 'play_requests.csv'
 @bot.event
 async def on_ready():
     print(f"We have logged in as {bot.user}")
-    #bot.loop.create_task(behavior.download_sound_periodically())
+    bot.loop.create_task(behavior.download_sound_periodically())
     bot.loop.create_task(behavior.play_sound_periodically())
     bot.loop.create_task(behavior.update_bot_status())
 
