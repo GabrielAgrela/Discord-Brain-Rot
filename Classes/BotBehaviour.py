@@ -44,7 +44,7 @@ class BotBehavior:
                 if vc_bot.guild == guild:
                     await vc_bot.disconnect()
 
-    async def play_audio(self, channel, audio_file,user, is_entrance=False, is_tts=False):
+    async def play_audio(self, channel, audio_file,user, is_entrance=False, is_tts=False, extra=""):
         self.player_history_db.add_entry(audio_file, user)
         #make channel be the current channel
         if channel == "":
@@ -52,12 +52,18 @@ class BotBehavior:
         self.temp_channel = channel
         voice_client = discord.utils.get(self.bot.voice_clients, guild=channel.guild)
         bot_channel = discord.utils.get(self.bot.guilds[0].text_channels, name='bot')
-        
         if bot_channel and not is_entrance and not is_tts:
-            embed = discord.Embed(
-                title=f"🔊 **{audio_file.split('/')[-1].replace('.mp3', '')}** 🔊",
-                color=discord.Color.red()
-            )
+            if extra != "": 
+                embed = discord.Embed(
+                    title=f"🔊 **{audio_file.split('/')[-1].replace('.mp3', '')}** 🔊",
+                    description= f"Similarity: {extra}%",
+                    color=discord.Color.red()
+                )
+            else:
+                embed = discord.Embed(
+                    title=f"🔊 **{audio_file.split('/')[-1].replace('.mp3', '')}** 🔊",
+                    color=discord.Color.red()
+                )
             #delete last message
             await bot_channel.send(embed=embed)
             
@@ -162,11 +168,10 @@ class BotBehavior:
     
     async def play_request(self, id, user):
         distance, filename = self.db.get_most_similar_filename(id)
-        print ("sim ",distance)
         for guild in self.bot.guilds:
             channel = self.get_largest_voice_channel(guild)
             if channel is not None:
-                asyncio.create_task(self.play_audio(channel, filename,user))
+                asyncio.create_task(self.play_audio(channel, filename,user,extra=distance))
                 #bot_channel = discord.utils.get(self.bot.guilds[0].text_channels, name='bot')
                 #if bot_channel:
                     #await bot_channel.send(f"🎶{distance}🎶 ")

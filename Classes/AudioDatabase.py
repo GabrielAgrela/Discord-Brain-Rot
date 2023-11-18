@@ -4,7 +4,13 @@ import os
 import difflib
 import discord
 import Levenshtein
-
+from difflib import SequenceMatcher
+import re
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+import numpy as np
+from fuzzywuzzy import process
+from fuzzywuzzy import fuzz
 class AudioDatabase:
     def __init__(self, csv_filename, bot):
         self.csv_filename = csv_filename
@@ -86,25 +92,38 @@ class AudioDatabase:
     
     
 
+
+
     def get_most_similar_filename(self, query_filename):
         filenames = self._read_filenames()
         if not filenames:
-            return None
-        
+            return None, None
+
+        query_filename = query_filename.replace("*p ", "").replace(" ", "-").lower()
+        print(query_filename)
+
+        highest_score = 0
         most_similar_filename = None
-        max_similarity = 0
+
         for filename in filenames:
-            # Clean and preprocess filenames and query
-            clean_query = query_filename.replace("*play ", "").lower()
-            clean_filename = filename.replace(".mp3", "").lower()
+            filename = filename.replace(".mp3", "").lower()
+            score = fuzz.token_sort_ratio(query_filename, filename)
+            # Additional weight if the query word appears in the filename
+            if query_filename in filename.lower():
+                score += 20
+                if score > 100:
+                    score = 100
             
-            similarity = Levenshtein.ratio(clean_query, clean_filename) * 100
-            if similarity > max_similarity:
-                max_similarity = similarity
+            if score > highest_score:
+                highest_score = score
                 most_similar_filename = filename
-                
-        
-        return max_similarity, most_similar_filename
+
+        return highest_score, most_similar_filename+".mp3"
+
+
+
+
+
 
     
     def get_id_by_filename(self, query_filename):
