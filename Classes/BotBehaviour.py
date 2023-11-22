@@ -164,7 +164,7 @@ class BotBehavior:
         while True:
             thread = threading.Thread(target=self.sound_downloader.download_sound)
             thread.start()
-            await asyncio.sleep(60)
+            await asyncio.sleep(50)
     
     async def play_request(self, id, user):
         distance, filename = self.db.get_most_similar_filename(id)

@@ -33,7 +33,9 @@ class AudioDatabase:
         print(f"Checking if {filename} exists")
         data = self._read_data()
         for row in data:
+            print(f"Filename already exists: {filename} and is called {row['originalfilename']}")
             if row['originalfilename'] == filename:
+                
                 return True
         return False
 
@@ -107,25 +109,35 @@ class AudioDatabase:
         if not filenames:
             return None, None
         #Clear query_filename of commands and spaces
-        query_filename = query_filename.replace("*p ", "").replace(" ", "-").lower()
+        query_filename = query_filename.replace("*p ", "").lower()
 
         highest_score = 0
         most_similar_filename = None
 
         for filename in filenames:
-            #Clear db's filename of .mp3
+            # Clear db's filename of .mp3
             filename = filename.replace(".mp3", "").lower()
-            #from here-on there should be the comparison of the clean query_filename with the db's filename
+
+            # Split query_filename into words
+            query_words = query_filename.split()
+
+            # Calculate the initial fuzz score
             score = fuzz.token_sort_ratio(query_filename, filename)
-            if query_filename in filename.lower():
-                if score != 100:
-                    score += 20
+
+            # Increment score for each matching word
+            for word in query_words:
+                if word in filename:
+                    score_increment = (100 - score) / 2
+                    score += score_increment
+                    # Cap the score at 99
                     if score > 99:
                         score = 99
-            
+
+            # Update the highest score and corresponding filename
             if score > highest_score:
                 highest_score = score
                 most_similar_filename = filename
+
 
         #return with .mp3 for comparison (fix this later, kinda stinky)
         return highest_score, most_similar_filename+".mp3"
@@ -142,7 +154,7 @@ class AudioDatabase:
         if most_similar_filename:
             data = self._read_data()
             for row in data:
-                if row['Filename.mp3'] == most_similar_filename:
+                if row['Filename.mp3'].lower() == most_similar_filename.lower():
                     return row['id']
                     
         print("No similar filename found.")

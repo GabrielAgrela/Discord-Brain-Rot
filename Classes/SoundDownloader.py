@@ -46,8 +46,10 @@ class SoundDownloader:
             random_sound_element = random.choice(sound_elements)
             
             self.driver.execute_script("arguments[0].scrollIntoView(true);", random_sound_element)
+            time.sleep(2)
             self.driver.execute_script("arguments[0].click();", random_sound_element)
             print(self.__class__.__name__,": ",random_sound_element, " chosen")
+            time.sleep(1)
             download_button = wait.until(EC.element_to_be_clickable((By.XPATH, '//a[contains(@class, "instant-page-extra-button btn btn-primary")][contains(text(),"Download MP3")]')))
             print(self.__class__.__name__,": Clicking download sound")
             self.driver.execute_script("arguments[0].click();", download_button)
@@ -57,14 +59,14 @@ class SoundDownloader:
             print(self.__class__.__name__,": Adjusting sound volume")
             self.adjust_volume(latest_file, -20.0)
             destination_folder = 'D:/eu/sounds/'
-            if not os.path.exists(os.path.join(destination_folder, os.path.basename(latest_file))) and not self.db.check_if_sound_exists(os.path.basename(latest_file)):
+            if not self.db.check_if_sound_exists(os.path.basename(latest_file)):
                 print(self.__class__.__name__,":Moving file to " + destination_folder)
                 shutil.move(latest_file, os.path.join(destination_folder, os.path.basename(latest_file)))
                 self.db.add_entry(os.path.basename(latest_file))
                 
             else:
                 
-                print(self.__class__.__name__,": Sound already exists")
+                print(self.__class__.__name__,": Sound already exists ", os.path.basename(latest_file))
                 print(self.__class__.__name__,": Removing file")
                 os.remove(latest_file)
             #delete file
