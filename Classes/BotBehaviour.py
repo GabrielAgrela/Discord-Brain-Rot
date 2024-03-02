@@ -10,6 +10,52 @@ from Classes.AudioDatabase import AudioDatabase
 from Classes.PlayHistoryDatabase import PlayHistoryDatabase
 from Classes.TTS import TTS
 
+from discord.ui import Button, View
+
+class ReplayButton(Button):
+    def __init__(self, bot_behavior, audio_file, **kwargs):
+        super().__init__(**kwargs)
+        self.bot_behavior = bot_behavior
+        self.audio_file = audio_file
+
+    async def callback(self, interaction):
+        # Delete the last message
+        await interaction.response.defer()
+        # Then start the audio playback
+        asyncio.create_task(self.bot_behavior.play_audio(interaction.message.channel, self.audio_file, interaction.user.name))
+
+class ReplayView(View):
+    def __init__(self, bot_behavior, audio_file):
+        super().__init__()
+        # Add the replay button to the view
+        self.add_item(ReplayButton(bot_behavior, audio_file, label=None, emoji="🔁", style=discord.ButtonStyle.primary))
+        # Add the play random button to the view
+        self.add_item(PlayRandomButton(bot_behavior, label=None, emoji="🎲", style=discord.ButtonStyle.primary))
+        # Add the play slap button to the view
+        self.add_item(PlaySlapButton(bot_behavior, label=None, emoji="👋", style=discord.ButtonStyle.primary))
+
+class PlayRandomButton(Button):
+    def __init__(self, bot_behavior, **kwargs):
+        super().__init__(**kwargs)
+        self.bot_behavior = bot_behavior
+
+    async def callback(self, interaction):
+        await interaction.response.defer()
+        # Start the audio playback
+        asyncio.create_task(self.bot_behavior.play_random_sound(interaction.user.name))
+
+class PlaySlapButton(Button):
+    def __init__(self, bot_behavior, **kwargs):
+        super().__init__(**kwargs)
+        self.bot_behavior = bot_behavior
+
+    async def callback(self, interaction):
+        await interaction.response.defer()
+        # Start the slap sound playback
+        asyncio.create_task(self.bot_behavior.play_audio("", "slap.mp3", "admin"))
+
+
+
 class BotBehavior:
     def __init__(self, bot, ffmpeg_path):
         self.bot = bot
@@ -65,7 +111,11 @@ class BotBehavior:
                     color=discord.Color.red()
                 )
             #delete last message
-            await bot_channel.send(embed=embed)
+            view = ReplayView(self, audio_file)
+            # Add the view to the message
+            if audio_file.split('/')[-1].replace('.mp3', '') != "slap":
+                await bot_channel.send(embed=embed, view=view)
+                
             
             
         audio_file_path = f"D:/eu/sounds/{audio_file}"
@@ -151,12 +201,12 @@ class BotBehavior:
                 print(f"An error occurred: {e}")
                 await asyncio.sleep(60) # if an error occurred, try again in 1 minute
 
-    async def play_random_sound(self):
+    async def play_random_sound(self, user="admin"):
         try:
             for guild in self.bot.guilds:
                 channel = self.get_largest_voice_channel(guild)
                 if channel is not None:
-                    asyncio.create_task(self.play_audio(channel, self.db.get_random_filename(),"admin"))
+                    asyncio.create_task(self.play_audio(channel, self.db.get_random_filename(),user))
         except Exception as e:
             print(f"An error occurred: {e}")
 

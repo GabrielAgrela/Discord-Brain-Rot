@@ -33,9 +33,7 @@ class AudioDatabase:
         print(f"Checking if {filename} exists")
         data = self._read_data()
         for row in data:
-            print(f"Filename already exists: {filename} and is called {row['originalfilename']}")
             if row['originalfilename'] == filename:
-                
                 return True
         return False
 
@@ -117,17 +115,19 @@ class AudioDatabase:
         for filename in filenames:
             # Clear db's filename of .mp3
             filename = filename.replace(".mp3", "").lower()
+            score = fuzz.token_sort_ratio(query_filename, filename)
 
+            query_filename = query_filename.replace("-", " ")
             # Split query_filename into words
             query_words = query_filename.split()
 
             # Calculate the initial fuzz score
-            score = fuzz.token_sort_ratio(query_filename, filename)
+            
 
             # Increment score for each matching word
             for word in query_words:
                 if word in filename:
-                    score_increment = (100 - score) / 2
+                    score_increment = (100 - score) / 1.5
                     score += score_increment
                     # Cap the score at 99
                     if score > 99:

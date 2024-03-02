@@ -53,5 +53,9 @@
     "darkout371#0": [{
         "event": "join",
         "sound": "HELLO"
+    }],
+    "fashionkiler#0": [{
+        "event": "join",
+        "sound": "ambatukam"
     }]
 }
