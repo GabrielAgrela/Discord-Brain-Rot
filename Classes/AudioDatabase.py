@@ -12,7 +12,7 @@ import numpy as np
 from fuzzywuzzy import process
 from fuzzywuzzy import fuzz
 class AudioDatabase:
-    def __init__(self, csv_filename, bot):
+    def __init__(self, csv_filename, bot=""):
         self.csv_filename = csv_filename
         self.bot = bot
 
@@ -48,13 +48,15 @@ class AudioDatabase:
                 
                 try:
                     # Check if new_filename already exists
-                    if not os.path.exists("D:/eu/sounds/" + new_filename + ".mp3"):
-                        os.rename("D:/eu/sounds/" + old_filename, "D:/eu/sounds/" + new_filename + ".mp3")
+                    old_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", old_filename))
+                    new_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", new_filename + ".mp3"))
+                    if not os.path.exists(new_path):
+                        os.rename(old_path, new_path)
                     else:
                         print("file already exists")
                         return
-                except:
-                    print("error renaming file")
+                except Exception as e:
+                    print("error renaming file" + str(e))
                     return
                 
                 self._write_data(data)

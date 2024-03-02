@@ -91,6 +91,7 @@ class BotBehavior:
                     await vc_bot.disconnect()
 
     async def play_audio(self, channel, audio_file,user, is_entrance=False, is_tts=False, extra=""):
+        
         self.player_history_db.add_entry(audio_file, user)
         #make channel be the current channel
         if channel == "":
@@ -117,8 +118,8 @@ class BotBehavior:
                 await bot_channel.send(embed=embed, view=view)
                 
             
-            
-        audio_file_path = f"D:/eu/sounds/{audio_file}"
+        audio_file_path =  os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds",audio_file))
+
         voice_client = discord.utils.get(self.bot.voice_clients, guild=channel.guild)
 
         if voice_client:

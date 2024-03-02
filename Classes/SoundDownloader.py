@@ -20,12 +20,13 @@ class SoundDownloader:
         self.service = Service()
         self.options = webdriver.ChromeOptions()
         self.options.add_argument('--log-level=3')
+        self.dwdir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Downloads"))
         self.options.add_experimental_option("prefs", {
-            "download.default_directory": r"H:\bup82623\Downloads",
+            "download.default_directory": self.dwdir,
             "download.prompt_for_download": False,
 
         })
-        self.options.add_argument('--headless')
+        #self.options.add_argument('--headless')
         self.options.add_argument('window-size=1200x600')
         self.options.add_argument('load-extension=' + r'C:\Users\netco\Desktop\1.52.2_0')
 
@@ -54,11 +55,15 @@ class SoundDownloader:
             print(self.__class__.__name__,": Clicking download sound")
             self.driver.execute_script("arguments[0].click();", download_button)
             time.sleep(5)
-            list_of_files = glob.glob('H:/bup82623/Downloads/*')
+            list_of_files = glob.glob(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Downloads","*")))
+            print(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Downloads","*")))
+            print(self.__class__.__name__,": ",str(len(list_of_files)) + " files found")
             latest_file = max(list_of_files, key=os.path.getctime)
+            print(self.__class__.__name__,": ",latest_file, " chosen")
             print(self.__class__.__name__,": Adjusting sound volume")
             self.adjust_volume(latest_file, -20.0)
-            destination_folder = 'D:/eu/sounds/'
+            destination_folder = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds"))
+            
             if not self.db.check_if_sound_exists(os.path.basename(latest_file)):
                 print(self.__class__.__name__,":Moving file to " + destination_folder)
                 shutil.move(latest_file, os.path.join(destination_folder, os.path.basename(latest_file)))
