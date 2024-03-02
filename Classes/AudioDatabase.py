@@ -12,7 +12,7 @@ import numpy as np
 from fuzzywuzzy import process
 from fuzzywuzzy import fuzz
 class AudioDatabase:
-    def __init__(self, csv_filename, bot):
+    def __init__(self, csv_filename, bot=""):
         self.csv_filename = csv_filename
         self.bot = bot
 
