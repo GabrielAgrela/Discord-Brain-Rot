@@ -68,6 +68,33 @@ async def tts(ctx):
     
     await behavior.tts(behavior,rest_of_message)
 
+@bot.command(name='ttsPT')
+async def tts(ctx):
+    parts = ctx.message.content.split(" ")[1:]
+    
+    # Join the words back together into a string
+    rest_of_message = " ".join(parts)
+    
+    await behavior.tts(behavior,rest_of_message, "pt")
+
+@bot.command(name='ttsBR')
+async def tts(ctx):
+    parts = ctx.message.content.split(" ")[1:]
+    
+    # Join the words back together into a string
+    rest_of_message = " ".join(parts)
+    
+    await behavior.tts(behavior,rest_of_message, "pt","com.br")
+
+@bot.command(name='ttsES')
+async def tts(ctx):
+    parts = ctx.message.content.split(" ")[1:]
+    
+    # Join the words back together into a string
+    rest_of_message = " ".join(parts)
+    
+    await behavior.tts(behavior,rest_of_message, "es")
+
 @bot.command(name='change')
 async def play_requested(ctx):
     await behavior.change_filename(ctx.message.content.split(" ")[1], ctx.message.content.split(" ")[2])
@@ -121,28 +148,6 @@ def on_press(key):
         # when the F6 key is pressed.
         asyncio.run_coroutine_threadsafe(behavior.play_audio("", "slap.mp3","admin"), bot.loop)
 
-def update_csv(keyword, user):
-    if not os.path.exists(file_name):
-        with open(file_name, mode='w', newline='') as file:
-            writer = csv.writer(file)
-            writer.writerow(['Keyword', 'Count', 'User'])
-
-    data = {}
-    with open(file_name, mode='r', newline='') as file:
-        reader = csv.reader(file)
-        next(reader)  # skip header
-        for row in reader:
-            key = (row[0], row[2])  # Tuple of keyword and user
-            data[key] = int(row[1])
-
-    key = (keyword, user)
-    data[key] = data.get(key, 0) + 1  # Increment count of keyword for the user
-
-    with open(file_name, mode='w', newline='') as file:
-        writer = csv.writer(file)
-        writer.writerow(['Keyword', 'Count', 'User'])
-        for key, count in data.items():
-            writer.writerow([key[0], count, key[1]])
 
 # Start the listener in a separate thread so that it doesn't block
 # the main thread where the Discord bot runs.

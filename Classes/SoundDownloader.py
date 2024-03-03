@@ -26,7 +26,7 @@ class SoundDownloader:
             "download.prompt_for_download": False,
 
         })
-        #self.options.add_argument('--headless')
+        self.options.add_argument('--headless')
         self.options.add_argument('window-size=1200x600')
         self.options.add_argument('load-extension=' + r'C:\Users\netco\Desktop\1.52.2_0')
 

@@ -24,16 +24,6 @@ class ReplayButton(Button):
         # Then start the audio playback
         asyncio.create_task(self.bot_behavior.play_audio(interaction.message.channel, self.audio_file, interaction.user.name))
 
-class ReplayView(View):
-    def __init__(self, bot_behavior, audio_file):
-        super().__init__()
-        # Add the replay button to the view
-        self.add_item(ReplayButton(bot_behavior, audio_file, label=None, emoji="🔁", style=discord.ButtonStyle.primary))
-        # Add the play random button to the view
-        self.add_item(PlayRandomButton(bot_behavior, label=None, emoji="🎲", style=discord.ButtonStyle.primary))
-        # Add the play slap button to the view
-        self.add_item(PlaySlapButton(bot_behavior, label=None, emoji="👋", style=discord.ButtonStyle.primary))
-
 class PlayRandomButton(Button):
     def __init__(self, bot_behavior, **kwargs):
         super().__init__(**kwargs)
@@ -53,6 +43,16 @@ class PlaySlapButton(Button):
         await interaction.response.defer()
         # Start the slap sound playback
         asyncio.create_task(self.bot_behavior.play_audio("", "slap.mp3", "admin"))
+
+class ReplayView(View):
+    def __init__(self, bot_behavior, audio_file):
+        super().__init__()
+        # Add the replay button to the view
+        self.add_item(ReplayButton(bot_behavior, audio_file, label=None, emoji="🔁", style=discord.ButtonStyle.primary))
+        # Add the play random button to the view
+        self.add_item(PlayRandomButton(bot_behavior, label=None, emoji="🎲", style=discord.ButtonStyle.primary))
+        # Add the play slap button to the view
+        self.add_item(PlaySlapButton(bot_behavior, label=None, emoji="👋", style=discord.ButtonStyle.primary))
 
 
 
@@ -91,7 +91,6 @@ class BotBehavior:
                     await vc_bot.disconnect()
 
     async def play_audio(self, channel, audio_file,user, is_entrance=False, is_tts=False, extra=""):
-        
         self.player_history_db.add_entry(audio_file, user)
         #make channel be the current channel
         if channel == "":
@@ -210,12 +209,6 @@ class BotBehavior:
                     asyncio.create_task(self.play_audio(channel, self.db.get_random_filename(),user))
         except Exception as e:
             print(f"An error occurred: {e}")
-
-    async def download_sound_periodically(self):
-        while True:
-            thread = threading.Thread(target=self.sound_downloader.download_sound)
-            thread.start()
-            await asyncio.sleep(50)
     
     async def play_request(self, id, user):
         distance, filename = self.db.get_most_similar_filename(id)
@@ -231,9 +224,9 @@ class BotBehavior:
         print("oldfilename: ", oldfilename, " newfilename: ", newfilename)
         await self.db.modify_filename(oldfilename, newfilename)
                     
-    async def tts(self,behavior, speech):
+    async def tts(self,behavior, speech, lang="en", region=""):
         print("stt: ", speech)
-        await self.TTS.save_as_mp3(speech)     
+        await self.TTS.save_as_mp3(speech, lang, region)     
     
     
 
