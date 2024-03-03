@@ -90,7 +90,7 @@ class BotBehavior:
                 if vc_bot.guild == guild:
                     await vc_bot.disconnect()
 
-    async def play_audio(self, channel, audio_file,user, is_entrance=False, is_tts=False, extra=""):
+    async def play_audio(self, channel, audio_file, user, is_entrance=False, is_tts=False, extra=""):
         self.player_history_db.add_entry(audio_file, user)
         #make channel be the current channel
         if channel == "":
@@ -110,11 +110,14 @@ class BotBehavior:
                     title=f"🔊 **{audio_file.split('/')[-1].replace('.mp3', '')}** 🔊",
                     color=discord.Color.red()
                 )
+            # Set the footer to show who requested the sound
+            embed.set_footer(text=f"Requested by {user}")
             #delete last message
             view = ReplayView(self, audio_file)
             # Add the view to the message
             if audio_file.split('/')[-1].replace('.mp3', '') != "slap":
                 await bot_channel.send(embed=embed, view=view)
+        # Rest of the code...
                 
             
         audio_file_path =  os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds",audio_file))
