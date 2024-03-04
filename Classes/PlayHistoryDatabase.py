@@ -16,6 +16,11 @@ class PlayHistoryDatabase:
         with open(self.csv_filename, mode='a', newline='', encoding='utf-8') as file:
             writer = csv.writer(file)
             sound_id = self.db.get_id_by_filename(filename)
+            # username without discriminator using try catch
+            try:
+                username = username.split("#")[0]
+            except:
+                pass
             writer.writerow([sound_id, username, current_datetime])
         print(f"Entry added: Sound ID:{sound_id}, Username: {username}, Datetime: {current_datetime}")
 
@@ -31,7 +36,7 @@ class PlayHistoryDatabase:
         top_sounds = sound_id_counts.most_common(21)
         total_sounds_played = sum(sound_id_counts.values())
         # Calculate average per day
-        dates = [datetime.strptime(row[2], "%Y-%m-%d %H:%M:%S") for row in data if row]
+        dates = [datetime.strptime(row[2], "%Y-%m-%d %H:%M:%S") for row in data if row and len(row) > 2 and len(row[2]) == 19]
         if dates:
             first_date = min(dates)
             last_date = max(dates)
@@ -96,10 +101,10 @@ class PlayHistoryDatabase:
             )
 
             # Attempt to get user avatar, set a default if unavailable
-            user = discord.utils.get(self.bot.get_all_members(), name=username.split('#')[0], discriminator=username.split('#')[1])
+            user = discord.utils.get(self.bot.get_all_members(), name=username)
             if user and user.avatar:
                 embed.set_thumbnail(url=user.avatar.url)
-            elif username.split('#')[0] == "syzoo":
+            elif username == "syzoo":
                 embed.set_thumbnail(url="https://media.npr.org/assets/img/2017/09/12/macaca_nigra_self-portrait-3e0070aa19a7fe36e802253048411a38f14a79f8-s800-c85.webp")
             elif user:
                 embed.set_thumbnail(url=user.default_avatar.url)
@@ -107,7 +112,10 @@ class PlayHistoryDatabase:
             # Add sounds played by the user as fields in the embed
             sounds_played = Counter(row[0] for row in play_data if row[1] == username)  # Count occurrences of each sound played by the user
             for sound_id, count in sounds_played.most_common(5):  # Only get the top 5 sounds
-                filename = self.db.get_filename_by_id(int(sound_id))
+                if sound_id.isdigit():
+                    filename = self.db.get_filename_by_id(int(sound_id))
+                else:
+                    print(f"Invalid sound_id: {sound_id}")
                 embed.add_field(name=f"🎶 `{filename}`", value=f"Played **{count}** times", inline=False)
 
             # Send the embed to the channel

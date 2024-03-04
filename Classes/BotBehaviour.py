@@ -19,10 +19,17 @@ class ReplayButton(Button):
         self.audio_file = audio_file
 
     async def callback(self, interaction):
-        # Delete the last message
-        await interaction.response.defer()
-        # Then start the audio playback
-        asyncio.create_task(self.bot_behavior.play_audio(interaction.message.channel, self.audio_file, interaction.user.name))
+        try:
+            # Delete the last message
+            await interaction.response.defer()
+            # Then start the audio playback
+            asyncio.create_task(self.bot_behavior.play_audio(interaction.message.channel, self.audio_file, interaction.user.name))
+        except discord.errors.NotFound:
+            # Handle expired interaction
+            await interaction.message.channel.send("The buttons have expired. Sending new ones...")
+            # Send new message with fresh buttons
+            view = ReplayView(self.bot_behavior, self.audio_file)
+            await interaction.message.channel.send(view=view)
 
 class PlayRandomButton(Button):
     def __init__(self, bot_behavior, **kwargs):
@@ -65,6 +72,7 @@ class BotBehavior:
         self.last_channel = {}
         self.playback_done = asyncio.Event()
         # Usage example
+        self.button_message = None
         self.script_dir = os.path.dirname(__file__)  # Get the directory of the current script
         self.db_path = os.path.join(self.script_dir, "../Data/soundsDB.csv")
         self.ph_path = os.path.join(self.script_dir, "../Data/play_history.csv")
@@ -72,8 +80,18 @@ class BotBehavior:
         self.player_history_db = PlayHistoryDatabase(self.ph_path,self.db, self.bot)
         self.sound_downloader = SoundDownloader(self.db)
         self.TTS = TTS(self,bot)
-        
+        self.view = None
 
+    async def delete_message_components(self):
+        bot_channel = await self.get_bot_channel()
+        async for message in bot_channel.history(limit=20):
+            if message.components:
+                await message.delete()
+    
+    async def get_bot_channel(self):
+        bot_channel = discord.utils.get(self.bot.guilds[0].text_channels, name='bot')
+        return bot_channel
+        
     def get_largest_voice_channel(self, guild):
         """Find the voice channel with the most members."""
         largest_channel = None
@@ -113,12 +131,14 @@ class BotBehavior:
             # Set the footer to show who requested the sound
             embed.set_footer(text=f"Requested by {user}")
             #delete last message
-            view = ReplayView(self, audio_file)
+            self.view = ReplayView(self, audio_file)
             # Add the view to the message
             if audio_file.split('/')[-1].replace('.mp3', '') != "slap":
-                await bot_channel.send(embed=embed, view=view)
-        # Rest of the code...
-                
+                await bot_channel.send(embed=embed)
+            await self.delete_message_components()
+            # Store the new message with buttons
+            self.button_message = await bot_channel.send(view=self.view)
+            
             
         audio_file_path =  os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds",audio_file))
 
@@ -134,31 +154,38 @@ class BotBehavior:
             try:
                 voice_client = await channel.connect()
             except Exception as e:
-                print(f"Error connecting to channel: {e}")
+                print(f"----------------Error connecting to channel: {e}")
                 return
 
         self.playback_done.clear()
+        
 
         def after_playing(error):
             if error:
-                print(f'Error in playback: {error}')
-            print("playing3")
+                print(f'---------------------Error in playback: {error}')
             self.playback_done.set()
 
         try:
-            print(f"Current WebSocket latency: {self.bot.latency*1000:.2f} ms")
             voice_client.play(
                 discord.FFmpegPCMAudio(executable=self.ffmpeg_path, source=audio_file_path),
                 after=after_playing
             )
         except Exception as e:
-            print(f"An error occurred: {e}")
+            print(f"----------------------An error occurred: {e}")
             await voice_client.disconnect()
 
         await self.playback_done.wait()
 
-
-
+    async def refresh_button_message(self):
+        while True:  # This will run indefinitely
+            await asyncio.sleep(600)  # Wait for 3 seconds
+            try:
+                if self.button_message:
+                    await self.button_message.delete()
+                    bot_channel = await self.get_bot_channel()
+                    self.button_message = await bot_channel.send(view=self.view)
+            except discord.errors.NotFound:
+                print("The message was not found. It may have been deleted.")
 
     async def update_bot_status_once(self):
         if hasattr(self.bot, 'next_download_time'):
@@ -170,8 +197,6 @@ class BotBehavior:
                 else:
                     activity = discord.Activity(name=f'an explosion in ~{minutes}m', type=discord.ActivityType.playing)
                 await self.bot.change_presence(activity=activity)
-
-
 
     async def update_bot_status(self):
         while True:
@@ -231,8 +256,6 @@ class BotBehavior:
         print("stt: ", speech)
         await self.TTS.save_as_mp3(speech, lang, region)     
     
-    
-
     async def list_sounds(self):
         try:
             for guild in self.bot.guilds:
@@ -249,8 +272,3 @@ class BotBehavior:
                     
         except Exception as e:
             print(f"An error occurred: {e}")
-
-
-
-    
-

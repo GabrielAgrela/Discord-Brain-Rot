@@ -13,6 +13,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 import csv
 from collections import Counter
+import atexit
 
 
 # Dictionary to store the counts for each user
@@ -38,6 +39,8 @@ async def on_ready():
     print(f"We have logged in as {bot.user}")
     bot.loop.create_task(behavior.play_sound_periodically())
     bot.loop.create_task(behavior.update_bot_status())
+    await behavior.delete_message_components()
+    bot.loop.create_task(behavior.refresh_button_message())
 
 @bot.command(name='play')
 async def play_random(ctx):
