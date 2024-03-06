@@ -5,7 +5,7 @@ import discord
 from Classes.Environment import Environment
 from Classes.Bot import Bot
 from Classes.SoundEventsLoader import SoundEventLoader
-from Classes.BotBehaviour import BotBehavior
+from Classes.BotBehaviour import BotBehavior, ControlsView
 import threading
 from pynput import keyboard
 import time
@@ -14,6 +14,7 @@ from datetime import datetime, timedelta
 import csv
 from collections import Counter
 import atexit
+import interactions
 
 
 # Dictionary to store the counts for each user
@@ -25,8 +26,8 @@ intents = discord.Intents(guilds=True, voice_states=True, messages=True, message
 
 
 env = Environment()
-bot = Bot(command_prefix="*", intents=intents, token=env.bot_token, ffmpeg_path=env.ffmpeg_path)
 
+bot = Bot(command_prefix="*", intents=intents, token=env.bot_token, ffmpeg_path=env.ffmpeg_path)
 
 loader = SoundEventLoader(os.path.abspath(__file__))
 USERS, SOUNDS = loader.load_sound_events()
@@ -41,16 +42,15 @@ async def on_ready():
     bot.loop.create_task(behavior.update_bot_status())
     await behavior.delete_message_components()
     bot.loop.create_task(behavior.refresh_button_message())
+    await behavior.clean_buttons()
+    channel = await behavior.get_bot_channel()
+    behavior.button_message = await channel.send(view=ControlsView(behavior))
 
-@bot.command(name='play')
-async def play_random(ctx):
-    bot_channel = discord.utils.get(bot.guilds[0].text_channels, name='bot')
-    if bot_channel:
-        #delete last message
-        await bot_channel.send(f"escreve '*p' burra do crl")
-
-@bot.command(name='p')
-async def play_requested(ctx):
+@bot.command(
+    name="p",
+    description="Play a sound"
+)
+async def play_requested(ctx: interactions.CommandContext):
     author = ctx.message.author
     username_with_discriminator = f"{author.name}#{author.discriminator}"
     try:
@@ -62,7 +62,10 @@ async def play_requested(ctx):
         asyncio.run_coroutine_threadsafe(behavior.play_random_sound(), bot.loop)
         return
     
-@bot.command(name='tts')
+@bot.command(
+    name="en",
+    description="Play a sound"
+)
 async def tts(ctx):
     parts = ctx.message.content.split(" ")[1:]
     
@@ -71,7 +74,10 @@ async def tts(ctx):
     
     await behavior.tts(behavior,rest_of_message)
 
-@bot.command(name='ttsPT')
+@bot.command(
+    name="pt",
+    description="Play a sound"
+)
 async def tts(ctx):
     parts = ctx.message.content.split(" ")[1:]
     
@@ -80,7 +86,10 @@ async def tts(ctx):
     
     await behavior.tts(behavior,rest_of_message, "pt")
 
-@bot.command(name='ttsBR')
+@bot.command(
+    name="br",
+    description="Play a sound"
+)
 async def tts(ctx):
     parts = ctx.message.content.split(" ")[1:]
     
@@ -89,7 +98,10 @@ async def tts(ctx):
     
     await behavior.tts(behavior,rest_of_message, "pt","com.br")
 
-@bot.command(name='ttsES')
+@bot.command(
+    name="es",
+    description="Play a sound"
+)
 async def tts(ctx):
     parts = ctx.message.content.split(" ")[1:]
     
@@ -98,18 +110,52 @@ async def tts(ctx):
     
     await behavior.tts(behavior,rest_of_message, "es")
 
-@bot.command(name='change')
+@bot.command(
+    name="fr",
+    description="Play a sound"
+)
+async def tts(ctx):
+    parts = ctx.message.content.split(" ")[1:]
+    
+    # Join the words back together into a string
+    rest_of_message = " ".join(parts)
+    
+    await behavior.tts(behavior,rest_of_message, "fr")
+
+@bot.command(
+    name="de",
+    description="Play a sound"
+)
+async def tts(ctx):
+    parts = ctx.message.content.split(" ")[1:]
+    
+    # Join the words back together into a string
+    rest_of_message = " ".join(parts)
+    
+    await behavior.tts(behavior,rest_of_message, "de")
+
+
+@bot.command(
+    name="change",
+    description="Play a sound"
+)
 async def play_requested(ctx):
     await behavior.change_filename(ctx.message.content.split(" ")[1], ctx.message.content.split(" ")[2])
 
-@bot.command(name='top')
+@bot.command(
+    name="top",
+    description="Play a sound"
+)
 async def top(ctx):
     if ctx.message.content.split(" ")[1] == "sounds":
         await behavior.player_history_db.write_top_played_sounds()
     elif ctx.message.content.split(" ")[1] == "users":
         await behavior.player_history_db.write_top_users()
 
-@bot.command(name='list')
+@bot.command(
+    name="list",
+    description="Play a sound"
+)
 async def list_sounds(ctx):
     await behavior.list_sounds()    
 
@@ -159,3 +205,4 @@ thread = threading.Thread(target=keyboard_listener.start)
 thread.start()
 
 bot.run_bot()
+bot.start()

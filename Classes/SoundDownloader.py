@@ -80,7 +80,6 @@ class SoundDownloader:
             self.driver.quit()
         except Exception as e:
             print(self.__class__.__name__,": Error downloading sound: ", e)
-            time.sleep(15)
             self.driver.quit()
         print(self.__class__.__name__,": Sound Dowloader finished")
         print("\n-----------------------------------\n")

@@ -24,7 +24,7 @@ class AudioDatabase:
 
             with open(self.csv_filename, mode='a', newline='', encoding='utf-8') as file:
                 writer = csv.writer(file)
-                writer.writerow([filename, new_id, filename])
+                writer.writerow([filename, new_id, filename, False, False])
                 print(f"Entry added: id: {new_id}, Filename: {filename}, Original Filename: {filename}")
         else:
             print("No similar filename found. Entry not added.")
@@ -36,14 +36,59 @@ class AudioDatabase:
             if row['originalfilename'] == filename:
                 return True
         return False
+    
+    def update_favorite_status(self, audio_file, status):
+        print(f"Updating favorite status for {audio_file} to {status}")
+        data = self._read_data()
+        for row in data:
+            if row['Filename.mp3'].strip().lower() == audio_file.strip().lower():
+                row['favorite'] = status
+                self._write_data(data)
+                return
+        print(f"Filename not found: {audio_file}")
+
+    def update_blacklist_status(self, audio_file, status):
+        print(f"Updating blacklist status for {audio_file} to {status}")
+        data = self._read_data()
+        for row in data:
+            if row['Filename.mp3'].strip().lower() == audio_file.strip().lower():
+                row['blacklist'] = status
+                self._write_data(data)
+                return
+        print(f"Filename not found: {audio_file}")
+
+    def is_favorite(self, audio_file):
+        data = self._read_data()
+        for row in data:
+            if row['Filename.mp3'].strip().lower() == audio_file.strip().lower():
+                # return row['favorite'] to bool
+                return row['favorite'] == "True"
+        print(f"Filename not found: {audio_file}")
+        return False
+    
+    def is_blacklisted(self, audio_file):
+        data = self._read_data()
+        for row in data:
+            if row['Filename.mp3'].strip().lower() == audio_file.strip().lower():
+                # return row['favorite'] to bool
+                return row['blacklist'] == "True"
+        print(f"Filename not found: {audio_file}")
+        return False
+    
+    def get_favorite_sounds(self):
+        data = self._read_data()
+        favorite_sounds = []
+        for row in data:
+            if row['favorite'] == "True":
+                favorite_sounds.append(row['Filename.mp3'])
+        return favorite_sounds
 
     async def modify_filename(self, old_filename, new_filename):
         print(f"Modifying {old_filename} to {new_filename}")
         sim, old_filename = self.get_most_similar_filename(old_filename)
-        
         data = self._read_data()
         for row in data:
-            if row['Filename.mp3'] == old_filename:
+            if row['Filename.mp3'].strip().lower() == old_filename.strip().lower():
                 row['Filename.mp3'] = new_filename+".mp3"  # Updating the originalfilename as well
                 
                 try:
@@ -84,13 +129,17 @@ class AudioDatabase:
 
     def _write_data(self, data):
         with open(self.csv_filename, mode='w', newline='', encoding='utf-8') as file:
-            writer = csv.DictWriter(file, fieldnames=['Filename.mp3', 'id', 'originalfilename'])
+            writer = csv.DictWriter(file, fieldnames=['Filename.mp3', 'id', 'originalfilename', 'favorite', 'blacklist'])
             writer.writeheader()
             writer.writerows(data)
 
     def get_random_filename(self):
         filenames = self._read_filenames()
-        return random.choice(filenames) if filenames else None
+        random.shuffle(filenames)  # Shuffle the filenames
+        for filename in filenames:  # Iterate over filenames
+            if not self.is_blacklisted(filename):  # If filename is not blacklisted
+                return filename  # Return the filename
+        return None  # Return None if all filenames are blacklisted
 
     def _read_filenames(self):
         filenames = []

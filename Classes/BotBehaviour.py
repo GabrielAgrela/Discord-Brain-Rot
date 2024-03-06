@@ -17,6 +17,7 @@ class ReplayButton(Button):
         super().__init__(**kwargs)
         self.bot_behavior = bot_behavior
         self.audio_file = audio_file
+        
 
     async def callback(self, interaction):
         try:
@@ -28,7 +29,7 @@ class ReplayButton(Button):
             # Handle expired interaction
             await interaction.message.channel.send("The buttons have expired. Sending new ones...")
             # Send new message with fresh buttons
-            view = ReplayView(self.bot_behavior, self.audio_file)
+            view = ControlsView(self.bot_behavior, self.audio_file)
             await interaction.message.channel.send(view=view)
 
 class PlayRandomButton(Button):
@@ -51,15 +52,77 @@ class PlaySlapButton(Button):
         # Start the slap sound playback
         asyncio.create_task(self.bot_behavior.play_audio("", "slap.mp3", "admin"))
 
-class ReplayView(View):
+class FavoriteButton(Button):
+    def __init__(self, bot_behavior, audio_file):
+        if bot_behavior.db.is_favorite(audio_file):
+            super().__init__(label="Favorite", emoji="❌", style=discord.ButtonStyle.primary)
+        else:
+            super().__init__(label="Favorite", emoji="⭐", style=discord.ButtonStyle.primary)
+        self.bot_behavior = bot_behavior
+        self.audio_file = audio_file
+
+    async def callback(self, interaction: discord.Interaction):
+        # Update the favorite status of the sound in the database
+        if self.bot_behavior.db.is_favorite(self.audio_file):
+            self.bot_behavior.db.update_favorite_status(self.audio_file, False)
+            await interaction.response.send_message("Sound removed from favorites!")
+        else:
+            self.bot_behavior.db.update_favorite_status(self.audio_file, True)
+            await interaction.response.send_message("Sound marked as favorite!")
+
+class BlacklistButton(Button):
+    def __init__(self, bot_behavior, audio_file):
+        if bot_behavior.db.is_blacklisted(audio_file):
+            super().__init__(label="BlackList", emoji="🔁", style=discord.ButtonStyle.primary)
+        else:
+            super().__init__(label="BlackList", emoji="🗑️", style=discord.ButtonStyle.primary)
+        self.bot_behavior = bot_behavior
+        self.audio_file = audio_file
+
+    async def callback(self, interaction: discord.Interaction):
+        # Update the favorite status of the sound in the database
+        if self.bot_behavior.db.is_blacklisted(self.audio_file):
+            self.bot_behavior.db.update_blacklist_status(self.audio_file, False)
+            await interaction.response.send_message("Sound removed from blacklist!")
+        else:
+            self.bot_behavior.db.update_blacklist_status(self.audio_file, True)
+            await interaction.response.send_message("Sound marked as blacklisted!")
+
+class ListFavoritesButton(Button):
+    def __init__(self, bot_behavior, **kwargs):
+        super().__init__(**kwargs)
+        self.bot_behavior = bot_behavior
+
+    async def callback(self, interaction):
+        await interaction.response.defer()
+        # Get the list of favorite sounds
+        favorites = self.bot_behavior.db.get_favorite_sounds()
+        if len(favorites) > 0:
+            # Send the list of favorite sounds
+            await interaction.message.channel.send(f"Favorite sounds: {', '.join(favorites)}")
+        else:
+            # Send a message if there are no favorite sounds
+            await interaction.message.channel.send("No favorite sounds found.")
+
+class ControlsView(View):
+    def __init__(self, bot_behavior):
+        super().__init__()
+        # Add the play random button to the view
+        self.add_item(PlayRandomButton(bot_behavior, label=None, emoji="🎲", style=discord.ButtonStyle.primary))
+        # Add the list favorites button to the view
+        self.add_item(ListFavoritesButton(bot_behavior, label="🎲", emoji="⭐", style=discord.ButtonStyle.primary))
+
+class SoundBeingPlayedView(View):
     def __init__(self, bot_behavior, audio_file):
         super().__init__()
         # Add the replay button to the view
         self.add_item(ReplayButton(bot_behavior, audio_file, label=None, emoji="🔁", style=discord.ButtonStyle.primary))
-        # Add the play random button to the view
-        self.add_item(PlayRandomButton(bot_behavior, label=None, emoji="🎲", style=discord.ButtonStyle.primary))
-        # Add the play slap button to the view
+        # Add the slap button to the view
         self.add_item(PlaySlapButton(bot_behavior, label=None, emoji="👋", style=discord.ButtonStyle.primary))
+        # Add the favorite button to the view
+        self.add_item(FavoriteButton(bot_behavior, audio_file))
+        # Add the blacklist button to the view
+        self.add_item(BlacklistButton(bot_behavior, audio_file))
 
 
 
@@ -81,12 +144,26 @@ class BotBehavior:
         self.sound_downloader = SoundDownloader(self.db)
         self.TTS = TTS(self,bot)
         self.view = None
+        
 
     async def delete_message_components(self):
         bot_channel = await self.get_bot_channel()
         async for message in bot_channel.history(limit=20):
-            if message.components:
+            # delete the message if there are buttons and no text
+            if message.components and not message.embeds:
                 await message.delete()
+    
+    async def clean_buttons(self):
+        bot_channel = await self.get_bot_channel()
+        async for message in bot_channel.history(limit=20):
+            # remove the components of the message if there are any
+            if message.components:
+                await message.edit(view=None)
+
+    async def delayed_button_clean(self, message):
+        await asyncio.sleep(300)  # Wait for 5 minutes
+        if message.components:
+            await message.edit(view=None)
     
     async def get_bot_channel(self):
         bot_channel = discord.utils.get(self.bot.guilds[0].text_channels, name='bot')
@@ -131,13 +208,16 @@ class BotBehavior:
             # Set the footer to show who requested the sound
             embed.set_footer(text=f"Requested by {user}")
             #delete last message
-            self.view = ReplayView(self, audio_file)
+            self.view = ControlsView(self)
             # Add the view to the message
             if audio_file.split('/')[-1].replace('.mp3', '') != "slap":
-                await bot_channel.send(embed=embed)
-            await self.delete_message_components()
-            # Store the new message with buttons
-            self.button_message = await bot_channel.send(view=self.view)
+                message = await bot_channel.send(embed=embed,view=SoundBeingPlayedView(self, audio_file))
+                await self.delete_message_components()
+                # Store the new message with buttons
+                self.button_message = await bot_channel.send(view=self.view)
+
+                # Start a new thread that will wait for 5 minutes then clear the buttons
+                asyncio.create_task(self.delayed_button_clean(message))
             
             
         audio_file_path =  os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds",audio_file))
@@ -178,7 +258,7 @@ class BotBehavior:
 
     async def refresh_button_message(self):
         while True:  # This will run indefinitely
-            await asyncio.sleep(600)  # Wait for 3 seconds
+            await asyncio.sleep(299)  # Wait for 3 seconds
             try:
                 if self.button_message:
                     await self.button_message.delete()
@@ -226,7 +306,7 @@ class BotBehavior:
                     else:
                         await asyncio.sleep(sleep_time)
             except Exception as e:
-                print(f"An error occurred: {e}")
+                print(f"1An error occurred: {e}")
                 await asyncio.sleep(60) # if an error occurred, try again in 1 minute
 
     async def play_random_sound(self, user="admin"):
@@ -236,7 +316,7 @@ class BotBehavior:
                 if channel is not None:
                     asyncio.create_task(self.play_audio(channel, self.db.get_random_filename(),user))
         except Exception as e:
-            print(f"An error occurred: {e}")
+            print(f"2An error occurred: {e}")
     
     async def play_request(self, id, user):
         distance, filename = self.db.get_most_similar_filename(id)
@@ -271,4 +351,4 @@ class BotBehavior:
                         return
                     
         except Exception as e:
-            print(f"An error occurred: {e}")
+            print(f"3An error occurred: {e}")
