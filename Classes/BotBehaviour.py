@@ -11,6 +11,11 @@ from Classes.PlayHistoryDatabase import PlayHistoryDatabase
 from Classes.TTS import TTS
 
 from discord.ui import Button, View
+import sounddevice as sd
+import numpy as np
+from scipy.io.wavfile import write
+from pydub import AudioSegment
+
 
 class ReplayButton(Button):
     def __init__(self, bot_behavior, audio_file, **kwargs):
@@ -55,38 +60,41 @@ class PlaySlapButton(Button):
 class FavoriteButton(Button):
     def __init__(self, bot_behavior, audio_file):
         if bot_behavior.db.is_favorite(audio_file):
-            super().__init__(label="Favorite", emoji="❌", style=discord.ButtonStyle.primary)
+            super().__init__(label="❌⭐", style=discord.ButtonStyle.primary)
         else:
-            super().__init__(label="Favorite", emoji="⭐", style=discord.ButtonStyle.primary)
+            super().__init__(label="⭐", style=discord.ButtonStyle.primary)
         self.bot_behavior = bot_behavior
         self.audio_file = audio_file
 
     async def callback(self, interaction: discord.Interaction):
+        await interaction.response.defer()
         # Update the favorite status of the sound in the database
         if self.bot_behavior.db.is_favorite(self.audio_file):
             self.bot_behavior.db.update_favorite_status(self.audio_file, False)
-            await interaction.response.send_message("Sound removed from favorites!")
         else:
             self.bot_behavior.db.update_favorite_status(self.audio_file, True)
-            await interaction.response.send_message("Sound marked as favorite!")
+        view = SoundBeingPlayedView(self.bot_behavior, self.audio_file)
+        await interaction.message.edit(view=view)
 
 class BlacklistButton(Button):
     def __init__(self, bot_behavior, audio_file):
         if bot_behavior.db.is_blacklisted(audio_file):
-            super().__init__(label="BlackList", emoji="🔁", style=discord.ButtonStyle.primary)
+            super().__init__( label="❌🗑️", style=discord.ButtonStyle.primary)
         else:
-            super().__init__(label="BlackList", emoji="🗑️", style=discord.ButtonStyle.primary)
+            super().__init__(label="", emoji="🗑️", style=discord.ButtonStyle.primary)
         self.bot_behavior = bot_behavior
         self.audio_file = audio_file
 
     async def callback(self, interaction: discord.Interaction):
+        await interaction.response.defer()
         # Update the favorite status of the sound in the database
         if self.bot_behavior.db.is_blacklisted(self.audio_file):
             self.bot_behavior.db.update_blacklist_status(self.audio_file, False)
-            await interaction.response.send_message("Sound removed from blacklist!")
         else:
             self.bot_behavior.db.update_blacklist_status(self.audio_file, True)
-            await interaction.response.send_message("Sound marked as blacklisted!")
+            # update this interactions view
+        view = SoundBeingPlayedView(self.bot_behavior, self.audio_file)
+        await interaction.message.edit(view=view)
 
 class ListFavoritesButton(Button):
     def __init__(self, bot_behavior, **kwargs):
@@ -99,18 +107,36 @@ class ListFavoritesButton(Button):
         favorites = self.bot_behavior.db.get_favorite_sounds()
         if len(favorites) > 0:
             # Send the list of favorite sounds
-            await interaction.message.channel.send(f"Favorite sounds: {', '.join(favorites)}")
+            await self.bot_behavior.write_to_channel(favorites)
         else:
             # Send a message if there are no favorite sounds
             await interaction.message.channel.send("No favorite sounds found.")
+
+class ListBlacklistButton(Button):
+    def __init__(self, bot_behavior, **kwargs):
+        super().__init__(**kwargs)
+        self.bot_behavior = bot_behavior
+
+    async def callback(self, interaction):
+        await interaction.response.defer()
+        # Get the list of blacklisted sounds
+        blacklisted = self.bot_behavior.db.get_blacklisted_sounds()
+        if len(blacklisted) > 0:
+            # Send the list of blacklisted sounds
+            await self.bot_behavior.write_to_channel(blacklisted)
+        else:
+            # Send a message if there are no blacklisted sounds
+            await interaction.message.channel.send("No blacklisted sounds found.")
 
 class ControlsView(View):
     def __init__(self, bot_behavior):
         super().__init__()
         # Add the play random button to the view
-        self.add_item(PlayRandomButton(bot_behavior, label=None, emoji="🎲", style=discord.ButtonStyle.primary))
+        self.add_item(PlayRandomButton(bot_behavior, label="🎲🎶", style=discord.ButtonStyle.primary))
         # Add the list favorites button to the view
-        self.add_item(ListFavoritesButton(bot_behavior, label="🎲", emoji="⭐", style=discord.ButtonStyle.primary))
+        self.add_item(ListFavoritesButton(bot_behavior, label="⭐⭐⭐", style=discord.ButtonStyle.primary))
+        # Add the list blacklist button to the view
+        self.add_item(ListBlacklistButton(bot_behavior, label="🗑️🗑️🗑️", style=discord.ButtonStyle.primary))
 
 class SoundBeingPlayedView(View):
     def __init__(self, bot_behavior, audio_file):
@@ -144,6 +170,11 @@ class BotBehavior:
         self.sound_downloader = SoundDownloader(self.db)
         self.TTS = TTS(self,bot)
         self.view = None
+
+    async def write_to_channel(self, message):
+        bot_channel = await self.get_bot_channel()
+        formatted_message = "```" + "\n".join(message) + "```"  # Surrounds the message with code block markdown
+        await bot_channel.send(formatted_message)
         
 
     async def delete_message_components(self):
@@ -152,6 +183,12 @@ class BotBehavior:
             # delete the message if there are buttons and no text
             if message.components and not message.embeds:
                 await message.delete()
+
+    async def delete_last_message(self, ctx):
+        bot_channel = await self.get_bot_channel()
+        async for message in bot_channel.history(limit=1):
+            await message.delete()
+            return
     
     async def clean_buttons(self):
         bot_channel = await self.get_bot_channel()
@@ -161,7 +198,7 @@ class BotBehavior:
                 await message.edit(view=None)
 
     async def delayed_button_clean(self, message):
-        await asyncio.sleep(300)  # Wait for 5 minutes
+        await asyncio.sleep(59)  # Wait for 5 minutes
         if message.components:
             await message.edit(view=None)
     
@@ -256,16 +293,17 @@ class BotBehavior:
 
         await self.playback_done.wait()
 
+
     async def refresh_button_message(self):
         while True:  # This will run indefinitely
-            await asyncio.sleep(299)  # Wait for 3 seconds
+            await asyncio.sleep(59)  # Wait for 3 seconds
             try:
                 if self.button_message:
                     await self.button_message.delete()
                     bot_channel = await self.get_bot_channel()
                     self.button_message = await bot_channel.send(view=self.view)
-            except discord.errors.NotFound:
-                print("The message was not found. It may have been deleted.")
+            except Exception as e:
+                print("The message was not found. It may have been deleted.",e)
 
     async def update_bot_status_once(self):
         if hasattr(self.bot, 'next_download_time'):
@@ -333,7 +371,6 @@ class BotBehavior:
         await self.db.modify_filename(oldfilename, newfilename)
                     
     async def tts(self,behavior, speech, lang="en", region=""):
-        print("stt: ", speech)
         await self.TTS.save_as_mp3(speech, lang, region)     
     
     async def list_sounds(self):

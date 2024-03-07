@@ -15,6 +15,7 @@ import csv
 from collections import Counter
 import atexit
 import interactions
+from discord.commands import Option
 
 
 # Dictionary to store the counts for each user
@@ -46,118 +47,92 @@ async def on_ready():
     channel = await behavior.get_bot_channel()
     behavior.button_message = await channel.send(view=ControlsView(behavior))
 
-@bot.command(
-    name="p",
-    description="Play a sound"
+@bot.slash_command(
+    name="play",
+    description="Write a name of something you want to hear"
 )
-async def play_requested(ctx: interactions.CommandContext):
-    author = ctx.message.author
+async def play_requested(ctx: interactions.CommandContext, message: Option(str, "Sound", required=False, default='random')):
+    await ctx.defer()
+    await behavior.delete_last_message(ctx)
+    author = ctx.user
     username_with_discriminator = f"{author.name}#{author.discriminator}"
     try:
-        if(ctx.message.content.split(" ")[1] == "random"):
+        if(message == "random"):
             asyncio.run_coroutine_threadsafe(behavior.play_random_sound(), bot.loop)
         else:
-            await behavior.play_request(ctx.message.content, username_with_discriminator)
+            await behavior.play_request(message, username_with_discriminator)
     except:
         asyncio.run_coroutine_threadsafe(behavior.play_random_sound(), bot.loop)
         return
     
-@bot.command(
-    name="en",
-    description="Play a sound"
-)
-async def tts(ctx):
-    parts = ctx.message.content.split(" ")[1:]
-    
-    # Join the words back together into a string
-    rest_of_message = " ".join(parts)
-    
-    await behavior.tts(behavior,rest_of_message)
+@bot.slash_command(name='tts', description='TTS with google translate. Press tab and enter to select message and write')
+async def tts(ctx, language: Option(str, "pt, br, es, fr, de and ch", required=False, default=''), message: Option(str, "What you want to say", required=False, default='write something')):
 
-@bot.command(
-    name="pt",
-    description="Play a sound"
-)
-async def tts(ctx):
-    parts = ctx.message.content.split(" ")[1:]
-    
-    # Join the words back together into a string
-    rest_of_message = " ".join(parts)
-    
-    await behavior.tts(behavior,rest_of_message, "pt")
+    await ctx.defer()
+    await behavior.delete_last_message(ctx)
+    try:
+        if language == "pt":
+            await behavior.tts(behavior, message, "pt")
+        elif language == "br":
+            await behavior.tts(behavior, message, "pt", "com.br")
+        elif language == "es":
+            await behavior.tts(behavior, message, "es")
+        elif language == "fr":
+            await behavior.tts(behavior, message, "fr")
+        elif language == "de":
+            await behavior.tts(behavior, message, "de")
+        elif language == "ch":
+            await behavior.tts(behavior, message, "zh-CN")
+        else:
+            await behavior.tts(behavior, message)
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        await ctx.send(content="An error occurred while processing your request.")
+        return
 
-@bot.command(
-    name="br",
-    description="Play a sound"
-)
-async def tts(ctx):
-    parts = ctx.message.content.split(" ")[1:]
     
-    # Join the words back together into a string
-    rest_of_message = " ".join(parts)
-    
-    await behavior.tts(behavior,rest_of_message, "pt","com.br")
-
-@bot.command(
-    name="es",
-    description="Play a sound"
-)
-async def tts(ctx):
-    parts = ctx.message.content.split(" ")[1:]
-    
-    # Join the words back together into a string
-    rest_of_message = " ".join(parts)
-    
-    await behavior.tts(behavior,rest_of_message, "es")
-
-@bot.command(
-    name="fr",
-    description="Play a sound"
-)
-async def tts(ctx):
-    parts = ctx.message.content.split(" ")[1:]
-    
-    # Join the words back together into a string
-    rest_of_message = " ".join(parts)
-    
-    await behavior.tts(behavior,rest_of_message, "fr")
-
-@bot.command(
-    name="de",
-    description="Play a sound"
-)
-async def tts(ctx):
-    parts = ctx.message.content.split(" ")[1:]
-    
-    # Join the words back together into a string
-    rest_of_message = " ".join(parts)
-    
-    await behavior.tts(behavior,rest_of_message, "de")
+    # Send the final response
+    await ctx.send(content="tts: "+message)
 
 
-@bot.command(
+
+@bot.slash_command(
     name="change",
-    description="Play a sound"
+    description="change the name of a sound"
 )
-async def play_requested(ctx):
-    await behavior.change_filename(ctx.message.content.split(" ")[1], ctx.message.content.split(" ")[2])
+async def change(ctx, current: Option(str, "Current name of the sound", required=True, default=''), new: Option(str, "New name of the sound", required=True, default='write something')):
+    await ctx.defer()
+    await behavior.delete_last_message(ctx)
+    await behavior.change_filename(current, new)
 
-@bot.command(
+
+@bot.slash_command(
     name="top",
-    description="Play a sound"
+    description="Leaderboard of sounds or users"
 )
-async def top(ctx):
-    if ctx.message.content.split(" ")[1] == "sounds":
+async def change(ctx, option: Option(str, "users or sounds", required=False, default='sounds')):
+    await ctx.defer()
+    await behavior.delete_last_message(ctx)
+    if option == "sounds":
         await behavior.player_history_db.write_top_played_sounds()
-    elif ctx.message.content.split(" ")[1] == "users":
+    elif option == "users":
         await behavior.player_history_db.write_top_users()
 
-@bot.command(
+@bot.slash_command(
     name="list",
-    description="Play a sound"
+    description="returns database of sounds"
 )
-async def list_sounds(ctx):
+async def change(ctx):
+    await ctx.defer()
+    await behavior.delete_last_message(ctx)
     await behavior.list_sounds()    
+
+@bot.command(
+    name="re",
+    description="Record a sound"
+)
+async def record(ctx):
+    behavior.record_sound('output', 5)  # 'output' is the filename, 5 is the duration
 
 @bot.event
 async def on_voice_state_update(member, before, after):

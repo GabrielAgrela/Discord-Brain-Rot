@@ -82,6 +82,14 @@ class AudioDatabase:
             if row['favorite'] == "True":
                 favorite_sounds.append(row['Filename.mp3'])
         return favorite_sounds
+    
+    def get_blacklisted_sounds(self):
+        data = self._read_data()
+        blacklisted_sounds = []
+        for row in data:
+            if row['blacklist'] == "True":
+                blacklisted_sounds.append(row['Filename.mp3'])
+        return blacklisted_sounds
 
     async def modify_filename(self, old_filename, new_filename):
         print(f"Modifying {old_filename} to {new_filename}")
