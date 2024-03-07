@@ -39,34 +39,40 @@ file_name = 'play_requests.csv'
 @bot.event
 async def on_ready():
     print(f"We have logged in as {bot.user}")
+    await behavior.play_random_sound()
     bot.loop.create_task(behavior.play_sound_periodically())
     bot.loop.create_task(behavior.update_bot_status())
     await behavior.delete_message_components()
     bot.loop.create_task(behavior.refresh_button_message())
     await behavior.clean_buttons()
-    channel = await behavior.get_bot_channel()
-    behavior.button_message = await channel.send(view=ControlsView(behavior))
 
 @bot.slash_command(
     name="play",
     description="Write a name of something you want to hear"
 )
-async def play_requested(ctx: interactions.CommandContext, message: Option(str, "Sound", required=False, default='random')):
+async def play_requested(ctx: interactions.CommandContext, message: Option(str, "Sound (empty for random)", required=False, default='random')):
     await ctx.defer()
     await behavior.delete_last_message(ctx)
     author = ctx.user
+    print(f"Playing {message} for {author.name}")
     username_with_discriminator = f"{author.name}#{author.discriminator}"
+    print(f"Playing {message} for {username_with_discriminator}")
     try:
         if(message == "random"):
-            asyncio.run_coroutine_threadsafe(behavior.play_random_sound(), bot.loop)
+            asyncio.run_coroutine_threadsafe(behavior.play_random_sound(username_with_discriminator), bot.loop)
         else:
             await behavior.play_request(message, username_with_discriminator)
     except:
-        asyncio.run_coroutine_threadsafe(behavior.play_random_sound(), bot.loop)
+        asyncio.run_coroutine_threadsafe(behavior.play_random_sound(username_with_discriminator), bot.loop)
         return
     
 @bot.slash_command(name='tts', description='TTS with google translate. Press tab and enter to select message and write')
-async def tts(ctx, language: Option(str, "pt, br, es, fr, de and ch", required=False, default=''), message: Option(str, "What you want to say", required=False, default='write something')):
+async def tts(
+    ctx, 
+    message: 
+        Option(str, "What you want to say", required=True), 
+    language: 
+        Option(str, "pt, br, es, fr, de and ch", required=False, default='')):
 
     await ctx.defer()
     await behavior.delete_last_message(ctx)
@@ -135,8 +141,9 @@ async def record(ctx):
     behavior.record_sound('output', 5)  # 'output' is the filename, 5 is the duration
 
 @bot.event
-async def on_voice_state_update(member, before, after):
-    member_str = str(member)
+async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
+    print(f"Voice state update: {member} {before.channel} {after.channel}")
+    member_str = f"{member.name}#{member.discriminator}"
     if member_str not in USERS and before.channel is None and after.channel is not None and member != bot.user:
         await behavior.play_audio(after.channel, "gay-echo.mp3","admin", is_entrance=True)
     else:
