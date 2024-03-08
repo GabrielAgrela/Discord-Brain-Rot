@@ -17,17 +17,8 @@ import atexit
 import interactions
 from discord.commands import Option
 
-
-# Dictionary to store the counts for each user
-user_scores = defaultdict(int)
-# Dictionary to store the timestamps for each command invocation
-user_timestamps = defaultdict(list)
-
-intents = discord.Intents(guilds=True, voice_states=True, messages=True, message_content=True, members=True)
-
-
 env = Environment()
-
+intents = discord.Intents(guilds=True, voice_states=True, messages=True, message_content=True, members=True)
 bot = Bot(command_prefix="*", intents=intents, token=env.bot_token, ffmpeg_path=env.ffmpeg_path)
 
 loader = SoundEventLoader(os.path.abspath(__file__))
@@ -39,17 +30,15 @@ file_name = 'play_requests.csv'
 @bot.event
 async def on_ready():
     print(f"We have logged in as {bot.user}")
+    await behavior.delete_message_components()
+    await behavior.clean_buttons()
     await behavior.play_random_sound()
+    
     bot.loop.create_task(behavior.play_sound_periodically())
     bot.loop.create_task(behavior.update_bot_status())
-    await behavior.delete_message_components()
-    bot.loop.create_task(behavior.refresh_button_message())
-    await behavior.clean_buttons()
+    #bot.loop.create_task(behavior.refresh_button_message())
 
-@bot.slash_command(
-    name="play",
-    description="Write a name of something you want to hear"
-)
+@bot.slash_command(name="play", description="Write a name of something you want to hear")
 async def play_requested(ctx: interactions.CommandContext, message: Option(str, "Sound (empty for random)", required=False, default='random')):
     await ctx.defer()
     await behavior.delete_last_message(ctx)
@@ -67,13 +56,7 @@ async def play_requested(ctx: interactions.CommandContext, message: Option(str, 
         return
     
 @bot.slash_command(name='tts', description='TTS with google translate. Press tab and enter to select message and write')
-async def tts(
-    ctx, 
-    message: 
-        Option(str, "What you want to say", required=True), 
-    language: 
-        Option(str, "pt, br, es, fr, de and ch", required=False, default='')):
-
+async def tts(ctx, message: Option(str, "What you want to say", required=True), language: Option(str, "pt, br, es, fr, de and ch", required=False, default='')):
     await ctx.defer()
     await behavior.delete_last_message(ctx)
     try:
@@ -95,27 +78,15 @@ async def tts(
         print(f"An error occurred: {e}")
         await ctx.send(content="An error occurred while processing your request.")
         return
-
-    
-    # Send the final response
     await ctx.send(content="tts: "+message)
 
-
-
-@bot.slash_command(
-    name="change",
-    description="change the name of a sound"
-)
+@bot.slash_command(name="change", description="change the name of a sound")
 async def change(ctx, current: Option(str, "Current name of the sound", required=True, default=''), new: Option(str, "New name of the sound", required=True, default='write something')):
     await ctx.defer()
     await behavior.delete_last_message(ctx)
     await behavior.change_filename(current, new)
 
-
-@bot.slash_command(
-    name="top",
-    description="Leaderboard of sounds or users"
-)
+@bot.slash_command(name="top", description="Leaderboard of sounds or users")
 async def change(ctx, option: Option(str, "users or sounds", required=False, default='sounds')):
     await ctx.defer()
     await behavior.delete_last_message(ctx)
@@ -124,19 +95,13 @@ async def change(ctx, option: Option(str, "users or sounds", required=False, def
     elif option == "users":
         await behavior.player_history_db.write_top_users()
 
-@bot.slash_command(
-    name="list",
-    description="returns database of sounds"
-)
+@bot.slash_command(name="list", description="returns database of sounds")
 async def change(ctx):
     await ctx.defer()
     await behavior.delete_last_message(ctx)
     await behavior.list_sounds()    
 
-@bot.command(
-    name="re",
-    description="Record a sound"
-)
+@bot.command(name="re", description="Record a sound")
 async def record(ctx):
     behavior.record_sound('output', 5)  # 'output' is the filename, 5 is the duration
 
@@ -171,17 +136,10 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
 
 def on_press(key):
     if key == keyboard.Key.f6:
-        # This is a simple function that runs the function in the event loop
-        # when the F6 key is pressed.
         asyncio.run_coroutine_threadsafe(behavior.play_random_sound(), bot.loop)
     if key == keyboard.Key.f7:
-        # This is a simple function that runs the function in the event loop
-        # when the F6 key is pressed.
         asyncio.run_coroutine_threadsafe(behavior.play_audio("", "slap.mp3","admin"), bot.loop)
 
-
-# Start the listener in a separate thread so that it doesn't block
-# the main thread where the Discord bot runs.
 keyboard_listener = keyboard.Listener(on_press=on_press)
 thread = threading.Thread(target=keyboard_listener.start)
 thread.start()

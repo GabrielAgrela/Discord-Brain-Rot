@@ -60,7 +60,7 @@ class PlaySlapButton(Button):
 class FavoriteButton(Button):
     def __init__(self, bot_behavior, audio_file):
         if bot_behavior.db.is_favorite(audio_file):
-            super().__init__(label="❌⭐", style=discord.ButtonStyle.primary)
+            super().__init__(label="⭐❌", style=discord.ButtonStyle.primary)
         else:
             super().__init__(label="⭐", style=discord.ButtonStyle.primary)
         self.bot_behavior = bot_behavior
@@ -79,7 +79,7 @@ class FavoriteButton(Button):
 class BlacklistButton(Button):
     def __init__(self, bot_behavior, audio_file):
         if bot_behavior.db.is_blacklisted(audio_file):
-            super().__init__( label="❌🗑️", style=discord.ButtonStyle.primary)
+            super().__init__( label="🗑️❌", style=discord.ButtonStyle.primary)
         else:
             super().__init__(label="", emoji="🗑️", style=discord.ButtonStyle.primary)
         self.bot_behavior = bot_behavior
@@ -130,7 +130,7 @@ class ListBlacklistButton(Button):
 
 class ControlsView(View):
     def __init__(self, bot_behavior):
-        super().__init__()
+        super().__init__(timeout=None)
         # Add the play random button to the view
         self.add_item(PlayRandomButton(bot_behavior, label="🎲🎶", style=discord.ButtonStyle.primary))
         # Add the list favorites button to the view
@@ -140,7 +140,7 @@ class ControlsView(View):
 
 class SoundBeingPlayedView(View):
     def __init__(self, bot_behavior, audio_file):
-        super().__init__()
+        super().__init__(timeout=None)
         # Add the replay button to the view
         self.add_item(ReplayButton(bot_behavior, audio_file, label=None, emoji="🔁", style=discord.ButtonStyle.primary))
         # Add the slap button to the view
@@ -198,7 +198,7 @@ class BotBehavior:
                 await message.edit(view=None)
 
     async def delayed_button_clean(self, message):
-        await asyncio.sleep(59)  # Wait for 5 minutes
+        await asyncio.sleep(119)  # Wait for 5 minutes
         if message.components:
             await message.edit(view=None)
     
@@ -254,7 +254,7 @@ class BotBehavior:
                 self.button_message = await bot_channel.send(view=self.view)
 
                 # Start a new thread that will wait for 5 minutes then clear the buttons
-                asyncio.create_task(self.delayed_button_clean(message))
+                #asyncio.create_task(self.delayed_button_clean(message))
             
             
         audio_file_path =  os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds",audio_file))
@@ -296,7 +296,7 @@ class BotBehavior:
 
     async def refresh_button_message(self):
         while True:  # This will run indefinitely
-            await asyncio.sleep(59)  # Wait for 3 seconds
+            await asyncio.sleep(119)  # Wait for 3 seconds
             try:
                 if self.button_message:
                     await self.button_message.delete()
