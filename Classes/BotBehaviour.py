@@ -32,10 +32,11 @@ class ReplayButton(Button):
             asyncio.create_task(self.bot_behavior.play_audio(interaction.message.channel, self.audio_file, interaction.user.name))
         except discord.errors.NotFound:
             # Handle expired interaction
-            await interaction.message.channel.send("The buttons have expired. Sending new ones...")
+            await self.bot_behavior.send_message(title="The buttons have expired. Sending new ones...")
             # Send new message with fresh buttons
             view = ControlsView(self.bot_behavior, self.audio_file)
-            await interaction.message.channel.send(view=view)
+            await self.bot_behavior.send_message(view=view)
+            #await interaction.message.channel.send(view=view)
 
 class PlayRandomButton(Button):
     def __init__(self, bot_behavior, **kwargs):
@@ -210,6 +211,7 @@ class BotBehavior:
     async def get_new_name(self, interaction):
         # Send a message asking for the new name
         message = await interaction.channel.send(embed=discord.Embed(title="Please enter the new name for the sound.", color=self.color))
+        
         # Define a check that only passes for messages from the user who clicked the button
         def check(m):
             return m.author == interaction.user and m.channel == interaction.channel
@@ -233,7 +235,8 @@ class BotBehavior:
         
         embed = discord.Embed(title=description, description=formatted_message, color=self.color)
         embed.set_footer(text=f"Auto-destructing in 30 seconds...")
-        message = await bot_channel.send(embed=embed)
+        message = await self.send_message(title=description, description=formatted_message, footer="Auto-destructing in 30 seconds...")
+        #message = await bot_channel.send(embed=embed)
         await asyncio.sleep(30)
         await message.delete()
         
@@ -321,13 +324,13 @@ class BotBehavior:
 
             # Add the view to the message
             if audio_file.split('/')[-1].replace('.mp3', '') != "slap":
-                if extra != "":
-                    await bot_channel.send(embed=embed,view=SoundBeingPlayedView(self, audio_file))
-                else:
-                    await self.delete_controls_message()
-                    await bot_channel.send(embed=embed,view=SoundBeingPlayedView(self, audio_file))
+                await self.send_message(view=SoundBeingPlayedView(self, audio_file), title=f"🔊 **{audio_file.split('/')[-1].replace('.mp3', '')}** 🔊", description = f"Similarity: {extra}%" if extra != "" else None, footer = f"{user} requested '{original_message}'" if original_message else f"Requested by {user}")
+                #if extra == "":
+                    #await self.delete_controls_message()
+                    #await bot_channel.send(embed=embed,view=SoundBeingPlayedView(self, audio_file))
                     # Store the new message with buttons
-                    self.controls_message = await bot_channel.send(view=self.view)
+                    #self.controls_message = await bot_channel.send(view=self.view)
+                    
 
                 # Start a new thread that will wait for 5 minutes then clear the buttons
                 #asyncio.create_task(self.delayed_button_clean(message))
@@ -445,10 +448,11 @@ class BotBehavior:
                     embed = discord.Embed(title="Maybe you meant one of these?", color=self.color)
                     view = SoundSimilarView(self, similar_sounds)
                     
-                    await bot_channel.send(view=view, embed=embed)
+                    #await bot_channel.send(view=view, embed=embed)
+                    await self.send_message(title="Maybe you meant one of these?", view=view)
                     # Store the new message with buttons
                     
-                    self.controls_message = await bot_channel.send(embed=self.embed, view=self.view)
+                    #self.controls_message = await bot_channel.send(embed=self.embed, view=self.view)
 
     async def change_filename(self, oldfilename, newfilename):
         await self.db.modify_filename(oldfilename, newfilename)
@@ -475,3 +479,13 @@ class BotBehavior:
                     
         except Exception as e:
             print(f"3An error occurred: {e}")
+
+    async def send_message(self, title="", description="",footer=None, thumbnail=None, view=None):
+        await self.delete_controls_message()
+        bot_channel = await self.get_bot_channel()
+        embed = discord.Embed(title=title, description=description, color=self.color)
+        embed.set_thumbnail(url=thumbnail)
+        embed.set_footer(text=footer)
+        message = await bot_channel.send(view=view, embed=None if description == "" and title == "" else embed)
+        self.controls_message = await bot_channel.send(view=self.view)
+        return message

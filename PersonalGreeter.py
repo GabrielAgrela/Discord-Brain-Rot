@@ -63,13 +63,12 @@ async def play_requested(ctx: interactions.CommandContext, message: Option(str, 
 async def tts(ctx, message: Option(str, "What you want to say", required=True), language: Option(str, "en, pt, br, es, fr, de, ar, ru and ch", required=True)):
     await ctx.defer()
     await behavior.delete_last_message(ctx)
-    embed = discord.Embed(title=f"TTS in {language.upper()}", description=f"'{message}'", color=behavior.color)
+    flag_emojis = {"pt": ":flag_pt:", "br": ":flag_br:", "es": ":flag_es:", "fr": ":flag_fr:", "de": ":flag_de:", "ru": ":flag_ru:", "ar": ":flag_sa:", "ch": ":flag_cn:", "ir": ":flag_ie:", "en": ":flag_gb:"}
+    flag = flag_emojis.get(language, ":grey_question:")
     user = discord.utils.get(bot.get_all_members(), name=ctx.user.name)
-    if user and user.avatar:
-        embed.set_thumbnail(url=user.avatar.url)
-    elif user:
-        embed.set_thumbnail(url=user.default_avatar.url)
-    await ctx.send(embed=embed)
+
+    await behavior.send_message(title=f"TTS in {flag}", description=f"'{message}'", thumbnail=user.avatar.url if user and user.avatar else user.default_avatar.url)
+
     try:
         if language == "pt":
             await behavior.tts(message, "pt")
@@ -92,8 +91,7 @@ async def tts(ctx, message: Option(str, "What you want to say", required=True), 
         else:
             await behavior.tts(message)
     except Exception as e:
-        print(f"An error occurred: {e}")
-        await ctx.send(content="An error occurred while processing your request.")
+        await behavior.send_message(title=e)
         return
     
 

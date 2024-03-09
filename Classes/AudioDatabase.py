@@ -107,7 +107,7 @@ class AudioDatabase:
                     if not os.path.exists(new_path):
                         os.rename(old_path, new_path)
                     else:
-                        await bot_channel.send(embed=discord.Embed(title=f"File already exists",color=self.bot.color))
+                        await self.bot.send_message(title="File already exists")
                         return
                 except Exception as e:
                     print("error renaming file" + str(e))
@@ -124,7 +124,7 @@ class AudioDatabase:
                     color=self.bot.color
                 )
                 #delete last message
-                await bot_channel.send(embed=embed)
+                await self.bot.send_message(title=f"Modified {old_filename} to {new_filename}")
                 return
         
         print(f"Filename not found: {old_filename}")
