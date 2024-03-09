@@ -140,6 +140,20 @@ class SimilarSoundButton(Button):
         print(f"Playing similar sound: {self.sound_name}")
         asyncio.create_task(self.bot_behavior.play_audio(interaction.message.channel, self.sound_name, interaction.user.name))
 
+class ChangeSoundNameButton(Button):
+    def __init__(self, bot_behavior, sound_name, **kwargs):
+        super().__init__(**kwargs)
+        self.bot_behavior = bot_behavior
+        self.sound_name = sound_name
+
+    async def callback(self, interaction):
+        await interaction.response.defer()
+        # Get the new name from the user
+        new_name = await self.bot_behavior.get_new_name(interaction)
+        if new_name:
+            # Call the change_filename method with the current and new name
+            await self.bot_behavior.change_filename(self.sound_name, new_name)
+
 class ControlsView(View):
     def __init__(self, bot_behavior):
         super().__init__(timeout=None)
@@ -161,6 +175,7 @@ class SoundBeingPlayedView(View):
         self.add_item(FavoriteButton(bot_behavior, audio_file))
         # Add the blacklist button to the view
         self.add_item(BlacklistButton(bot_behavior, audio_file))
+        self.add_item(ChangeSoundNameButton(bot_behavior, audio_file, label="📝", style=discord.ButtonStyle.primary))
 
 class SoundSimilarView(View):
     def __init__(self, bot_behavior, similar_sounds):
@@ -184,13 +199,33 @@ class BotBehavior:
         self.script_dir = os.path.dirname(__file__)  # Get the directory of the current script
         self.db_path = os.path.join(self.script_dir, "../Data/soundsDB.csv")
         self.ph_path = os.path.join(self.script_dir, "../Data/play_history.csv")
-        self.db = AudioDatabase(self.db_path, self.bot)
+        self.db = AudioDatabase(self.db_path, self)
         self.player_history_db = PlayHistoryDatabase(self.ph_path,self.db, self.bot)
         self.sound_downloader = SoundDownloader(self.db)
         self.TTS = TTS(self,bot)
         self.view = None
         self.embed = None
         self.color = discord.Color.red()
+
+    async def get_new_name(self, interaction):
+        # Send a message asking for the new name
+        message = await interaction.channel.send(embed=discord.Embed(title="Please enter the new name for the sound.", color=self.color))
+        # Define a check that only passes for messages from the user who clicked the button
+        def check(m):
+            return m.author == interaction.user and m.channel == interaction.channel
+
+        try:
+            # Wait for a message from the user
+            response = await self.bot.wait_for('message', check=check, timeout=10.0)
+            await response.delete()
+            await message.delete()
+        except asyncio.TimeoutError:
+            # delete the message if the user didn't respond in time
+            await message.delete()
+            return None
+
+        # Return the content of the response message as the new name
+        return response.content
 
     async def write_to_channel(self, message, description=""):
         bot_channel = await self.get_bot_channel()
@@ -218,7 +253,7 @@ class BotBehavior:
     
     async def clean_buttons(self):
         bot_channel = await self.get_bot_channel()
-        async for message in bot_channel.history(limit=20):
+        async for message in bot_channel.history(limit=100):
             # remove the components of the message if there are any
             if message.components:
                 await message.edit(view=None)
@@ -289,7 +324,7 @@ class BotBehavior:
                     await self.delete_message_components()
                     message = await bot_channel.send(embed=embed,view=SoundBeingPlayedView(self, audio_file))
                     # Store the new message with buttons
-                    self.button_message = await bot_channel.send(embed=self.embed, view=self.view)
+                    self.button_message = await bot_channel.send(view=self.view)
 
                 # Start a new thread that will wait for 5 minutes then clear the buttons
                 #asyncio.create_task(self.delayed_button_clean(message))
@@ -402,7 +437,7 @@ class BotBehavior:
         self.color = temp_color
     
     async def play_request(self, id, user):
-        filenames = self.db.get_most_similar_filenames(id,20)
+        filenames = self.db.get_most_similar_filenames(id,5)
         filename = filenames[0][1] if filenames else None
         similarity = filenames[0][0] if filenames else None
         for guild in self.bot.guilds:

@@ -16,6 +16,7 @@ from collections import Counter
 import atexit
 import interactions
 from discord.commands import Option
+from discord import default_permissions
 
 env = Environment()
 intents = discord.Intents(guilds=True, voice_states=True, messages=True, message_content=True, members=True)
@@ -27,6 +28,7 @@ USERS, SOUNDS = loader.load_sound_events()
 behavior = BotBehavior(bot, env.ffmpeg_path)
 file_name = 'play_requests.csv'
 
+@default_permissions(manage_messages=True)
 @bot.event
 async def on_ready():
     print(f"We have logged in as {bot.user}")

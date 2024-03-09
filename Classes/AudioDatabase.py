@@ -1,3 +1,4 @@
+import asyncio
 import csv
 import random
 import os
@@ -98,7 +99,7 @@ class AudioDatabase:
         for row in data:
             if row['Filename.mp3'].strip().lower() == old_filename.strip().lower():
                 row['Filename.mp3'] = new_filename+".mp3"  # Updating the originalfilename as well
-                
+                bot_channel = await self.bot.get_bot_channel()
                 try:
                     # Check if new_filename already exists
                     old_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", old_filename))
@@ -106,23 +107,24 @@ class AudioDatabase:
                     if not os.path.exists(new_path):
                         os.rename(old_path, new_path)
                     else:
-                        print("file already exists")
+                        await bot_channel.send(embed=discord.Embed(title=f"File already exists",color=self.bot.color))
                         return
                 except Exception as e:
                     print("error renaming file" + str(e))
+                    # wait 2 seconds and try again
+                    if 'used by another process' in str(e):
+                        await asyncio.sleep(2)
+                        await self.modify_filename(old_filename, new_filename)
                     return
                 
                 self._write_data(data)
-                bot_channel = discord.utils.get(self.bot.guilds[0].text_channels, name='bot')
-        
+               
                 embed = discord.Embed(
                     title=f"Modified {old_filename} to {new_filename}",
-                    color=self.bot.color()
+                    color=self.bot.color
                 )
                 #delete last message
                 await bot_channel.send(embed=embed)
-
-                print()
                 return
         
         print(f"Filename not found: {old_filename}")
