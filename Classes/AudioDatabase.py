@@ -92,8 +92,8 @@ class AudioDatabase:
         return blacklisted_sounds
 
     async def modify_filename(self, old_filename, new_filename):
-        print(f"Modifying {old_filename} to {new_filename}")
-        sim, old_filename = self.get_most_similar_filename(old_filename)
+        old_filenames = self.get_most_similar_filenames(old_filename)
+        old_filename = old_filenames[0][1] if old_filenames else None
         data = self._read_data()
         for row in data:
             if row['Filename.mp3'].strip().lower() == old_filename.strip().lower():
@@ -161,45 +161,41 @@ class AudioDatabase:
 
 
 
-    def get_most_similar_filename(self, query_filename):
+    def get_most_similar_filenames(self, query_filename, num_results=1):
         filenames = self._read_filenames()
         if not filenames:
             return None, None
-        #Clear query_filename of commands and spaces
+        # Clear query_filename of commands and spaces
         query_filename = query_filename.replace("*p ", "").lower()
 
-        highest_score = 0
-        most_similar_filename = None
+        scores = []
 
         for filename in filenames:
             # Clear db's filename of .mp3
-            filename = filename.replace(".mp3", "").lower()
+            filename = filename.lower()
             score = fuzz.token_sort_ratio(query_filename, filename)
 
-            query_filename = query_filename.replace("-", " ")
+            query_filename = query_filename.replace("-", " ").replace("_", " ")
             # Split query_filename into words
             query_words = query_filename.split()
 
             # Calculate the initial fuzz score
-            
 
             # Increment score for each matching word
             for word in query_words:
                 if word in filename:
                     score_increment = (100 - score) / 1.5
                     score += score_increment
-                    # Cap the score at 99
-                    if score > 99:
-                        score = 99
 
             # Update the highest score and corresponding filename
-            if score > highest_score:
-                highest_score = score
-                most_similar_filename = filename
+            scores.append((round(score, 2), filename))
 
+        # Sort the scores in descending order and get the top 'num_results' scores
+        scores.sort(key=lambda x: x[0], reverse=True)
+        top_scores = scores[:num_results]
 
-        #return with .mp3 for comparison (fix this later, kinda stinky)
-        return highest_score, most_similar_filename+".mp3"
+        # Return the top 'num_results' filenames with their scores
+        return top_scores
 
 
 
@@ -208,8 +204,8 @@ class AudioDatabase:
 
     
     def get_id_by_filename(self, query_filename):
-        similarity, most_similar_filename = self.get_most_similar_filename(query_filename)
-        
+        most_similar_filenames = self.get_most_similar_filenames(query_filename)
+        most_similar_filename = most_similar_filenames[0][1] if most_similar_filenames else None
         if most_similar_filename:
             data = self._read_data()
             for row in data:

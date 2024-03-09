@@ -39,11 +39,10 @@ async def on_ready():
     #bot.loop.create_task(behavior.refresh_button_message())
 
 @bot.slash_command(name="play", description="Write a name of something you want to hear")
-async def play_requested(ctx: interactions.CommandContext, message: Option(str, "Sound (empty for random)", required=False, default='random')):
+async def play_requested(ctx: interactions.CommandContext, message: Option(str, "Sound name ('random' for random)", required=True)):
     await ctx.defer()
     await behavior.delete_last_message(ctx)
     author = ctx.user
-    print(f"Playing {message} for {author.name}")
     username_with_discriminator = f"{author.name}#{author.discriminator}"
     print(f"Playing {message} for {username_with_discriminator}")
     try:
@@ -56,43 +55,49 @@ async def play_requested(ctx: interactions.CommandContext, message: Option(str, 
         return
     
 @bot.slash_command(name='tts', description='TTS with google translate. Press tab and enter to select message and write')
-async def tts(ctx, message: Option(str, "What you want to say", required=True), language: Option(str, "pt, br, es, fr, de and ch", required=False, default='')):
+async def tts(ctx, message: Option(str, "What you want to say", required=True), language: Option(str, "en, pt, br, es, fr, de and ch", required=True)):
     await ctx.defer()
     await behavior.delete_last_message(ctx)
     try:
         if language == "pt":
-            await behavior.tts(behavior, message, "pt")
+            await behavior.tts(message, "pt")
         elif language == "br":
-            await behavior.tts(behavior, message, "pt", "com.br")
+            await behavior.tts(message, "pt", "com.br")
         elif language == "es":
-            await behavior.tts(behavior, message, "es")
+            await behavior.tts(message, "es")
         elif language == "fr":
-            await behavior.tts(behavior, message, "fr")
+            await behavior.tts(message, "fr")
         elif language == "de":
-            await behavior.tts(behavior, message, "de")
+            await behavior.tts(message, "de")
         elif language == "ch":
-            await behavior.tts(behavior, message, "zh-CN")
+            await behavior.tts(message, "zh-CN")
         else:
-            await behavior.tts(behavior, message)
+            await behavior.tts(message)
     except Exception as e:
         print(f"An error occurred: {e}")
         await ctx.send(content="An error occurred while processing your request.")
         return
-    await ctx.send(content="tts: "+message)
+    embed = discord.Embed(title=f"TTS in {language}: '**{message}**'",color=discord.Color.blurple())
+    user = discord.utils.get(bot.get_all_members(), name=ctx.user.name)
+    if user and user.avatar:
+        embed.set_thumbnail(url=user.avatar.url)
+    elif user:
+        embed.set_thumbnail(url=user.default_avatar.url)
+    await ctx.send(embed=embed)
 
 @bot.slash_command(name="change", description="change the name of a sound")
-async def change(ctx, current: Option(str, "Current name of the sound", required=True, default=''), new: Option(str, "New name of the sound", required=True, default='write something')):
+async def change(ctx, current: Option(str, "Current name of the sound", required=True), new: Option(str, "New name of the sound", required=True)):
     await ctx.defer()
     await behavior.delete_last_message(ctx)
     await behavior.change_filename(current, new)
 
 @bot.slash_command(name="top", description="Leaderboard of sounds or users")
-async def change(ctx, option: Option(str, "users or sounds", required=False, default='sounds')):
+async def change(ctx, option: Option(str, "users or sounds", required=True)):
     await ctx.defer()
     await behavior.delete_last_message(ctx)
     if option == "sounds":
         await behavior.player_history_db.write_top_played_sounds()
-    elif option == "users":
+    else:
         await behavior.player_history_db.write_top_users()
 
 @bot.slash_command(name="list", description="returns database of sounds")
@@ -101,13 +106,67 @@ async def change(ctx):
     await behavior.delete_last_message(ctx)
     await behavior.list_sounds()    
 
-@bot.command(name="re", description="Record a sound")
-async def record(ctx):
-    behavior.record_sound('output', 5)  # 'output' is the filename, 5 is the duration
+
+
+
+connections = {}
+
+async def once_done(sink: discord.sinks, channel: discord.TextChannel, *args):
+    recorded_users = [
+        f"<@{user_id}>"
+        for user_id, audio in sink.audio_data.items()
+    ]
+    await sink.vc.disconnect()
+    files = [discord.File(audio.file, f"{user_id}.{sink.encoding}") for user_id, audio in sink.audio_data.items()]
+    # STT files
+    await behavior.stt(files)
+
+@bot.command(name="re")
+async def record_sound(ctx):
+    voice = ctx.author.voice
+    if not voice:
+        await ctx.send("You aren't in a voice channel!")
+        return
+
+    #get connected voice client
+    try:
+        vc = await voice.channel.connect()
+    except:
+        vc = discord.utils.get(bot.voice_clients, guild=ctx.guild)
+    connections.update({ctx.guild.id: vc})
+
+    # Start recording
+    vc.start_recording(
+        discord.sinks.WaveSink(), 
+        once_done, 
+        ctx.channel
+    )
+    print("Started recording!")
+
+    # Wait for 5 seconds
+    await asyncio.sleep(5)
+
+    # Stop recording after 5 seconds
+    if ctx.guild.id in connections:
+        vc = connections[ctx.guild.id]
+        vc.stop_recording()
+        del connections[ctx.guild.id]
+
+@bot.command()
+async def stop_recording(ctx):
+    if ctx.guild.id in connections:
+        vc = connections[ctx.guild.id]
+        vc.stop_recording()
+        del connections[ctx.guild.id]
+        print("Stopped recording.")
+    else:
+        print("not recording")
+
+
+
 
 @bot.event
 async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
-    print(f"Voice state update: {member} {before.channel} {after.channel}")
     member_str = f"{member.name}#{member.discriminator}"
     if member_str not in USERS and before.channel is None and after.channel is not None and member != bot.user:
         await behavior.play_audio(after.channel, "gay-echo.mp3","admin", is_entrance=True)

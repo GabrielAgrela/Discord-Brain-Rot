@@ -128,15 +128,27 @@ class ListBlacklistButton(Button):
             # Send a message if there are no blacklisted sounds
             await interaction.message.channel.send("No blacklisted sounds found.")
 
+class SimilarSoundButton(Button):
+    def __init__(self, bot_behavior, sound_name, **kwargs):
+        super().__init__(**kwargs)
+        self.bot_behavior = bot_behavior
+        self.sound_name = sound_name
+
+    async def callback(self, interaction):
+        await interaction.response.defer()
+        # Start the audio playback of the similar sound
+        print(f"Playing similar sound: {self.sound_name}")
+        asyncio.create_task(self.bot_behavior.play_audio(interaction.message.channel, self.sound_name, interaction.user.name))
+
 class ControlsView(View):
     def __init__(self, bot_behavior):
         super().__init__(timeout=None)
         # Add the play random button to the view
-        self.add_item(PlayRandomButton(bot_behavior, label="🎲🎶", style=discord.ButtonStyle.primary))
+        self.add_item(PlayRandomButton(bot_behavior, label="🎲Play Random🎶", style=discord.ButtonStyle.success))
         # Add the list favorites button to the view
-        self.add_item(ListFavoritesButton(bot_behavior, label="⭐⭐⭐", style=discord.ButtonStyle.primary))
+        self.add_item(ListFavoritesButton(bot_behavior, label="⭐Favorites⭐", style=discord.ButtonStyle.success))
         # Add the list blacklist button to the view
-        self.add_item(ListBlacklistButton(bot_behavior, label="🗑️🗑️🗑️", style=discord.ButtonStyle.primary))
+        self.add_item(ListBlacklistButton(bot_behavior, label="🗑️Blacklisted🗑️", style=discord.ButtonStyle.success))
 
 class SoundBeingPlayedView(View):
     def __init__(self, bot_behavior, audio_file):
@@ -149,6 +161,14 @@ class SoundBeingPlayedView(View):
         self.add_item(FavoriteButton(bot_behavior, audio_file))
         # Add the blacklist button to the view
         self.add_item(BlacklistButton(bot_behavior, audio_file))
+
+class SoundSimilarView(View):
+    def __init__(self, bot_behavior, similar_sounds):
+        super().__init__(timeout=None)
+        # Add a button for each similar sound
+        for sound in similar_sounds:
+            print(f"Adding similar sound button: {sound}")
+            self.add_item(SimilarSoundButton(bot_behavior, sound, style=discord.ButtonStyle.danger, label=sound.split('/')[-1].replace('.mp3', '')))
 
 
 
@@ -170,6 +190,7 @@ class BotBehavior:
         self.sound_downloader = SoundDownloader(self.db)
         self.TTS = TTS(self,bot)
         self.view = None
+        self.embed = None
 
     async def write_to_channel(self, message):
         bot_channel = await self.get_bot_channel()
@@ -179,9 +200,9 @@ class BotBehavior:
 
     async def delete_message_components(self):
         bot_channel = await self.get_bot_channel()
-        async for message in bot_channel.history(limit=20):
+        async for message in bot_channel.history(limit=100):
             # delete the message if there are buttons and no text
-            if message.components and not message.embeds:
+            if message.components and len(message.components[0].children) == 3:
                 await message.delete()
 
     async def delete_last_message(self, ctx):
@@ -222,7 +243,7 @@ class BotBehavior:
                 if vc_bot.guild == guild:
                     await vc_bot.disconnect()
 
-    async def play_audio(self, channel, audio_file, user, is_entrance=False, is_tts=False, extra=""):
+    async def play_audio(self, channel, audio_file, user, is_entrance=False, is_tts=False, extra="", original_message=""):
         self.player_history_db.add_entry(audio_file, user)
         #make channel be the current channel
         if channel == "":
@@ -243,15 +264,26 @@ class BotBehavior:
                     color=discord.Color.red()
                 )
             # Set the footer to show who requested the sound
-            embed.set_footer(text=f"Requested by {user}")
+            if original_message:
+                embed.set_footer(text=f"{user} requested '{original_message}'")
+            else:
+                embed.set_footer(text=f"Requested by {user}")
             #delete last message
             self.view = ControlsView(self)
+            self.embed = discord.Embed(thumbnail="https://i.imgur.com/RFmwCdu.png")
+            # add footer
+            self.embed.set_footer(text=f"Control Menu")
+
             # Add the view to the message
             if audio_file.split('/')[-1].replace('.mp3', '') != "slap":
-                message = await bot_channel.send(embed=embed,view=SoundBeingPlayedView(self, audio_file))
-                await self.delete_message_components()
-                # Store the new message with buttons
-                self.button_message = await bot_channel.send(view=self.view)
+                if extra != "":
+                    await self.delete_message_components()
+                    message = await bot_channel.send(embed=embed,view=SoundBeingPlayedView(self, audio_file))
+                else:
+                    await self.delete_message_components()
+                    message = await bot_channel.send(embed=embed,view=SoundBeingPlayedView(self, audio_file))
+                    # Store the new message with buttons
+                    self.button_message = await bot_channel.send(embed=self.embed, view=self.view)
 
                 # Start a new thread that will wait for 5 minutes then clear the buttons
                 #asyncio.create_task(self.delayed_button_clean(message))
@@ -301,7 +333,7 @@ class BotBehavior:
                 if self.button_message:
                     await self.button_message.delete()
                     bot_channel = await self.get_bot_channel()
-                    self.button_message = await bot_channel.send(view=self.view)
+                    self.button_message = await bot_channel.send(embed=self.embed, view=self.view)
             except Exception as e:
                 print("The message was not found. It may have been deleted.",e)
 
@@ -357,21 +389,32 @@ class BotBehavior:
             print(f"2An error occurred: {e}")
     
     async def play_request(self, id, user):
-        distance, filename = self.db.get_most_similar_filename(id)
+        filenames = self.db.get_most_similar_filenames(id,10)
+        filename = filenames[0][1] if filenames else None
+        similarity = filenames[0][0] if filenames else None
         for guild in self.bot.guilds:
             channel = self.get_largest_voice_channel(guild)
             if channel is not None:
-                asyncio.create_task(self.play_audio(channel, filename,user,extra=distance))
-                #bot_channel = discord.utils.get(self.bot.guilds[0].text_channels, name='bot')
-                #if bot_channel:
-                    #await bot_channel.send(f"🎶{distance}🎶 ")
+                asyncio.create_task(self.play_audio(channel, filename, user,extra=similarity, original_message=id))
+                # after waiting 2 seconds, if there are multiple sounds with similarity > 50, send message of each sound > 50 similarity
+                await asyncio.sleep(2)
+                bot_channel = await self.get_bot_channel()
+                similar_sounds = [f"{filename[1]}" for filename in filenames[1:] if filename[0] > 50]
+                if similar_sounds:
+                    embed = discord.Embed(title="Maybe you meant one of these?", color=discord.Color.orange())
+                    view = SoundSimilarView(self, similar_sounds)
+                    await bot_channel.send(view=view, embed=embed)
+                # Store the new message with buttons
+                self.button_message = await bot_channel.send(embed=self.embed, view=self.view)
 
     async def change_filename(self, oldfilename, newfilename):
-        print("oldfilename: ", oldfilename, " newfilename: ", newfilename)
         await self.db.modify_filename(oldfilename, newfilename)
                     
-    async def tts(self,behavior, speech, lang="en", region=""):
+    async def tts(self, speech, lang="en", region=""):
         await self.TTS.save_as_mp3(speech, lang, region)     
+
+    async def stt(self, audio_files):
+        return await self.TTS.speech_to_text(audio_files)
     
     async def list_sounds(self):
         try:
