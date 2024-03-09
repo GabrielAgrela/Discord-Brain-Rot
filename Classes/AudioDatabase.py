@@ -117,7 +117,7 @@ class AudioDatabase:
         
                 embed = discord.Embed(
                     title=f"Modified {old_filename} to {new_filename}",
-                    color=discord.Color.purple()
+                    color=self.bot.color()
                 )
                 #delete last message
                 await bot_channel.send(embed=embed)
@@ -193,6 +193,10 @@ class AudioDatabase:
         # Sort the scores in descending order and get the top 'num_results' scores
         scores.sort(key=lambda x: x[0], reverse=True)
         top_scores = scores[:num_results]
+
+        # print the top scores and their corresponding filenames
+        for score, filename in top_scores:
+            print(f" Found {filename}: {score}")
 
         # Return the top 'num_results' filenames with their scores
         return top_scores

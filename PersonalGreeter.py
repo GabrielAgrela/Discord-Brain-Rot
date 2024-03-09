@@ -58,6 +58,13 @@ async def play_requested(ctx: interactions.CommandContext, message: Option(str, 
 async def tts(ctx, message: Option(str, "What you want to say", required=True), language: Option(str, "en, pt, br, es, fr, de and ch", required=True)):
     await ctx.defer()
     await behavior.delete_last_message(ctx)
+    embed = discord.Embed(title=f"TTS in {language.upper()}", description=f"'{message.upper()}'", color=bot.color)
+    user = discord.utils.get(bot.get_all_members(), name=ctx.user.name)
+    if user and user.avatar:
+        embed.set_thumbnail(url=user.avatar.url)
+    elif user:
+        embed.set_thumbnail(url=user.default_avatar.url)
+    await ctx.send(embed=embed)
     try:
         if language == "pt":
             await behavior.tts(message, "pt")
@@ -77,13 +84,7 @@ async def tts(ctx, message: Option(str, "What you want to say", required=True), 
         print(f"An error occurred: {e}")
         await ctx.send(content="An error occurred while processing your request.")
         return
-    embed = discord.Embed(title=f"TTS in {language}: '**{message}**'",color=discord.Color.blurple())
-    user = discord.utils.get(bot.get_all_members(), name=ctx.user.name)
-    if user and user.avatar:
-        embed.set_thumbnail(url=user.avatar.url)
-    elif user:
-        embed.set_thumbnail(url=user.default_avatar.url)
-    await ctx.send(embed=embed)
+    
 
 @bot.slash_command(name="change", description="change the name of a sound")
 async def change(ctx, current: Option(str, "Current name of the sound", required=True), new: Option(str, "New name of the sound", required=True)):

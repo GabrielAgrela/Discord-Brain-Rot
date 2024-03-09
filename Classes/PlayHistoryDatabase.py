@@ -46,7 +46,7 @@ class PlayHistoryDatabase:
         embed = discord.Embed(
             title=f"🎵 **A TOTAL OF {total_sounds_played} SOUNDS PLAYED! AVERAGE OF {average_per_day:.0f} A DAY!** 🎵",
             description="Here are the sounds that got everyone moving!",
-            color=discord.Color.yellow()
+            color=self.bot.color()
         )
         embed.set_thumbnail(url="https://i.imgflip.com/1vdris.jpg")
         embed.set_footer(text="Updated as of")
@@ -97,7 +97,7 @@ class PlayHistoryDatabase:
             embed = discord.Embed(
                 title=f"🔊 **#{rank} {username.replace('#0', '').upper()}**",
                 description=f"🎵 **Total Sounds Played: {total_plays}**",
-                color=discord.Color.dark_blue()  # Or any color of your choice
+                color=self.bot.color  # Or any color of your choice
             )
 
             # Attempt to get user avatar, set a default if unavailable

@@ -107,7 +107,7 @@ class ListFavoritesButton(Button):
         favorites = self.bot_behavior.db.get_favorite_sounds()
         if len(favorites) > 0:
             # Send the list of favorite sounds
-            await self.bot_behavior.write_to_channel(favorites)
+            await self.bot_behavior.write_to_channel(favorites, "Favorite sounds")
         else:
             # Send a message if there are no favorite sounds
             await interaction.message.channel.send("No favorite sounds found.")
@@ -123,7 +123,7 @@ class ListBlacklistButton(Button):
         blacklisted = self.bot_behavior.db.get_blacklisted_sounds()
         if len(blacklisted) > 0:
             # Send the list of blacklisted sounds
-            await self.bot_behavior.write_to_channel(blacklisted)
+            await self.bot_behavior.write_to_channel(blacklisted, "Blacklisted sounds")
         else:
             # Send a message if there are no blacklisted sounds
             await interaction.message.channel.send("No blacklisted sounds found.")
@@ -167,7 +167,6 @@ class SoundSimilarView(View):
         super().__init__(timeout=None)
         # Add a button for each similar sound
         for sound in similar_sounds:
-            print(f"Adding similar sound button: {sound}")
             self.add_item(SimilarSoundButton(bot_behavior, sound, style=discord.ButtonStyle.danger, label=sound.split('/')[-1].replace('.mp3', '')))
 
 
@@ -191,11 +190,17 @@ class BotBehavior:
         self.TTS = TTS(self,bot)
         self.view = None
         self.embed = None
+        self.color = discord.Color.red()
 
-    async def write_to_channel(self, message):
+    async def write_to_channel(self, message, description=""):
         bot_channel = await self.get_bot_channel()
         formatted_message = "```" + "\n".join(message) + "```"  # Surrounds the message with code block markdown
-        await bot_channel.send(formatted_message)
+        
+        embed = discord.Embed(title=description, description=formatted_message, color=self.color)
+        embed.set_footer(text=f"Auto-destructing in 30 seconds...")
+        message = await bot_channel.send(embed=embed)
+        await asyncio.sleep(30)
+        await message.delete()
         
 
     async def delete_message_components(self):
@@ -244,6 +249,7 @@ class BotBehavior:
                     await vc_bot.disconnect()
 
     async def play_audio(self, channel, audio_file, user, is_entrance=False, is_tts=False, extra="", original_message=""):
+        self.randomize_color()
         self.player_history_db.add_entry(audio_file, user)
         #make channel be the current channel
         if channel == "":
@@ -256,12 +262,12 @@ class BotBehavior:
                 embed = discord.Embed(
                     title=f"🔊 **{audio_file.split('/')[-1].replace('.mp3', '')}** 🔊",
                     description= f"Similarity: {extra}%",
-                    color=discord.Color.red()
+                    color=self.color
                 )
             else:
                 embed = discord.Embed(
                     title=f"🔊 **{audio_file.split('/')[-1].replace('.mp3', '')}** 🔊",
-                    color=discord.Color.red()
+                    color=self.color
                 )
             # Set the footer to show who requested the sound
             if original_message:
@@ -270,7 +276,7 @@ class BotBehavior:
                 embed.set_footer(text=f"Requested by {user}")
             #delete last message
             self.view = ControlsView(self)
-            self.embed = discord.Embed(thumbnail="https://i.imgur.com/RFmwCdu.png")
+            self.embed = discord.Embed(thumbnail="https://i.imgur.com/RFmwCdu.png", color=self.color)
             # add footer
             self.embed.set_footer(text=f"Control Menu")
 
@@ -387,21 +393,29 @@ class BotBehavior:
                     asyncio.create_task(self.play_audio(channel, self.db.get_random_filename(),user))
         except Exception as e:
             print(f"2An error occurred: {e}")
+
+    def randomize_color(self):
+        # from all discord.colors choose a random one that is different from the current color
+        temp_color = discord.Color.random()
+        while temp_color == self.color:
+            temp_color = discord.Color.random()
+        self.color = temp_color
     
     async def play_request(self, id, user):
-        filenames = self.db.get_most_similar_filenames(id,10)
+        filenames = self.db.get_most_similar_filenames(id,20)
         filename = filenames[0][1] if filenames else None
         similarity = filenames[0][0] if filenames else None
         for guild in self.bot.guilds:
             channel = self.get_largest_voice_channel(guild)
             if channel is not None:
+                
                 asyncio.create_task(self.play_audio(channel, filename, user,extra=similarity, original_message=id))
                 # after waiting 2 seconds, if there are multiple sounds with similarity > 50, send message of each sound > 50 similarity
                 await asyncio.sleep(2)
                 bot_channel = await self.get_bot_channel()
-                similar_sounds = [f"{filename[1]}" for filename in filenames[1:] if filename[0] > 50]
+                similar_sounds = [f"{filename[1]}" for filename in filenames[1:] if filename[0] > 70]
                 if similar_sounds:
-                    embed = discord.Embed(title="Maybe you meant one of these?", color=discord.Color.orange())
+                    embed = discord.Embed(title="Maybe you meant one of these?", color=self.color)
                     view = SoundSimilarView(self, similar_sounds)
                     await bot_channel.send(view=view, embed=embed)
                 # Store the new message with buttons
