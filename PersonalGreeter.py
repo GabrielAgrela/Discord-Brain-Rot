@@ -32,13 +32,12 @@ file_name = 'play_requests.csv'
 @bot.event
 async def on_ready():
     print(f"We have logged in as {bot.user}")
-    await behavior.delete_message_components()
+    await behavior.delete_controls_message()
     await behavior.clean_buttons()
     await behavior.play_random_sound()
     
     bot.loop.create_task(behavior.play_sound_periodically())
     bot.loop.create_task(behavior.update_bot_status())
-    #bot.loop.create_task(behavior.refresh_button_message())
 
 @bot.slash_command(name="play", description="Write a name of something you want to hear")
 async def play_requested(ctx: interactions.CommandContext, message: Option(str, "Sound name ('random' for random)", required=True), request_number: Option(str, "Number of Similar Sounds", default=5)):
@@ -64,7 +63,7 @@ async def play_requested(ctx: interactions.CommandContext, message: Option(str, 
 async def tts(ctx, message: Option(str, "What you want to say", required=True), language: Option(str, "en, pt, br, es, fr, de, ar, ru and ch", required=True)):
     await ctx.defer()
     await behavior.delete_last_message(ctx)
-    embed = discord.Embed(title=f"TTS in {language.upper()}", description=f"'{message.upper()}'", color=behavior.color)
+    embed = discord.Embed(title=f"TTS in {language.upper()}", description=f"'{message}'", color=behavior.color)
     user = discord.utils.get(bot.get_all_members(), name=ctx.user.name)
     if user and user.avatar:
         embed.set_thumbnail(url=user.avatar.url)
@@ -88,6 +87,8 @@ async def tts(ctx, message: Option(str, "What you want to say", required=True), 
             await behavior.tts(message, "ar")
         elif language == "ch":
             await behavior.tts(message, "zh-CN")
+        elif language == "ir":
+            await behavior.tts(message, "en", "ie")
         else:
             await behavior.tts(message)
     except Exception as e:

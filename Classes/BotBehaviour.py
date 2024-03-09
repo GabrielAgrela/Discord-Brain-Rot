@@ -195,7 +195,6 @@ class BotBehavior:
         self.last_channel = {}
         self.playback_done = asyncio.Event()
         # Usage example
-        self.button_message = None
         self.script_dir = os.path.dirname(__file__)  # Get the directory of the current script
         self.db_path = os.path.join(self.script_dir, "../Data/soundsDB.csv")
         self.ph_path = os.path.join(self.script_dir, "../Data/play_history.csv")
@@ -205,6 +204,7 @@ class BotBehavior:
         self.TTS = TTS(self,bot)
         self.view = None
         self.embed = None
+        self.controls_message = None
         self.color = discord.Color.red()
 
     async def get_new_name(self, interaction):
@@ -238,12 +238,15 @@ class BotBehavior:
         await message.delete()
         
 
-    async def delete_message_components(self):
-        bot_channel = await self.get_bot_channel()
-        async for message in bot_channel.history(limit=100):
-            # delete the message if there are buttons and no text
-            if message.components and len(message.components[0].children) == 4 and not message.embeds:
-                await message.delete()
+    async def delete_controls_message(self):
+        try:
+            await self.controls_message.delete()
+        except:
+            bot_channel = await self.get_bot_channel()
+            async for message in bot_channel.history(limit=100):
+                # delete the message if there are buttons and no text
+                if message.components and len(message.components[0].children) == 4 and not message.embeds:
+                    await message.delete()
 
     async def delete_last_message(self, ctx):
         bot_channel = await self.get_bot_channel()
@@ -319,13 +322,12 @@ class BotBehavior:
             # Add the view to the message
             if audio_file.split('/')[-1].replace('.mp3', '') != "slap":
                 if extra != "":
-                    await self.delete_message_components()
-                    message = await bot_channel.send(embed=embed,view=SoundBeingPlayedView(self, audio_file))
+                    await bot_channel.send(embed=embed,view=SoundBeingPlayedView(self, audio_file))
                 else:
-                    await self.delete_message_components()
-                    message = await bot_channel.send(embed=embed,view=SoundBeingPlayedView(self, audio_file))
+                    await self.delete_controls_message()
+                    await bot_channel.send(embed=embed,view=SoundBeingPlayedView(self, audio_file))
                     # Store the new message with buttons
-                    self.button_message = await bot_channel.send(view=self.view)
+                    self.controls_message = await bot_channel.send(view=self.view)
 
                 # Start a new thread that will wait for 5 minutes then clear the buttons
                 #asyncio.create_task(self.delayed_button_clean(message))
@@ -366,18 +368,6 @@ class BotBehavior:
             await voice_client.disconnect()
 
         await self.playback_done.wait()
-
-
-    async def refresh_button_message(self):
-        while True:  # This will run indefinitely
-            await asyncio.sleep(119)  # Wait for 3 seconds
-            try:
-                if self.button_message:
-                    await self.button_message.delete()
-                    bot_channel = await self.get_bot_channel()
-                    self.button_message = await bot_channel.send(embed=self.embed, view=self.view)
-            except Exception as e:
-                print("The message was not found. It may have been deleted.",e)
 
     async def update_bot_status_once(self):
         if hasattr(self.bot, 'next_download_time'):
@@ -444,18 +434,21 @@ class BotBehavior:
         for guild in self.bot.guilds:
             channel = self.get_largest_voice_channel(guild)
             if channel is not None:
-                
+                await self.delete_controls_message()
                 asyncio.create_task(self.play_audio(channel, filename, user,extra=similarity, original_message=id))
                 # after waiting 2 seconds, if there are multiple sounds with similarity > 50, send message of each sound > 50 similarity
                 await asyncio.sleep(2)
                 bot_channel = await self.get_bot_channel()
                 similar_sounds = [f"{filename[1]}" for filename in filenames[1:] if filename[0] > 70]
                 if similar_sounds:
+                    await self.delete_controls_message()
                     embed = discord.Embed(title="Maybe you meant one of these?", color=self.color)
                     view = SoundSimilarView(self, similar_sounds)
+                    
                     await bot_channel.send(view=view, embed=embed)
-                # Store the new message with buttons
-                self.button_message = await bot_channel.send(embed=self.embed, view=self.view)
+                    # Store the new message with buttons
+                    
+                    self.controls_message = await bot_channel.send(embed=self.embed, view=self.view)
 
     async def change_filename(self, oldfilename, newfilename):
         await self.db.modify_filename(oldfilename, newfilename)
