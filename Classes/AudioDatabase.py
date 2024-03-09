@@ -198,7 +198,7 @@ class AudioDatabase:
 
         # print the top scores and their corresponding filenames
         for score, filename in top_scores:
-            print(f" Found {filename}: {score}")
+            print(f"Found {filename}: {score}")
 
         # Return the top 'num_results' filenames with their scores
         return top_scores

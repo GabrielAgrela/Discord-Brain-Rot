@@ -163,14 +163,14 @@ class ControlsView(View):
         self.add_item(ListFavoritesButton(bot_behavior, label="⭐Favorites⭐", style=discord.ButtonStyle.success))
         # Add the list blacklist button to the view
         self.add_item(ListBlacklistButton(bot_behavior, label="🗑️Blacklisted🗑️", style=discord.ButtonStyle.success))
+        # Add the slap button to the view
+        self.add_item(PlaySlapButton(bot_behavior, label="👋Slap da Bitch👋", style=discord.ButtonStyle.success))
 
 class SoundBeingPlayedView(View):
     def __init__(self, bot_behavior, audio_file):
         super().__init__(timeout=None)
         # Add the replay button to the view
         self.add_item(ReplayButton(bot_behavior, audio_file, label=None, emoji="🔁", style=discord.ButtonStyle.primary))
-        # Add the slap button to the view
-        self.add_item(PlaySlapButton(bot_behavior, label=None, emoji="👋", style=discord.ButtonStyle.primary))
         # Add the favorite button to the view
         self.add_item(FavoriteButton(bot_behavior, audio_file))
         # Add the blacklist button to the view
@@ -242,7 +242,7 @@ class BotBehavior:
         bot_channel = await self.get_bot_channel()
         async for message in bot_channel.history(limit=100):
             # delete the message if there are buttons and no text
-            if message.components and len(message.components[0].children) == 3:
+            if message.components and len(message.components[0].children) == 4 and not message.embeds:
                 await message.delete()
 
     async def delete_last_message(self, ctx):
@@ -311,9 +311,10 @@ class BotBehavior:
                 embed.set_footer(text=f"Requested by {user}")
             #delete last message
             self.view = ControlsView(self)
-            self.embed = discord.Embed(thumbnail="https://i.imgur.com/RFmwCdu.png", color=self.color)
+            #self.embed = discord.Embed(thumbnail="https://i.imgur.com/RFmwCdu.png", color=self.color)
+            self.embed = None
             # add footer
-            self.embed.set_footer(text=f"Control Menu")
+            #self.embed.set_footer(text=f"Control Menu")
 
             # Add the view to the message
             if audio_file.split('/')[-1].replace('.mp3', '') != "slap":
@@ -436,8 +437,8 @@ class BotBehavior:
             temp_color = discord.Color.random()
         self.color = temp_color
     
-    async def play_request(self, id, user):
-        filenames = self.db.get_most_similar_filenames(id,5)
+    async def play_request(self, id, user, request_number=5):
+        filenames = self.db.get_most_similar_filenames(id,request_number)
         filename = filenames[0][1] if filenames else None
         similarity = filenames[0][0] if filenames else None
         for guild in self.bot.guilds:

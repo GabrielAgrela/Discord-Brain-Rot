@@ -41,26 +41,30 @@ async def on_ready():
     #bot.loop.create_task(behavior.refresh_button_message())
 
 @bot.slash_command(name="play", description="Write a name of something you want to hear")
-async def play_requested(ctx: interactions.CommandContext, message: Option(str, "Sound name ('random' for random)", required=True)):
+async def play_requested(ctx: interactions.CommandContext, message: Option(str, "Sound name ('random' for random)", required=True), request_number: Option(str, "Number of Similar Sounds", default=5)):
     await ctx.defer()
     await behavior.delete_last_message(ctx)
     author = ctx.user
     username_with_discriminator = f"{author.name}#{author.discriminator}"
+    try:
+        number_similar_sounds = int(request_number)
+    except:
+        number_similar_sounds = 5
     print(f"Playing {message} for {username_with_discriminator}")
     try:
         if(message == "random"):
             asyncio.run_coroutine_threadsafe(behavior.play_random_sound(username_with_discriminator), bot.loop)
         else:
-            await behavior.play_request(message, username_with_discriminator)
+            await behavior.play_request(message, username_with_discriminator,request_number=number_similar_sounds)
     except:
         asyncio.run_coroutine_threadsafe(behavior.play_random_sound(username_with_discriminator), bot.loop)
         return
     
 @bot.slash_command(name='tts', description='TTS with google translate. Press tab and enter to select message and write')
-async def tts(ctx, message: Option(str, "What you want to say", required=True), language: Option(str, "en, pt, br, es, fr, de and ch", required=True)):
+async def tts(ctx, message: Option(str, "What you want to say", required=True), language: Option(str, "en, pt, br, es, fr, de, ar, ru and ch", required=True)):
     await ctx.defer()
     await behavior.delete_last_message(ctx)
-    embed = discord.Embed(title=f"TTS in {language.upper()}", description=f"'{message.upper()}'", color=bot.color)
+    embed = discord.Embed(title=f"TTS in {language.upper()}", description=f"'{message.upper()}'", color=behavior.color)
     user = discord.utils.get(bot.get_all_members(), name=ctx.user.name)
     if user and user.avatar:
         embed.set_thumbnail(url=user.avatar.url)
@@ -78,6 +82,10 @@ async def tts(ctx, message: Option(str, "What you want to say", required=True), 
             await behavior.tts(message, "fr")
         elif language == "de":
             await behavior.tts(message, "de")
+        elif language == "ru":
+            await behavior.tts(message, "ru")
+        elif language == "ar":
+            await behavior.tts(message, "ar")
         elif language == "ch":
             await behavior.tts(message, "zh-CN")
         else:
