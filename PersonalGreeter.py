@@ -42,7 +42,7 @@ async def on_ready():
 @bot.slash_command(name="play", description="Write a name of something you want to hear")
 async def play_requested(ctx: interactions.CommandContext, message: Option(str, "Sound name ('random' for random)", required=True), request_number: Option(str, "Number of Similar Sounds", default=5)):
     await ctx.defer()
-    await behavior.delete_last_message(ctx)
+    await behavior.delete_last_message()
     author = ctx.user
     username_with_discriminator = f"{author.name}#{author.discriminator}"
     try:
@@ -62,7 +62,7 @@ async def play_requested(ctx: interactions.CommandContext, message: Option(str, 
 @bot.slash_command(name='tts', description='TTS with google translate. Press tab and enter to select message and write')
 async def tts(ctx, message: Option(str, "What you want to say", required=True), language: Option(str, "en, pt, br, es, fr, de, ar, ru and ch", required=True)):
     await ctx.defer()
-    await behavior.delete_last_message(ctx)
+    await behavior.delete_last_message()
     flag_emojis = {"pt": ":flag_pt:", "br": ":flag_br:", "es": ":flag_es:", "fr": ":flag_fr:", "de": ":flag_de:", "ru": ":flag_ru:", "ar": ":flag_sa:", "ch": ":flag_cn:", "ir": ":flag_ie:", "en": ":flag_gb:"}
     flag = flag_emojis.get(language, ":grey_question:")
     user = discord.utils.get(bot.get_all_members(), name=ctx.user.name)
@@ -98,13 +98,13 @@ async def tts(ctx, message: Option(str, "What you want to say", required=True), 
 @bot.slash_command(name="change", description="change the name of a sound")
 async def change(ctx, current: Option(str, "Current name of the sound", required=True), new: Option(str, "New name of the sound", required=True)):
     await ctx.defer()
-    await behavior.delete_last_message(ctx)
+    await behavior.delete_last_message()
     await behavior.change_filename(current, new)
 
 @bot.slash_command(name="top", description="Leaderboard of sounds or users")
 async def change(ctx, option: Option(str, "users or sounds", required=True)):
     await ctx.defer()
-    await behavior.delete_last_message(ctx)
+    await behavior.delete_last_message()
     if option == "sounds":
         await behavior.player_history_db.write_top_played_sounds()
     else:
@@ -113,7 +113,7 @@ async def change(ctx, option: Option(str, "users or sounds", required=True)):
 @bot.slash_command(name="list", description="returns database of sounds")
 async def change(ctx):
     await ctx.defer()
-    await behavior.delete_last_message(ctx)
+    await behavior.delete_last_message()
     await behavior.list_sounds()    
 
 

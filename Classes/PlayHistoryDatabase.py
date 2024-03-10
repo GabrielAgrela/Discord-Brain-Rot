@@ -6,10 +6,11 @@ import random
 import time
 
 class PlayHistoryDatabase:
-    def __init__(self, csv_filename, db, bot):
+    def __init__(self, csv_filename, db, bot, behavior):
         self.csv_filename = csv_filename
         self.db = db
         self.bot = bot
+        self.behavior = behavior
 
     def add_entry(self, filename, username):
         current_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -46,7 +47,7 @@ class PlayHistoryDatabase:
         embed = discord.Embed(
             title=f"🎵 **A TOTAL OF {total_sounds_played} SOUNDS PLAYED! AVERAGE OF {average_per_day:.0f} A DAY!** 🎵",
             description="Here are the sounds that got everyone moving!",
-            color=self.bot.color()
+            color=self.behavior.color
         )
         embed.set_thumbnail(url="https://i.imgflip.com/1vdris.jpg")
         embed.set_footer(text="Updated as of")
@@ -67,8 +68,9 @@ class PlayHistoryDatabase:
         
 
         
-
+        await self.behavior.delete_controls_message()
         await bot_channel.send(embed=embed)
+        await self.behavior.send_controls()
 
 
 
@@ -90,14 +92,14 @@ class PlayHistoryDatabase:
         # Exclude specific usernames
         excluded_users = ["admin", "periodic function", "tts"]
         top_users = [(u, c) for u, c in user_counts.most_common() if u not in excluded_users]
-
+        await self.behavior.delete_controls_message()
         # Create and send an embed for each top user
         for rank, (username, total_plays) in enumerate(top_users, 1):
             # Initialize embed with dynamic elements
             embed = discord.Embed(
                 title=f"🔊 **#{rank} {username.replace('#0', '').upper()}**",
                 description=f"🎵 **Total Sounds Played: {total_plays}**",
-                color=self.bot.color  # Or any color of your choice
+                color=self.behavior.color  # Or any color of your choice
             )
 
             # Attempt to get user avatar, set a default if unavailable
@@ -119,7 +121,9 @@ class PlayHistoryDatabase:
                 embed.add_field(name=f"🎶 `{filename}`", value=f"Played **{count}** times", inline=False)
 
             # Send the embed to the channel
+            
             await bot_channel.send(embed=embed)
+        await self.behavior.send_controls()
 
 
 
