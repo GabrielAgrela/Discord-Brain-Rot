@@ -1,6 +1,7 @@
 from asyncio import Queue
 import asyncio
 import os
+import random
 import discord
 from Classes.Environment import Environment
 from Classes.Bot import Bot
@@ -215,7 +216,7 @@ def on_press(key):
     if key == keyboard.Key.f6:
         asyncio.run_coroutine_threadsafe(behavior.play_random_sound(), bot.loop)
     if key == keyboard.Key.f7:
-        asyncio.run_coroutine_threadsafe(behavior.play_audio("", "slap.mp3","admin"), bot.loop)
+        asyncio.run_coroutine_threadsafe(behavior.play_audio("",  random.choice(["slap.mp3", "tiro.mp3", "pubg-pan-sound-effect.mp3"]),"admin"), bot.loop)
 
 keyboard_listener = keyboard.Listener(on_press=on_press)
 thread = threading.Thread(target=keyboard_listener.start)

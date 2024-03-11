@@ -109,7 +109,17 @@ class PlaySlapButton(Button):
 
     async def callback(self, interaction):
         await interaction.response.defer()
-        asyncio.create_task(self.bot_behavior.play_audio("", "slap.mp3", "admin"))
+        asyncio.create_task(self.bot_behavior.play_audio("",  random.choice(["slap.mp3", "tiro.mp3", "pubg-pan-sound-effect.mp3"]), "admin"))
+       
+
+class ListSoundsButton(Button):
+    def __init__(self, bot_behavior, **kwargs):
+        super().__init__(**kwargs)
+        self.bot_behavior = bot_behavior
+
+    async def callback(self, interaction):
+        await interaction.response.defer()
+        asyncio.create_task(self.bot_behavior.list_sounds())
 
 class SubwaySurfersButton(Button):
     def __init__(self, bot_behavior, **kwargs):
@@ -120,14 +130,23 @@ class SubwaySurfersButton(Button):
         await interaction.response.defer()
         asyncio.create_task(self.bot_behavior.subway_surfers())
 
-class ListSoundsButton(Button):
+class SliceAllButton(Button):
     def __init__(self, bot_behavior, **kwargs):
         super().__init__(**kwargs)
         self.bot_behavior = bot_behavior
 
     async def callback(self, interaction):
         await interaction.response.defer()
-        asyncio.create_task(self.bot_behavior.list_sounds())
+        asyncio.create_task(self.bot_behavior.slice_all())
+
+class FamilyGuyButton(Button):
+    def __init__(self, bot_behavior, **kwargs):
+        super().__init__(**kwargs)
+        self.bot_behavior = bot_behavior
+
+    async def callback(self, interaction):
+        await interaction.response.defer()
+        asyncio.create_task(self.bot_behavior.family_guy())
 
 class ListTopSoundsButton(Button):
     def __init__(self, bot_behavior, **kwargs):
@@ -173,9 +192,11 @@ class ControlsView(View):
         self.add_item(PlayRandomButton(bot_behavior, label="🎲Play Random🎶", style=discord.ButtonStyle.success))
         self.add_item(ListFavoritesButton(bot_behavior, label="⭐Favorites⭐", style=discord.ButtonStyle.success))
         self.add_item(ListBlacklistButton(bot_behavior, label="🗑️Blacklisted🗑️", style=discord.ButtonStyle.success))
-        self.add_item(PlaySlapButton(bot_behavior, label="👋Slap da Bitch👋", style=discord.ButtonStyle.success))
-        self.add_item(SubwaySurfersButton(bot_behavior, label="🚇Subway Surfers🚇", style=discord.ButtonStyle.success))
+        self.add_item(PlaySlapButton(bot_behavior, label="👋/🔫/🍳", style=discord.ButtonStyle.success))
         self.add_item(ListSoundsButton(bot_behavior, label="📜List Sounds📜", style=discord.ButtonStyle.success))
+        self.add_item(SubwaySurfersButton(bot_behavior, label="🚇Subway Surfers🚇", style=discord.ButtonStyle.success))
+        self.add_item(SliceAllButton(bot_behavior, label="🔪Slice All🔪", style=discord.ButtonStyle.success))
+        self.add_item(FamilyGuyButton(bot_behavior, label="👨‍👩‍👧‍👦Family Guy👨‍👩‍👧‍👦", style=discord.ButtonStyle.success))
         self.add_item(ListTopSoundsButton(bot_behavior, label="📈Top Sounds📈", style=discord.ButtonStyle.success))
         self.add_item(ListTopUsersButton(bot_behavior, label="📊Top Users📊", style=discord.ButtonStyle.success))
 
@@ -229,11 +250,11 @@ class BotBehavior:
             bot_channel = await self.get_bot_channel()
             if delete_all:
                 async for message in bot_channel.history(limit=100):
-                    if message.components and len(message.components[0].children) == 5 and len(message.components[1].children) == 3 and not message.embeds and "Play Random" in message.components[0].children[0].label:
+                    if message.components and len(message.components[0].children) == 5 and len(message.components[1].children) == 5 and not message.embeds and "Play Random" in message.components[0].children[0].label:
                         await message.delete()
             else:
                 messages = await bot_channel.history(limit=100).flatten()
-                control_messages = [message for message in messages if message.components and len(message.components[0].children) == 5 and len(message.components[1].children) == 3 and not message.embeds and "Play Random" in message.components[0].children[0].label]
+                control_messages = [message for message in messages if message.components and len(message.components[0].children) == 5 and len(message.components[1].children) == 5 and not message.embeds and "Play Random" in message.components[0].children[0].label]
                 for message in control_messages[:-1]:  # Skip the last message
                     await message.delete()
         except Exception as e:
@@ -249,12 +270,11 @@ class BotBehavior:
         try:
             bot_channel = await self.get_bot_channel()
             async for message in bot_channel.history(limit=100):
-                if message.components:
-                    try:
-                        await message.edit(view=None)
-                    except Exception as e:
-                        print(f"6An error occurred: {e}")
-                        await message.delete()
+                # if message.components and not empty
+                if message.components and message.embeds:
+                    await message.edit(view=None)      
+                elif message.components:
+                    await message.delete()                 
         except Exception as e:
             print(f"2An error occurred: {e}")
     
@@ -280,7 +300,7 @@ class BotBehavior:
         voice_client = discord.utils.get(self.bot.voice_clients, guild=channel.guild)
         bot_channel = discord.utils.get(self.bot.guilds[0].text_channels, name='bot')
         if bot_channel and not is_entrance and not is_tts:
-            if audio_file.split('/')[-1].replace('.mp3', '') != "slap":
+            if audio_file.split('/')[-1].replace('.mp3', '') not in ["slap", "tiro", "pubg-pan-sound-effect"]:
                 await self.send_message(view=SoundBeingPlayedView(self, audio_file), title=f"🔊 **{audio_file.split('/')[-1].replace('.mp3', '')}** 🔊", description = f"Similarity: {extra}%" if extra != "" else None, footer = f"{user} requested '{original_message}'" if original_message else f"Requested by {user}", send_controls=send_controls)
         audio_file_path =  os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", audio_file))
         voice_client = discord.utils.get(self.bot.voice_clients, guild=channel.guild)
@@ -405,6 +425,22 @@ class BotBehavior:
         files = os.listdir(folder)
         file = random.choice(files)
         message = await self.send_message(file=discord.File(os.path.abspath(os.path.join(folder, file)), f"SubwaySurfers/{file}"))
+        await asyncio.sleep(60)
+        await message.delete()
+    
+    async def slice_all(self):
+        folder = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Data", "SliceAll"))
+        files = os.listdir(folder)
+        file = random.choice(files)
+        message = await self.send_message(file=discord.File(os.path.abspath(os.path.join(folder, file)), f"SliceAll/{file}"))
+        await asyncio.sleep(60)
+        await message.delete()
+
+    async def family_guy(self):
+        folder = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Data", "FamilyGuy"))
+        files = os.listdir(folder)
+        file = random.choice(files)
+        message = await self.send_message(file=discord.File(os.path.abspath(os.path.join(folder, file)), f"FamilyGuy/{file}"))
         await asyncio.sleep(60)
         await message.delete()
 
