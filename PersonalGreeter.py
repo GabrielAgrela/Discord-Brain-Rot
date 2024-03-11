@@ -55,7 +55,8 @@ async def play_requested(ctx: interactions.CommandContext, message: Option(str, 
             asyncio.run_coroutine_threadsafe(behavior.play_random_sound(username_with_discriminator), bot.loop)
         else:
             await behavior.play_request(message, username_with_discriminator,request_number=number_similar_sounds)
-    except:
+    except Exception as e:
+        print(e)
         asyncio.run_coroutine_threadsafe(behavior.play_random_sound(username_with_discriminator), bot.loop)
         return
     
@@ -64,7 +65,7 @@ async def tts(ctx, message: Option(str, "What you want to say", required=True), 
     await ctx.defer()
     await behavior.delete_last_message()
     flag_emojis = {"pt": ":flag_pt:", "br": ":flag_br:", "es": ":flag_es:", "fr": ":flag_fr:", "de": ":flag_de:", "ru": ":flag_ru:", "ar": ":flag_sa:", "ch": ":flag_cn:", "ir": ":flag_ie:", "en": ":flag_gb:"}
-    flag = flag_emojis.get(language, ":grey_question:")
+    flag = flag_emojis.get(language, ":flag_gb:")
     user = discord.utils.get(bot.get_all_members(), name=ctx.user.name)
 
     await behavior.send_message(title=f"TTS in {flag}", description=f"'{message}'", thumbnail=user.avatar.url if user and user.avatar else user.default_avatar.url)
@@ -115,6 +116,13 @@ async def change(ctx):
     await ctx.defer()
     await behavior.delete_last_message()
     await behavior.list_sounds()    
+
+@bot.slash_command(name="subwaysurfers", description="returns database of sounds")
+async def change(ctx):
+    await ctx.defer()
+    await behavior.delete_last_message()
+    await behavior.subway_surfers()    
+
 
 
 

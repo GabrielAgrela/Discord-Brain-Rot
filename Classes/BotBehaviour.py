@@ -111,6 +111,44 @@ class PlaySlapButton(Button):
         await interaction.response.defer()
         asyncio.create_task(self.bot_behavior.play_audio("", "slap.mp3", "admin"))
 
+class SubwaySurfersButton(Button):
+    def __init__(self, bot_behavior, **kwargs):
+        super().__init__(**kwargs)
+        self.bot_behavior = bot_behavior
+
+    async def callback(self, interaction):
+        await interaction.response.defer()
+        asyncio.create_task(self.bot_behavior.subway_surfers())
+
+class ListSoundsButton(Button):
+    def __init__(self, bot_behavior, **kwargs):
+        super().__init__(**kwargs)
+        self.bot_behavior = bot_behavior
+
+    async def callback(self, interaction):
+        await interaction.response.defer()
+        asyncio.create_task(self.bot_behavior.list_sounds())
+
+class ListTopSoundsButton(Button):
+    def __init__(self, bot_behavior, **kwargs):
+        super().__init__(**kwargs)
+        self.bot_behavior = bot_behavior
+
+    async def callback(self, interaction):
+        await interaction.response.defer()
+        asyncio.create_task(self.bot_behavior.player_history_db.write_top_played_sounds())
+
+class ListTopUsersButton(Button):
+    def __init__(self, bot_behavior, **kwargs):
+        super().__init__(**kwargs)
+        self.bot_behavior = bot_behavior
+
+    async def callback(self, interaction):
+        await interaction.response.defer()
+        asyncio.create_task(self.bot_behavior.player_history_db.write_top_users())
+
+
+
 class SimilarSoundButton(Button):
     def __init__(self, bot_behavior, sound_name, **kwargs):
         super().__init__(**kwargs)
@@ -136,6 +174,10 @@ class ControlsView(View):
         self.add_item(ListFavoritesButton(bot_behavior, label="⭐Favorites⭐", style=discord.ButtonStyle.success))
         self.add_item(ListBlacklistButton(bot_behavior, label="🗑️Blacklisted🗑️", style=discord.ButtonStyle.success))
         self.add_item(PlaySlapButton(bot_behavior, label="👋Slap da Bitch👋", style=discord.ButtonStyle.success))
+        self.add_item(SubwaySurfersButton(bot_behavior, label="🚇Subway Surfers🚇", style=discord.ButtonStyle.success))
+        self.add_item(ListSoundsButton(bot_behavior, label="📜List Sounds📜", style=discord.ButtonStyle.success))
+        self.add_item(ListTopSoundsButton(bot_behavior, label="📈Top Sounds📈", style=discord.ButtonStyle.success))
+        self.add_item(ListTopUsersButton(bot_behavior, label="📊Top Users📊", style=discord.ButtonStyle.success))
 
 class SoundSimilarView(View):
     def __init__(self, bot_behavior, similar_sounds):
@@ -148,6 +190,7 @@ class BotBehavior:
         self.bot = bot
         self.ffmpeg_path = ffmpeg_path
         self.temp_channel = ""
+        self.last_channel = {}
         self.playback_done = asyncio.Event()
         self.script_dir = os.path.dirname(__file__)  # Get the directory of the current script
         self.db_path = os.path.join(self.script_dir, "../Data/soundsDB.csv")
@@ -181,14 +224,20 @@ class BotBehavior:
         await message.delete()
         
 
-    async def delete_controls_message(self):
+    async def delete_controls_message(self, delete_all=True):
         try:
-            await self.controls_message.delete()
-        except:
             bot_channel = await self.get_bot_channel()
-            async for message in bot_channel.history(limit=100):
-                if message.components and len(message.components[0].children) == 4 and not message.embeds:
+            if delete_all:
+                async for message in bot_channel.history(limit=100):
+                    if message.components and len(message.components[0].children) == 5 and len(message.components[1].children) == 3 and not message.embeds and "Play Random" in message.components[0].children[0].label:
+                        await message.delete()
+            else:
+                messages = await bot_channel.history(limit=100).flatten()
+                control_messages = [message for message in messages if message.components and len(message.components[0].children) == 5 and len(message.components[1].children) == 3 and not message.embeds and "Play Random" in message.components[0].children[0].label]
+                for message in control_messages[:-1]:  # Skip the last message
                     await message.delete()
+        except Exception as e:
+            print(f"1An error occurred: {e}")
 
     async def delete_last_message(self):
         bot_channel = await self.get_bot_channel()
@@ -197,10 +246,17 @@ class BotBehavior:
             return
     
     async def clean_buttons(self):
-        bot_channel = await self.get_bot_channel()
-        async for message in bot_channel.history(limit=100):
-            if message.components:
-                await message.edit(view=None)
+        try:
+            bot_channel = await self.get_bot_channel()
+            async for message in bot_channel.history(limit=100):
+                if message.components:
+                    try:
+                        await message.edit(view=None)
+                    except Exception as e:
+                        print(f"6An error occurred: {e}")
+                        await message.delete()
+        except Exception as e:
+            print(f"2An error occurred: {e}")
     
     async def get_bot_channel(self):
         bot_channel = discord.utils.get(self.bot.guilds[0].text_channels, name='bot')
@@ -215,7 +271,7 @@ class BotBehavior:
                 largest_size = len(channel.members)
         return largest_channel
 
-    async def play_audio(self, channel, audio_file, user, is_entrance=False, is_tts=False, extra="", original_message=""):
+    async def play_audio(self, channel, audio_file, user, is_entrance=False, is_tts=False, extra="", original_message="", send_controls=True):
         self.randomize_color()
         self.player_history_db.add_entry(audio_file, user)
         if channel == "":
@@ -225,7 +281,7 @@ class BotBehavior:
         bot_channel = discord.utils.get(self.bot.guilds[0].text_channels, name='bot')
         if bot_channel and not is_entrance and not is_tts:
             if audio_file.split('/')[-1].replace('.mp3', '') != "slap":
-                await self.send_message(view=SoundBeingPlayedView(self, audio_file), title=f"🔊 **{audio_file.split('/')[-1].replace('.mp3', '')}** 🔊", description = f"Similarity: {extra}%" if extra != "" else None, footer = f"{user} requested '{original_message}'" if original_message else f"Requested by {user}")
+                await self.send_message(view=SoundBeingPlayedView(self, audio_file), title=f"🔊 **{audio_file.split('/')[-1].replace('.mp3', '')}** 🔊", description = f"Similarity: {extra}%" if extra != "" else None, footer = f"{user} requested '{original_message}'" if original_message else f"Requested by {user}", send_controls=send_controls)
         audio_file_path =  os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", audio_file))
         voice_client = discord.utils.get(self.bot.voice_clients, guild=channel.guild)
         if voice_client:
@@ -290,7 +346,7 @@ class BotBehavior:
                     else:
                         await asyncio.sleep(sleep_time)
             except Exception as e:
-                print(f"1An error occurred: {e}")
+                print(f"4An error occurred: {e}")
                 await asyncio.sleep(60)
 
     async def play_random_sound(self, user="admin"):
@@ -300,7 +356,7 @@ class BotBehavior:
                 if channel is not None:
                     asyncio.create_task(self.play_audio(channel, self.db.get_random_filename(),user))
         except Exception as e:
-            print(f"2An error occurred: {e}")
+            print(f"3An error occurred: {e}")
 
     def randomize_color(self):
         temp_color = discord.Color.random()
@@ -315,11 +371,11 @@ class BotBehavior:
         for guild in self.bot.guilds:
             channel = self.get_largest_voice_channel(guild)
             if channel is not None:
-                asyncio.create_task(self.play_audio(channel, filename, user,extra=similarity, original_message=id))
-                await asyncio.sleep(2)
                 similar_sounds = [f"{filename[1]}" for filename in filenames[1:] if filename[0] > 70]
+                asyncio.create_task(self.play_audio(channel, filename, user,extra=similarity, original_message=id, send_controls = False if similar_sounds else True))
+                await asyncio.sleep(2)
                 if similar_sounds:
-                    await self.send_message(title="Maybe you meant one of these?", view=SoundSimilarView(self, similar_sounds))
+                    await self.send_message(view=SoundSimilarView(self, similar_sounds))
 
     async def change_filename(self, oldfilename, newfilename):
         await self.db.modify_filename(oldfilename, newfilename)
@@ -342,18 +398,28 @@ class BotBehavior:
                         print(f"csv sent to the chat.")
                         return
         except Exception as e:
-            print(f"3An error occurred: {e}")
+            print(f"5An error occurred: {e}")
 
-    async def send_message(self, title="", description="",footer=None, thumbnail=None, view=None):
+    async def subway_surfers(self):
+        folder = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Data", "SubwaySurfers"))
+        files = os.listdir(folder)
+        file = random.choice(files)
+        message = await self.send_message(file=discord.File(os.path.abspath(os.path.join(folder, file)), f"SubwaySurfers/{file}"))
+        await asyncio.sleep(60)
+        await message.delete()
+
+    async def send_message(self, title="", description="",footer=None, thumbnail=None, view=None, send_controls=True, file=None):
         await self.delete_controls_message()
         bot_channel = await self.get_bot_channel()
         embed = discord.Embed(title=title, description=description, color=self.color)
         embed.set_thumbnail(url=thumbnail)
         embed.set_footer(text=footer)
-        message = await bot_channel.send(view=view, embed=None if description == "" and title == "" else embed)
-        await self.send_controls()
+        message = await bot_channel.send(view=view, embed=None if description == "" and title == "" else embed, file=file)
+        if send_controls:
+            await self.send_controls()
         return message
     
     async def send_controls(self):
         bot_channel = await self.get_bot_channel()
         self.controls_message = await bot_channel.send(view=ControlsView(self))
+        await self.delete_controls_message(delete_all=False)
