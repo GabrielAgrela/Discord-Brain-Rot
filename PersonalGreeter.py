@@ -204,8 +204,8 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
             user_events = userUtils.get_user_events_by_name(member_str)
             for user_event in user_events:
                 if user_event.event_code == event:
-                    await asyncio.sleep(.5)
                     behavior.last_channel[member_str] = channel
+                    await asyncio.sleep(.5)
                     if channel:
                         print(f"Playing {user_event.sound} for {member_str}")
                         await behavior.play_audio(channel, behavior.db.get_most_similar_filenames(user_event.sound, include_score=False)[0], member_str, is_entrance=True)

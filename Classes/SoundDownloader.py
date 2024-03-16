@@ -34,8 +34,10 @@ class SoundDownloader:
         try:
             print(self.__class__.__name__,": Opening Chrome")
             self.driver = webdriver.Chrome(service=self.service, options=self.options)
-            self.driver.get("https://www.myinstants.com/en/index/pt/")
-            print(self.__class__.__name__,": Opening MyInstants")
+            base_url = "https://www.myinstants.com/en/index/"
+            country = random.choice(["pt", "us", "es", "br"])
+            self.driver.get(base_url+country+"/")
+            print(self.__class__.__name__,": Opening ", base_url+country+"/")
             wait = WebDriverWait(self.driver, 0)
             consent_button = wait.until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[3]/div[2]/div[1]/div[2]/div[2]/button[1]/p')))
             print(self.__class__.__name__,": Clicking consent button")
