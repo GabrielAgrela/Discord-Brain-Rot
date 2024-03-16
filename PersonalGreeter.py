@@ -1,4 +1,3 @@
-from asyncio import Queue
 import asyncio
 import os
 import random
@@ -6,15 +5,9 @@ import discord
 from Classes.Environment import Environment
 from Classes.Bot import Bot
 from Classes.SoundEventsLoader import SoundEventLoader
-from Classes.BotBehaviour import BotBehavior, ControlsView
+from Classes.BotBehaviour import BotBehavior
 import threading
 from pynput import keyboard
-import time
-from collections import defaultdict
-from datetime import datetime, timedelta
-import csv
-from collections import Counter
-import atexit
 import interactions
 from discord.commands import Option
 from discord import default_permissions
