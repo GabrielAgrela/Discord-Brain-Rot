@@ -207,7 +207,7 @@ class ControlsView(View):
         self.add_item(ListTopUsersButton(bot_behavior, label="📊Top Users📊", style=discord.ButtonStyle.success))
 
         self.add_item(ListSoundsButton(bot_behavior, label="📜List Sounds📜", style=discord.ButtonStyle.success))
-        self.add_item(ListLastScrapedSoundsButton(bot_behavior, label="🔽Last Scraped Sounds🔽", style=discord.ButtonStyle.success))
+        self.add_item(ListLastScrapedSoundsButton(bot_behavior, label="🔽Last Downloaded Sounds🔽", style=discord.ButtonStyle.success))
 
 class SoundView(View):
     def __init__(self, bot_behavior, similar_sounds):

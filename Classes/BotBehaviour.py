@@ -236,7 +236,7 @@ class BotBehavior:
                                 sound_names = [row[0] for row in data]  # Extract the first column
                                 message = "\n".join(sound_names)  # Convert to string
                                 sound_view = SoundView(self, sound_names)
-                                await self.send_message(title="Last "+ str(count)+" Sounds Scraped:", view=sound_view)
+                                await self.send_message(title="Last "+ str(count)+" Sounds Downloaded", view=sound_view)
                             else:
                                 await bot_channel.send(file=discord.File(self.db_path, 'Data/soundsDB.csv'))
                             print(f"Message sent to the chat.")

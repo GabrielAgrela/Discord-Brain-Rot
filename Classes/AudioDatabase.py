@@ -163,23 +163,27 @@ class AudioDatabase:
 
 
 
-    def get_most_similar_filenames(self, query_filename, num_results=1):
+    def get_most_similar_filenames(self, query_filename, num_results=1, include_score=True):
         filenames = self._read_filenames()
         if not filenames:
             return None, None
         # Clear query_filename of commands and spaces
-        query_filename = query_filename.replace("*p ", "").lower()
+        try:
+            tmp_query_filename = query_filename.replace("*p ", "").lower()
+        except Exception as e:
+            print("-------------",query_filename[1], e)
+            tmp_query_filename = str(query_filename[1].replace("*p ", "").lower())
 
         scores = []
 
         for filename in filenames:
             # Clear db's filename of .mp3
             filename = filename.lower()
-            score = fuzz.token_sort_ratio(query_filename, filename)
+            score = fuzz.token_sort_ratio(tmp_query_filename, filename)
 
-            query_filename = query_filename.replace("-", " ").replace("_", " ")
+            tmp_query_filename = tmp_query_filename.replace("-", " ").replace("_", " ")
             # Split query_filename into words
-            query_words = query_filename.split()
+            query_words = tmp_query_filename.split()
 
             # Calculate the initial fuzz score
 
@@ -201,7 +205,10 @@ class AudioDatabase:
             print(f"Found {filename}: {score}")
 
         # Return the top 'num_results' filenames with their scores
-        return top_scores
+        if include_score:
+            return top_scores
+        else:
+            return [filename for score, filename in top_scores]
 
 
 

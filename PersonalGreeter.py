@@ -4,20 +4,20 @@ import random
 import discord
 from Classes.Environment import Environment
 from Classes.Bot import Bot
-from Classes.SoundEventsLoader import SoundEventLoader
 from Classes.BotBehaviour import BotBehavior
 import threading
 from pynput import keyboard
 import interactions
 from discord.commands import Option
 from discord import default_permissions
+from Classes.UsersUtils import UsersUtils
 
 env = Environment()
 intents = discord.Intents(guilds=True, voice_states=True, messages=True, message_content=True, members=True)
 bot = Bot(command_prefix="*", intents=intents, token=env.bot_token, ffmpeg_path=env.ffmpeg_path)
 
-loader = SoundEventLoader(os.path.abspath(__file__))
-USERS, SOUNDS = loader.load_sound_events()
+# Usage
+userUtils = UsersUtils(os.path.abspath(os.path.join(os.path.dirname(__file__), "Data", "Users.json")))
 
 behavior = BotBehavior(bot, env.ffmpeg_path)
 file_name = 'play_requests.csv'
@@ -188,10 +188,11 @@ async def stop_recording(ctx):
 @bot.event
 async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
     member_str = f"{member.name}#{member.discriminator}"
-    if member_str not in USERS and before.channel is None and after.channel is not None and member != bot.user:
+    users = userUtils.users
+    if member_str not in userUtils.get_users_names() and before.channel is None and after.channel is not None and member != bot.user:
         await behavior.play_audio(after.channel, "gay-echo.mp3","admin", is_entrance=True)
     else:
-        if member_str in USERS and member != bot.user:
+        if member_str in userUtils.get_users_names() and member != bot.user:
             if before.channel is None or (before.channel != after.channel and after.channel is not None):
                 event = "join"
                 channel = after.channel
@@ -200,18 +201,15 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
                 channel = before.channel
             else:
                 return
-            user_events = USERS[member_str]
+            user_events = userUtils.get_user_events_by_name(member_str)
             for user_event in user_events:
-                if user_event.event == event:
+                if user_event.event_code == event:
+                    await asyncio.sleep(.5)
                     behavior.last_channel[member_str] = channel
-                    await asyncio.sleep(1)
-                    if behavior.last_channel[member_str] == channel:
-                        for guild in bot.guilds:
-                            #await behavior.disconnect_all_bots(guild)
-                            if channel:
-                                print(f"Playing {user_event.sound} for {member_str}")
-                                await behavior.play_audio(channel, user_event.sound,member_str, is_entrance=True)
-                            break
+                    if channel:
+                        print(f"Playing {user_event.sound} for {member_str}")
+                        await behavior.play_audio(channel, behavior.db.get_most_similar_filenames(user_event.sound, include_score=False)[0], member_str, is_entrance=True)
+                            
 
 def on_press(key):
     if key == keyboard.Key.f6:
