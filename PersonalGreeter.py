@@ -44,6 +44,9 @@ async def on_ready():
 async def play_requested(ctx: interactions.CommandContext, message: Option(str, "Sound name ('random' for random)", required=True), request_number: Option(str, "Number of Similar Sounds", default=5)):
     await ctx.defer()
     await behavior.delete_last_message()
+    request_number = int(request_number)
+    if request_number > 25:
+        request_number = 25
     author = ctx.user
     username_with_discriminator = f"{author.name}#{author.discriminator}"
     try:
@@ -124,6 +127,11 @@ async def change(ctx):
     await behavior.delete_last_message()
     await behavior.subway_surfers()    
 
+@bot.slash_command(name="lastsounds", description="returns last sounds downloaded")
+async def change(ctx, number: Option(str, "number of sounds", default=10)):
+    await ctx.defer()
+    await behavior.delete_last_message()
+    await behavior.list_sounds(int(number))    
 
 
 

@@ -13,6 +13,8 @@ import sounddevice as sd
 import numpy as np
 from scipy.io.wavfile import write
 from pydub import AudioSegment
+import csv
+import io
 
 
 class ReplayButton(Button):
@@ -75,6 +77,15 @@ class PlayRandomButton(Button):
     async def callback(self, interaction):
         await interaction.response.defer()
         asyncio.create_task(self.bot_behavior.play_random_sound(interaction.user.name))
+
+class PlayRandomFavoriteButton(Button):
+    def __init__(self, bot_behavior, **kwargs):
+        super().__init__(**kwargs)
+        self.bot_behavior = bot_behavior
+
+    async def callback(self, interaction):
+        await interaction.response.defer()
+        asyncio.create_task(self.bot_behavior.play_random_favorite_sound(interaction.user.name))
 
 class ListFavoritesButton(Button):
     def __init__(self, bot_behavior, **kwargs):
@@ -189,16 +200,18 @@ class SoundBeingPlayedView(View):
 class ControlsView(View):
     def __init__(self, bot_behavior):
         super().__init__(timeout=None)
-        self.add_item(PlayRandomButton(bot_behavior, label="🎲Play Random🎶", style=discord.ButtonStyle.success))
+        self.add_item(PlayRandomButton(bot_behavior, label="🎲Play Random🎲", style=discord.ButtonStyle.success))
+        self.add_item(PlayRandomFavoriteButton(bot_behavior, label="🎲Play Random Favorite⭐", style=discord.ButtonStyle.success))
+        self.add_item(PlaySlapButton(bot_behavior, label="👋/🔫/🍳", style=discord.ButtonStyle.success))
         self.add_item(ListFavoritesButton(bot_behavior, label="⭐Favorites⭐", style=discord.ButtonStyle.success))
         self.add_item(ListBlacklistButton(bot_behavior, label="🗑️Blacklisted🗑️", style=discord.ButtonStyle.success))
-        self.add_item(PlaySlapButton(bot_behavior, label="👋/🔫/🍳", style=discord.ButtonStyle.success))
-        self.add_item(ListSoundsButton(bot_behavior, label="📜List Sounds📜", style=discord.ButtonStyle.success))
+        
         self.add_item(SubwaySurfersButton(bot_behavior, label="🚇Subway Surfers🚇", style=discord.ButtonStyle.success))
         self.add_item(SliceAllButton(bot_behavior, label="🔪Slice All🔪", style=discord.ButtonStyle.success))
         self.add_item(FamilyGuyButton(bot_behavior, label="👨‍👩‍👧‍👦Family Guy👨‍👩‍👧‍👦", style=discord.ButtonStyle.success))
         self.add_item(ListTopSoundsButton(bot_behavior, label="📈Top Sounds📈", style=discord.ButtonStyle.success))
         self.add_item(ListTopUsersButton(bot_behavior, label="📊Top Users📊", style=discord.ButtonStyle.success))
+        self.add_item(ListSoundsButton(bot_behavior, label="📜List Sounds📜", style=discord.ButtonStyle.success))
 
 class SoundSimilarView(View):
     def __init__(self, bot_behavior, similar_sounds):
@@ -269,7 +282,7 @@ class BotBehavior:
     async def clean_buttons(self):
         try:
             bot_channel = await self.get_bot_channel()
-            async for message in bot_channel.history(limit=100):
+            async for message in bot_channel.history(limit=20):
                 # if message.components and not empty
                 if message.components and message.embeds:
                     await message.edit(view=None)      
@@ -378,6 +391,15 @@ class BotBehavior:
         except Exception as e:
             print(f"3An error occurred: {e}")
 
+    async def play_random_favorite_sound(self, username):
+        favorite_sounds = self.db.get_favorite_sounds()
+        channel = self.get_largest_voice_channel(self.bot.guilds[0])
+        if favorite_sounds:
+            sound_to_play = random.choice(favorite_sounds)
+            await self.play_audio(channel,sound_to_play, username)
+        else:
+            print("No favorite sounds found.")
+
     def randomize_color(self):
         temp_color = discord.Color.random()
         while temp_color == self.color:
@@ -406,25 +428,34 @@ class BotBehavior:
     async def stt(self, audio_files):
         return await self.TTS.speech_to_text(audio_files)
     
-    async def list_sounds(self):
+    async def list_sounds(self, count=0):
         try:
             for guild in self.bot.guilds:
                 channel = self.get_largest_voice_channel(guild)
                 if channel is not None:
                     bot_channel = discord.utils.get(self.bot.guilds[0].text_channels, name='bot')
                     if bot_channel:
-                        with open(self.db_path, 'rb') as file:
-                            await bot_channel.send(file=discord.File(file, 'Data/soundsDB.csv'))
-                        print(f"csv sent to the chat.")
-                        return
+                        with open(self.db_path, 'r') as file:
+                            reader = csv.reader(file)
+                            data = list(reader)
+                            if count > 0:
+                                data = data[-count:]  # Get the last 'count' entries
+                                data = [row[0] for row in data]  # Extract the first column
+                                message = "\n".join(data)  # Convert to string
+                                await self.send_message(title="Last "+ str(count)+" sounds Scraped", description=message.replace(".mp3",""))
+                            else:
+                                await bot_channel.send(file=discord.File(self.db_path, 'Data/soundsDB.csv'))
+                            print(f"Message sent to the chat.")
+                            return
         except Exception as e:
-            print(f"5An error occurred: {e}")
+            print(f"An error occurred: {e}")
 
     async def subway_surfers(self):
         folder = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Data", "SubwaySurfers"))
         files = os.listdir(folder)
         file = random.choice(files)
-        message = await self.send_message(file=discord.File(os.path.abspath(os.path.join(folder, file)), f"SubwaySurfers/{file}"))
+        title = files.index(file) + 1  # Adding 1 because index is 0-based
+        message = await self.send_message(title="Subway Surfers clip "+str(title)+" of "+str(len(files)), file=discord.File(os.path.abspath(os.path.join(folder, file)), f"SubwaySurfers/{file}"))
         await asyncio.sleep(60)
         await message.delete()
     
@@ -432,7 +463,8 @@ class BotBehavior:
         folder = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Data", "SliceAll"))
         files = os.listdir(folder)
         file = random.choice(files)
-        message = await self.send_message(file=discord.File(os.path.abspath(os.path.join(folder, file)), f"SliceAll/{file}"))
+        title = files.index(file) + 1  # Adding 1 because index is 0-based
+        message = await self.send_message(title="Slice All clip "+str(title)+" of "+str(len(files)), file=discord.File(os.path.abspath(os.path.join(folder, file)), f"SliceAll/{file}"))
         await asyncio.sleep(60)
         await message.delete()
 
@@ -440,7 +472,8 @@ class BotBehavior:
         folder = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Data", "FamilyGuy"))
         files = os.listdir(folder)
         file = random.choice(files)
-        message = await self.send_message(file=discord.File(os.path.abspath(os.path.join(folder, file)), f"FamilyGuy/{file}"))
+        title = files.index(file) + 1  # Adding 1 because index is 0-based
+        message = await self.send_message(title="Family Guy clip "+str(title)+" of "+str(len(files)), file=discord.File(os.path.abspath(os.path.join(folder, file)), f"FamilyGuy/{file}"))
         await asyncio.sleep(60)
         await message.delete()
 
