@@ -8,7 +8,8 @@ from Classes.AudioDatabase import AudioDatabase
 from Classes.PlayHistoryDatabase import PlayHistoryDatabase
 from Classes.TTS import TTS
 import csv
-from Classes.UI import ReplayButton, FavoriteButton, BlacklistButton, ChangeSoundNameButton, PlayRandomButton, PlayRandomFavoriteButton, ListFavoritesButton, ListBlacklistButton, PlaySlapButton, ListSoundsButton, SubwaySurfersButton, SliceAllButton, FamilyGuyButton, ListTopSoundsButton, ListTopUsersButton, PlaySoundButton, SoundBeingPlayedView, ControlsView, SoundView
+from Classes.UI import SoundBeingPlayedView, ControlsView, SoundView
+from moviepy.editor import VideoFileClip
 
 
 
@@ -61,7 +62,7 @@ class BotBehavior:
             else:
                 messages = await bot_channel.history(limit=100).flatten()
                 control_messages = [message for message in messages if message.components and len(message.components[0].children) == 5 and len(message.components[1].children) == 5 and not message.embeds and "Play Random" in message.components[0].children[0].label]
-                for message in control_messages[:-1]:  # Skip the last message
+                for message in control_messages[1:]:  # Skip the last message
                     await message.delete()
         except Exception as e:
             print(f"1An error occurred: {e}")
@@ -250,7 +251,7 @@ class BotBehavior:
         file = random.choice(files)
         title = files.index(file) + 1  # Adding 1 because index is 0-based
         message = await self.send_message(title="Subway Surfers clip "+str(title)+" of "+str(len(files)), file=discord.File(os.path.abspath(os.path.join(folder, file)), f"SubwaySurfers/{file}"))
-        await asyncio.sleep(60)
+        await asyncio.sleep(VideoFileClip(os.path.join(folder, file)).duration + 5)
         await message.delete()
     
     async def slice_all(self):
@@ -259,7 +260,7 @@ class BotBehavior:
         file = random.choice(files)
         title = files.index(file) + 1  # Adding 1 because index is 0-based
         message = await self.send_message(title="Slice All clip "+str(title)+" of "+str(len(files)), file=discord.File(os.path.abspath(os.path.join(folder, file)), f"SliceAll/{file}"))
-        await asyncio.sleep(60)
+        await asyncio.sleep(VideoFileClip(os.path.join(folder, file)).duration + 5)
         await message.delete()
 
     async def family_guy(self):
@@ -268,7 +269,7 @@ class BotBehavior:
         file = random.choice(files)
         title = files.index(file) + 1  # Adding 1 because index is 0-based
         message = await self.send_message(title="Family Guy clip "+str(title)+" of "+str(len(files)), file=discord.File(os.path.abspath(os.path.join(folder, file)), f"FamilyGuy/{file}"))
-        await asyncio.sleep(60)
+        await asyncio.sleep(VideoFileClip(os.path.join(folder, file)).duration + 5)
         await message.delete()
 
     async def send_message(self, title="", description="",footer=None, thumbnail=None, view=None, send_controls=True, file=None):

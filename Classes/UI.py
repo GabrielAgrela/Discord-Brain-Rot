@@ -146,6 +146,17 @@ class FamilyGuyButton(Button):
         await interaction.response.defer()
         asyncio.create_task(self.bot_behavior.family_guy())
 
+class BrainRotButton(Button):
+    def __init__(self, bot_behavior, **kwargs):
+        super().__init__(**kwargs)
+        self.bot_behavior = bot_behavior
+
+    async def callback(self, interaction):
+        await interaction.response.defer()
+        task = random.choice([self.bot_behavior.family_guy,self.bot_behavior.family_guy, self.bot_behavior.family_guy,  self.bot_behavior.subway_surfers, self.bot_behavior.slice_all])
+        asyncio.create_task(task())
+
+
 class ListTopSoundsButton(Button):
     def __init__(self, bot_behavior, **kwargs):
         super().__init__(**kwargs)
@@ -200,12 +211,9 @@ class ControlsView(View):
         self.add_item(ListFavoritesButton(bot_behavior, label="⭐Favorites⭐", style=discord.ButtonStyle.success))
         self.add_item(ListBlacklistButton(bot_behavior, label="🗑️Blacklisted🗑️", style=discord.ButtonStyle.success))
         
-        self.add_item(SubwaySurfersButton(bot_behavior, label="🚇Subway Surfers🚇", style=discord.ButtonStyle.success))
-        self.add_item(SliceAllButton(bot_behavior, label="🔪Slice All🔪", style=discord.ButtonStyle.success))
-        self.add_item(FamilyGuyButton(bot_behavior, label="👨‍👩‍👧‍👦Family Guy👨‍👩‍👧‍👦", style=discord.ButtonStyle.success))
+        self.add_item(BrainRotButton(bot_behavior, label="🧠Brain Rot🧠", style=discord.ButtonStyle.success))
         self.add_item(ListTopSoundsButton(bot_behavior, label="📈Top Sounds📈", style=discord.ButtonStyle.success))
         self.add_item(ListTopUsersButton(bot_behavior, label="📊Top Users📊", style=discord.ButtonStyle.success))
-
         self.add_item(ListSoundsButton(bot_behavior, label="📜List Sounds📜", style=discord.ButtonStyle.success))
         self.add_item(ListLastScrapedSoundsButton(bot_behavior, label="🔽Last Downloaded Sounds🔽", style=discord.ButtonStyle.success))
 

@@ -120,6 +120,18 @@ async def change(ctx):
     await behavior.delete_last_message()
     await behavior.subway_surfers()    
 
+@bot.slash_command(name="familyguy", description="returns database of sounds")
+async def change(ctx):
+    await ctx.defer()
+    await behavior.delete_last_message()
+    await behavior.family_guy()
+
+@bot.slash_command(name="slice", description="returns database of sounds")
+async def change(ctx):
+    await ctx.defer()
+    await behavior.delete_last_message()
+    await behavior.slice_all()
+
 @bot.slash_command(name="lastsounds", description="returns last sounds downloaded")
 async def change(ctx, number: Option(str, "number of sounds", default=10)):
     await ctx.defer()

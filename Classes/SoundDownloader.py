@@ -35,7 +35,7 @@ class SoundDownloader:
             print(self.__class__.__name__,": Opening Chrome")
             self.driver = webdriver.Chrome(service=self.service, options=self.options)
             base_url = "https://www.myinstants.com/en/index/"
-            country = random.choice(["pt", "us", "es", "br"])
+            country = random.choice(["pt", "us", "br"])
             self.driver.get(base_url+country+"/")
             print(self.__class__.__name__,": Opening ", base_url+country+"/")
             wait = WebDriverWait(self.driver, 0)
