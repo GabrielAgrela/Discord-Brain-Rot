@@ -1,6 +1,7 @@
 /.env
 /__pycache__
-/Data
+/Data/das.py
+/Data/clipper.py
 /Classes/__pycache__
 /Downloads
 /Sounds
