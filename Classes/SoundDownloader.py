@@ -28,7 +28,7 @@ class SoundDownloader:
         })
         self.options.add_argument('--headless')
         self.options.add_argument('window-size=1200x600')
-        self.options.add_argument('load-extension=' + r'C:\Users\netco\Desktop\1.52.2_0')
+        #self.options.add_argument('load-extension=' + r'C:\Users\netco\Desktop\1.52.2_0')
 
     def download_sound(self):
         try:
@@ -51,8 +51,27 @@ class SoundDownloader:
             self.driver.execute_script("arguments[0].scrollIntoView(true);", random_sound_element)
             time.sleep(2)
             self.driver.execute_script("arguments[0].click();", random_sound_element)
-            print(self.__class__.__name__,": ",random_sound_element, " chosen")
             time.sleep(1)
+            #try to click //*[@id="dismiss-button"]
+            try:
+                # Find the <ins> tag
+                ins_tag = self.driver.find_element(By.TAG_NAME, "ins")
+
+                # Find the iframe within the <ins> tag
+                iframe = ins_tag.find_element(By.TAG_NAME, "iframe")
+
+                # Switch to the iframe
+                self.driver.switch_to.frame(iframe)
+
+                # Find the dismiss button
+                dismiss_button = self.driver.find_element(By.ID, "dismiss-button")
+                print(self.__class__.__name__, ": Clicking dismiss button")
+                self.driver.execute_script("arguments[0].click();", dismiss_button)
+
+                # Switch back to the main content
+                self.driver.switch_to.default_content()
+            except Exception as e:
+                print(self.__class__.__name__, ": No dismiss button found ")
             download_button = wait.until(EC.element_to_be_clickable((By.XPATH, '//a[contains(@class, "instant-page-extra-button btn btn-primary")][contains(text(),"Download MP3")]')))
             print(self.__class__.__name__,": Clicking download sound")
             self.driver.execute_script("arguments[0].click();", download_button)
