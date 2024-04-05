@@ -17,7 +17,7 @@ import shutil
 class SoundDownloader:
     def __init__(self,db):
         self.db = db
-        self.service = Service()
+        self.service = Service(executable_path='/usr/lib/chromium-browser/chromedriver')
         self.options = webdriver.ChromeOptions()
         self.options.add_argument('--log-level=3')
         self.dwdir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Downloads"))
@@ -51,7 +51,34 @@ class SoundDownloader:
             self.driver.execute_script("arguments[0].scrollIntoView(true);", random_sound_element)
             time.sleep(2)
             self.driver.execute_script("arguments[0].click();", random_sound_element)
-            print(self.__class__.__name__,": ",random_sound_element, " chosen")
+            time.sleep(1)
+            try:
+                # Find the <ins> tag with id starting with 'gpt'
+                ins_tag = self.driver.find_element(By.CSS_SELECTOR, "ins[id^='gpt']")
+
+                # Find the iframe within the <ins> tag
+                iframe = ins_tag.find_element(By.TAG_NAME, "iframe")
+
+                # Switch to the iframe
+                self.driver.switch_to.frame(iframe)
+
+                # Check if there's an extra iframe within the current iframe
+                try:
+                    inner_iframe = self.driver.find_element(By.TAG_NAME, "iframe")
+                    self.driver.switch_to.frame(inner_iframe)
+                    print(self.__class__.__name__, ": Switched to inner iframe")
+                except Exception as e:
+                    print(self.__class__.__name__, ": No inner iframe found")
+
+                # Find the dismiss button
+                dismiss_button = self.driver.find_element(By.ID, "dismiss-button")
+                print(self.__class__.__name__, ": Clicking dismiss button")
+                self.driver.execute_script("arguments[0].click();", dismiss_button)
+
+                # Switch back to the main content
+                self.driver.switch_to.default_content()
+            except Exception as e:
+                print(self.__class__.__name__, ": No dismiss button found ")
             time.sleep(1)
             download_button = wait.until(EC.element_to_be_clickable((By.XPATH, '//a[contains(@class, "instant-page-extra-button btn btn-primary")][contains(text(),"Download MP3")]')))
             print(self.__class__.__name__,": Clicking download sound")
@@ -88,14 +115,18 @@ class SoundDownloader:
 
     def scroll_a_little(self, driver):
         # Get the current scroll height of the page
-        for i in range(0, 5):
+        for i in range(0, 15):
             last_height = driver.execute_script("return document.body.scrollHeight")
-        
             
             # Scroll to the random height
             driver.execute_script(f"window.scrollTo(0, {last_height*5});")
-            time.sleep(1)  # Allow the page to load
+            time.sleep(.5)  # Allow the page to load
 
+            # Every 2 scrolls down, scroll 1 up
+            if i % 3 == 2:
+                driver.execute_script(f"window.scrollTo(0, {last_height*-1});")
+                time.sleep(.5)  # Allow the page to load
+                
     def adjust_volume(self, sound_file, target_dBFS):
         sound = AudioSegment.from_file(sound_file, format="mp3")
         difference = target_dBFS - sound.dBFS

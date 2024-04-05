@@ -6,7 +6,6 @@ from Classes.Environment import Environment
 from Classes.Bot import Bot
 from Classes.BotBehaviour import BotBehavior
 import threading
-from pynput import keyboard
 import interactions
 from discord.commands import Option
 from discord import default_permissions
@@ -222,16 +221,6 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
                         print(f"Playing {user_event.sound} for {member_str}")
                         await behavior.play_audio(channel, behavior.db.get_most_similar_filenames(user_event.sound, include_score=False)[0], member_str, is_entrance=True)
                             
-
-def on_press(key):
-    if key == keyboard.Key.f6:
-        asyncio.run_coroutine_threadsafe(behavior.play_random_sound(), bot.loop)
-    if key == keyboard.Key.f7:
-        asyncio.run_coroutine_threadsafe(behavior.play_audio("",  random.choice(["slap.mp3", "tiro.mp3", "pubg-pan-sound-effect.mp3"]),"admin"), bot.loop)
-
-keyboard_listener = keyboard.Listener(on_press=on_press)
-thread = threading.Thread(target=keyboard_listener.start)
-thread.start()
 
 bot.run_bot()
 bot.start()
