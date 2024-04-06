@@ -131,9 +131,6 @@ class BotBehavior:
 
         # try playing the audio file
         try:
-            # Stop the audio if it is already playing
-            if voice_client.is_playing():
-                voice_client.stop()
             # Add the entry to the play history database
             self.player_history_db.add_entry(audio_file, user)
             # Get the absolute path of the audio file
@@ -144,6 +141,9 @@ class BotBehavior:
             if bot_channel and not is_entrance and not is_tts:
                 if audio_file.split('/')[-1].replace('.mp3', '') not in ["slap", "tiro", "pubg-pan-sound-effect"]:
                     await self.send_message(view=SoundBeingPlayedView(self, audio_file), title=f"🔊 **{audio_file.split('/')[-1].replace('.mp3', '')}** 🔊", description = f"Similarity: {extra}%" if extra != "" else None, footer = f"{user} requested '{original_message}'" if original_message else f"Requested by {user}", send_controls=send_controls)
+            # Stop the audio if it is already playing
+            if voice_client.is_playing():
+                voice_client.stop()
             # Play the audio file
             voice_client.play(discord.FFmpegPCMAudio(executable=self.ffmpeg_path, source=audio_file_path), after=after_playing)
         except Exception as e:
