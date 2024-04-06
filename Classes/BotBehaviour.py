@@ -126,6 +126,7 @@ class BotBehavior:
             if error:
                 print(f'---------------------Error in playback: {error}')
                 time.sleep(1)
+                asyncio.create_task(self.delete_last_message())
                 asyncio.create_task(self.play_audio(channel, audio_file, user, is_entrance, is_tts, extra, original_message, send_controls))
             else:
                 # Add the entry to the play history database
@@ -134,7 +135,6 @@ class BotBehavior:
 
         # try playing the audio file
         try:
-            
             # Get the absolute path of the audio file
             audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", audio_file))
             # Send a message to the bot channel if the sound is not a slap, tiro or pubg-pan-sound-effect
