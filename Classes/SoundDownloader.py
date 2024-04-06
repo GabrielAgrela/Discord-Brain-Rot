@@ -16,7 +16,7 @@ import shutil
 import os
 
 class SoundDownloader:
-    def __init__(self,db):
+    def __init__(self,db, chromedriver_path=""):
         self.db = db
         chromedriver_path = os.getenv("CHROMEDRIVER_PATH")
         if not chromedriver_path:
