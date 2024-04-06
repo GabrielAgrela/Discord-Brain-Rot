@@ -130,19 +130,19 @@ class BotBehavior:
             else:
                 # Add the entry to the play history database
                 self.player_history_db.add_entry(audio_file, user)
-                # Send a message to the bot channel if the sound is not a slap, tiro or pubg-pan-sound-effect
-                self.randomize_color()
-                bot_channel = discord.utils.get(self.bot.guilds[0].text_channels, name='bot')
-                if bot_channel and not is_entrance and not is_tts:
-                    if audio_file.split('/')[-1].replace('.mp3', '') not in ["slap", "tiro", "pubg-pan-sound-effect"]:
-                       asyncio.create_task(self.send_message(view=SoundBeingPlayedView(self, audio_file), title=f"🔊 **{audio_file.split('/')[-1].replace('.mp3', '')}** 🔊", description = f"Similarity: {extra}%" if extra != "" else None, footer = f"{user} requested '{original_message}'" if original_message else f"Requested by {user}", send_controls=send_controls))
-
             self.playback_done.set()
 
         # try playing the audio file
         try:
+            
             # Get the absolute path of the audio file
             audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", audio_file))
+            # Send a message to the bot channel if the sound is not a slap, tiro or pubg-pan-sound-effect
+            self.randomize_color()
+            bot_channel = discord.utils.get(self.bot.guilds[0].text_channels, name='bot')
+            if bot_channel and not is_entrance and not is_tts:
+                if audio_file.split('/')[-1].replace('.mp3', '') not in ["slap", "tiro", "pubg-pan-sound-effect"]:
+                    await self.send_message(view=SoundBeingPlayedView(self, audio_file), title=f"🔊 **{audio_file.split('/')[-1].replace('.mp3', '')}** 🔊", description = f"Similarity: {extra}%" if extra != "" else None, footer = f"{user} requested '{original_message}'" if original_message else f"Requested by {user}", send_controls=send_controls)
             # Stop the audio if it is already playing
             if voice_client.is_playing():
                 voice_client.stop()
