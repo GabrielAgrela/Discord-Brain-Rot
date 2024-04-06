@@ -131,6 +131,9 @@ class BotBehavior:
 
         # try playing the audio file
         try:
+            # Stop the audio if it is already playing
+            if voice_client.is_playing():
+                voice_client.stop()
             # Add the entry to the play history database
             self.player_history_db.add_entry(audio_file, user)
             # Get the absolute path of the audio file
