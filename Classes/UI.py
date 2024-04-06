@@ -107,7 +107,7 @@ class PlaySlapButton(Button):
 
     async def callback(self, interaction):
         await interaction.response.defer()
-        asyncio.create_task(self.bot_behavior.play_request(random.choice(["slap.mp3", "tiro.mp3", "pubg-pan-sound-effect.mp3"]), interaction.user.name))
+        asyncio.create_task(self.bot_behavior.play_request(random.choice(["slap.mp3", "tiro.mp3", "pubg-pan-sound-effect.mp3"]), interaction.user.name, 1))
        
 
 class ListSoundsButton(Button):
