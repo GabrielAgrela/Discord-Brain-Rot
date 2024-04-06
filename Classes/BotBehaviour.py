@@ -106,19 +106,11 @@ class BotBehavior:
                         return channel
         return None
 
-    async def play_audio(self, channel, audio_file, user, is_entrance=False, is_tts=False, extra="", original_message="", send_controls=True):
-        self.randomize_color()
-        self.player_history_db.add_entry(audio_file, user)
-        voice_client = discord.utils.get(self.bot.voice_clients, guild=channel.guild)
-        bot_channel = discord.utils.get(self.bot.guilds[0].text_channels, name='bot')
-        if bot_channel and not is_entrance and not is_tts:
-            if audio_file.split('/')[-1].replace('.mp3', '') not in ["slap", "tiro", "pubg-pan-sound-effect"]:
-                await self.send_message(view=SoundBeingPlayedView(self, audio_file), title=f"🔊 **{audio_file.split('/')[-1].replace('.mp3', '')}** 🔊", description = f"Similarity: {extra}%" if extra != "" else None, footer = f"{user} requested '{original_message}'" if original_message else f"Requested by {user}", send_controls=send_controls)
-        audio_file_path =  os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", audio_file))
+    async def play_audio(self, channel, audio_file, user, is_entrance=False, is_tts=False, extra="", original_message="", send_controls=True):        
+        # Try connecting to the voice channel
         voice_client = discord.utils.get(self.bot.voice_clients, guild=channel.guild)
         if voice_client:
-            if voice_client.channel != channel:
-                await voice_client.move_to(channel)
+            await voice_client.move_to(channel)
             if voice_client.is_playing():
                 voice_client.stop()
         else:
@@ -126,49 +118,61 @@ class BotBehavior:
                 voice_client = await channel.connect()
             except Exception as e:
                 print(f"----------------Error connecting to channel: {e}")
+                await asyncio.sleep(1)
+                await self.play_audio(channel, audio_file, user, is_entrance, is_tts, extra, original_message, send_controls)
                 return
         self.playback_done.clear()
 
+        # if error occurred, try playing the audio file again
         def after_playing(error):
             if error:
                 print(f'---------------------Error in playback: {error}')
+                time.sleep(1)
+                asyncio.create_task(self.play_audio(channel, audio_file, user, is_entrance, is_tts, extra, original_message, send_controls))
             self.playback_done.set()
 
+        # try playing the audio file
         try:
-            voice_client.play(
-                discord.FFmpegPCMAudio(executable=self.ffmpeg_path, source=audio_file_path),
-                after=after_playing
-            )
+            # Add the entry to the play history database
+            self.player_history_db.add_entry(audio_file, user)
+            # Get the absolute path of the audio file
+            audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", audio_file))
+            # Send a message to the bot channel if the sound is not a slap, tiro or pubg-pan-sound-effect
+            self.randomize_color()
+            bot_channel = discord.utils.get(self.bot.guilds[0].text_channels, name='bot')
+            if bot_channel and not is_entrance and not is_tts:
+                if audio_file.split('/')[-1].replace('.mp3', '') not in ["slap", "tiro", "pubg-pan-sound-effect"]:
+                    await self.send_message(view=SoundBeingPlayedView(self, audio_file), title=f"🔊 **{audio_file.split('/')[-1].replace('.mp3', '')}** 🔊", description = f"Similarity: {extra}%" if extra != "" else None, footer = f"{user} requested '{original_message}'" if original_message else f"Requested by {user}", send_controls=send_controls)
+            # Play the audio file
+            voice_client.play(discord.FFmpegPCMAudio(executable=self.ffmpeg_path, source=audio_file_path), after=after_playing)
         except Exception as e:
             print(f"----------------------An error occurred: {e}")
-            await voice_client.disconnect()
+            await asyncio.sleep(1)
+            await self.play_audio(channel, audio_file, user, is_entrance, is_tts, extra, original_message, send_controls)
         await self.playback_done.wait()
 
-    async def update_bot_status_once(self):
-        if hasattr(self.bot, 'next_download_time'):
-            time_left = self.bot.next_download_time - time.time()
-            if time_left > 0:
-                minutes = round(time_left / 60)
-                if minutes < 2:
-                    activity = discord.Activity(name=f'explosion imminent!!!', type=discord.ActivityType.playing)
-                else:
-                    activity = discord.Activity(name=f'an explosion in ~{minutes}m', type=discord.ActivityType.playing)
-                await self.bot.change_presence(activity=activity)
+        
+
 
     async def update_bot_status(self):
         while True:
-            await self.update_bot_status_once()
+            if hasattr(self.bot, 'next_download_time'):
+                time_left = self.bot.next_download_time - time.time()
+                if time_left > 0:
+                    minutes = round(time_left / 60)
+                    if minutes < 2:
+                        activity = discord.Activity(name=f'explosion imminent!!!', type=discord.ActivityType.playing)
+                    else:
+                        activity = discord.Activity(name=f'an explosion in ~{minutes}m', type=discord.ActivityType.playing)
+                    await self.bot.change_presence(activity=activity)
             await asyncio.sleep(60)
 
     async def play_sound_periodically(self):
         while True:
             try:
-                for guild in self.bot.guilds:
-                    channel = self.get_largest_voice_channel(guild)
                 sleep_time = random.uniform(0, 800)
                 self.bot.next_download_time = time.time() + sleep_time
                 while time.time() < self.bot.next_download_time:
-                    await self.update_bot_status_once()
                     await asyncio.sleep(60)
                 for guild in self.bot.guilds:
                     channel = self.get_largest_voice_channel(guild)
