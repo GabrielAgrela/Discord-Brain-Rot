@@ -1,11 +1,9 @@
 import asyncio
 import os
-import random
 import discord
 from Classes.Environment import Environment
 from Classes.Bot import Bot
 from Classes.BotBehaviour import BotBehavior
-import threading
 import interactions
 from discord.commands import Option
 from discord import default_permissions
@@ -33,7 +31,7 @@ async def on_ready():
     bot.loop.create_task(behavior.update_bot_status())
 
 @bot.slash_command(name="play", description="Write a name of something you want to hear")
-async def play_requested(ctx: interactions.CommandContext, message: Option(str, "Sound name ('random' for random)", required=True), request_number: Option(str, "Number of Similar Sounds", default=5)):
+async def play_requested(ctx: interactions.ComponentContext, message: Option(str, "Sound name ('random' for random)", required=True), request_number: Option(str, "Number of Similar Sounds", default=5)):
     await ctx.defer()
     await behavior.delete_last_message()
     request_number = int(request_number)

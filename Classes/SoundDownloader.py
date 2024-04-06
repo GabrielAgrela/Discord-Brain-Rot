@@ -13,11 +13,15 @@ from pydub import AudioSegment
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 import shutil
+import os
 
 class SoundDownloader:
     def __init__(self,db):
         self.db = db
-        self.service = Service(executable_path='/usr/lib/chromium-browser/chromedriver')
+        chromedriver_path = os.getenv("CHROMEDRIVER_PATH")
+        if not chromedriver_path:
+            chromedriver_path = ChromeDriverManager().install()
+        self.service = Service(executable_path=chromedriver_path)
         self.options = webdriver.ChromeOptions()
         self.options.add_argument('--log-level=3')
         self.dwdir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Downloads"))

@@ -2,15 +2,7 @@ import asyncio
 import csv
 import random
 import os
-import difflib
 import discord
-import Levenshtein
-from difflib import SequenceMatcher
-import re
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
-import numpy as np
-from fuzzywuzzy import process
 from fuzzywuzzy import fuzz
 class AudioDatabase:
     def __init__(self, csv_filename, bot=""):
