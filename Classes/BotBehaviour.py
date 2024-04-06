@@ -111,8 +111,6 @@ class BotBehavior:
         voice_client = discord.utils.get(self.bot.voice_clients, guild=channel.guild)
         if voice_client:
             await voice_client.move_to(channel)
-            if voice_client.is_playing():
-                voice_client.stop()
         else:
             try:
                 voice_client = await channel.connect()
