@@ -17,7 +17,6 @@ class BotBehavior:
     def __init__(self, bot, ffmpeg_path):
         self.bot = bot
         self.ffmpeg_path = ffmpeg_path
-        self.temp_channel = ""
         self.last_channel = {}
         self.playback_done = asyncio.Event()
         self.script_dir = os.path.dirname(__file__)  # Get the directory of the current script
@@ -49,8 +48,7 @@ class BotBehavior:
         formatted_message = "```" + "\n".join(message) + "```"  # Surrounds the message with code block markdown
         message = await self.send_message(title=description, description=formatted_message, footer="Auto-destructing in 30 seconds...")
         await asyncio.sleep(30)
-        await message.delete()
-        
+        await message.delete()     
 
     async def delete_controls_message(self, delete_all=True):
         try:
@@ -97,13 +95,20 @@ class BotBehavior:
                 largest_channel = channel
                 largest_size = len(channel.members)
         return largest_channel
+    
+    def get_user_voice_channel(self, guild, user):
+        #stip the user of the discriminator
+        user = user.split("#")[0]
+        for channel in guild.voice_channels:
+            if channel.members:
+                for member in channel.members:
+                    if user in member.name:
+                        return channel
+        return None
 
     async def play_audio(self, channel, audio_file, user, is_entrance=False, is_tts=False, extra="", original_message="", send_controls=True):
         self.randomize_color()
         self.player_history_db.add_entry(audio_file, user)
-        if channel == "":
-            channel = self.temp_channel
-        self.temp_channel = channel
         voice_client = discord.utils.get(self.bot.voice_clients, guild=channel.guild)
         bot_channel = discord.utils.get(self.bot.guilds[0].text_channels, name='bot')
         if bot_channel and not is_entrance and not is_tts:
@@ -179,7 +184,10 @@ class BotBehavior:
     async def play_random_sound(self, user="admin"):
         try:
             for guild in self.bot.guilds:
-                channel = self.get_largest_voice_channel(guild)
+                if (user == "admin"):
+                    channel = self.get_largest_voice_channel(guild)
+                else:
+                    channel = self.get_user_voice_channel(guild,user)
                 if channel is not None:
                     asyncio.create_task(self.play_audio(channel, self.db.get_random_filename(),user))
         except Exception as e:
@@ -187,7 +195,7 @@ class BotBehavior:
 
     async def play_random_favorite_sound(self, username):
         favorite_sounds = self.db.get_favorite_sounds()
-        channel = self.get_largest_voice_channel(self.bot.guilds[0])
+        channel = self.get_user_voice_channel(self.bot.guilds[0], username)
         if favorite_sounds:
             sound_to_play = random.choice(favorite_sounds)
             await self.play_audio(channel,sound_to_play, username)
@@ -205,7 +213,7 @@ class BotBehavior:
         filename = filenames[0][1] if filenames else None
         similarity = filenames[0][0] if filenames else None
         for guild in self.bot.guilds:
-            channel = self.get_largest_voice_channel(guild)
+            channel = self.get_user_voice_channel(guild, user)
             if channel is not None:
                 similar_sounds = [f"{filename[1]}" for filename in filenames[1:] if filename[0] > 70]
                 asyncio.create_task(self.play_audio(channel, filename, user,extra=similarity, original_message=id, send_controls = False if similar_sounds else True))
@@ -224,24 +232,21 @@ class BotBehavior:
     
     async def list_sounds(self, count=0):
         try:
-            for guild in self.bot.guilds:
-                channel = self.get_largest_voice_channel(guild)
-                if channel is not None:
-                    bot_channel = discord.utils.get(self.bot.guilds[0].text_channels, name='bot')
-                    if bot_channel:
-                        with open(self.db_path, 'r') as file:
-                            reader = csv.reader(file)
-                            data = list(reader)
-                            if count > 0:
-                                data = data[-count:]  # Get the last 'count' entries
-                                sound_names = [row[0] for row in data]  # Extract the first column
-                                message = "\n".join(sound_names)  # Convert to string
-                                sound_view = SoundView(self, sound_names)
-                                await self.send_message(title="Last "+ str(count)+" Sounds Downloaded", view=sound_view)
-                            else:
-                                await bot_channel.send(file=discord.File(self.db_path, 'Data/soundsDB.csv'))
-                            print(f"Message sent to the chat.")
-                            return
+            bot_channel = discord.utils.get(self.bot.guilds[0].text_channels, name='bot')
+            if bot_channel:
+                with open(self.db_path, 'r') as file:
+                    reader = csv.reader(file)
+                    data = list(reader)
+                    if count > 0:
+                        data = data[-count:]  # Get the last 'count' entries
+                        sound_names = [row[0] for row in data]  # Extract the first column
+                        message = "\n".join(sound_names)  # Convert to string
+                        sound_view = SoundView(self, sound_names)
+                        await self.send_message(title="Last "+ str(count)+" Sounds Downloaded", view=sound_view)
+                    else:
+                        await bot_channel.send(file=discord.File(self.db_path, 'Data/soundsDB.csv'))
+                    print(f"Message sent to the chat.")
+                    return
         except Exception as e:
             print(f"An error occurred: {e}")
 
