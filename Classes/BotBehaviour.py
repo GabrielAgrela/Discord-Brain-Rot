@@ -65,9 +65,9 @@ class BotBehavior:
         except Exception as e:
             print(f"1An error occurred: {e}")
 
-    async def delete_last_message(self):
+    async def delete_last_message(self, count=1):
         bot_channel = await self.get_bot_channel()
-        async for message in bot_channel.history(limit=1):
+        async for message in bot_channel.history(limit=count):
             await message.delete()
             return
     
@@ -126,7 +126,7 @@ class BotBehavior:
             if error:
                 print(f'---------------------Error in playback: {error}')
                 time.sleep(1)
-                asyncio.create_task(self.delete_last_message())
+                asyncio.create_task(self.delete_last_message(2))
                 asyncio.create_task(self.play_audio(channel, audio_file, user, is_entrance, is_tts, extra, original_message, send_controls))
             else:
                 # Add the entry to the play history database
