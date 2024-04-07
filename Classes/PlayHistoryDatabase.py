@@ -1,10 +1,9 @@
+import asyncio
 import csv
 from collections import Counter
-from datetime import datetime, timedelta
+from datetime import datetime
 import discord
-import random
-import time
-
+from collections import Counter
 class PlayHistoryDatabase:
     def __init__(self, csv_filename, db, bot, behavior):
         self.csv_filename = csv_filename
@@ -69,15 +68,17 @@ class PlayHistoryDatabase:
 
         
         await self.behavior.delete_controls_message()
-        await bot_channel.send(embed=embed)
+        message = await bot_channel.send(embed=embed)
         await self.behavior.send_controls()
+        await asyncio.sleep(30)
+        await message.delete()
 
 
 
 
 
 
-    async def write_top_users(self):
+    async def write_top_users(self, num_users=5):
         bot_channel = discord.utils.get(self.bot.guilds[0].text_channels, name='bot')
         
         # Read data from CSV
@@ -88,11 +89,19 @@ class PlayHistoryDatabase:
 
         # Count occurrences of each username
         user_counts = Counter(row[1] for row in play_data)
-
+        
         # Exclude specific usernames
         excluded_users = ["admin", "periodic function", "tts"]
-        top_users = [(u, c) for u, c in user_counts.most_common() if u not in excluded_users]
+        filtered_user_counts = {user: count for user, count in user_counts.items() if user not in excluded_users}
+        
+        # Convert dictionary back to Counter
+        filtered_user_counts = Counter(filtered_user_counts)
+        
+        # Limit to top 5 users
+        top_users = [(u, c) for u, c in filtered_user_counts.most_common(num_users)]
         await self.behavior.delete_controls_message()
+
+        messages = []
         # Create and send an embed for each top user
         for rank, (username, total_plays) in enumerate(top_users, 1):
             # Initialize embed with dynamic elements
@@ -113,7 +122,7 @@ class PlayHistoryDatabase:
 
             # Add sounds played by the user as fields in the embed
             sounds_played = Counter(row[0] for row in play_data if row[1] == username)  # Count occurrences of each sound played by the user
-            for sound_id, count in sounds_played.most_common(5):  # Only get the top 5 sounds
+            for sound_id, count in sounds_played.most_common(10):  # Only get the top 5 sounds
                 if sound_id.isdigit():
                     filename = self.db.get_filename_by_id(int(sound_id))
                 else:
@@ -122,8 +131,18 @@ class PlayHistoryDatabase:
 
             # Send the embed to the channel
             
-            await bot_channel.send(embed=embed)
+            message = await bot_channel.send(embed=embed)
+            messages.append(message)
+
         await self.behavior.send_controls()
+        # Wait for 10 seconds
+        await asyncio.sleep(120)
+
+        # Delete all messages
+        for message in messages:
+            await message.delete()
+
+        
 
 
 

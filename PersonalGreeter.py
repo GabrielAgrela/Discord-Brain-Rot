@@ -97,13 +97,13 @@ async def change(ctx, current: Option(str, "Current name of the sound", required
     await behavior.change_filename(current, new)
 
 @bot.slash_command(name="top", description="Leaderboard of sounds or users")
-async def change(ctx, option: Option(str, "users or sounds", required=True)):
+async def change(ctx, option: Option(str, "users or sounds", required=True), number: Option(str, "number of users", default=5)):
     await ctx.defer()
     await behavior.delete_last_message()
     if option == "sounds":
         await behavior.player_history_db.write_top_played_sounds()
     else:
-        await behavior.player_history_db.write_top_users()
+        await behavior.player_history_db.write_top_users(int(number))
 
 @bot.slash_command(name="list", description="returns database of sounds")
 async def change(ctx):
