@@ -106,7 +106,9 @@ class BotBehavior:
                         return channel
         return None
 
-    async def play_audio(self, channel, audio_file, user, is_entrance=False, is_tts=False, extra="", original_message="", send_controls=True):        
+    async def play_audio(self, channel, audio_file, user, is_entrance=False, is_tts=False, extra="", original_message="", send_controls=True):   
+        if await self.is_channel_empty(channel):
+            return     
         # Try connecting to the voice channel
         voice_client = discord.utils.get(self.bot.voice_clients, guild=channel.guild)
         if voice_client:
@@ -153,9 +155,6 @@ class BotBehavior:
             await asyncio.sleep(1)
             await self.play_audio(channel, audio_file, user, is_entrance, is_tts, extra, original_message, send_controls)
         await self.playback_done.wait()
-
-        
-
 
     async def update_bot_status(self):
         while True:
@@ -295,6 +294,13 @@ class BotBehavior:
             await self.send_controls()
         return message
     
+    #check if channel is empty or only has bot in it
+    async def is_channel_empty(self, channel):
+        if len(channel.members) == 0 or (len(channel.members) == 1 and self.bot.user in channel.members):
+            await self.bot.voice_clients[0].disconnect()
+            return True
+        return False
+
     async def send_controls(self):
         bot_channel = await self.get_bot_channel()
         self.controls_message = await bot_channel.send(view=ControlsView(self))
