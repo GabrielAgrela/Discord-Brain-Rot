@@ -25,7 +25,7 @@ async def on_ready():
     print(f"We have logged in as {bot.user}")
     await behavior.delete_controls_message()
     await behavior.clean_buttons()
-    await behavior.play_random_sound()
+    await behavior.send_controls()
     
     bot.loop.create_task(behavior.play_sound_periodically())
     bot.loop.create_task(behavior.update_bot_status())

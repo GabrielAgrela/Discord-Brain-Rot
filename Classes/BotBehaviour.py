@@ -243,15 +243,17 @@ class BotBehavior:
                 with open(self.db_path, 'r') as file:
                     reader = csv.reader(file)
                     data = list(reader)
+                    message = ""
                     if count > 0:
                         data = data[-count:]  # Get the last 'count' entries
                         sound_names = [row[0] for row in data]  # Extract the first column
-                        message = "\n".join(sound_names)  # Convert to string
                         sound_view = SoundView(self, sound_names)
-                        await self.send_message(title="Last "+ str(count)+" Sounds Downloaded", view=sound_view)
+                        message = await self.send_message(title="Last "+ str(count)+" Sounds Downloaded", footer="Auto-destructing in 30 seconds...", view=sound_view)
                     else:
-                        await bot_channel.send(file=discord.File(self.db_path, 'Data/soundsDB.csv'))
+                        message = await self.send_message(description="Total sounds downloaded: "+str(len(data)), footer="Auto-destructing in 30 seconds...", file=discord.File(self.db_path, 'Data/soundsDB.csv'))
                     print(f"Message sent to the chat.")
+                    await asyncio.sleep(30)
+                    await message.delete()
                     return
         except Exception as e:
             print(f"An error occurred: {e}")
@@ -294,7 +296,6 @@ class BotBehavior:
             await self.send_controls()
         return message
     
-    #check if channel is empty or only has bot in it
     async def is_channel_empty(self, channel):
         if len(channel.members) == 0 or (len(channel.members) == 1 and self.bot.user in channel.members):
             await self.bot.voice_clients[0].disconnect()
