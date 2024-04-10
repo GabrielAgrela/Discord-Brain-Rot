@@ -71,10 +71,10 @@ class BotBehavior:
             await message.delete()
             return
     
-    async def clean_buttons(self):
+    async def clean_buttons(self, count=10):
         try:
             bot_channel = await self.get_bot_channel()
-            async for message in bot_channel.history(limit=20):
+            async for message in bot_channel.history(limit=count):
                 # if message.components and not empty
                 if message.components and message.embeds:
                     await message.edit(view=None)      
