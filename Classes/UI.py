@@ -182,7 +182,7 @@ class ListLastScrapedSoundsButton(Button):
 
     async def callback(self, interaction):
         await interaction.response.defer()
-        asyncio.create_task(self.bot_behavior.list_sounds(10))
+        asyncio.create_task(self.bot_behavior.list_sounds(25))
 
 class PlaySoundButton(Button):
     def __init__(self, bot_behavior, sound_name, **kwargs):
