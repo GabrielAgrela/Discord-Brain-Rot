@@ -23,13 +23,13 @@ file_name = 'play_requests.csv'
 @bot.event
 async def on_ready():
     print(f"We have logged in as {bot.user}")
-    #await behavior.delete_controls_message()
-    #await behavior.clean_buttons()
+    await behavior.delete_controls_message()
+    await behavior.clean_buttons()
     await behavior.send_controls(force=True)
     
     
-    #bot.loop.create_task(behavior.play_sound_periodically())
-    #bot.loop.create_task(behavior.update_bot_status())
+    bot.loop.create_task(behavior.play_sound_periodically())
+    bot.loop.create_task(behavior.update_bot_status())
 
 @bot.slash_command(name="play", description="Write a name of something you want to hear")
 async def play_requested(ctx: interactions.ComponentContext, message: Option(str, "Sound name ('random' for random)", required=True), request_number: Option(str, "Number of Similar Sounds", default=5)):
