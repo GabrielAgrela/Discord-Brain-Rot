@@ -113,7 +113,7 @@ class AudioDatabase:
                
                 embed = discord.Embed(
                     title=f"Modified {old_filename} to {new_filename}",
-                    color=self.bot.color
+                    color=discord.Color.blurple()
                 )
                 #delete last message
                 await self.bot.send_message(title=f"Modified {old_filename} to {new_filename}")

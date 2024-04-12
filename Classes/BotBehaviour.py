@@ -46,7 +46,7 @@ class BotBehavior:
 
     async def write_list(self, message, description=""):
         formatted_message = "```" + "\n".join(message) + "```"  # Surrounds the message with code block markdown
-        message = await self.send_message(title=description, description=formatted_message, footer="Auto-destructing in 30 seconds...")
+        message = await self.send_message(title=description, description=formatted_message)
         await asyncio.sleep(30)
         await message.delete()     
 
@@ -140,7 +140,7 @@ class BotBehavior:
             # Get the absolute path of the audio file
             audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", audio_file))
             # Send a message to the bot channel if the sound is not a slap, tiro or pubg-pan-sound-effect
-            self.randomize_color()
+            self.color = discord.Color.red()
             bot_channel = discord.utils.get(self.bot.guilds[0].text_channels, name='bot')
             if bot_channel and not is_entrance and not is_tts:
                 if audio_file.split('/')[-1].replace('.mp3', '') not in ["slap", "tiro", "pubg-pan-sound-effect"]:
@@ -254,9 +254,9 @@ class BotBehavior:
                         data = data[-count:]  # Get the last 'count' entries
                         sound_names = [row[0] for row in data]  # Extract the first column
                         sound_view = SoundView(self, sound_names)
-                        message = await self.send_message(title="Last "+ str(count)+" Sounds Downloaded", footer="Auto-destructing in 30 seconds...", view=sound_view)
+                        message = await self.send_message(title="Last "+ str(count)+" Sounds Downloaded", view=sound_view)
                     else:
-                        message = await self.send_message(description="Total sounds downloaded: "+str(len(data)), footer="Auto-destructing in 30 seconds...", file=discord.File(self.db_path, 'Data/soundsDB.csv'))
+                        message = await self.send_message(description="Total sounds downloaded: "+str(len(data)), file=discord.File(self.db_path, 'Data/soundsDB.csv'))
                     print(f"Message sent to the chat.")
                     await asyncio.sleep(30)
                     await message.delete()

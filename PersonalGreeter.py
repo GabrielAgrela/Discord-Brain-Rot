@@ -61,6 +61,7 @@ async def tts(ctx, message: Option(str, "What you want to say", required=True), 
     flag = flag_emojis.get(language, ":flag_gb:")
     user = discord.utils.get(bot.get_all_members(), name=ctx.user.name)
 
+    behavior.color = discord.Color.dark_blue()
     await behavior.send_message(title=f"TTS in {flag}", description=f"'{message}'", thumbnail=user.avatar.url if user and user.avatar else user.default_avatar.url)
 
     try:
