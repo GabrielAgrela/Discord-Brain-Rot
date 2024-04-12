@@ -67,7 +67,6 @@ class PlayHistoryDatabase:
         
 
         
-        await self.behavior.delete_controls_message()
         message = await bot_channel.send(embed=embed)
         await self.behavior.send_controls()
         await asyncio.sleep(30)
@@ -99,7 +98,6 @@ class PlayHistoryDatabase:
         
         # Limit to top 5 users
         top_users = [(u, c) for u, c in filtered_user_counts.most_common(num_users)]
-        await self.behavior.delete_controls_message()
 
         messages = []
         # Create and send an embed for each top user

@@ -292,7 +292,6 @@ class BotBehavior:
         await message.delete()
 
     async def send_message(self, title="", description="",footer=None, thumbnail=None, view=None, send_controls=True, file=None):
-        await self.delete_controls_message()
         bot_channel = await self.get_bot_channel()
         embed = discord.Embed(title=title, description=description, color=self.color)
         embed.set_thumbnail(url=thumbnail)
@@ -308,10 +307,17 @@ class BotBehavior:
             return True
         return False
 
-    async def send_controls(self):
+    async def send_controls(self, force = False):
         bot_channel = await self.get_bot_channel()
-        self.controls_message = await bot_channel.send(view=ControlsView(self))
-        await self.delete_controls_message(delete_all=False)
+        try:
+            await self.controls_message.delete()
+            self.controls_message = await bot_channel.send(view=ControlsView(self))
+        except Exception as e:
+            print("error sending controls ", e)
+        if force:
+            self.controls_message = await bot_channel.send(view=ControlsView(self))
+        
+        
 
     async def is_playing_sound(self):
         for vc in self.bot.voice_clients:

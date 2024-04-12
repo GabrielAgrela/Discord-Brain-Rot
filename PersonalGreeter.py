@@ -23,17 +23,17 @@ file_name = 'play_requests.csv'
 @bot.event
 async def on_ready():
     print(f"We have logged in as {bot.user}")
-    await behavior.delete_controls_message()
-    await behavior.clean_buttons()
-    await behavior.send_controls()
+    #await behavior.delete_controls_message()
+    #await behavior.clean_buttons()
+    await behavior.send_controls(force=True)
     
-    bot.loop.create_task(behavior.play_sound_periodically())
-    bot.loop.create_task(behavior.update_bot_status())
+    
+    #bot.loop.create_task(behavior.play_sound_periodically())
+    #bot.loop.create_task(behavior.update_bot_status())
 
 @bot.slash_command(name="play", description="Write a name of something you want to hear")
 async def play_requested(ctx: interactions.ComponentContext, message: Option(str, "Sound name ('random' for random)", required=True), request_number: Option(str, "Number of Similar Sounds", default=5)):
-    await ctx.defer()
-    await behavior.delete_last_message()
+    await ctx.respond("Processing your request...", delete_after=0)
     request_number = int(request_number)
     if request_number > 25:
         request_number = 25
@@ -56,8 +56,7 @@ async def play_requested(ctx: interactions.ComponentContext, message: Option(str
     
 @bot.slash_command(name='tts', description='TTS with google translate. Press tab and enter to select message and write')
 async def tts(ctx, message: Option(str, "What you want to say", required=True), language: Option(str, "en, pt, br, es, fr, de, ar, ru and ch", required=True)):
-    await ctx.defer()
-    await behavior.delete_last_message()
+    await ctx.respond("Processing your request...", delete_after=0)
     flag_emojis = {"pt": ":flag_pt:", "br": ":flag_br:", "es": ":flag_es:", "fr": ":flag_fr:", "de": ":flag_de:", "ru": ":flag_ru:", "ar": ":flag_sa:", "ch": ":flag_cn:", "ir": ":flag_ie:", "en": ":flag_gb:"}
     flag = flag_emojis.get(language, ":flag_gb:")
     user = discord.utils.get(bot.get_all_members(), name=ctx.user.name)
@@ -92,14 +91,12 @@ async def tts(ctx, message: Option(str, "What you want to say", required=True), 
 
 @bot.slash_command(name="change", description="change the name of a sound")
 async def change(ctx, current: Option(str, "Current name of the sound", required=True), new: Option(str, "New name of the sound", required=True)):
-    await ctx.defer()
-    await behavior.delete_last_message()
+    await ctx.respond("Processing your request...", delete_after=0)
     await behavior.change_filename(current, new)
 
 @bot.slash_command(name="top", description="Leaderboard of sounds or users")
 async def change(ctx, option: Option(str, "users or sounds", required=True), number: Option(str, "number of users", default=5)):
-    await ctx.defer()
-    await behavior.delete_last_message()
+    await ctx.respond("Processing your request...", delete_after=0)
     if option == "sounds":
         await behavior.player_history_db.write_top_played_sounds()
     else:
@@ -107,32 +104,27 @@ async def change(ctx, option: Option(str, "users or sounds", required=True), num
 
 @bot.slash_command(name="list", description="returns database of sounds")
 async def change(ctx):
-    await ctx.defer()
-    await behavior.delete_last_message()
+    await ctx.respond("Processing your request...", delete_after=0)
     await behavior.list_sounds()    
 
 @bot.slash_command(name="subwaysurfers", description="returns database of sounds")
 async def change(ctx):
-    await ctx.defer()
-    await behavior.delete_last_message()
+    await ctx.respond("Processing your request...", delete_after=0)
     await behavior.subway_surfers()    
 
 @bot.slash_command(name="familyguy", description="returns database of sounds")
 async def change(ctx):
-    await ctx.defer()
-    await behavior.delete_last_message()
+    await ctx.respond("Processing your request...", delete_after=0)
     await behavior.family_guy()
 
 @bot.slash_command(name="slice", description="returns database of sounds")
 async def change(ctx):
-    await ctx.defer()
-    await behavior.delete_last_message()
+    await ctx.respond("Processing your request...", delete_after=0)
     await behavior.slice_all()
 
 @bot.slash_command(name="lastsounds", description="returns last sounds downloaded")
 async def change(ctx, number: Option(str, "number of sounds", default=10)):
-    await ctx.defer()
-    await behavior.delete_last_message()
+    await ctx.respond("Processing your request...", delete_after=0)
     await behavior.list_sounds(int(number))    
 
 
