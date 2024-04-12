@@ -153,7 +153,7 @@ class BrainRotButton(Button):
         self.bot_behavior = bot_behavior
 
     async def callback(self, interaction):
-        await interaction.response.defer()
+        await interaction.response.send_message("WAIT SOME SECONDS RASPBERRY PI IS BURNING 🔥🔥🔥", delete_after=5)
         if (datetime.now() - self.bot_behavior.lastInteractionDateTime).total_seconds() > 10:
             self.bot_behavior.color = discord.Color.teal()
             task = random.choice([self.bot_behavior.family_guy, self.bot_behavior.family_guy, self.bot_behavior.family_guy, self.bot_behavior.subway_surfers, self.bot_behavior.slice_all])
