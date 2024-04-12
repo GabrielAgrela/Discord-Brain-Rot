@@ -46,6 +46,7 @@ class BotBehavior:
 
     async def write_list(self, message, description=""):
         formatted_message = "```" + "\n".join(message) + "```"  # Surrounds the message with code block markdown
+        self.color = discord.Color.orange()
         message = await self.send_message(title=description, description=formatted_message)
         await asyncio.sleep(30)
         await message.delete()     
