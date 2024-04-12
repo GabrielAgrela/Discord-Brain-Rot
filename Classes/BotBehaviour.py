@@ -144,6 +144,12 @@ class BotBehavior:
             bot_channel = discord.utils.get(self.bot.guilds[0].text_channels, name='bot')
             if bot_channel and not is_entrance and not is_tts:
                 if audio_file.split('/')[-1].replace('.mp3', '') not in ["slap", "tiro", "pubg-pan-sound-effect"]:
+                    # check if is plaing sound, if so, send a autodestruct message to the bot channel saying "waiting for the sound to finish"
+                    if await self.is_playing_sound():
+                        message = await bot_channel.send(embed=discord.Embed(title="Don't be rude, let Gertrudes speak 😤"))
+                        await asyncio.sleep(3)
+                        await message.delete()
+                        return
                     await self.send_message(view=SoundBeingPlayedView(self, audio_file), title=f"🔊 **{audio_file.split('/')[-1].replace('.mp3', '')}** 🔊", description = f"Similarity: {extra}%" if extra != "" else None, footer = f"{user} requested '{original_message}'" if original_message else f"Requested by {user}", send_controls=send_controls)
             # Stop the audio if it is already playing
             if voice_client.is_playing():
@@ -306,3 +312,9 @@ class BotBehavior:
         bot_channel = await self.get_bot_channel()
         self.controls_message = await bot_channel.send(view=ControlsView(self))
         await self.delete_controls_message(delete_all=False)
+
+    async def is_playing_sound(self):
+        for vc in self.bot.voice_clients:
+            if vc.is_playing():
+                return True
+        return False

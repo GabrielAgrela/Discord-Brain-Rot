@@ -221,4 +221,3 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
                             
 
 bot.run_bot()
-bot.start()
