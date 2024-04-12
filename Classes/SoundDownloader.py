@@ -139,7 +139,7 @@ class SoundDownloader:
 
     def scroll_a_little(self, driver):
         # Get the current scroll height of the page
-        for i in range(0, 15):
+        for i in range(0, 5):
             last_height = driver.execute_script("return document.body.scrollHeight")
             
             # Scroll to the random height
