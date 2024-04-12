@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime
 import time
 import discord
 import random
@@ -30,6 +31,8 @@ class BotBehavior:
         self.embed = None
         self.controls_message = None
         self.color = discord.Color.red()
+        # self.lastInteractionDateTime = current
+        self.lastInteractionDateTime = datetime.now()
 
     async def get_new_name(self, interaction):
         message = await interaction.channel.send(embed=discord.Embed(title="Please enter the new name for the sound.", color=self.color))

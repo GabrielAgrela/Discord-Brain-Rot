@@ -1,3 +1,4 @@
+from datetime import datetime
 import random
 from discord.ui import Button, View
 import discord
@@ -153,8 +154,13 @@ class BrainRotButton(Button):
 
     async def callback(self, interaction):
         await interaction.response.defer()
-        task = random.choice([self.bot_behavior.family_guy,self.bot_behavior.family_guy, self.bot_behavior.family_guy,  self.bot_behavior.subway_surfers, self.bot_behavior.slice_all])
-        asyncio.create_task(task())
+        if (datetime.now() - self.bot_behavior.lastInteractionDateTime).total_seconds() > 10:
+            self.bot_behavior.color = discord.Color.teal()
+            task = random.choice([self.bot_behavior.family_guy, self.bot_behavior.family_guy, self.bot_behavior.family_guy, self.bot_behavior.subway_surfers, self.bot_behavior.slice_all])
+            asyncio.create_task(task())
+            self.bot_behavior.lastInteractionDateTime = datetime.now()
+        else:
+            print("Too many requests")
 
 
 class ListTopSoundsButton(Button):
