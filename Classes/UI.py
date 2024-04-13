@@ -153,7 +153,6 @@ class BrainRotButton(Button):
         self.bot_behavior = bot_behavior
 
     async def callback(self, interaction):
-        await interaction.response.defer()
         if (datetime.now() - self.bot_behavior.lastInteractionDateTime).total_seconds() > 10:
             asyncio.create_task(interaction.channel.send("Gertrudes may need some seconds for this one", delete_after=3))
             self.bot_behavior.color = discord.Color.teal()
@@ -162,6 +161,7 @@ class BrainRotButton(Button):
             self.bot_behavior.lastInteractionDateTime = datetime.now()
         else:
             asyncio.create_task(interaction.channel.send("STOP SPAMMING, GERTRUDES IS RUNNING ON A RASPBERRY PI 🔥🔥🔥", delete_after=3))
+        await interaction.response.defer()
 
 class ListTopSoundsButton(Button):
     def __init__(self, bot_behavior, **kwargs):
