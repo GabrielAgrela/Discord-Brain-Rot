@@ -132,7 +132,8 @@ class BotBehavior:
             if error:
                 print(f'---------------------Error in playback: {error}')
                 time.sleep(1)
-                loop = asyncio.get_event_loop()
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
                 loop.create_task(self.delete_last_message(2))
                 loop.create_task(self.play_audio(channel, audio_file, user, is_entrance, is_tts, extra, original_message, send_controls))
             else:
