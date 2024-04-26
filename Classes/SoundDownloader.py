@@ -107,35 +107,34 @@ class SoundDownloader:
             download_button = wait.until(EC.element_to_be_clickable((By.XPATH, '//a[contains(@class, "instant-page-extra-button btn btn-primary")][contains(text(),"Download MP3")]')))
             print(self.__class__.__name__,": Clicking download sound")
             self.driver.execute_script("arguments[0].click();", download_button)
-            time.sleep(5)
-            list_of_files = glob.glob(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Downloads","*")))
-            print(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Downloads","*")))
-            print(self.__class__.__name__,": ",str(len(list_of_files)) + " files found")
-            latest_file = max(list_of_files, key=os.path.getctime)
-            print(self.__class__.__name__,": ",latest_file, " chosen")
-            print(self.__class__.__name__,": Adjusting sound volume")
-            self.adjust_volume(latest_file, -20.0)
-            destination_folder = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds"))
-            
-            if not self.db.check_if_sound_exists(os.path.basename(latest_file)):
-                print(self.__class__.__name__,":Moving file to " + destination_folder)
-                shutil.move(latest_file, os.path.join(destination_folder, os.path.basename(latest_file)))
-                self.db.add_entry(os.path.basename(latest_file))
-                
-            else:
-                
-                print(self.__class__.__name__,": Sound already exists ", os.path.basename(latest_file))
-                print(self.__class__.__name__,": Removing file")
-                os.remove(latest_file)
-            #delete file
-            
-
-            self.driver.quit()
+            # WAIT FOR DOWNLOAD TO FINISH
+            print(self.__class__.__name__,": Waiting for download to finish")
+            time.sleep(10)
         except Exception as e:
             print(self.__class__.__name__,": Error downloading sound: ", e)
             self.driver.quit()
         print(self.__class__.__name__,": Sound Dowloader finished")
         print("\n-----------------------------------\n")
+
+        self.driver.quit()
+
+    def move_sounds(self):
+        list_of_files = glob.glob(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Downloads","*.mp3")))
+        print(self.__class__.__name__," MOVER: ",str(len(list_of_files)) + " files found")
+        for file in list_of_files:
+            print(self.__class__.__name__," MOVER: ",file, " chosen")
+            print(self.__class__.__name__," MOVER: Adjusting sound volume")
+            self.adjust_volume(file, -20.0)
+            destination_folder = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds"))
+            
+            if not self.db.check_if_sound_exists(os.path.basename(file)):
+                print(self.__class__.__name__," MOVER:Moving file to " + destination_folder)
+                shutil.move(file, os.path.join(destination_folder, os.path.basename(file)))
+                self.db.add_entry(os.path.basename(file))
+            else:
+                print(self.__class__.__name__," MOVER: Sound already exists ", os.path.basename(file))
+                print(self.__class__.__name__," MOVER: Removing file")
+                os.remove(file)
 
     def scroll_a_little(self, driver):
         # Get the current scroll height of the page
