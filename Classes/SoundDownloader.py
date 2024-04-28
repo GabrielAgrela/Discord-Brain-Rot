@@ -14,6 +14,8 @@ from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 import shutil
 import os
+from unidecode import unidecode
+import requests
 
 class SoundDownloader:
     def __init__(self,db, chromedriver_path=""):
@@ -30,7 +32,7 @@ class SoundDownloader:
             "download.prompt_for_download": False,
 
         })
-        self.options.add_argument('--headless')
+        #self.options.add_argument('--headless')
         self.options.add_argument('window-size=1200x600')
         #self.options.add_argument('load-extension=' + r'C:\Users\netco\Desktop\1.52.2_0')
 
@@ -49,91 +51,64 @@ class SoundDownloader:
             print(self.__class__.__name__,": Scrolling down to get more sounds")
             self.scroll_a_little(self.driver)
             sound_elements = wait.until(EC.presence_of_all_elements_located((By.XPATH, '//a[@class="instant-link link-secondary"]')))
-            print(self.__class__.__name__,": ",str(len(sound_elements)) + " Sounds found")
-            random_sound_element = random.choice(sound_elements)
-            
-            self.driver.execute_script("arguments[0].scrollIntoView(true);", random_sound_element)
-            time.sleep(2)
-            self.driver.execute_script("arguments[0].click();", random_sound_element)
-            time.sleep(1)
-            try:
-                # Find the <ins> tag with id starting with 'gpt'
-                ins_tag = self.driver.find_element(By.CSS_SELECTOR, "ins[id^='gpt']")
+            print(self.__class__.__name__,": Found ", len(sound_elements), " sounds")
+            new_sounds_detected = 0
+            new_sounds_downloaded = 0
+            new_sounds_invalid = 0
+            #for each sound_elements, download the sound by going to the url "https://www.myinstants.com/media/sounds/"+sound element text to lowercase+".mp3"
+            for i in range(0, len(sound_elements)):
+                filename = unidecode(sound_elements[i].text.lower().replace("*", "").replace("_", "-").replace("'", "").replace(" ", "-").replace(",", "").replace("?", "").replace("!", "").replace(":", "").replace("(", "").replace(")", "")) + ".mp3"
+                #sometimes it has multiple - in a row, so we need to replace them with just one
+                filename = filename.replace("~", "")
+                filename = filename.replace("#", "")
+                filename = filename.replace("--", "-")
+                filename = filename.replace("--", "-")
+                filename = filename.replace("...", ".")
+                filename = filename.replace("..", ".")
+                filename = filename.replace(".mp3.mp3", ".mp3")
+                filename = filename.replace('"','')
+                url = "https://www.myinstants.com/media/sounds/" + filename
 
-                # Find the iframe within the <ins> tag
-                iframe = ins_tag.find_element(By.TAG_NAME, "iframe")
-
-                # Switch to the iframe
-                self.driver.switch_to.frame(iframe)
-
-                # Check if there's an extra iframe within the current iframe
-                try:
-                    inner_iframe = self.driver.find_element(By.TAG_NAME, "iframe")
-                    self.driver.switch_to.frame(inner_iframe)
-                    print(self.__class__.__name__, ": Switched to inner iframe")
-                except Exception as e:
-                    print(self.__class__.__name__, ": No inner iframe found")
-
-                # Find the dismiss button
-                dismiss_button = self.driver.find_element(By.ID, "dismiss-button")
-                print(self.__class__.__name__, ": Clicking dismiss button")
-                self.driver.execute_script("arguments[0].click();", dismiss_button)
-
-                # Switch back to the main content
-                self.driver.switch_to.default_content()
-            except Exception as e:
-                print(self.__class__.__name__, ": No dismiss button found ")
-            time.sleep(1)
-            #try to click //*[@id="dismiss-button"]
-            try:
-                # Find the <ins> tag
-                ins_tag = self.driver.find_element(By.TAG_NAME, "ins")
-
-                # Find the iframe within the <ins> tag
-                iframe = ins_tag.find_element(By.TAG_NAME, "iframe")
-
-                # Switch to the iframe
-                self.driver.switch_to.frame(iframe)
-
-                # Find the dismiss button
-                dismiss_button = self.driver.find_element(By.ID, "dismiss-button")
-                print(self.__class__.__name__, ": Clicking dismiss button")
-                self.driver.execute_script("arguments[0].click();", dismiss_button)
-
-                # Switch back to the main content
-                self.driver.switch_to.default_content()
-            except Exception as e:
-                print(self.__class__.__name__, ": No dismiss button found ")
-            download_button = wait.until(EC.element_to_be_clickable((By.XPATH, '//a[contains(@class, "instant-page-extra-button btn btn-primary")][contains(text(),"Download MP3")]')))
-            print(self.__class__.__name__,": Clicking download sound")
-            self.driver.execute_script("arguments[0].click();", download_button)
-            # WAIT FOR DOWNLOAD TO FINISH
-            print(self.__class__.__name__,": Waiting for download to finish")
-            time.sleep(10)
+                if not self.db.check_if_sound_exists(filename):
+                    new_sounds_detected += 1
+                    response = requests.get(url)
+                    # if the file is not found, we will skip it
+                    if response.status_code == 404:
+                        new_sounds_invalid += 1
+                        print(f"File {filename} not found, skipping download.")
+                    else:
+                        new_sounds_downloaded += 1
+                        out_file_path = os.path.join(self.dwdir, filename)
+                        with open(out_file_path, 'wb') as out_file:
+                            # write the file to self.dwdir location
+                            out_file.write(response.content)
         except Exception as e:
             print(self.__class__.__name__,": Error downloading sound: ", e)
             self.driver.quit()
-        print(self.__class__.__name__,": Sound Dowloader finished")
+        print(self.__class__.__name__,": Sound Dowloader finished " + str(new_sounds_detected) + " sounds detected, " + str(new_sounds_downloaded) + " sounds downloaded, " + str(new_sounds_invalid) + " sounds invalid")
         print("\n-----------------------------------\n")
 
         self.driver.quit()
 
-    def move_sounds(self):
+    def move_sounds(self):    
         list_of_files = glob.glob(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Downloads","*.mp3")))
         print(self.__class__.__name__," MOVER: ",str(len(list_of_files)) + " files found")
         for file in list_of_files:
-            print(self.__class__.__name__," MOVER: ",file, " chosen")
-            print(self.__class__.__name__," MOVER: Adjusting sound volume")
-            self.adjust_volume(file, -20.0)
-            destination_folder = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds"))
-            
-            if not self.db.check_if_sound_exists(os.path.basename(file)):
-                print(self.__class__.__name__," MOVER:Moving file to " + destination_folder)
-                shutil.move(file, os.path.join(destination_folder, os.path.basename(file)))
-                self.db.add_entry(os.path.basename(file))
-            else:
-                print(self.__class__.__name__," MOVER: Sound already exists ", os.path.basename(file))
-                print(self.__class__.__name__," MOVER: Removing file")
+            try:
+                print(self.__class__.__name__," MOVER: ",file, " chosen")
+                print(self.__class__.__name__," MOVER: Adjusting sound volume")
+                self.adjust_volume(file, -20.0)
+                destination_folder = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds"))
+                
+                if not self.db.check_if_sound_exists(os.path.basename(file)):
+                    print(self.__class__.__name__," MOVER:Moving file to " + destination_folder)
+                    shutil.move(file, os.path.join(destination_folder, os.path.basename(file)))
+                    self.db.add_entry(os.path.basename(file))
+                else:
+                    print(self.__class__.__name__," MOVER: Sound already exists ", os.path.basename(file))
+                    print(self.__class__.__name__," MOVER: Removing file")
+                    os.remove(file)
+            except Exception as e:
                 os.remove(file)
 
     def scroll_a_little(self, driver):

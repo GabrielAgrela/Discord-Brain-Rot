@@ -23,7 +23,7 @@ class AudioDatabase:
             print("No similar filename found. Entry not added.")
     
     def check_if_sound_exists(self, filename):
-        print(f"Checking if {filename} exists")
+        #print(f"Checking if {filename} exists")
         data = self._read_data()
         for row in data:
             if row['originalfilename'] == filename:

@@ -11,15 +11,16 @@ sound_downloader_instance = SoundDownloader(db, os.getenv("CHROMEDRIVER_PATH"))
 
 def download_sounds():
     while True:
+        sound_downloader_instance.move_sounds()
         SoundDownloader(db, os.getenv("CHROMEDRIVER_PATH")).download_sound()
-        time.sleep(10)
+        time.sleep(60)
 
 download_thread = threading.Thread(target=download_sounds)
 download_thread.start()
 
 
-while True:
-    sound_downloader_instance.move_sounds()
-    time.sleep(10)
+#while True:
+    #sound_downloader_instance.move_sounds()
+    #time.sleep(10)
 
 
