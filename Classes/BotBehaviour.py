@@ -264,7 +264,7 @@ class BotBehavior:
                     else:
                         message = await self.send_message(description="Total sounds downloaded: "+str(len(data)), file=discord.File(self.db_path, 'Data/soundsDB.csv'))
                     print(f"Message sent to the chat.")
-                    await asyncio.sleep(30)
+                    await asyncio.sleep(120)
                     await message.delete()
                     return
         except Exception as e:
