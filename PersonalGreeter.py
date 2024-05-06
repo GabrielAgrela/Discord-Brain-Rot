@@ -8,6 +8,7 @@ import interactions
 from discord.commands import Option
 from discord import default_permissions
 from Classes.UsersUtils import UsersUtils
+from Classes.SoundDownloader import SoundDownloader
 
 env = Environment()
 intents = discord.Intents(guilds=True, voice_states=True, messages=True, message_content=True, members=True)
@@ -30,6 +31,7 @@ async def on_ready():
     
     bot.loop.create_task(behavior.play_sound_periodically())
     bot.loop.create_task(behavior.update_bot_status())
+    bot.loop.create_task(SoundDownloader(behavior, behavior.db, os.getenv("CHROMEDRIVER_PATH")).move_sounds())
 
 @bot.slash_command(name="play", description="Write a name of something you want to hear")
 async def play_requested(ctx: interactions.ComponentContext, message: Option(str, "Sound name ('random' for random)", required=True), request_number: Option(str, "Number of Similar Sounds", default=5)):

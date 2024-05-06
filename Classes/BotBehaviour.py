@@ -25,7 +25,6 @@ class BotBehavior:
         self.ph_path = os.path.join(self.script_dir, "../Data/play_history.csv")
         self.db = AudioDatabase(self.db_path, self)
         self.player_history_db = PlayHistoryDatabase(self.ph_path,self.db, self.bot, self)
-        self.sound_downloader = SoundDownloader(self.db)
         self.TTS = TTS(self,bot)
         self.view = None
         self.embed = None

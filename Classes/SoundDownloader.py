@@ -1,3 +1,4 @@
+import asyncio
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -16,10 +17,12 @@ import shutil
 import os
 from unidecode import unidecode
 import requests
+from Classes.UI import SoundView
 
 class SoundDownloader:
-    def __init__(self,db, chromedriver_path=""):
+    def __init__(self, bot, db, chromedriver_path=""):
         self.db = db
+        self.bot = bot
         chromedriver_path = os.getenv("CHROMEDRIVER_PATH")
         if not chromedriver_path:
             chromedriver_path = ChromeDriverManager().install()
@@ -90,26 +93,30 @@ class SoundDownloader:
 
         self.driver.quit()
 
-    def move_sounds(self):    
-        list_of_files = glob.glob(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Downloads","*.mp3")))
-        print(self.__class__.__name__," MOVER: ",str(len(list_of_files)) + " files found")
-        for file in list_of_files:
-            try:
-                print(self.__class__.__name__," MOVER: ",file, " chosen")
-                print(self.__class__.__name__," MOVER: Adjusting sound volume")
-                self.adjust_volume(file, -20.0)
-                destination_folder = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds"))
-                
-                if not self.db.check_if_sound_exists(os.path.basename(file)):
-                    print(self.__class__.__name__," MOVER:Moving file to " + destination_folder)
-                    shutil.move(file, os.path.join(destination_folder, os.path.basename(file)))
-                    self.db.add_entry(os.path.basename(file))
-                else:
-                    print(self.__class__.__name__," MOVER: Sound already exists ", os.path.basename(file))
-                    print(self.__class__.__name__," MOVER: Removing file")
+    async def move_sounds(self):   
+        while True: 
+            list_of_files = glob.glob(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Downloads","*.mp3")))
+            print(self.__class__.__name__," MOVER: ",str(len(list_of_files)) + " files found")
+            for file in list_of_files:
+                try:
+                    print(self.__class__.__name__," MOVER: ",file, " chosen")
+                    print(self.__class__.__name__," MOVER: Adjusting sound volume")
+                    self.adjust_volume(file, -20.0)
+                    destination_folder = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds"))
+                    
+                    if not self.db.check_if_sound_exists(os.path.basename(file)):
+                        print(self.__class__.__name__," MOVER:Moving file to " + destination_folder)
+                        sound_view = SoundView(self.bot, [os.path.basename(file)])
+                        await self.bot.send_message(title="I stole "+os.path.basename(file)+" to our database hehe", view=sound_view)
+                        shutil.move(file, os.path.join(destination_folder, os.path.basename(file)))
+                        self.db.add_entry(os.path.basename(file))
+                    else:
+                        print(self.__class__.__name__," MOVER: Sound already exists ", os.path.basename(file))
+                        print(self.__class__.__name__," MOVER: Removing file")
+                        os.remove(file)
+                except Exception as e:
                     os.remove(file)
-            except Exception as e:
-                os.remove(file)
+            await asyncio.sleep(60)
 
     def scroll_a_little(self, driver):
         # Get the current scroll height of the page
