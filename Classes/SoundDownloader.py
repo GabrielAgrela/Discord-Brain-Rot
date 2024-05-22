@@ -115,6 +115,7 @@ class SoundDownloader:
                         print(self.__class__.__name__," MOVER: Removing file")
                         os.remove(file)
                 except Exception as e:
+                    print(self.__class__.__name__," MOVER: Error moving sound: ", e)
                     os.remove(file)
             await asyncio.sleep(10)
 
