@@ -24,6 +24,7 @@ class BotBehavior:
         self.script_dir = os.path.dirname(__file__)  # Get the directory of the current script
         self.db_path = os.path.join(self.script_dir, "../Data/soundsDB.csv")
         self.ph_path = os.path.join(self.script_dir, "../Data/play_history.csv")
+        self.dwdir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Downloads"))
         self.db = AudioDatabase(self.db_path, self)
         self.player_history_db = PlayHistoryDatabase(self.ph_path,self.db, self.bot, self)
         self.TTS = TTS(self,bot)
@@ -74,17 +75,15 @@ class BotBehavior:
                 await error_message.delete()
 
     async def save_uploaded_sound(self, attachment):
-        downloads_path = os.path.join(self.script_dir, "..\Downloads")
-        os.makedirs(downloads_path, exist_ok=True)
-        file_path = os.path.join(downloads_path, attachment.filename)
+        os.makedirs(self.dwdir, exist_ok=True)
+        file_path = os.path.join(self.dwdir, attachment.filename)
         await attachment.save(file_path)
         return file_path
 
     async def save_sound_from_url(self, url):
-        downloads_path = os.path.join(self.script_dir, "..\Downloads")
-        os.makedirs(downloads_path, exist_ok=True)
+        os.makedirs(self.dwdir, exist_ok=True)
         filename = url.split("/")[-1]
-        file_path = os.path.join(downloads_path, filename)
+        file_path = os.path.join(self.dwdir, filename)
 
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as response:
