@@ -116,7 +116,7 @@ class SoundDownloader:
                         os.remove(file)
                 except Exception as e:
                     os.remove(file)
-            await asyncio.sleep(60)
+            await asyncio.sleep(10)
 
     def scroll_a_little(self, driver):
         # Get the current scroll height of the page

@@ -44,7 +44,7 @@ class BotBehavior:
             return
         
         async with self.upload_lock:
-            message = await interaction.channel.send(embed=discord.Embed(title="Please upload a sound file (mp3 format) or provide an MP3 URL.", color=self.color))
+            message = await interaction.channel.send(embed=discord.Embed(title="Upload a the .mp3 or provide an MP3 URL. You have 60s ☝️🤓", color=self.color))
 
             def check(m):
                 is_attachment = len(m.attachments) > 0 and m.attachments[0].filename.endswith('.mp3')
