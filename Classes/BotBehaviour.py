@@ -74,14 +74,14 @@ class BotBehavior:
                 await error_message.delete()
 
     async def save_uploaded_sound(self, attachment):
-        downloads_path = os.path.join(self.script_dir, "../downloads")
+        downloads_path = os.path.join(self.script_dir, "..\Downloads")
         os.makedirs(downloads_path, exist_ok=True)
         file_path = os.path.join(downloads_path, attachment.filename)
         await attachment.save(file_path)
         return file_path
 
     async def save_sound_from_url(self, url):
-        downloads_path = os.path.join(self.script_dir, "../downloads")
+        downloads_path = os.path.join(self.script_dir, "..\Downloads")
         os.makedirs(downloads_path, exist_ok=True)
         filename = url.split("/")[-1]
         file_path = os.path.join(downloads_path, filename)
