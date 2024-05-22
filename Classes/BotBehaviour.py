@@ -11,7 +11,8 @@ from Classes.TTS import TTS
 import csv
 from Classes.UI import SoundBeingPlayedView, ControlsView, SoundView
 from moviepy.editor import VideoFileClip
-
+import aiohttp
+import re
 
 
 class BotBehavior:
@@ -30,8 +31,69 @@ class BotBehavior:
         self.embed = None
         self.controls_message = None
         self.color = discord.Color.red()
+        self.upload_lock = asyncio.Lock()
         # self.lastInteractionDateTime = current
         self.lastInteractionDateTime = datetime.now()
+
+    async def prompt_upload_sound(self, interaction):
+        if self.upload_lock.locked():
+            message = await interaction.channel.send(embed=discord.Embed(title="Another upload is in progress. Wait caralho 😤", color=self.color))
+            await asyncio.sleep(10)
+            await message.delete()
+            return
+        
+        async with self.upload_lock:
+            message = await interaction.channel.send(embed=discord.Embed(title="Please upload a sound file (mp3 format) or provide an MP3 URL.", color=self.color))
+
+            def check(m):
+                is_attachment = len(m.attachments) > 0 and m.attachments[0].filename.endswith('.mp3')
+                is_mp3_url = re.match(r'^https?://.*\.mp3$', m.content)
+                return m.author == interaction.user and m.channel == interaction.channel and (is_attachment or is_mp3_url)
+
+            try:
+                response = await self.bot.wait_for('message', check=check, timeout=60.0)
+                await message.delete()
+
+                if len(response.attachments) > 0:
+                    file_path = await self.save_uploaded_sound(response.attachments[0])
+                else:
+                    file_path = await self.save_sound_from_url(response.content)
+
+                await response.delete()
+                confirmation_message = await interaction.channel.send(embed=discord.Embed(title="Sound uploaded successfully! (may take up to 60s to be available)", color=self.color))
+                await asyncio.sleep(10)
+                await confirmation_message.delete()
+            except asyncio.TimeoutError:
+                await message.delete()
+                timeout_message = await interaction.channel.send(embed=discord.Embed(title="Upload timed out 🤬", color=self.color))
+                await asyncio.sleep(10)
+                await timeout_message.delete()
+            except Exception as e:
+                error_message = await interaction.channel.send(embed=discord.Embed(title="An error occurred.", description=str(e), color=self.color))
+                await asyncio.sleep(10)
+                await error_message.delete()
+
+    async def save_uploaded_sound(self, attachment):
+        downloads_path = os.path.join(self.script_dir, "../downloads")
+        os.makedirs(downloads_path, exist_ok=True)
+        file_path = os.path.join(downloads_path, attachment.filename)
+        await attachment.save(file_path)
+        return file_path
+
+    async def save_sound_from_url(self, url):
+        downloads_path = os.path.join(self.script_dir, "../downloads")
+        os.makedirs(downloads_path, exist_ok=True)
+        filename = url.split("/")[-1]
+        file_path = os.path.join(downloads_path, filename)
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as response:
+                if response.status == 200:
+                    with open(file_path, 'wb') as f:
+                        f.write(await response.read())
+                else:
+                    raise Exception("Failed to download the MP3 file.")
+        return file_path
 
     async def get_new_name(self, interaction):
         message = await interaction.channel.send(embed=discord.Embed(title="Please enter the new name for the sound.", color=self.color))
