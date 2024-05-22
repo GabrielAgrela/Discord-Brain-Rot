@@ -61,7 +61,7 @@ class BotBehavior:
                     file_path = await self.save_sound_from_url(response.content)
 
                 await response.delete()
-                confirmation_message = await interaction.channel.send(embed=discord.Embed(title=self.dwdir, color=self.color))
+                confirmation_message = await interaction.channel.send(embed=discord.Embed(title="Sound uploaded successfully! (may take up to 60s to be available)", color=self.color))
                 await asyncio.sleep(10)
                 await confirmation_message.delete()
             except asyncio.TimeoutError:
