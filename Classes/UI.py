@@ -15,6 +15,7 @@ class ReplayButton(Button):
     async def callback(self, interaction):
         await interaction.response.defer()
         asyncio.create_task(self.bot_behavior.play_audio(interaction.message.channel, self.audio_file, interaction.user.name))
+        self.bot.bot_behavior.add_entry(interaction.user.name, "replay_sound", self.audio_file)
 
 class FavoriteButton(Button):
     def __init__(self, bot_behavior, audio_file):
@@ -29,6 +30,7 @@ class FavoriteButton(Button):
         await interaction.response.defer()
         self.bot_behavior.db.update_favorite_status(self.audio_file, not self.bot_behavior.db.is_favorite(self.audio_file))
         await interaction.message.edit(view=SoundBeingPlayedView(self.bot_behavior, self.audio_file))
+        self.bot.bot_behavior.add_entry(interaction.user.name, "favorite_sound", self.audio_file)
 
 class BlacklistButton(Button):
     def __init__(self, bot_behavior, audio_file):
@@ -44,6 +46,7 @@ class BlacklistButton(Button):
         self.bot_behavior.db.update_blacklist_status(self.audio_file, not self.bot_behavior.db.is_blacklisted(self.audio_file))
         view = SoundBeingPlayedView(self.bot_behavior, self.audio_file)
         await interaction.message.edit(view=view)
+        self.bot.bot_behavior.add_entry(interaction.user.name, "blacklist_sound", self.audio_file)
 
 class ChangeSoundNameButton(Button):
     def __init__(self, bot_behavior, sound_name, **kwargs):
@@ -56,6 +59,7 @@ class ChangeSoundNameButton(Button):
         new_name = await self.bot_behavior.get_new_name(interaction)
         if new_name:
             await self.bot_behavior.change_filename(self.sound_name, new_name)
+            self.bot.bot_behavior.add_entry(interaction.user.name, "change_sound_name", self.sound_name)
 
 class UploadSoundButton(Button):
     def __init__(self, bot_behavior, **kwargs):
@@ -110,6 +114,8 @@ class ListBlacklistButton(Button):
             await self.bot_behavior.write_list(blacklisted, "Blacklisted sounds")
         else:
             await interaction.message.channel.send("No blacklisted sounds found.")
+        self.bot.bot_behavior.add_entry(interaction.user.name, "list_blacklisted_sounds")
+            
 
 class PlaySlapButton(Button):
     def __init__(self, bot_behavior, **kwargs):
@@ -129,6 +135,7 @@ class ListSoundsButton(Button):
     async def callback(self, interaction):
         await interaction.response.defer()
         asyncio.create_task(self.bot_behavior.list_sounds())
+        self.bot.bot_behavior.add_entry(interaction.user.name, "list_sounds")
 
 class SubwaySurfersButton(Button):
     def __init__(self, bot_behavior, **kwargs):
@@ -181,6 +188,7 @@ class ListTopSoundsButton(Button):
     async def callback(self, interaction):
         await interaction.response.defer()
         asyncio.create_task(self.bot_behavior.player_history_db.write_top_played_sounds())
+        self.bot.bot_behavior.add_entry(interaction.user.name, "list_top_sounds")
 
 class ListTopUsersButton(Button):
     def __init__(self, bot_behavior, **kwargs):
@@ -190,6 +198,7 @@ class ListTopUsersButton(Button):
     async def callback(self, interaction):
         await interaction.response.defer()
         asyncio.create_task(self.bot_behavior.player_history_db.write_top_users())
+        self.bot.bot_behavior.add_entry(interaction.user.name, "list_top_users")
 
 class ListLastScrapedSoundsButton(Button):
     def __init__(self, bot_behavior, **kwargs):
@@ -199,6 +208,7 @@ class ListLastScrapedSoundsButton(Button):
     async def callback(self, interaction):
         await interaction.response.defer()
         asyncio.create_task(self.bot_behavior.list_sounds(25))
+        self.bot.bot_behavior.add_entry(interaction.user.name, "list_last_scraped_sounds")
 
 class PlaySoundButton(Button):
     def __init__(self, bot_behavior, sound_name, **kwargs):
