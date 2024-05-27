@@ -7,6 +7,7 @@ from Classes.SoundDownloader import SoundDownloader
 import os
 from Classes.AudioDatabase import AudioDatabase
 from Classes.PlayHistoryDatabase import PlayHistoryDatabase
+from Classes.OtherActionsDatabase import OtherActionsDatabase
 from Classes.TTS import TTS
 import csv
 from Classes.UI import SoundBeingPlayedView, ControlsView, SoundView
@@ -24,9 +25,11 @@ class BotBehavior:
         self.script_dir = os.path.dirname(__file__)  # Get the directory of the current script
         self.db_path = os.path.join(self.script_dir, "../Data/soundsDB.csv")
         self.ph_path = os.path.join(self.script_dir, "../Data/play_history.csv")
+        self.oa_path = os.path.join(self.script_dir, "../Data/other_actions.csv")
         self.dwdir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Downloads"))
         self.db = AudioDatabase(self.db_path, self)
         self.player_history_db = PlayHistoryDatabase(self.ph_path,self.db, self.bot, self)
+        self.other_actions_db = OtherActionsDatabase(self.oa_path, self)
         self.TTS = TTS(self,bot)
         self.view = None
         self.embed = None
@@ -61,6 +64,7 @@ class BotBehavior:
                     file_path = await self.save_sound_from_url(response.content)
 
                 await response.delete()
+                self.other_actions_db.add_entry(interaction.user.name, "upload_sound", file_path)
                 confirmation_message = await interaction.channel.send(embed=discord.Embed(title="Sound uploaded successfully! (may take up to 60s to be available)", color=self.color))
                 await asyncio.sleep(10)
                 await confirmation_message.delete()
@@ -253,6 +257,7 @@ class BotBehavior:
                     if channel is not None:
                         random_file = self.db.get_random_filename()
                         await self.play_audio(channel, random_file, "periodic function")
+                        self.other_actions_db.add_entry("admin", "play_sound_periodically", random_file)
                     else:
                         await asyncio.sleep(sleep_time)
             except Exception as e:
@@ -268,6 +273,7 @@ class BotBehavior:
                     channel = self.get_user_voice_channel(guild,user)
                 if channel is not None:
                     asyncio.create_task(self.play_audio(channel, self.db.get_random_filename(),user))
+                    self.other_actions_db.add_entry(user, "play_random_sound")
         except Exception as e:
             print(f"3An error occurred: {e}")
 
@@ -276,6 +282,7 @@ class BotBehavior:
         channel = self.get_user_voice_channel(self.bot.guilds[0], username)
         if favorite_sounds:
             sound_to_play = random.choice(favorite_sounds)
+            self.other_actions_db.add_entry(username, "play_random_favorite_sound", sound_to_play)
             await self.play_audio(channel,sound_to_play, username)
         else:
             print("No favorite sounds found.")
@@ -300,9 +307,11 @@ class BotBehavior:
                     await self.send_message(view=SoundView(self, similar_sounds))
 
     async def change_filename(self, oldfilename, newfilename):
+        self.other_actions_db.add_entry("admin", "change_filename", oldfilename + " to " + newfilename)
         await self.db.modify_filename(oldfilename, newfilename)
                     
     async def tts(self, speech, lang="en", region=""):
+        self.other_actions_db.add_entry("admin", "tts", speech.replace(",", "."))
         await self.TTS.save_as_mp3(speech, lang, region)     
 
     async def stt(self, audio_files):
@@ -320,8 +329,10 @@ class BotBehavior:
                         data = data[-count:]  # Get the last 'count' entries
                         sound_names = [row[0] for row in data]  # Extract the first column
                         sound_view = SoundView(self, sound_names)
+                        self.other_actions_db.add_entry("admin", "list_sounds", str(count))
                         message = await self.send_message(title="Last "+ str(count)+" Sounds Downloaded", view=sound_view)
                     else:
+                        self.other_actions_db.add_entry("admin", "list_sounds", "all")
                         message = await self.send_message(description="Total sounds downloaded: "+str(len(data)), file=discord.File(self.db_path, 'Data/soundsDB.csv'))
                     print(f"Message sent to the chat.")
                     await asyncio.sleep(120)
@@ -355,6 +366,7 @@ class BotBehavior:
         title = files.index(file) + 1  # Adding 1 because index is 0-based
         message = await self.send_message(title="Family Guy clip "+str(title)+" of "+str(len(files)), file=discord.File(os.path.abspath(os.path.join(folder, file)), f"FamilyGuy/{file}"))
         await asyncio.sleep(VideoFileClip(os.path.join(folder, file)).duration + 5)
+        self.other_actions_db.add_entry("admin", "family_guy", file)
         await message.delete()
 
     async def send_message(self, title="", description="",footer=None, thumbnail=None, view=None, send_controls=True, file=None):
@@ -383,8 +395,6 @@ class BotBehavior:
         if force:
             self.controls_message = await bot_channel.send(view=ControlsView(self))
         
-        
-
     async def is_playing_sound(self):
         for vc in self.bot.voice_clients:
             if vc.is_playing():

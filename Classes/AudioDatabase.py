@@ -68,13 +68,14 @@ class AudioDatabase:
         print(f"Filename not found: {audio_file}")
         return False
     
-    def get_favorite_sounds(self):
+    def get_favorite_sounds(self, num_results=0):
         data = self._read_data()
-        favorite_sounds = []
-        for row in data:
-            if row['favorite'] == "True":
-                favorite_sounds.append(row['Filename.mp3'])
-        return favorite_sounds
+        favorite_sounds = [row['Filename.mp3'] for row in reversed(data) if row['favorite'] == "True"]
+        
+        if num_results == 0:
+            return favorite_sounds
+        else:
+            return favorite_sounds[:min(num_results, 150)]
     
     def get_blacklisted_sounds(self):
         data = self._read_data()

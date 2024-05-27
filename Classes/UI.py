@@ -92,7 +92,7 @@ class ListFavoritesButton(Button):
 
     async def callback(self, interaction):
         await interaction.response.defer()
-        favorites = self.bot_behavior.db.get_favorite_sounds()
+        favorites = self.bot_behavior.db.get_favorite_sounds(50)
         if len(favorites) > 0:
             await self.bot_behavior.write_list(favorites, "Favorite sounds")
         else:
