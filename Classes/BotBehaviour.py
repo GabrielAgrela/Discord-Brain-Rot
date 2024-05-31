@@ -214,7 +214,7 @@ class BotBehavior:
             self.color = discord.Color.red()
             bot_channel = discord.utils.get(self.bot.guilds[0].text_channels, name='bot')
             if bot_channel and not is_entrance and not is_tts:
-                if audio_file.split('/')[-1].replace('.mp3', '') not in ["slap", "tiro", "pubg-pan-sound-effect", "slap-oh"]:
+                if audio_file.split('/')[-1].replace('.mp3', '') not in ["slap", "tiro", "pubg-pan-sound-effect", "slap-oh_LGvkhyt"]:
                     # check if is plaing sound, if so, send a autodestruct message to the bot channel saying "waiting for the sound to finish"
                     if await self.is_playing_sound():
                         message = await bot_channel.send(embed=discord.Embed(title="Don't be rude, let Gertrudes speak 😤"))
