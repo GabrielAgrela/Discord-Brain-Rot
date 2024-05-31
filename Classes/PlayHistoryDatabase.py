@@ -32,13 +32,15 @@ class PlayHistoryDatabase:
         with open(self.csv_filename, mode='r', newline='', encoding='utf-8') as file:
             reader = csv.reader(file)
             data = list(reader)
+            #reverse the data to get the latest sounds
+            data = data[::-1]
 
         # Load user event sounds from JSON
         with open(self.users_json, mode='r', encoding='utf-8') as file:
             users_data = json.load(file)
 
         # Collect sounds to be ignored
-        ignored_sounds = {"slap", "tiro", "pubg-pan-sound-effect"}
+        ignored_sounds = {"slap", "tiro", "pubg-pan-sound-effect", "gay-echo"}
         for user, events in users_data.items():
             for event in events:
                 ignored_sounds.add(event["sound"].lower())
@@ -52,12 +54,14 @@ class PlayHistoryDatabase:
                     play_date = datetime.strptime(row[2].strip(), "%Y-%m-%d %H:%M:%S")
                     if play_date > x_ago:
                         filtered_data.append(row)
+                    #else we can stop the loop since the data is sorted by date
+                    else:
+                        break
                 except ValueError as e:
                     print(f"Error parsing date: {e}, data: {row}")
 
         sound_ids = [row[0] for row in filtered_data]
         sound_id_counts = Counter(sound_ids)
-        top_sounds = sound_id_counts.most_common(21)
         total_sounds_played = sum(sound_id_counts.values())
 
         # Calculate average per day for the specified days
@@ -74,20 +78,24 @@ class PlayHistoryDatabase:
         embed.timestamp = datetime.utcnow()
 
         rank = 1
-        for sound_id, count in top_sounds:
+        count = 0
+        for sound_id, sound_count in sound_id_counts.most_common():
             filename = self.db.get_filename_by_id(int(sound_id)).replace('.mp3', '')
             if filename not in ignored_sounds:
                 emoji = ["🥇", "🥈", "🥉"][rank-1] if rank <= 3 else "🎶"
                 embed.add_field(
                     name=f"{rank}. {emoji} `{filename.upper()}`",
-                    value=f"Played **{count}** times",
+                    value=f"Played **{sound_count}** times",
                     inline=False
                 )
                 rank += 1
+                count += 1
+                if count >= 20:
+                    break
 
         message = await bot_channel.send(embed=embed)
         await self.behavior.send_controls()
-        await asyncio.sleep(30)
+        await asyncio.sleep(60)
         await message.delete()
 
     async def write_top_users(self, num_users=5, daysFrom=7):
@@ -104,7 +112,7 @@ class PlayHistoryDatabase:
             users_data = json.load(file)
 
         # Collect sounds to be ignored
-        ignored_sounds = {"slap", "tiro", "pubg-pan-sound-effect"}
+        ignored_sounds = {"slap", "tiro", "pubg-pan-sound-effect", "gay-echo"}
         for user, events in users_data.items():
             for event in events:
                 ignored_sounds.add(event["sound"].lower())
@@ -117,22 +125,20 @@ class PlayHistoryDatabase:
                 try:
                     play_date = datetime.strptime(row[2].strip(), "%Y-%m-%d %H:%M:%S")
                     if play_date > x_ago:
-                        sound_id = row[0]
-                        filename = self.db.get_filename_by_id(int(sound_id)).replace('.mp3', '')
-                        if filename not in ignored_sounds:
-                            filtered_play_data.append(row)
+                        filtered_play_data.append(row)
                 except ValueError as e:
                     print(f"Error parsing date: {e}, data: {row}")
-        # Count occurrences of each username
+
+        # Count occurrences of each username without filtering ignored sounds
         user_counts = Counter(row[1] for row in filtered_play_data)
-        
+
         # Exclude specific usernames
         excluded_users = ["admin", "periodic function", "tts"]
         filtered_user_counts = {user: count for user, count in user_counts.items() if user not in excluded_users}
-        
+
         # Convert dictionary back to Counter
         filtered_user_counts = Counter(filtered_user_counts)
-        
+
         # Limit to top num_users users
         top_users = [(u, c) for u, c in filtered_user_counts.most_common(num_users)]
 
@@ -155,14 +161,20 @@ class PlayHistoryDatabase:
             elif user:
                 embed.set_thumbnail(url=user.default_avatar.url)
 
-            # Add sounds played by the user as fields in the embed
-            sounds_played = Counter(row[0] for row in filtered_play_data if row[1] == username and row[0] not in ignored_sounds)
-            for sound_id, count in sounds_played.most_common(10):  # Only get the top 10 sounds
-                if sound_id.isdigit():
-                    filename = self.db.get_filename_by_id(int(sound_id))
-                    embed.add_field(name=f"🎶 `{filename}`", value=f"Played **{count}** times", inline=False)
-                else:
-                    print(f"Invalid sound_id: {sound_id}")
+            # Count sounds played by the user without filtering ignored sounds
+            sounds_played = Counter(row[0] for row in filtered_play_data if row[1] == username)
+
+            # Filter and fetch top 10 sounds for each user, ignoring the sounds to be excluded
+            valid_sounds = []
+            for sound_id, count in sounds_played.most_common():
+                if len(valid_sounds) >= 10:
+                    break
+                filename = self.db.get_filename_by_id(int(sound_id)).replace('.mp3', '')
+                if filename not in ignored_sounds:
+                    valid_sounds.append((filename, count))
+
+            for filename, count in valid_sounds:
+                embed.add_field(name=f"🎶 `{filename}`", value=f"Played **{count}** times", inline=False)
 
             # Send the embed to the channel
             message = await bot_channel.send(embed=embed)
@@ -176,7 +188,7 @@ class PlayHistoryDatabase:
         for message in messages:
             await message.delete()
 
-        
+            
 
 
 
