@@ -90,7 +90,7 @@ class PlayHistoryDatabase:
                 )
                 rank += 1
                 count += 1
-                if count >= 20:
+                if count >= 10:
                     break
 
         message = await bot_channel.send(embed=embed)
@@ -164,10 +164,10 @@ class PlayHistoryDatabase:
             # Count sounds played by the user without filtering ignored sounds
             sounds_played = Counter(row[0] for row in filtered_play_data if row[1] == username)
 
-            # Filter and fetch top 10 sounds for each user, ignoring the sounds to be excluded
+            # Filter and fetch top 5 sounds for each user, ignoring the sounds to be excluded
             valid_sounds = []
             for sound_id, count in sounds_played.most_common():
-                if len(valid_sounds) >= 10:
+                if len(valid_sounds) >= 5:
                     break
                 filename = self.db.get_filename_by_id(int(sound_id)).replace('.mp3', '')
                 if filename not in ignored_sounds:
@@ -182,7 +182,7 @@ class PlayHistoryDatabase:
 
         await self.behavior.send_controls()
         # Wait for 120 seconds
-        await asyncio.sleep(120)
+        await asyncio.sleep(60)
 
         # Delete all messages
         for message in messages:
