@@ -41,7 +41,7 @@ class PlayHistoryDatabase:
         ignored_sounds = {"slap", "tiro", "pubg-pan-sound-effect"}
         for user, events in users_data.items():
             for event in events:
-                ignored_sounds.add(event["sound"])
+                ignored_sounds.add(event["sound"].lower())
 
         # Filter data for the last specified days
         x_ago = datetime.utcnow() - timedelta(days=daysFrom)
@@ -107,7 +107,7 @@ class PlayHistoryDatabase:
         ignored_sounds = {"slap", "tiro", "pubg-pan-sound-effect"}
         for user, events in users_data.items():
             for event in events:
-                ignored_sounds.add(event["sound"])
+                ignored_sounds.add(event["sound"].lower())
 
         # Filter data for the last specified days
         x_ago = datetime.utcnow() - timedelta(days=daysFrom)
