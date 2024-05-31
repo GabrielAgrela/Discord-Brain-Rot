@@ -26,9 +26,10 @@ class BotBehavior:
         self.db_path = os.path.join(self.script_dir, "../Data/soundsDB.csv")
         self.ph_path = os.path.join(self.script_dir, "../Data/play_history.csv")
         self.oa_path = os.path.join(self.script_dir, "../Data/other_actions.csv")
+        self.users_json = os.path.join(self.script_dir, "../Data/Users.json")
         self.dwdir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Downloads"))
         self.db = AudioDatabase(self.db_path, self)
-        self.player_history_db = PlayHistoryDatabase(self.ph_path,self.db, self.bot, self)
+        self.player_history_db = PlayHistoryDatabase(self.ph_path,self.db,self.users_json, self.bot, self)
         self.other_actions_db = OtherActionsDatabase(self.oa_path, self)
         self.TTS = TTS(self,bot)
         self.view = None

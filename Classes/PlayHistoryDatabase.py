@@ -1,15 +1,17 @@
 import asyncio
 import csv
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timedelta
+import json
 import discord
 from collections import Counter
 class PlayHistoryDatabase:
-    def __init__(self, csv_filename, db, bot, behavior):
+    def __init__(self, csv_filename, db,users_json, bot, behavior):
         self.csv_filename = csv_filename
         self.db = db
         self.bot = bot
         self.behavior = behavior
+        self.users_json = users_json
 
     def add_entry(self, filename, username):
         current_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -24,38 +26,57 @@ class PlayHistoryDatabase:
             writer.writerow([sound_id, username, current_datetime])
         print(f"Entry added: Sound ID:{sound_id}, Username: {username}, Datetime: {current_datetime}")
 
-    async def write_top_played_sounds(self):
+    async def write_top_played_sounds(self, daysFrom=7):
         bot_channel = discord.utils.get(self.bot.guilds[0].text_channels, name='bot')
-        
+
         with open(self.csv_filename, mode='r', newline='', encoding='utf-8') as file:
             reader = csv.reader(file)
             data = list(reader)
 
-        sound_ids = [row[0] for row in data]
+        # Load user event sounds from JSON
+        with open(self.users_json, mode='r', encoding='utf-8') as file:
+            users_data = json.load(file)
+
+        # Collect sounds to be ignored
+        ignored_sounds = {"slap", "tiro", "pubg-pan-sound-effect"}
+        for user, events in users_data.items():
+            for event in events:
+                ignored_sounds.add(event["sound"])
+
+        # Filter data for the last specified days
+        x_ago = datetime.utcnow() - timedelta(days=daysFrom)
+        filtered_data = []
+        for row in data:
+            if len(row) > 2:
+                try:
+                    play_date = datetime.strptime(row[2].strip(), "%Y-%m-%d %H:%M:%S")
+                    if play_date > x_ago:
+                        filtered_data.append(row)
+                except ValueError as e:
+                    print(f"Error parsing date: {e}, data: {row}")
+
+        sound_ids = [row[0] for row in filtered_data]
         sound_id_counts = Counter(sound_ids)
         top_sounds = sound_id_counts.most_common(21)
         total_sounds_played = sum(sound_id_counts.values())
-        # Calculate average per day
-        dates = [datetime.strptime(row[2], "%Y-%m-%d %H:%M:%S") for row in data if row and len(row) > 2 and len(row[2]) == 19]
-        if dates:
-            first_date = min(dates)
-            last_date = max(dates)
-            days_passed = (last_date - first_date).days or 1  # Avoid division by zero
-            average_per_day = total_sounds_played / days_passed
+
+        # Calculate average per day for the specified days
+        days_passed = daysFrom
+        average_per_day = total_sounds_played / days_passed
 
         embed = discord.Embed(
-            title=f"🎵 **A TOTAL OF {total_sounds_played} SOUNDS PLAYED! AVERAGE OF {average_per_day:.0f} A DAY!** 🎵",
+            title=f"🎵 **A TOTAL OF {total_sounds_played} SOUNDS PLAYED IN THE LAST {daysFrom} DAYS! AVERAGE OF {average_per_day:.0f} A DAY!** 🎵",
             description="Here are the sounds that got everyone moving!",
             color=discord.Color.yellow()
         )
         embed.set_thumbnail(url="https://i.imgflip.com/1vdris.jpg")
         embed.set_footer(text="Updated as of")
         embed.timestamp = datetime.utcnow()
-        
+
         rank = 1
         for sound_id, count in top_sounds:
-            filename = self.db.get_filename_by_id(int(sound_id))
-            if filename != "tts.mp3":
+            filename = self.db.get_filename_by_id(int(sound_id)).replace('.mp3', '')
+            if filename not in ignored_sounds:
                 emoji = ["🥇", "🥈", "🥉"][rank-1] if rank <= 3 else "🎶"
                 embed.add_field(
                     name=f"{rank}. {emoji} `{filename.upper()}`",
@@ -64,30 +85,46 @@ class PlayHistoryDatabase:
                 )
                 rank += 1
 
-        
-
-        
         message = await bot_channel.send(embed=embed)
         await self.behavior.send_controls()
         await asyncio.sleep(30)
         await message.delete()
 
-
-
-
-
-
-    async def write_top_users(self, num_users=5):
+    async def write_top_users(self, num_users=5, daysFrom=7):
         bot_channel = discord.utils.get(self.bot.guilds[0].text_channels, name='bot')
-        
+
         # Read data from CSV
         with open(self.csv_filename, mode='r', newline='', encoding='utf-8') as file:
             reader = csv.reader(file)
             next(reader, None)  # skip the headers
             play_data = [row for row in reader]
 
+        # Load user event sounds from JSON
+        with open(self.users_json, mode='r', encoding='utf-8') as file:
+            users_data = json.load(file)
+
+        # Collect sounds to be ignored
+        ignored_sounds = {"slap", "tiro", "pubg-pan-sound-effect"}
+        for user, events in users_data.items():
+            for event in events:
+                ignored_sounds.add(event["sound"])
+
+        # Filter data for the last specified days
+        x_ago = datetime.utcnow() - timedelta(days=daysFrom)
+        filtered_play_data = []
+        for row in play_data:
+            if len(row) > 2:
+                try:
+                    play_date = datetime.strptime(row[2].strip(), "%Y-%m-%d %H:%M:%S")
+                    if play_date > x_ago:
+                        sound_id = row[0]
+                        filename = self.db.get_filename_by_id(int(sound_id)).replace('.mp3', '')
+                        if filename not in ignored_sounds:
+                            filtered_play_data.append(row)
+                except ValueError as e:
+                    print(f"Error parsing date: {e}, data: {row}")
         # Count occurrences of each username
-        user_counts = Counter(row[1] for row in play_data)
+        user_counts = Counter(row[1] for row in filtered_play_data)
         
         # Exclude specific usernames
         excluded_users = ["admin", "periodic function", "tts"]
@@ -96,7 +133,7 @@ class PlayHistoryDatabase:
         # Convert dictionary back to Counter
         filtered_user_counts = Counter(filtered_user_counts)
         
-        # Limit to top 5 users
+        # Limit to top num_users users
         top_users = [(u, c) for u, c in filtered_user_counts.most_common(num_users)]
 
         messages = []
@@ -119,21 +156,20 @@ class PlayHistoryDatabase:
                 embed.set_thumbnail(url=user.default_avatar.url)
 
             # Add sounds played by the user as fields in the embed
-            sounds_played = Counter(row[0] for row in play_data if row[1] == username)  # Count occurrences of each sound played by the user
-            for sound_id, count in sounds_played.most_common(10):  # Only get the top 5 sounds
+            sounds_played = Counter(row[0] for row in filtered_play_data if row[1] == username and row[0] not in ignored_sounds)
+            for sound_id, count in sounds_played.most_common(10):  # Only get the top 10 sounds
                 if sound_id.isdigit():
                     filename = self.db.get_filename_by_id(int(sound_id))
+                    embed.add_field(name=f"🎶 `{filename}`", value=f"Played **{count}** times", inline=False)
                 else:
                     print(f"Invalid sound_id: {sound_id}")
-                embed.add_field(name=f"🎶 `{filename}`", value=f"Played **{count}** times", inline=False)
 
             # Send the embed to the channel
-            
             message = await bot_channel.send(embed=embed)
             messages.append(message)
 
         await self.behavior.send_controls()
-        # Wait for 10 seconds
+        # Wait for 120 seconds
         await asyncio.sleep(120)
 
         # Delete all messages
