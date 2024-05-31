@@ -171,8 +171,7 @@ class AudioDatabase:
 
         for filename in filenames:
             # Clear db's filename of .mp3
-            filename = filename.lower()
-            score = fuzz.token_sort_ratio(tmp_query_filename, filename)
+            score = fuzz.token_sort_ratio(tmp_query_filename, filename.lower())
 
             tmp_query_filename = tmp_query_filename.replace("-", " ").replace("_", " ")
             # Split query_filename into words
