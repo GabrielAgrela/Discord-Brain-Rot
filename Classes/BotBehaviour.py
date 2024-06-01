@@ -197,10 +197,11 @@ class BotBehavior:
         # Check cooldown
         if self.last_played_time and (datetime.now() - self.last_played_time).total_seconds() < 5:
             bot_channel = await self.get_bot_channel()
-            if not getattr(self, 'cooldown_message', None):
+            if self.cooldown_message is None:
                 self.cooldown_message = await bot_channel.send(embed=discord.Embed(title="Don't be rude, let Gertrudes speak 😤"))
                 await asyncio.sleep(3)
                 await self.cooldown_message.delete()
+                self.cooldown_message = None
             return
         self.last_played_time = datetime.now()
 
