@@ -39,6 +39,8 @@ class BotBehavior:
         self.upload_lock = asyncio.Lock()
         # self.lastInteractionDateTime = current
         self.lastInteractionDateTime = datetime.now()
+        self.last_played_time = None
+        self.cooldown_message = None
 
     async def prompt_upload_sound(self, interaction):
         if self.upload_lock.locked():
@@ -192,6 +194,16 @@ class BotBehavior:
                 return
         self.playback_done.clear()
 
+        # Check cooldown
+        if self.last_played_time and (datetime.now() - self.last_played_time).total_seconds() < 5:
+            bot_channel = await self.get_bot_channel()
+            if not getattr(self, 'cooldown_message', None):
+                self.cooldown_message = await bot_channel.send(embed=discord.Embed(title="Don't be rude, let Gertrudes speak 😤"))
+                await asyncio.sleep(3)
+                await self.cooldown_message.delete()
+            return
+        self.last_played_time = datetime.now()
+
         # if error occurred, try playing the audio file again
         def after_playing(error):
             if error:
@@ -215,12 +227,6 @@ class BotBehavior:
             bot_channel = discord.utils.get(self.bot.guilds[0].text_channels, name='bot')
             if bot_channel and not is_entrance and not is_tts:
                 if audio_file.split('/')[-1].replace('.mp3', '') not in ["slap", "tiro", "pubg-pan-sound-effect", "slap-oh_LGvkhyt"]:
-                    # check if is plaing sound, if so, send a autodestruct message to the bot channel saying "waiting for the sound to finish"
-                    if await self.is_playing_sound():
-                        message = await bot_channel.send(embed=discord.Embed(title="Don't be rude, let Gertrudes speak 😤"))
-                        await asyncio.sleep(3)
-                        await message.delete()
-                        return
                     await self.send_message(view=SoundBeingPlayedView(self, audio_file), title=f"🔊 **{audio_file.split('/')[-1].replace('.mp3', '')}** 🔊", description = f"Similarity: {extra}%" if extra != "" else None, footer = f"{user} requested '{original_message}'" if original_message else f"Requested by {user}", send_controls=send_controls)
             # Stop the audio if it is already playing
             if voice_client.is_playing():
