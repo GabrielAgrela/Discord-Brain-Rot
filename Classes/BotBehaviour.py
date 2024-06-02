@@ -195,7 +195,7 @@ class BotBehavior:
         self.playback_done.clear()
 
         # Check cooldown
-        if self.last_played_time and (datetime.now() - self.last_played_time).total_seconds() < 5:
+        if self.last_played_time and (datetime.now() - self.last_played_time).total_seconds() < 2:
             bot_channel = await self.get_bot_channel()
             if self.cooldown_message is None:
                 self.cooldown_message = await bot_channel.send(embed=discord.Embed(title="Don't be rude, let Gertrudes speak 😤"))
