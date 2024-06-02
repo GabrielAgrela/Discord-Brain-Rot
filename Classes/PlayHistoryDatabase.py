@@ -40,7 +40,7 @@ class PlayHistoryDatabase:
             users_data = json.load(file)
 
         # Collect sounds to be ignored
-        ignored_sounds = {"slap", "tiro", "pubg-pan-sound-effect", "gay-echo"}
+        ignored_sounds = {"slap", "tiro", "pubg-pan-sound-effect", "gunshot", "gay-echo"}
         for user, events in users_data.items():
             for event in events:
                 ignored_sounds.add(event["sound"].lower())
@@ -112,7 +112,7 @@ class PlayHistoryDatabase:
             users_data = json.load(file)
 
         # Collect sounds to be ignored
-        ignored_sounds = {"slap", "tiro", "pubg-pan-sound-effect", "gay-echo"}
+        ignored_sounds = {"slap", "tiro", "pubg-pan-sound-effect", "gunshot", "gay-echo"}
         for user, events in users_data.items():
             for event in events:
                 ignored_sounds.add(event["sound"].lower())
