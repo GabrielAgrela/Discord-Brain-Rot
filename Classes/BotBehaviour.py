@@ -256,7 +256,11 @@ class BotBehavior:
 
             # Play the audio file
             try:
-                audio_source = discord.FFmpegPCMAudio(executable=self.ffmpeg_path, source=audio_file_path)
+                ffmpeg_options = {
+                    'options': '-vn',
+                    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5'
+                }
+                audio_source = discord.FFmpegPCMAudio(executable=self.ffmpeg_path, source=audio_file_path, **ffmpeg_options)
                 voice_client.play(audio_source, after=after_playing)
             except Exception as e:
                 await self.send_error_message(f"Error playing audio: {e}")
