@@ -41,6 +41,7 @@ class BotBehavior:
         self.lastInteractionDateTime = datetime.now()
         self.last_played_time = None
         self.cooldown_message = None
+        self.error_message = None
 
     async def prompt_upload_sound(self, interaction):
         if self.upload_lock.locked():
@@ -176,28 +177,21 @@ class BotBehavior:
                     if user in member.name:
                         return channel
         return None
+    
+    async def send_error_message(self, message):
+        self.error_message = await self.send_message(view=None, title="🤬 Error 🤬", description=message)
+        #await asyncio.sleep(3)
+        #await self.cooldown_message.delete()
 
-    async def play_audio(self, channel, audio_file, user, is_entrance=False, is_tts=False, extra="", original_message="", send_controls=True):   
+    async def play_audio(self, channel, audio_file, user, is_entrance=False, is_tts=False, extra="", original_message="", send_controls=True, retry_count=0):
+        MAX_RETRIES = 3
         if await self.is_channel_empty(channel):
-            return     
-        # Try connecting to the voice channel
-        voice_client = discord.utils.get(self.bot.voice_clients, guild=channel.guild)
-        if voice_client:
-            await voice_client.move_to(channel)
-        else:
-            try:
-                voice_client = await channel.connect()
-            except Exception as e:
-                print(f"----------------Error connecting to channel: {e}")
-                await asyncio.sleep(1)
-                await self.play_audio(channel, audio_file, user, is_entrance, is_tts, extra, original_message, send_controls)
-                return
-        self.playback_done.clear()
+            return
 
-        # Check cooldown
+        # Check cooldown first
         if self.last_played_time and (datetime.now() - self.last_played_time).total_seconds() < 2:
             bot_channel = await self.get_bot_channel()
-            if self.cooldown_message is None:
+            if self.cooldown_message is None and not is_entrance:
                 self.cooldown_message = await bot_channel.send(embed=discord.Embed(title="Don't be rude, let Gertrudes speak 😤"))
                 await asyncio.sleep(3)
                 await self.cooldown_message.delete()
@@ -205,40 +199,81 @@ class BotBehavior:
             return
         self.last_played_time = datetime.now()
 
-        # if error occurred, try playing the audio file again
-        def after_playing(error):
-            if error:
-                print(f'---------------------Error in playback: {error}')
-                time.sleep(1)
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                loop.create_task(self.delete_last_message(2))
-                loop.create_task(self.play_audio(channel, audio_file, user, is_entrance, is_tts, extra, original_message, send_controls))
-            else:
-                # Add the entry to the play history database
-                self.player_history_db.add_entry(audio_file, user)
-            self.playback_done.set()
-
-        # try playing the audio file
         try:
+            # Try connecting to the voice channel
+            voice_client = discord.utils.get(self.bot.voice_clients, guild=channel.guild)
+            if voice_client:
+                await voice_client.move_to(channel)
+            else:
+                try:
+                    voice_client = await channel.connect()
+                except Exception as e:
+                    await self.send_error_message(f"Error connecting to channel: {e}")
+                    print(f"Error connecting to channel: {e}")
+                    if retry_count < MAX_RETRIES:
+                        await asyncio.sleep(1)
+                        await self.play_audio(channel, audio_file, user, is_entrance, is_tts, extra, original_message, send_controls, retry_count + 1)
+                    return
+
             # Get the absolute path of the audio file
             audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", audio_file))
+
+            # Check if the audio file exists
+            if not os.path.exists(audio_file_path):
+                await self.send_error_message(f"Audio file not found: {audio_file_path}")
+                print(f"Audio file not found: {audio_file_path}")
+                return
+
             # Send a message to the bot channel if the sound is not a slap, tiro or pubg-pan-sound-effect
             self.color = discord.Color.red()
             bot_channel = discord.utils.get(self.bot.guilds[0].text_channels, name='bot')
             if bot_channel and not is_entrance and not is_tts:
                 if audio_file.split('/')[-1].replace('.mp3', '') not in ["slap", "tiro", "pubg-pan-sound-effect", "gunshot", "slap-oh_LGvkhyt"]:
                     await self.send_message(view=SoundBeingPlayedView(self, audio_file), title=f"🔊 **{audio_file.split('/')[-1].replace('.mp3', '')}** 🔊", description = f"Similarity: {extra}%" if extra != "" else None, footer = f"{user} requested '{original_message}'" if original_message else f"Requested by {user}", send_controls=send_controls)
+
             # Stop the audio if it is already playing
             if voice_client.is_playing():
                 voice_client.stop()
+
+            def after_playing(error):
+                if error:
+                    asyncio.run_coroutine_threadsafe(self.send_error_message(f"Error in playback, but Gertrudes will retry: {error}"), self.bot.loop)
+                    print(f'Error in playback: {error}')
+                    if retry_count < MAX_RETRIES:
+                        #sleep for 1 second before retrying without asyncio
+                        time.sleep(5)
+                        asyncio.run_coroutine_threadsafe(self.play_audio(channel, audio_file, user, is_entrance, is_tts, extra, original_message, send_controls, retry_count + 1), self.bot.loop)
+                else:
+                    # Add the entry to the play history database
+                    self.player_history_db.add_entry(audio_file, user)
+                self.bot.loop.call_soon_threadsafe(self.playback_done.set)
+
+            # Check if FFmpeg path is set and valid
+            if not self.ffmpeg_path or not os.path.exists(self.ffmpeg_path):
+                await self.send_error_message(f"Invalid FFmpeg path: {self.ffmpeg_path}")
+                print(f"Invalid FFmpeg path: {self.ffmpeg_path}")
+                return
+
             # Play the audio file
-            voice_client.play(discord.FFmpegPCMAudio(executable=self.ffmpeg_path, source=audio_file_path), after=after_playing)
+            try:
+                audio_source = discord.FFmpegPCMAudio(executable=self.ffmpeg_path, source=audio_file_path)
+                voice_client.play(audio_source, after=after_playing)
+            except Exception as e:
+                await self.send_error_message(f"Error playing audio: {e}")
+                print(f"Error playing audio: {e}")
+                if retry_count < MAX_RETRIES:
+                    await asyncio.sleep(1)
+                    await self.play_audio(channel, audio_file, user, is_entrance, is_tts, extra, original_message, send_controls, retry_count + 1)
+                return
+
+            await self.playback_done.wait()
+
         except Exception as e:
-            print(f"----------------------An error occurred: {e}")
-            await asyncio.sleep(1)
-            await self.play_audio(channel, audio_file, user, is_entrance, is_tts, extra, original_message, send_controls)
-        await self.playback_done.wait()
+            await self.send_error_message(f"An error occurred: {e}")
+            print(f"An error occurred: {e}")
+            if retry_count < MAX_RETRIES:
+                await asyncio.sleep(1)
+                await self.play_audio(channel, audio_file, user, is_entrance, is_tts, extra, original_message, send_controls, retry_count + 1)
 
     async def update_bot_status(self):
         while True:
