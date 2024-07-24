@@ -68,7 +68,7 @@ async def tts(ctx, message: Option(str, "What you want to say", required=True), 
 
     try:
         if language == "pt":
-            await behavior.tts(message, "pt")
+            await behavior.tts_EL(message, "pt")
         elif language == "br":
             await behavior.tts(message, "pt", "com.br")
         elif language == "es":

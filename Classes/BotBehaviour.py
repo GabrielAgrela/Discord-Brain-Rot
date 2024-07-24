@@ -356,7 +356,11 @@ class BotBehavior:
                     
     async def tts(self, speech, lang="en", region=""):
         self.other_actions_db.add_entry("admin", "tts", speech.replace(",", "."))
-        await self.TTS.save_as_mp3(speech, lang, region)     
+        await self.TTS.save_as_mp3(speech, lang, region)   
+
+    async def tts_EL(self, speech, lang="pt", region=""):
+        self.other_actions_db.add_entry("admin", "tts_EL", speech.replace(",", "."))
+        await self.TTS.save_as_mp3_EL(speech, lang, region)  
 
     async def stt(self, audio_files):
         return await self.TTS.speech_to_text(audio_files)
