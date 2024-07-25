@@ -76,7 +76,7 @@ class BotBehavior:
 
                 await response.delete()
                 self.other_actions_db.add_entry(interaction.user.name, "upload_sound", file_path)
-                confirmation_message = await interaction.channel.send(embed=discord.Embed(title="Sound uploaded successfully! (may take up to 60s to be available)", color=self.color))
+                confirmation_message = await interaction.channel.send(embed=discord.Embed(title="Sound uploaded successfully! (may take up to 10s to be available)", color=self.color))
                 await asyncio.sleep(10)
                 await confirmation_message.delete()
             except asyncio.TimeoutError:
