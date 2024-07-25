@@ -64,29 +64,37 @@ async def tts(ctx, message: Option(str, "What you want to say", required=True), 
     user = discord.utils.get(bot.get_all_members(), name=ctx.user.name)
 
     behavior.color = discord.Color.dark_blue()
-    await behavior.send_message(title=f"TTS in {flag}", description=f"'{message}'", thumbnail=user.avatar.url if user and user.avatar else user.default_avatar.url)
+    if language in ["pt", "en"]:
+        url = "https://play-lh.googleusercontent.com/cyy3sqDw73x3LRwLbqMmWVHtCFp36RHaMO7Hh_YGqD6NRiLa8B5X8x-OLjAnnXbhYaw=w240-h480-rw" if language == "pt" else "https://www.famousbirthdays.com/headshots/mike-tyson-7.jpg"
+    else:
+        url = user.avatar.url if user and user.avatar else user.default_avatar.url
 
+    await behavior.send_message(
+        title=f"TTS in {flag}",
+        description=f"'{message}'",
+        thumbnail=url
+    )
     try:
         if language == "pt":
-            await behavior.tts_EL(message, "pt")
+            await behavior.tts_EL(user, message, "pt")
         elif language == "br":
-            await behavior.tts(message, "pt", "com.br")
+            await behavior.tts(user, message, "pt", "com.br")
         elif language == "es":
-            await behavior.tts(message, "es")
+            await behavior.tts(user, message, "es")
         elif language == "fr":
-            await behavior.tts(message, "fr")
+            await behavior.tts(user, message, "fr")
         elif language == "de":
-            await behavior.tts(message, "de")
+            await behavior.tts(user, message, "de")
         elif language == "ru":
-            await behavior.tts(message, "ru")
+            await behavior.tts(user, message, "ru")
         elif language == "ar":
-            await behavior.tts(message, "ar")
+            await behavior.tts(user, message, "ar")
         elif language == "ch":
-            await behavior.tts(message, "zh-CN")
+            await behavior.tts(user, message, "zh-CN")
         elif language == "ir":
-            await behavior.tts(message, "en", "ie")
+            await behavior.tts(user, message, "en", "ie")
         else:
-            await behavior.tts(message)
+            await behavior.tts_EL(user, message)
     except Exception as e:
         await behavior.send_message(title=e)
         return

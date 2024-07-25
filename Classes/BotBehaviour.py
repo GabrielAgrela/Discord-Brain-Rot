@@ -368,15 +368,15 @@ class BotBehavior:
         self.other_actions_db.add_entry("admin", "change_filename", oldfilename + " to " + newfilename)
         await self.db.modify_filename(oldfilename, newfilename)
                     
-    async def tts(self, speech, lang="en", region=""):
-        self.other_actions_db.add_entry("admin", "tts", speech.replace(",", "."))
+    async def tts(self, user, speech, lang="en", region=""):
+        self.other_actions_db.add_entry(user.name, "tts", speech.replace(",", "."))
         await self.TTS.save_as_mp3(speech, lang, region)   
 
-    async def tts_EL(self, speech, lang="pt", region=""):
-        self.other_actions_db.add_entry("admin", "tts_EL", speech.replace(",", "."))
+    async def tts_EL(self, user, speech, lang="en", region=""):
+        self.other_actions_db.add_entry(user.name, "tts_EL", speech.replace(",", "."))
         await self.TTS.save_as_mp3_EL(speech, lang, region)  
 
-    async def stt(self, audio_files):
+    async def stt(self, user, audio_files):
         return await self.TTS.speech_to_text(audio_files)
     
     async def list_sounds(self, count=0):
