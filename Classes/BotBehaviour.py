@@ -62,10 +62,17 @@ class BotBehavior:
                 response = await self.bot.wait_for('message', check=check, timeout=60.0)
                 await message.delete()
 
+                # Extract the custom filename if provided
+                custom_filename = None
+                if response.content:
+                    parts = response.content.split(maxsplit=1)
+                    if len(parts) > 1 and not parts[0].startswith('http'):
+                        custom_filename = response.content
+
                 if len(response.attachments) > 0:
-                    file_path = await self.save_uploaded_sound(response.attachments[0])
+                    file_path = await self.save_uploaded_sound(response.attachments[0], custom_filename)
                 else:
-                    file_path = await self.save_sound_from_url(response.content)
+                    file_path = await self.save_sound_from_url(response.content, custom_filename)
 
                 await response.delete()
                 self.other_actions_db.add_entry(interaction.user.name, "upload_sound", file_path)
@@ -82,15 +89,22 @@ class BotBehavior:
                 await asyncio.sleep(10)
                 await error_message.delete()
 
-    async def save_uploaded_sound(self, attachment):
+    async def save_uploaded_sound(self, attachment, custom_filename=None):
         os.makedirs(self.dwdir, exist_ok=True)
-        file_path = os.path.join(self.dwdir, attachment.filename)
+        if custom_filename:
+            filename = f"{custom_filename}.mp3"
+        else:
+            filename = attachment.filename
+        file_path = os.path.join(self.dwdir, filename)
         await attachment.save(file_path)
         return file_path
 
-    async def save_sound_from_url(self, url):
+    async def save_sound_from_url(self, url, custom_filename=None):
         os.makedirs(self.dwdir, exist_ok=True)
-        filename = url.split("/")[-1]
+        if custom_filename:
+            filename = f"{custom_filename}.mp3"
+        else:
+            filename = url.split("/")[-1]
         file_path = os.path.join(self.dwdir, filename)
 
         async with aiohttp.ClientSession() as session:
