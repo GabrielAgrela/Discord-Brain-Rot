@@ -42,8 +42,8 @@ class TTS:
 
     async def save_as_mp3_EL(self, text, lang="pt", region=""):
         boost_volume = 0
-        #create a unique self.filename based on the text and current time
-        self.filename = f"tts_{text[:10]}_{int(time.time())}.mp3"
+        #create a unique self.filename based on the text and current time in the format dd-mm-yy-hh-mm-ss
+        self.filename = f"{text[:10]}-{time.strftime('%d-%m-%y-%H-%M-%S')}.mp3"
         if lang == "pt":
             self.voice_id = self.voice_id_pt
         elif lang == "en":
