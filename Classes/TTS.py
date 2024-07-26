@@ -63,6 +63,15 @@ class TTS:
             await asyncio.sleep(5)
             await cooldown_message.delete()
             return
+        
+        #  audio file cannot be longer than 30 seconds
+        if AudioSegment.from_file(audio_file_path).duration_seconds > 15:
+            print("Audio file is too long. Please provide a file that is less than 15 seconds.")
+            error_message = await self.behavior.send_message(view=None, title="Audio File Too Long", description="Please provide a file that is less than 15 seconds.")
+            # Remove the error message after 5 seconds
+            await asyncio.sleep(5)
+            await error_message.delete()
+            return
 
         url = f"https://api.elevenlabs.io/v1/speech-to-speech/{self.voice_id}/stream"
         headers = {
