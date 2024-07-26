@@ -17,6 +17,7 @@ class TTS:
         self.filename = filename
         self.behavior = behavior
         self.bot = bot
+        self.db = behavior.db
         self.last_request_time = 0
         self.cooldown_seconds = cooldown_seconds
 
@@ -84,7 +85,8 @@ class TTS:
         louder_audio = audio + boost_volume
 
         path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", self.filename))
-        
+        self.db.add_entry(os.path.basename(self.filename))
+
         # Export the louder audio
         louder_audio.export(path, format="mp3")
 

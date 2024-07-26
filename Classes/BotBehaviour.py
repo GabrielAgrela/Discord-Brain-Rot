@@ -270,7 +270,8 @@ class BotBehavior:
 
             # Play the audio file
             try:
-                await asyncio.sleep(1)
+                if audio_file.split('/')[-1].replace('.mp3', '') not in ["slap", "tiro", "pubg-pan-sound-effect", "gunshot", "slap-oh_LGvkhyt"]:
+                    await asyncio.sleep(1)
                 audio_source = discord.FFmpegPCMAudio(executable=self.ffmpeg_path, source=audio_file_path)
                 voice_client.play(audio_source, after=after_playing)
             except Exception as e:
