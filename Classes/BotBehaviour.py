@@ -241,9 +241,12 @@ class BotBehavior:
             # Send a message to the bot channel if the sound is not a slap, tiro or pubg-pan-sound-effect
             self.color = discord.Color.red()
             bot_channel = discord.utils.get(self.bot.guilds[0].text_channels, name='bot')
-            if bot_channel and not is_entrance and not is_tts:
-                if audio_file.split('/')[-1].replace('.mp3', '') not in ["slap", "tiro", "pubg-pan-sound-effect", "gunshot", "slap-oh_LGvkhyt"]:
-                    await self.send_message(view=SoundBeingPlayedView(self, audio_file), title=f"🔊 **{audio_file.split('/')[-1].replace('.mp3', '')}** 🔊", description = f"Similarity: {extra}%" if extra != "" else None, footer = f"{user} requested '{original_message}'" if original_message else f"Requested by {user}", send_controls=send_controls)
+            if bot_channel and not is_entrance:
+                if is_tts:
+                    await self.send_message(view=SoundBeingPlayedView(self, audio_file) , send_controls=send_controls)
+                else:
+                    if audio_file.split('/')[-1].replace('.mp3', '') not in ["slap", "tiro", "pubg-pan-sound-effect", "gunshot", "slap-oh_LGvkhyt"]:
+                        await self.send_message(view=SoundBeingPlayedView(self, audio_file), title=f"🔊 **{audio_file.split('/')[-1].replace('.mp3', '')}** 🔊", description = f"Similarity: {extra}%" if extra != "" else None, footer = f"{user} requested '{original_message}'" if original_message else f"Requested by {user}", send_controls=send_controls)
 
             # Stop the audio if it is already playing
             if voice_client.is_playing():
