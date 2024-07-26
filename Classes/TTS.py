@@ -65,7 +65,7 @@ class TTS:
             return
         
         #  audio file cannot be longer than 30 seconds
-        if AudioSegment.from_file(audio_file_path).duration_seconds > 30:
+        if AudioSegment.from_file(audio_file_path).duration_seconds > 60:
             print("Audio file is too long. Please provide a file that is less than 15 seconds.")
             error_message = await self.behavior.send_message(view=None, title="Audio File Too Long", description="Please provide a file that is less than 15 seconds.")
             # Remove the error message after 5 seconds
