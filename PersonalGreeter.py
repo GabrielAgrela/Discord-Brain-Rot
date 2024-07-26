@@ -99,6 +99,29 @@ async def tts(ctx, message: Option(str, "What you want to say", required=True), 
         await behavior.send_message(title=e)
         return
     
+@bot.slash_command(name='sts', description='Speech-To-Speech. Press tab and enter to select message and write')
+async def tts(ctx, sound: Option(str, "Base sound you want to convert", required=True), char: Option(str, "tyson, ventura", required=True)):
+    await ctx.respond("Processing your request...", delete_after=0)
+
+    user = discord.utils.get(bot.get_all_members(), name=ctx.user.name)
+
+    behavior.color = discord.Color.dark_blue()
+    if char in ["tyson", "ventura"]:
+        url = "https://play-lh.googleusercontent.com/cyy3sqDw73x3LRwLbqMmWVHtCFp36RHaMO7Hh_YGqD6NRiLa8B5X8x-OLjAnnXbhYaw=w240-h480-rw" if char == "ventura" else "https://www.famousbirthdays.com/headshots/mike-tyson-7.jpg"
+    else:
+        char = "tyson"
+        url = "https://play-lh.googleusercontent.com/cyy3sqDw73x3LRwLbqMmWVHtCFp36RHaMO7Hh_YGqD6NRiLa8B5X8x-OLjAnnXbhYaw=w240-h480-rw"
+
+    await behavior.send_message(
+        title=f"{sound} to {char}",
+        description=f"'{char}'",
+        thumbnail=url
+    )
+    try:
+        await behavior.sts_EL(user, sound, char)
+    except Exception as e:
+        await behavior.send_message(title=e)
+        return
 
 @bot.slash_command(name="change", description="change the name of a sound")
 async def change(ctx, current: Option(str, "Current name of the sound", required=True), new: Option(str, "New name of the sound", required=True)):

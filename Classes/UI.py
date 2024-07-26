@@ -17,6 +17,18 @@ class ReplayButton(Button):
         asyncio.create_task(self.bot_behavior.play_audio(interaction.message.channel, self.audio_file, interaction.user.name))
         self.bot_behavior.other_actions_db.add_entry(interaction.user.name, "replay_sound", self.audio_file)
 
+class VenturaButton(Button):
+    def __init__(self, bot_behavior, audio_file, **kwargs):
+        super().__init__(**kwargs)
+        self.bot_behavior = bot_behavior
+        self.audio_file = audio_file
+        
+
+    async def callback(self, interaction):
+        await interaction.response.defer()
+        asyncio.create_task(self.bot_behavior.sts_EL(interaction.message.channel, self.audio_file, "ventura"))
+        self.bot_behavior.other_actions_db.add_entry(interaction.user.name, "sts_EL", self.audio_file)
+
 class FavoriteButton(Button):
     def __init__(self, bot_behavior, audio_file):
         if bot_behavior.db.is_favorite(audio_file):
@@ -227,6 +239,7 @@ class SoundBeingPlayedView(View):
         self.add_item(FavoriteButton(bot_behavior, audio_file))
         self.add_item(BlacklistButton(bot_behavior, audio_file))
         self.add_item(ChangeSoundNameButton(bot_behavior, audio_file, label="📝", style=discord.ButtonStyle.primary))
+        self.add_item(VenturaButton(bot_behavior, audio_file, label="🚗", style=discord.ButtonStyle.primary))
 
 class ControlsView(View):
     def __init__(self, bot_behavior):

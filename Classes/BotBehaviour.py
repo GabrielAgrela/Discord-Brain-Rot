@@ -242,11 +242,8 @@ class BotBehavior:
             self.color = discord.Color.red()
             bot_channel = discord.utils.get(self.bot.guilds[0].text_channels, name='bot')
             if bot_channel and not is_entrance:
-                if is_tts:
-                    await self.send_message(view=SoundBeingPlayedView(self, audio_file) , send_controls=send_controls)
-                else:
-                    if audio_file.split('/')[-1].replace('.mp3', '') not in ["slap", "tiro", "pubg-pan-sound-effect", "gunshot", "slap-oh_LGvkhyt"]:
-                        await self.send_message(view=SoundBeingPlayedView(self, audio_file), title=f"🔊 **{audio_file.split('/')[-1].replace('.mp3', '')}** 🔊", description = f"Similarity: {extra}%" if extra != "" else None, footer = f"{user} requested '{original_message}'" if original_message else f"Requested by {user}", send_controls=send_controls)
+                if audio_file.split('/')[-1].replace('.mp3', '') not in ["slap", "tiro", "pubg-pan-sound-effect", "gunshot", "slap-oh_LGvkhyt"]:
+                    await self.send_message(view=SoundBeingPlayedView(self, audio_file), title=f"🔊 **{audio_file.split('/')[-1].replace('.mp3', '')}** 🔊", description = f"Similarity: {extra}%" if extra != "" else None, footer = f"{user} requested '{original_message}'" if original_message else f"Requested by {user}", send_controls=send_controls)
 
             # Stop the audio if it is already playing
             if voice_client.is_playing():
@@ -379,6 +376,10 @@ class BotBehavior:
     async def tts_EL(self, user, speech, lang="en", region=""):
         self.other_actions_db.add_entry(user.name, "tts_EL", speech.replace(",", "."))
         await self.TTS.save_as_mp3_EL(speech, lang, region)  
+
+    async def sts_EL(self, user, sound, char="ventura", region=""):
+        self.other_actions_db.add_entry(user.name, "sts_EL", sound.replace(",", "."))
+        await self.TTS.speech_to_speech(sound, char, region)  
 
     async def stt(self, user, audio_files):
         return await self.TTS.speech_to_text(audio_files)
