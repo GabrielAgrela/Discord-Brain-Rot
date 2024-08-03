@@ -381,6 +381,10 @@ class BotBehavior:
         self.other_actions_db.add_entry(user.name, "sts_EL", sound.replace(",", "."))
         await self.TTS.speech_to_speech(sound, char, region)  
 
+    async def isolate_voice(self, user, sound):
+        self.other_actions_db.add_entry(user.name, "isolate_voice", sound.replace(",", "."))
+        await self.TTS.isolate_voice(sound)
+
     async def stt(self, user, audio_files):
         return await self.TTS.speech_to_text(audio_files)
     
@@ -436,12 +440,15 @@ class BotBehavior:
         self.other_actions_db.add_entry("admin", "family_guy", file)
         await message.delete()
 
-    async def send_message(self, title="", description="",footer=None, thumbnail=None, view=None, send_controls=True, file=None):
+    async def send_message(self, title="", description="",footer=None, thumbnail=None, view=None, send_controls=True, file=None, delete_time=0):
         bot_channel = await self.get_bot_channel()
         embed = discord.Embed(title=title, description=description, color=self.color)
         embed.set_thumbnail(url=thumbnail)
         embed.set_footer(text=footer)
-        message = await bot_channel.send(view=view, embed=None if description == "" and title == "" else embed, file=file)
+        if delete_time > 0:
+            message = await bot_channel.send(view=view, embed=None if description == "" and title == "" else embed, file=file, delete_after=delete_time)
+        else:
+            message = await bot_channel.send(view=view, embed=None if description == "" and title == "" else embed, file=file)
         if send_controls:
             await self.send_controls()
         return message

@@ -122,6 +122,20 @@ async def tts(ctx, sound: Option(str, "Base sound you want to convert", required
     except Exception as e:
         await behavior.send_message(title=e)
         return
+    
+@bot.slash_command(name='isolate', description='Isolate voice from a sound.')
+async def isolate(ctx, sound: Option(str, "Base sound you want to isolate", required=True)):
+    await ctx.respond("Processing your request...", delete_after=0)
+
+    user = discord.utils.get(bot.get_all_members(), name=ctx.user.name)
+
+    behavior.color = discord.Color.dark_blue()
+
+    try:
+        await behavior.isolate_voice(user, sound)
+    except Exception as e:
+        await behavior.send_message(title=e)
+        return
 
 @bot.slash_command(name="change", description="change the name of a sound")
 async def change(ctx, current: Option(str, "Current name of the sound", required=True), new: Option(str, "New name of the sound", required=True)):
