@@ -17,17 +17,18 @@ class ReplayButton(Button):
         asyncio.create_task(self.bot_behavior.play_audio(interaction.message.channel, self.audio_file, interaction.user.name))
         self.bot_behavior.other_actions_db.add_entry(interaction.user.name, "replay_sound", self.audio_file)
 
-class VenturaButton(Button):
-    def __init__(self, bot_behavior, audio_file, **kwargs):
+class STSButton(Button):
+    def __init__(self, bot_behavior, audio_file, char, **kwargs):
         super().__init__(**kwargs)
         self.bot_behavior = bot_behavior
         self.audio_file = audio_file
+        self.char = char
         
 
     async def callback(self, interaction):
         await interaction.response.defer()
-        asyncio.create_task(self.bot_behavior.sts_EL(interaction.message.channel, self.audio_file, "ventura"))
-        self.bot_behavior.other_actions_db.add_entry(interaction.user.name, "sts_EL", self.audio_file)
+        asyncio.create_task(self.bot_behavior.sts_EL(interaction.message.channel, self.audio_file, self.char))
+        self.bot_behavior.other_actions_db.add_entry(interaction.user.name, "sts_EL_"+self.char, self.audio_file)
 
 class IsolateButton(Button):
     def __init__(self, bot_behavior, audio_file, **kwargs):
@@ -251,8 +252,10 @@ class SoundBeingPlayedView(View):
         self.add_item(FavoriteButton(bot_behavior, audio_file))
         self.add_item(BlacklistButton(bot_behavior, audio_file))
         self.add_item(ChangeSoundNameButton(bot_behavior, audio_file, label="📝", style=discord.ButtonStyle.primary))
-        self.add_item(VenturaButton(bot_behavior, audio_file, label="🐵", style=discord.ButtonStyle.primary))
         self.add_item(IsolateButton(bot_behavior, audio_file, label="🧑‍🎤🎶❌", style=discord.ButtonStyle.primary))
+        self.add_item(STSButton(bot_behavior, audio_file, label="🐷", style=discord.ButtonStyle.primary))
+        self.add_item(STSButton(bot_behavior, audio_file, label="🐵", style=discord.ButtonStyle.primary))
+        
 
 class ControlsView(View):
     def __init__(self, bot_behavior):
