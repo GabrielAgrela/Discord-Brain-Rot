@@ -11,6 +11,7 @@ from Classes.OtherActionsDatabase import OtherActionsDatabase
 from Classes.TTS import TTS
 import csv
 from Classes.UI import SoundBeingPlayedView, ControlsView, SoundView
+from Classes.ManualSoundDownloader import ManualSoundDownloader
 from moviepy.editor import VideoFileClip
 import aiohttp
 import re
@@ -32,6 +33,7 @@ class BotBehavior:
         self.player_history_db = PlayHistoryDatabase(self.ph_path,self.db,self.users_json, self.bot, self)
         self.other_actions_db = OtherActionsDatabase(self.oa_path, self)
         self.TTS = TTS(self,bot)
+        self.ManualSoundDownloader = ManualSoundDownloader()
         self.view = None
         self.embed = None
         self.controls_message = None
@@ -51,12 +53,13 @@ class BotBehavior:
             return
         
         async with self.upload_lock:
-            message = await interaction.channel.send(embed=discord.Embed(title="Upload a the .mp3 (and write the name you wanna give to that sound) or provide an MP3 URL. You have 60s ☝️🤓", color=self.color))
+            message = await interaction.channel.send(embed=discord.Embed(title="Upload a the .mp3 (and write the name you wanna give to that sound) or provide an MP3/Tiktok URL. You have 60s ☝️🤓", color=self.color))
 
             def check(m):
                 is_attachment = len(m.attachments) > 0 and m.attachments[0].filename.endswith('.mp3')
                 is_mp3_url = re.match(r'^https?://.*\.mp3$', m.content)
-                return m.author == interaction.user and m.channel == interaction.channel and (is_attachment or is_mp3_url)
+                is_tiktok_url = re.match(r'^https?://.*tiktok\.com/.*$', m.content)
+                return m.author == interaction.user and m.channel == interaction.channel and (is_attachment or is_mp3_url or is_tiktok_url)
 
             try:
                 response = await self.bot.wait_for('message', check=check, timeout=60.0)
@@ -69,8 +72,20 @@ class BotBehavior:
                     if len(parts) > 1 and not parts[0].startswith('http'):
                         custom_filename = response.content
 
+                #time limit is the int after the url
+                if re.match(r'^https?://.*tiktok\.com/.*$', response.content):
+                    parts = response.content.split(maxsplit=1)
+                    if len(parts) > 1 and parts[1].isdigit():
+                        time_limit = int(parts[1])
+                    else:
+                        time_limit = None
+                else:
+                    time_limit = None
+
                 if len(response.attachments) > 0:
                     file_path = await self.save_uploaded_sound(response.attachments[0], custom_filename)
+                elif re.match(r'^https?://.*tiktok\.com/.*$', response.content):
+                    file_path = await self.save_sound_from_tiktok(response.content, custom_filename, time_limit=time_limit)
                 else:
                     file_path = await self.save_sound_from_url(response.content, custom_filename)
 
@@ -97,6 +112,15 @@ class BotBehavior:
             filename = attachment.filename
         file_path = os.path.join(self.dwdir, filename)
         await attachment.save(file_path)
+        return file_path
+    
+    async def save_sound_from_tiktok(self, url, custom_filename=None, time_limit=None):
+        os.makedirs(self.dwdir, exist_ok=True)
+
+        # Download the TikTok video
+        filename = ManualSoundDownloader.tiktok_to_mp3(url, self.dwdir, custom_filename, time_limit)
+        file_path = os.path.join(self.dwdir, filename)
+
         return file_path
 
     async def save_sound_from_url(self, url, custom_filename=None):
