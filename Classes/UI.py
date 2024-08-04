@@ -253,8 +253,8 @@ class SoundBeingPlayedView(View):
         self.add_item(BlacklistButton(bot_behavior, audio_file))
         self.add_item(ChangeSoundNameButton(bot_behavior, audio_file, label="📝", style=discord.ButtonStyle.primary))
         self.add_item(IsolateButton(bot_behavior, audio_file, label="🧑‍🎤🎶❌", style=discord.ButtonStyle.primary))
-        self.add_item(STSButton(bot_behavior, audio_file, label="🐷", style=discord.ButtonStyle.primary))
-        self.add_item(STSButton(bot_behavior, audio_file, label="🐵", style=discord.ButtonStyle.primary))
+        self.add_item(STSButton(bot_behavior, audio_file, "ventura", label="🐷", style=discord.ButtonStyle.primary))
+        self.add_item(STSButton(bot_behavior, audio_file, "tyson", label="🐵", style=discord.ButtonStyle.primary))
         
 
 class ControlsView(View):
