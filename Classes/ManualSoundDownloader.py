@@ -6,9 +6,21 @@ import uuid
 class ManualSoundDownloader:
     def tiktok_to_mp3(url, output_dir='.', custom_filename=None, time_limit=None):
         # Set up yt-dlp options
+        def sanitize_title(title):
+            if len(title) > 30:
+                return title[:27] + '...' + str(uuid.uuid4())[:3]
+            return title
+
+        # Download the video and extract audio
+        with yt_dlp.YoutubeDL() as ydl:
+            info_dict = ydl.extract_info(url, download=False)
+            title = sanitize_title(info_dict.get('title', ''))
+            mp3_filename = f"{title}.mp3"
+            mp3_filepath = os.path.join(output_dir, mp3_filename)
+
         ydl_opts = {
             'format': 'bestaudio/best',
-            'outtmpl': os.path.join(output_dir, '%(title)s.%(ext)s'),
+            'outtmpl': mp3_filepath,
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': 'mp3',
@@ -16,23 +28,9 @@ class ManualSoundDownloader:
             }],
         }
 
-        # Download the video and extract audio
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info_dict = ydl.extract_info(url, download=True)
-            title = info_dict.get('title', None)
-            
-            # Ensure the filename is 30 chars or less
-            if len(title) > 30:
-                title = title[:27] + '...' + str(uuid.uuid4())[:3]
-            
-            mp3_filename = f"{title}.mp3"
-            mp3_filepath = os.path.join(output_dir, mp3_filename)
-        
-        # Rename the file to the new truncated name
-        original_mp3_filepath = os.path.join(output_dir, f"{info_dict.get('title', None)}.mp3")
-        if os.path.exists(original_mp3_filepath):
-            os.rename(original_mp3_filepath, mp3_filepath)
-        
+            ydl.download([url])
+
         # If time_limit is provided, trim the audio
         if time_limit:
             audio = AudioSegment.from_mp3(mp3_filepath)
