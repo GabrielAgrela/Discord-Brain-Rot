@@ -90,8 +90,8 @@ class TTS:
             "model_id": "eleven_multilingual_sts_v2",
             "voice_settings": json.dumps({
                 "stability": 0.3,
-                "similarity_boost": 1,
-                "style": 1,
+                "similarity_boost": 0.85,
+                "style": 0.5,
                 "use_speaker_boost": True
             })
         }
