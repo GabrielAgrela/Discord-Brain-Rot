@@ -5,6 +5,10 @@ import uuid
 
 class ManualSoundDownloader:
     def tiktok_to_mp3(url, output_dir='.', custom_filename=None, time_limit=None):
+        # Replace "photo" with "video" in the URL if present
+        if "photo" in url:
+            url = url.replace("photo", "video")
+
         # Set up yt-dlp options
         def sanitize_title(title):
             if len(title) > 30:
@@ -15,7 +19,7 @@ class ManualSoundDownloader:
         with yt_dlp.YoutubeDL() as ydl:
             info_dict = ydl.extract_info(url, download=False)
             title = sanitize_title(info_dict.get('title', ''))
-            mp3_filename = f"{title}.mp3"
+            mp3_filename = f"{custom_filename}.mp3" if custom_filename else f"{title}.mp3"
             mp3_filepath = os.path.join(output_dir, mp3_filename)
 
         ydl_opts = {

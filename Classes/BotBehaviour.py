@@ -71,6 +71,8 @@ class BotBehavior:
                     parts = response.content.split(maxsplit=1)
                     if len(parts) > 1 and not parts[0].startswith('http'):
                         custom_filename = response.content
+                    elif len(parts) > 1 and parts[0].startswith('http'):
+                        custom_filename = parts[1]
 
                 #time limit is the int after the url
                 if re.match(r'^https?://.*tiktok\.com/.*$', response.content):
@@ -82,14 +84,17 @@ class BotBehavior:
                 else:
                     time_limit = None
 
+                await response.delete()
+                
                 if len(response.attachments) > 0:
                     file_path = await self.save_uploaded_sound(response.attachments[0], custom_filename)
                 elif re.match(r'^https?://.*tiktok\.com/.*$', response.content):
+                    # send_message("Downloading TikTok video... 🤓"), destroy after 5s
+                    await self.send_message(title="Downloading TikTok video... 🤓", description="Espera, bixa", delete_time=5)
                     file_path = await self.save_sound_from_tiktok(response.content, custom_filename, time_limit=time_limit)
                 else:
                     file_path = await self.save_sound_from_url(response.content, custom_filename)
 
-                await response.delete()
                 self.other_actions_db.add_entry(interaction.user.name, "upload_sound", file_path)
                 confirmation_message = await interaction.channel.send(embed=discord.Embed(title="Sound uploaded successfully! (may take up to 10s to be available)", color=self.color))
                 await asyncio.sleep(10)
