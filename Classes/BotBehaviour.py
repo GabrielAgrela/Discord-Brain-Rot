@@ -75,7 +75,7 @@ class BotBehavior:
 
             # You might want to add top sounds for each user here if that data is available
             top_sounds = Database().get_top_sounds(number=number, days=days, user=username)
-            for sound in top_sounds:
+            for sound in top_sounds[0]:
                 embed.add_field(name=f"🎵 **{sound[0]}**", value=f"Played **{sound[1]}** times", inline=False)
 
             message = await bot_channel.send(embed=embed)
@@ -83,7 +83,7 @@ class BotBehavior:
 
         sound_summary, total_plays = Database().get_top_sounds(number=100000, days=30, user=None)
         average_per_day = total_plays / 30
-        title = f"🎵 **TOP SOUNDS IN THE LAST {days} DAYS! TOTAL PLAYS: {total_plays}** 🎵"
+        title = f"🎵 **TOP MANUALLY PLAYED SOUNDS IN THE LAST {days} DAYS! TOTAL PLAYS: {total_plays}** 🎵"
         description = f"Average of {average_per_day:.0f} plays per day!"
         color = discord.Color.yellow()
 
