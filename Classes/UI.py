@@ -28,7 +28,6 @@ class STSButton(Button):
     async def callback(self, interaction):
         await interaction.response.defer()
         asyncio.create_task(self.bot_behavior.sts_EL(interaction.message.channel, self.audio_file, self.char))
-        self.bot_behavior.other_actions_db.add_entry(interaction.user.name, "sts_EL_"+self.char, self.audio_file)
 
 class IsolateButton(Button):
     def __init__(self, bot_behavior, audio_file, **kwargs):
@@ -200,7 +199,7 @@ class BrainRotButton(Button):
             asyncio.create_task(interaction.channel.send("Gertrudes may need some seconds for this one", delete_after=3))
             self.bot_behavior.color = discord.Color.teal()
             task = random.choice([self.bot_behavior.family_guy, self.bot_behavior.family_guy, self.bot_behavior.family_guy, self.bot_behavior.subway_surfers, self.bot_behavior.slice_all])
-            asyncio.create_task(task())
+            asyncio.create_task(task(interaction.user))
             self.bot_behavior.lastInteractionDateTime = datetime.now()
         else:
             asyncio.create_task(interaction.channel.send("STOP SPAMMING, GERTRUDES IS RUNNING ON A RASPBERRY PI 🔥🔥🔥", delete_after=3))
