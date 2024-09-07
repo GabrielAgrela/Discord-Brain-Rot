@@ -125,6 +125,7 @@ class ListFavoritesButton(Button):
     async def callback(self, interaction):
         await interaction.response.defer()
         favorites = Database().get_sounds(num_sounds=1000, favorite=True)
+        Database().insert_action(interaction.user.name, "list_favorites", len(favorites))
         if len(favorites) > 0:
             favorite_entries = [f"{favorite[0]}: {favorite[2]}" for favorite in favorites]
             favorites_content = "\n".join(favorite_entries)
@@ -144,7 +145,8 @@ class ListBlacklistButton(Button):
 
     async def callback(self, interaction):
         await interaction.response.defer()
-        blacklisted = self.bot_behavior.db.get_blacklisted_sounds()
+        blacklisted = Database().get_sounds(num_sounds=1000, blacklist=True)
+        Database().insert_action(interaction.user.name, "list_blacklisted_sounds", len(blacklisted))
         if len(blacklisted) > 0:
             blacklisted_entries = [f"{sound[0]}: {sound[2]}" for sound in blacklisted]
             blacklisted_content = "\n".join(blacklisted_entries)
@@ -156,7 +158,6 @@ class ListBlacklistButton(Button):
             os.remove("blacklisted.txt")  # Clean up the temporary file
         else:
             await interaction.message.channel.send("No blacklisted sounds found.")
-        self.bot_behavior.other_actions_db.add_entry(interaction.user.name, "list_blacklisted_sounds")
 
 class PlaySlapButton(Button):
     def __init__(self, bot_behavior, **kwargs):
