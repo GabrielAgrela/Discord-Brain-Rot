@@ -258,16 +258,18 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
 
     try:
         user_events = db.get_user_events(member_str, event)
+        sound = user_events[0][2]
+        db.insert_action(member_str, event, db.get_sounds_by_similarity(sound)[0][0])
         if user_events:
             behavior.last_channel[member_str] = channel
             await asyncio.sleep(.5)
             if channel:
-                sound = user_events[0][2]  # Assuming the sound is in the third column
+                  # Assuming the sound is in the third column
                 print(f"Playing {sound} for {member_str} on {event}")
                 await behavior.play_audio(channel, db.get_sounds_by_similarity(sound)[0][2], member_str, is_entrance=True)
         elif event == "join" and not db.get_user_events(member_str):
             await behavior.play_audio(channel, "gay-echo.mp3", "admin", is_entrance=True)
-        db.insert_action(member_str, event, db.get_sounds_by_similarity(sound)[0][0])
+        
     except Exception as e:
         print(f"An error occurred: {e}")
 
