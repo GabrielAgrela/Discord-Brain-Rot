@@ -60,7 +60,7 @@ class Database:
             # users table should have id, event, sound, timestamp
             create_users_table = '''
             CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id TEXT NOT NULL,
                 event TEXT NOT NULL,
                 sound TEXT NOT NULL,
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -381,3 +381,9 @@ class Migrate:
                 print("Connection closed")
 
 
+#create db and migrate
+Database.create_database()
+Migrate.migrate_sounds()
+Migrate.migrate_play_history()
+Migrate.migrate_other_actions()
+Migrate.migrate_users()
