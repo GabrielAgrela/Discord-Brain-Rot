@@ -18,7 +18,7 @@ class ReplayButton(Button):
     async def callback(self, interaction):
         await interaction.response.defer()
         asyncio.create_task(self.bot_behavior.play_audio(interaction.message.channel, self.audio_file, interaction.user.name))
-        self.bot_behavior.other_actions_db.add_entry(interaction.user.name, "replay_sound", self.audio_file)
+        Database().insert_action(interaction.user.name, "replay_sound", Database().get_sounds_by_similarity(self.audio_file)[0][0])
 
 class STSButton(Button):
     def __init__(self, bot_behavior, audio_file, char, **kwargs):
@@ -133,7 +133,7 @@ class ListFavoritesButton(Button):
             with open("favorites.txt", "w") as f:
                 f.write(favorites_content)
             
-            await self.bot_behavior.send_message("🤩 Favorites 🤩", file=discord.File("favorites.txt", "favorites.txt"), delete_time=10)
+            await self.bot_behavior.send_message("🤩 Favorites 🤩", file=discord.File("favorites.txt", "favorites.txt"), delete_time=30)
             os.remove("favorites.txt")  # Clean up the temporary file
         else:
             await interaction.message.channel.send("No favorite sounds found.")
@@ -154,7 +154,7 @@ class ListBlacklistButton(Button):
             with open("blacklisted.txt", "w") as f:
                 f.write(blacklisted_content)
             
-            await self.bot_behavior.send_message("🗑️ Blacklisted Sounds 🗑️", file=discord.File("blacklisted.txt", "blacklisted.txt"), delete_time=10)
+            await self.bot_behavior.send_message("🗑️ Blacklisted Sounds 🗑️", file=discord.File("blacklisted.txt", "blacklisted.txt"), delete_time=30)
             os.remove("blacklisted.txt")  # Clean up the temporary file
         else:
             await interaction.message.channel.send("No blacklisted sounds found.")
