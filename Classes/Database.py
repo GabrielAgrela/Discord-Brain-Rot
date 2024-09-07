@@ -2,6 +2,7 @@ import sqlite3
 import os
 import csv
 import json
+from fuzzywuzzy import fuzz
 
 class Database:
     _instance = None
@@ -84,6 +85,7 @@ class Database:
                 print("Connection closed")
 
     def insert_action(self, username, action, target):
+        username = username.split("#")[0]
         try:
             self.cursor.execute("INSERT INTO actions (username, action, target) VALUES (?, ?, ?);", (username, action, target))
             self.conn.commit()
@@ -122,28 +124,43 @@ class Database:
         # Split the input into individual words
         words = req_sound.split()
         
-        # Build the SQL query with LIKE and SOUNDEX conditions
-        conditions = " OR ".join([f"(Filename LIKE ? OR SOUNDEX(Filename) = SOUNDEX(?))" for _ in words])
+        # Build the SQL query with LIKE conditions
+        conditions = " OR ".join([f"Filename LIKE ?" for _ in words])
         
-        # Create the parameters for the LIKE and SOUNDEX queries (duplicate for both)
-        params = [item for word in words for item in (f"%{word}%", word)]
+        # Create the parameters for the LIKE queries
+        params = [f"%{word}%" for word in words]
 
         try:
-            # Execute the query and count how many words match (either LIKE or SOUNDEX)
+            # Execute the query to get potential matches
             query = f"""
-                SELECT *, 
-                    ({' + '.join([f"(Filename LIKE ? OR SOUNDEX(Filename) = SOUNDEX(?))" for _ in words])}) AS match_count
+                SELECT *
                 FROM sounds 
                 WHERE {conditions}
-                ORDER BY match_count DESC
-                LIMIT ?;
             """
             
-            # Add the limit parameter at the end
-            self.cursor.execute(query, (*params, *params, num_results))
+            self.cursor.execute(query, params)
+            potential_matches = self.cursor.fetchall()
+
+            # Calculate similarity scores
+            scored_matches = []
+            for sound in potential_matches:
+                filename = sound[2]  # Assuming 'Filename' is at index 2
+                score = fuzz.token_sort_ratio(req_sound.lower(), filename.lower())
+
+                # Increment score for each matching word
+                for word in words:
+                    if word.lower() in filename.lower():
+                        score_increment = (100 - score) / 1.5
+                        score += score_increment
+
+                scored_matches.append((round(score, 2), sound))
+
+            # Sort by score in descending order and get top results
+            scored_matches.sort(key=lambda x: x[0], reverse=True)
+            top_matches = scored_matches[:num_results]
 
             print("Sounds found successfully")
-            return self.cursor.fetchall()
+            return [match[1] for match in top_matches]  # Return only the sound data
 
         except sqlite3.Error as e:
             print(f"An error occurred: {e}")
