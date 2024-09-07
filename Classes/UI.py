@@ -31,6 +31,7 @@ class STSButton(Button):
     async def callback(self, interaction):
         await interaction.response.defer()
         asyncio.create_task(self.bot_behavior.sts_EL(interaction.message.channel, self.audio_file, self.char))
+        Database().insert_action(interaction.user.name, "sts_EL", Database().get_sounds_by_similarity(self.audio_file)[0][0])
 
 class IsolateButton(Button):
     def __init__(self, bot_behavior, audio_file, **kwargs):
@@ -42,7 +43,7 @@ class IsolateButton(Button):
     async def callback(self, interaction):
         await interaction.response.defer()
         asyncio.create_task(self.bot_behavior.isolate_voice(interaction.message.channel, self.audio_file))
-        self.bot_behavior.other_actions_db.add_entry(interaction.user.name, "isolate", self.audio_file)
+        Database().insert_action(interaction.user.name, "isolate", Database().get_sounds_by_similarity(self.audio_file)[0][0])
 
 class FavoriteButton(Button):
     def __init__(self, bot_behavior, audio_file):
@@ -55,9 +56,9 @@ class FavoriteButton(Button):
 
     async def callback(self, interaction: discord.Interaction):
         await interaction.response.defer()
-        self.bot_behavior.db.update_favorite_status(self.audio_file, not self.bot_behavior.db.is_favorite(self.audio_file))
+        Database().update_sound(self.audio_file, None, not Database().get_sounds_by_similarity(self.audio_file)[0][3])
         await interaction.message.edit(view=SoundBeingPlayedView(self.bot_behavior, self.audio_file))
-        self.bot_behavior.other_actions_db.add_entry(interaction.user.name, "favorite_sound", self.audio_file)
+        Database().insert_action(interaction.user.name, "favorite_sound", Database().get_sounds_by_similarity(self.audio_file)[0][0]) 
 
 class BlacklistButton(Button):
     def __init__(self, bot_behavior, audio_file):
@@ -70,10 +71,9 @@ class BlacklistButton(Button):
 
     async def callback(self, interaction: discord.Interaction):
         await interaction.response.defer()
-        self.bot_behavior.db.update_blacklist_status(self.audio_file, not self.bot_behavior.db.is_blacklisted(self.audio_file))
-        view = SoundBeingPlayedView(self.bot_behavior, self.audio_file)
-        await interaction.message.edit(view=view)
-        self.bot_behavior.other_actions_db.add_entry(interaction.user.name, "blacklist_sound", self.audio_file)
+        Database().update_sound(self.audio_file, None, None, not Database().get_sounds_by_similarity(self.audio_file)[0][4])
+        await interaction.message.edit(view=SoundBeingPlayedView(self.bot_behavior, self.audio_file))
+        Database().insert_action(interaction.user.name, "blacklist_sound", Database().get_sounds_by_similarity(self.audio_file)[0][0]) 
 
 class ChangeSoundNameButton(Button):
     def __init__(self, bot_behavior, sound_name, **kwargs):
