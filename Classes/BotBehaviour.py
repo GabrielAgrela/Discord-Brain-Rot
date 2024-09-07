@@ -55,7 +55,6 @@ class BotBehavior:
         bot_channel = await self.get_bot_channel()
         
         total_plays = sum(count for _, count in top_users)
-        average_per_day = total_plays / days
 
         messages = []
         for rank, (username, total_plays) in enumerate(top_users, 1):
@@ -82,10 +81,17 @@ class BotBehavior:
             message = await bot_channel.send(embed=embed)
             messages.append(message)
 
+        sound_summary = Database().get_top_sounds(number=10, days=30, user=None)
+        total_plays = sound_summary[0][1]
+        average_per_day = total_plays / days
+        title = f"🎵 **TOP SOUNDS IN THE LAST {days} DAYS! TOTAL PLAYS: {total_plays}** 🎵"
+        description = f"Average of {average_per_day:.0f} plays per day!"
+        color = discord.Color.yellow()
+
         summary_embed = discord.Embed(
-            title=f"🎵 **TOP {number} USERS IN THE LAST {days} DAYS! TOTAL PLAYS: {total_plays}** 🎵",
-            description=f"Average of {average_per_day:.0f} plays per day!",
-            color=discord.Color.yellow()
+            title=title,
+            description=description,
+            color=color
         )
         summary_embed.set_thumbnail(url="https://i.imgflip.com/1vdris.jpg")
         summary_embed.set_footer(text="Updated as of")
