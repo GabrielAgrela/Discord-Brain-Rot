@@ -126,8 +126,8 @@ class ListFavoritesButton(Button):
         await interaction.response.defer()
         favorites = Database().get_sounds(num_sounds=1000, favorite=True)
         if len(favorites) > 0:
-            favorite_names = [favorite[2] for favorite in favorites]
-            favorites_content = "\n".join(favorite_names)
+            favorite_entries = [f"{favorite[0]}: {favorite[2]}" for favorite in favorites]
+            favorites_content = "\n".join(favorite_entries)
             
             with open("favorites.txt", "w") as f:
                 f.write(favorites_content)
