@@ -362,9 +362,9 @@ class Migrate:
                     print(f"Inserting data: {username} - {event} - {sound}")
                     try:
                         cursor.execute("""
-                        INSERT INTO users (event, sound)
-                        VALUES (?, ?)
-                        """, (event, sound))
+                        INSERT INTO users (id, event, sound)
+                        VALUES (?, ?, ?)
+                        """, (username, event, sound))
                     except sqlite3.Error as e:
                         print(f"An error occurred: {e}")
 
