@@ -81,9 +81,8 @@ class BotBehavior:
             message = await bot_channel.send(embed=embed)
             messages.append(message)
 
-        sound_summary = Database().get_top_sounds(number=100000, days=30, user=None)
-        total_plays = sound_summary[0][1]
-        average_per_day = total_plays / days
+        sound_summary, total_plays = Database().get_top_sounds(number=100000, days=30, user=None)
+        average_per_day = total_plays / 30
         title = f"🎵 **TOP SOUNDS IN THE LAST {days} DAYS! TOTAL PLAYS: {total_plays}** 🎵"
         description = f"Average of {average_per_day:.0f} plays per day!"
         color = discord.Color.yellow()

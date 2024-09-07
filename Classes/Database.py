@@ -227,10 +227,28 @@ class Database:
             params.append(number)
             
             self.cursor.execute(query, tuple(params))
-            return self.cursor.fetchall()
+            top_sounds = self.cursor.fetchall()
+
+            # Get total count
+            total_count_query = """
+            SELECT COUNT(*) as total_count
+            FROM actions a
+            WHERE a.action IN ('play_random_sound', 'replay_sound', 'play_random_favorite_sound', 'play_request')
+            """
+            
+            if days > 0:
+                total_count_query += " AND a.timestamp >= datetime('now', '-' || ? || ' days')"
+            
+            if user:
+                total_count_query += " AND a.username = ?"
+            
+            self.cursor.execute(total_count_query, tuple(params[:-1]))  # Exclude the LIMIT parameter
+            total_count = self.cursor.fetchone()[0]
+
+            return top_sounds, total_count
         except sqlite3.Error as e:
             print(f"An error occurred: {e}")
-            return []
+            return [], 0
         
         
         
