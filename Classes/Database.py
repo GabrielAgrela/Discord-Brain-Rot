@@ -279,6 +279,8 @@ class Database:
 
     async def update_sound(self, filename, new_filename=None, favorite=None, blacklist=None):
         new_filename = new_filename + ".mp3"
+        favorite = 1 if favorite else 0
+        blacklist = 1 if blacklist else 0
         try:
             if new_filename:
                 self.cursor.execute("UPDATE sounds SET Filename = ? WHERE Filename = ?;", (new_filename, filename))
