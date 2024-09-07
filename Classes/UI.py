@@ -3,7 +3,8 @@ import random
 from discord.ui import Button, View
 import discord
 import asyncio
-from Database import Database
+import os
+from Classes.Database import Database
 
 
 
@@ -125,8 +126,14 @@ class ListFavoritesButton(Button):
         await interaction.response.defer()
         favorites = Database().get_sounds(num_sounds=1000, favorite=True)
         if len(favorites) > 0:
-            #use self.bot_behavior.send_message to send a file with the list of favorites
-            await self.bot_behavior.send_message(interaction.message.channel, file=discord.File(favorites[:][2], "favorites.txt"))
+            favorite_names = [favorite[2] for favorite in favorites]
+            favorites_content = "\n".join(favorite_names)
+            
+            with open("favorites.txt", "w") as f:
+                f.write(favorites_content)
+            
+            await self.bot_behavior.send_message(interaction.message.channel, file=discord.File("favorites.txt", "favorites.txt"))
+            os.remove("favorites.txt")  # Clean up the temporary file
         else:
             await interaction.message.channel.send("No favorite sounds found.")
 
