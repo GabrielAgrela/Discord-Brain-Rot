@@ -81,7 +81,7 @@ class BotBehavior:
             message = await bot_channel.send(embed=embed)
             messages.append(message)
 
-        sound_summary = Database().get_top_sounds(number=10, days=30, user=None)
+        sound_summary = Database().get_top_sounds(number=100000, days=30, user=None)
         total_plays = sound_summary[0][1]
         average_per_day = total_plays / days
         title = f"🎵 **TOP SOUNDS IN THE LAST {days} DAYS! TOTAL PLAYS: {total_plays}** 🎵"
@@ -96,6 +96,15 @@ class BotBehavior:
         summary_embed.set_thumbnail(url="https://i.imgflip.com/1vdris.jpg")
         summary_embed.set_footer(text="Updated as of")
         summary_embed.timestamp = datetime.utcnow()
+
+        # Add top 10 sounds to the summary embed
+        top_10_sounds = sound_summary[:10]
+        for i, (sound_name, play_count) in enumerate(top_10_sounds, 1):
+            summary_embed.add_field(
+                name=f"#{i}: {sound_name}",
+                value=f"Played {play_count} times",
+                inline=False
+            )
 
         summary_message = await bot_channel.send(embed=summary_embed)
         messages.append(summary_message)
