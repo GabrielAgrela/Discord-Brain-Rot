@@ -264,7 +264,7 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
             if channel:
                 sound = user_events[0][2]  # Assuming the sound is in the third column
                 print(f"Playing {sound} for {member_str} on {event}")
-                await behavior.play_audio(channel, db.get_sound(sound)[0][2], member_str, is_entrance=True)
+                await behavior.play_audio(channel, db.get_sounds_by_similarity(sound)[0][2], member_str, is_entrance=True)
         elif event == "join" and not db.get_user_events(member_str):
             await behavior.play_audio(channel, "gay-echo.mp3", "admin", is_entrance=True)
     except Exception as e:
