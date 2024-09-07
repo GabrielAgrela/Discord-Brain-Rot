@@ -85,7 +85,7 @@ class ChangeSoundNameButton(Button):
         if new_name:
             #get username
             await self.bot_behavior.change_filename(self.sound_name, new_name,interaction.user)
-            self.bot_behavior.other_actions_db.add_entry(interaction.user.name, "change_sound_name", self.sound_name)
+            #self.bot_behavior.other_actions_db.add_entry(interaction.user.name, "change_sound_name", self.sound_name)
 
 class UploadSoundButton(Button):
     def __init__(self, bot_behavior, **kwargs):

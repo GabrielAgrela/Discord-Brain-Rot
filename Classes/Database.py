@@ -177,7 +177,8 @@ class Database:
         except sqlite3.Error as e:
             print(f"An error occurred: {e}")
 
-    async def  update_sound(self, filename, new_filename=None, favorite=None, blacklist=None):
+    async def update_sound(self, filename, new_filename=None, favorite=None, blacklist=None):
+        new_filename = new_filename + ".mp3"
         try:
             if new_filename:
                 self.cursor.execute("UPDATE sounds SET Filename = ? WHERE Filename = ?;", (new_filename, filename))
@@ -382,8 +383,8 @@ class Migrate:
 
 
 #create db and migrate
-Database.create_database()
+""" Database.create_database()
 Migrate.migrate_sounds()
 Migrate.migrate_play_history()
 Migrate.migrate_other_actions()
-Migrate.migrate_users()
+Migrate.migrate_users() """

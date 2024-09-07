@@ -394,7 +394,7 @@ class BotBehavior:
 
     async def change_filename(self, oldfilename, newfilename, user):
         Database().insert_action(user.name, "change_filename", oldfilename + " to " + newfilename)
-        Database().update_sound(oldfilename, new_filename=newfilename)
+        await Database().update_sound(oldfilename, new_filename=newfilename)
                     
     async def tts(self, user, speech, lang="en", region=""):
         Database().insert_action(user.name, "tts", speech)
