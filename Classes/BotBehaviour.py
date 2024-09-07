@@ -57,27 +57,45 @@ class BotBehavior:
         total_plays = sum(count for _, count in top_users)
         average_per_day = total_plays / days
 
-        embed = discord.Embed(
+        messages = []
+        for rank, (username, total_plays) in enumerate(top_users, 1):
+            embed = discord.Embed(
+                title=f"🔊 **#{rank} {username.upper()}**",
+                description=f"🎵 **Total Sounds Played: {total_plays}**",
+                color=discord.Color.green()
+            )
+
+            # Attempt to get user avatar, set a default if unavailable
+            discord_user = discord.utils.get(self.bot.get_all_members(), name=username)
+            if discord_user and discord_user.avatar:
+                embed.set_thumbnail(url=discord_user.avatar.url)
+            elif username == "syzoo":
+                embed.set_thumbnail(url="https://media.npr.org/assets/img/2017/09/12/macaca_nigra_self-portrait-3e0070aa19a7fe36e802253048411a38f14a79f8-s800-c85.webp")
+            elif discord_user:
+                embed.set_thumbnail(url=discord_user.default_avatar.url)
+
+            # You might want to add top sounds for each user here if that data is available
+
+            message = await bot_channel.send(embed=embed)
+            messages.append(message)
+
+        summary_embed = discord.Embed(
             title=f"🎵 **TOP {number} USERS IN THE LAST {days} DAYS! TOTAL PLAYS: {total_plays}** 🎵",
             description=f"Average of {average_per_day:.0f} plays per day!",
             color=discord.Color.yellow()
         )
-        embed.set_thumbnail(url="https://i.imgflip.com/1vdris.jpg")
-        embed.set_footer(text="Updated as of")
-        embed.timestamp = datetime.utcnow()
+        summary_embed.set_thumbnail(url="https://i.imgflip.com/1vdris.jpg")
+        summary_embed.set_footer(text="Updated as of")
+        summary_embed.timestamp = datetime.utcnow()
 
-        for rank, (username, count) in enumerate(top_users, 1):
-            emoji = ["🥇", "🥈", "🥉"][rank-1] if rank <= 3 else "🎶"
-            embed.add_field(
-                name=f"{rank}. {emoji} `{username.upper()}`",
-                value=f"**{count}** plays",
-                inline=False
-            )
+        summary_message = await bot_channel.send(embed=summary_embed)
+        messages.append(summary_message)
 
-        message = await bot_channel.send(embed=embed)
         await self.send_controls()
         await asyncio.sleep(60)
-        await message.delete()
+
+        for message in messages:
+            await message.delete()
 
     async def prompt_upload_sound(self, interaction):
         if self.upload_lock.locked():
