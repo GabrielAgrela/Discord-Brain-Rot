@@ -267,6 +267,7 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
                 await behavior.play_audio(channel, db.get_sounds_by_similarity(sound)[0][2], member_str, is_entrance=True)
         elif event == "join" and not db.get_user_events(member_str):
             await behavior.play_audio(channel, "gay-echo.mp3", "admin", is_entrance=True)
+        db.insert_action(member_str, event, db.get_sounds_by_similarity(sound)[0][0])
     except Exception as e:
         print(f"An error occurred: {e}")
 
