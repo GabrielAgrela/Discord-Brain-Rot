@@ -239,27 +239,29 @@ async def stop_recording(ctx):
 @bot.event
 async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
     member_str = f"{member.name}#{member.discriminator}"
-    users = userUtils.users
-    if member_str not in userUtils.get_users_names() and before.channel is None and after.channel is not None and member != bot.user:
-        await behavior.play_audio(after.channel, "gay-echo.mp3","admin", is_entrance=True)
+    
+    if before.channel is None and after.channel is not None and member != bot.user:
+        event = "join"
+        channel = after.channel
+    elif after.channel is None and before.channel is not None:
+        event = "leave"
+        channel = before.channel
     else:
-        if member_str in userUtils.get_users_names() and member != bot.user:
-            if before.channel is None or (before.channel != after.channel and after.channel is not None):
-                event = "join"
-                channel = after.channel
-            elif after.channel is None or (before.channel != after.channel and before.channel is not None):
-                event = "leave"
-                channel = before.channel
-            else:
-                return
-            user_events = userUtils.get_user_events_by_name(member_str)
-            for user_event in user_events:
-                if user_event.event_code == event:
-                    behavior.last_channel[member_str] = channel
-                    await asyncio.sleep(.5)
-                    if channel:
-                        print(f"Playing {user_event.sound} for {member_str}")
-                        await behavior.play_audio(channel, behavior.db.get_most_similar_filenames(user_event.sound, include_score=False)[0], member_str, is_entrance=True)
-                            
+        return
+
+    if member != bot.user:
+        try:
+            user_events = db.get_user_events(member_str, event)
+            if user_events:
+                behavior.last_channel[member_str] = channel
+                await asyncio.sleep(.5)
+                if channel:
+                    sound = user_events[0][2]  # Assuming the sound is in the third column
+                    print(f"Playing {sound} for {member_str}")
+                    await behavior.play_audio(channel, behavior.db.get_most_similar_filenames(sound, include_score=False)[0], member_str, is_entrance=True)
+            elif event == "join" and not db.get_user_events(member_str):
+                await behavior.play_audio(after.channel, "gay-echo.mp3", "admin", is_entrance=True)
+        except Exception as e:
+            print(f"An error occurred: {e}")
 
 bot.run_bot()

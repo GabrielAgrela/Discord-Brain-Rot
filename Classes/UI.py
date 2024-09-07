@@ -206,17 +206,6 @@ class BrainRotButton(Button):
             asyncio.create_task(interaction.channel.send("STOP SPAMMING, GERTRUDES IS RUNNING ON A RASPBERRY PI 🔥🔥🔥", delete_after=3))
         await interaction.response.defer()
 
-class ListTopSoundsButton(Button):
-    def __init__(self, bot_behavior, **kwargs):
-        super().__init__(**kwargs)
-        self.bot_behavior = bot_behavior
-
-    async def callback(self, interaction):
-        await interaction.response.defer()
-        asyncio.create_task(self.bot_behavior.display_top_users(interaction.user))
-        #asyncio.create_task(self.bot_behavior.player_history_db.write_top_played_sounds())
-        #self.bot_behavior.other_actions_db.add_entry(interaction.user.name, "list_top_sounds")
-
 class ListTopUsersButton(Button):
     def __init__(self, bot_behavior, **kwargs):
         super().__init__(**kwargs)
@@ -269,7 +258,6 @@ class ControlsView(View):
         self.add_item(ListBlacklistButton(bot_behavior, label="🗑️Blacklisted🗑️", style=discord.ButtonStyle.success))
         
         self.add_item(BrainRotButton(bot_behavior, label="🧠Brain Rot🧠", style=discord.ButtonStyle.success))
-        self.add_item(ListTopSoundsButton(bot_behavior, label="📈Top Sounds📈", style=discord.ButtonStyle.success))
         self.add_item(ListTopUsersButton(bot_behavior, label="📊Top Users📊", style=discord.ButtonStyle.success))
         self.add_item(UploadSoundButton(bot_behavior, label="⬆️Upload Sound⬆️", style=discord.ButtonStyle.success))
         self.add_item(ListLastScrapedSoundsButton(bot_behavior, label="🔽Last Downloaded Sounds🔽", style=discord.ButtonStyle.success))

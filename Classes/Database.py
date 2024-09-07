@@ -250,6 +250,13 @@ class Database:
             print(f"An error occurred: {e}")
             return [], 0
         
+    def get_user_events(self, user, event):
+        try:
+            self.cursor.execute("SELECT * FROM users WHERE id = ? AND event = ?;", (user, event))
+            return self.cursor.fetchall()
+        except sqlite3.Error as e:
+            print(f"An error occurred: {e}")
+            return []
         
         
 
