@@ -132,7 +132,7 @@ class ListFavoritesButton(Button):
             with open("favorites.txt", "w") as f:
                 f.write(favorites_content)
             
-            await self.bot_behavior.send_message(interaction.message.channel, file=discord.File("favorites.txt", "favorites.txt"))
+            await self.bot_behavior.send_message("🤩 Favorites 🤩", file=discord.File(favorites_content, "favorites.txt"))
             os.remove("favorites.txt")  # Clean up the temporary file
         else:
             await interaction.message.channel.send("No favorite sounds found.")
