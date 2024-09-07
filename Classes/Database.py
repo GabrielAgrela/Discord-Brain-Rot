@@ -8,11 +8,11 @@ class Database:
 
     def __new__(cls, *args, **kwargs):
         if not cls._instance:
-            cls._instance = super(Database, cls).__new__(cls, *args, **kwargs)
+            cls._instance = super(Database, cls).__new__(cls)
             cls._instance._initialized = False
         return cls._instance
 
-    def __init__(self):
+    def __init__(self, behavior=None):
         if self._initialized:
             return
         self._initialized = True
@@ -20,6 +20,8 @@ class Database:
         self.db_path = os.path.join(script_dir, "../database.db")
         self.conn = sqlite3.connect(self.db_path)
         self.cursor = self.conn.cursor()
+        self.behavior = behavior
+
 
     @staticmethod
     def create_database():
@@ -184,7 +186,7 @@ class Database:
             if blacklist is not None:
                 self.cursor.execute("UPDATE sounds SET blacklist = ? WHERE Filename = ?;", (blacklist, filename))
             self.conn.commit()
-            await self.bot.send_message(title=f"Modified {filename} to {new_filename}")
+            await self.behavior.send_message(title=f"Modified {filename} to {new_filename}")
             print("Sound updated successfully")
         except sqlite3.Error as e:
             print(f"An error occurred: {e}")

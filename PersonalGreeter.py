@@ -9,6 +9,7 @@ from discord.commands import Option
 from discord import default_permissions
 from Classes.UsersUtils import UsersUtils
 from Classes.SoundDownloader import SoundDownloader
+from Classes.Database import Database
 
 env = Environment()
 intents = discord.Intents(guilds=True, voice_states=True, messages=True, message_content=True, members=True)
@@ -18,6 +19,7 @@ bot = Bot(command_prefix="*", intents=intents, token=env.bot_token, ffmpeg_path=
 userUtils = UsersUtils(os.path.abspath(os.path.join(os.path.dirname(__file__), "Data", "Users.json")))
 
 behavior = BotBehavior(bot, env.ffmpeg_path)
+db = Database(behavior=behavior)
 file_name = 'play_requests.csv'
 
 @default_permissions(manage_messages=True)
