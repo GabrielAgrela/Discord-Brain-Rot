@@ -50,7 +50,7 @@ async def play_requested(ctx: interactions.ComponentContext, message: Option(str
         if(message == "random"):
             asyncio.run_coroutine_threadsafe(behavior.play_random_sound(username_with_discriminator), bot.loop)
         else:
-            await behavior.play_request(message, username_with_discriminator,request_number=number_similar_sounds)
+            await behavior.play_request(message, author.name,request_number=number_similar_sounds)
     except Exception as e:
         print(e)
         asyncio.run_coroutine_threadsafe(behavior.play_random_sound(username_with_discriminator), bot.loop)
@@ -140,7 +140,7 @@ async def isolate(ctx, sound: Option(str, "Base sound you want to isolate", requ
 @bot.slash_command(name="change", description="change the name of a sound")
 async def change(ctx, current: Option(str, "Current name of the sound", required=True), new: Option(str, "New name of the sound", required=True)):
     await ctx.respond("Processing your request...", delete_after=0)
-    await behavior.change_filename(current, new)
+    await behavior.change_filename(current, new, ctx.user)
 
 @bot.slash_command(name="top", description="Leaderboard of sounds or users")
 async def change(ctx, option: Option(str, "users or sounds", required=True), number: Option(str, "number of users", default=5), numberdays: Option(str, "number of days", default=7)):
@@ -153,7 +153,7 @@ async def change(ctx, option: Option(str, "users or sounds", required=True), num
 @bot.slash_command(name="list", description="returns database of sounds")
 async def change(ctx):
     await ctx.respond("Processing your request...", delete_after=0)
-    await behavior.list_sounds()    
+    await behavior.list_sounds(ctx.user)    
 
 @bot.slash_command(name="subwaysurfers", description="returns database of sounds")
 async def change(ctx):
@@ -173,7 +173,7 @@ async def change(ctx):
 @bot.slash_command(name="lastsounds", description="returns last sounds downloaded")
 async def change(ctx, number: Option(str, "number of sounds", default=10)):
     await ctx.respond("Processing your request...", delete_after=0)
-    await behavior.list_sounds(int(number))    
+    await behavior.list_sounds(ctx.user, int(number))    
 
 
 

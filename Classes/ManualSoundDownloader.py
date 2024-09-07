@@ -19,7 +19,7 @@ class ManualSoundDownloader:
         with yt_dlp.YoutubeDL() as ydl:
             info_dict = ydl.extract_info(url, download=False)
             title = sanitize_title(info_dict.get('title', ''))
-            mp3_filename = f"{custom_filename}.mp3" if custom_filename else f"{title}.mp3"
+            mp3_filename = f"{custom_filename}" if custom_filename else f"{title}"
             mp3_filepath = os.path.join(output_dir, mp3_filename)
 
         ydl_opts = {

@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 import threading
 import time
 db = AudioDatabase(os.path.join(os.path.dirname(__file__), "Data/soundsDB.csv"), "null")
+
 load_dotenv()
 
 sound_downloader_instance = SoundDownloader(db, os.getenv("CHROMEDRIVER_PATH"))

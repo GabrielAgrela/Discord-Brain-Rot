@@ -83,7 +83,8 @@ class ChangeSoundNameButton(Button):
         await interaction.response.defer()
         new_name = await self.bot_behavior.get_new_name(interaction)
         if new_name:
-            await self.bot_behavior.change_filename(self.sound_name, new_name)
+            #get username
+            await self.bot_behavior.change_filename(self.sound_name, new_name,interaction.user)
             self.bot_behavior.other_actions_db.add_entry(interaction.user.name, "change_sound_name", self.sound_name)
 
 class UploadSoundButton(Button):
@@ -159,8 +160,8 @@ class ListSoundsButton(Button):
 
     async def callback(self, interaction):
         await interaction.response.defer()
-        asyncio.create_task(self.bot_behavior.list_sounds())
-        self.bot_behavior.other_actions_db.add_entry(interaction.user.name, "list_sounds")
+        asyncio.create_task(self.bot_behavior.list_sounds(user=interaction.user))
+        #self.bot_behavior.other_actions_db.add_entry(interaction.user.name, "list_sounds")
 
 class SubwaySurfersButton(Button):
     def __init__(self, bot_behavior, **kwargs):
@@ -232,7 +233,7 @@ class ListLastScrapedSoundsButton(Button):
 
     async def callback(self, interaction):
         await interaction.response.defer()
-        asyncio.create_task(self.bot_behavior.list_sounds(25))
+        asyncio.create_task(self.bot_behavior.list_sounds(interaction.user, 25))
         self.bot_behavior.other_actions_db.add_entry(interaction.user.name, "list_last_scraped_sounds")
 
 class PlaySoundButton(Button):
@@ -272,8 +273,13 @@ class ControlsView(View):
         self.add_item(UploadSoundButton(bot_behavior, label="⬆️Upload Sound⬆️", style=discord.ButtonStyle.success))
         self.add_item(ListLastScrapedSoundsButton(bot_behavior, label="🔽Last Downloaded Sounds🔽", style=discord.ButtonStyle.success))
 
+class DownloadedSoundView(View):
+    def __init__(self, bot_behavior, sound):
+        super().__init__(timeout=None)
+        self.add_item(PlaySoundButton(bot_behavior, sound, style=discord.ButtonStyle.danger, label=sound.split('/')[-1].replace('.mp3', '')))
+                          
 class SoundView(View):
     def __init__(self, bot_behavior, similar_sounds):
         super().__init__(timeout=None)
         for sound in similar_sounds:
-            self.add_item(PlaySoundButton(bot_behavior, sound, style=discord.ButtonStyle.danger, label=sound.split('/')[-1].replace('.mp3', '')))
+            self.add_item(PlaySoundButton(bot_behavior, sound[2], style=discord.ButtonStyle.danger, label=sound[2].split('/')[-1].replace('.mp3', '')))

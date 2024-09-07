@@ -18,6 +18,9 @@ import os
 from unidecode import unidecode
 import requests
 from Classes.UI import SoundView
+from Classes.UI import DownloadedSoundView
+
+from Classes.Database import Database
 
 class SoundDownloader:
     def __init__(self, bot, db, chromedriver_path=""):
@@ -72,7 +75,7 @@ class SoundDownloader:
                 filename = filename.replace('"','')
                 url = "https://www.myinstants.com/media/sounds/" + filename
 
-                if not self.db.check_if_sound_exists(filename):
+                if not Database().get_sound(filename, original_filename=True):
                     new_sounds_detected += 1
                     response = requests.get(url)
                     # if the file is not found, we will skip it
@@ -104,12 +107,12 @@ class SoundDownloader:
                     self.adjust_volume(file, -20.0)
                     destination_folder = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds"))
                     
-                    if not self.db.check_if_sound_exists(os.path.basename(file)):
+                    if not Database().get_sound(os.path.basename(file), original_filename=True):
                         print(self.__class__.__name__," MOVER:Moving file to " + destination_folder)
-                        sound_view = SoundView(self.bot, [os.path.basename(file)])
+                        sound_view = DownloadedSoundView(self.bot, os.path.basename(file))
                         await self.bot.send_message(title="I stole "+os.path.basename(file)+" to our database hehe", view=sound_view)
                         shutil.move(file, os.path.join(destination_folder, os.path.basename(file)))
-                        self.db.add_entry(os.path.basename(file))
+                        Database().insert_sound(os.path.basename(file), os.path.basename(file))
                     else:
                         print(self.__class__.__name__," MOVER: Sound already exists ", os.path.basename(file))
                         print(self.__class__.__name__," MOVER: Removing file")
