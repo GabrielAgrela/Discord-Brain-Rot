@@ -212,8 +212,8 @@ class Database:
             params = []
             
             if days > 0:
-                query += " AND a.timestamp >= datetime('now', '-? days')"
-                params.append(days)
+                query += " AND a.timestamp >= datetime('now', '-' || ? || ' days')"
+                params.append(str(days))
             
             if user:
                 query += " AND a.username = ?"
