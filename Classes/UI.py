@@ -56,7 +56,8 @@ class FavoriteButton(Button):
 
     async def callback(self, interaction: discord.Interaction):
         await interaction.response.defer()
-        Database().update_sound(self.audio_file, None, not Database().get_sounds_by_similarity(self.audio_file)[0][3])
+        favorite = 1 if not Database().get_sounds_by_similarity(self.audio_file)[0][3] else 0
+        Database().update_sound(self.audio_file, None, favorite)
         await interaction.message.edit(view=SoundBeingPlayedView(self.bot_behavior, self.audio_file))
         Database().insert_action(interaction.user.name, "favorite_sound", Database().get_sounds_by_similarity(self.audio_file)[0][0]) 
 
