@@ -224,8 +224,8 @@ class ListTopUsersButton(Button):
 
     async def callback(self, interaction):
         await interaction.response.defer()
-        asyncio.create_task(self.bot_behavior.player_history_db.write_top_users())
-        self.bot_behavior.other_actions_db.add_entry(interaction.user.name, "list_top_users")
+        asyncio.create_task(self.bot_behavior.display_top_users(interaction.user, number=5, days=30, by="plays"))
+
 
 class ListLastScrapedSoundsButton(Button):
     def __init__(self, bot_behavior, **kwargs):

@@ -51,7 +51,33 @@ class BotBehavior:
     async def display_top_users(self, user, number=5, days=7, by="plays"):
         Database().insert_action(user.name, "list_top_users", by)
         top_users = Database().get_top_users(number, days, by)
-        await self.write_list(top_users, f"Top {number} users in the last {days} days")
+        
+        bot_channel = await self.get_bot_channel()
+        
+        total_plays = sum(count for _, count in top_users)
+        average_per_day = total_plays / days
+
+        embed = discord.Embed(
+            title=f"🎵 **TOP {number} USERS IN THE LAST {days} DAYS! TOTAL PLAYS: {total_plays}** 🎵",
+            description=f"Average of {average_per_day:.0f} plays per day!",
+            color=discord.Color.yellow()
+        )
+        embed.set_thumbnail(url="https://i.imgflip.com/1vdris.jpg")
+        embed.set_footer(text="Updated as of")
+        embed.timestamp = datetime.utcnow()
+
+        for rank, (username, count) in enumerate(top_users, 1):
+            emoji = ["🥇", "🥈", "🥉"][rank-1] if rank <= 3 else "🎶"
+            embed.add_field(
+                name=f"{rank}. {emoji} `{username.upper()}`",
+                value=f"**{count}** plays",
+                inline=False
+            )
+
+        message = await bot_channel.send(embed=embed)
+        await self.send_controls()
+        await asyncio.sleep(60)
+        await message.delete()
 
     async def prompt_upload_sound(self, interaction):
         if self.upload_lock.locked():
