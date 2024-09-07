@@ -3,6 +3,8 @@ import random
 from discord.ui import Button, View
 import discord
 import asyncio
+from Database import Database
+
 
 
 class ReplayButton(Button):
@@ -121,9 +123,10 @@ class ListFavoritesButton(Button):
 
     async def callback(self, interaction):
         await interaction.response.defer()
-        favorites = self.bot_behavior.db.get_favorite_sounds(50)
+        favorites = Database().get_sounds(num_sounds=1000, favorite=True)
         if len(favorites) > 0:
-            await self.bot_behavior.write_list(favorites, "Favorite sounds")
+            #use self.bot_behavior.send_message to send a file with the list of favorites
+            await self.bot_behavior.send_message(interaction.message.channel, file=discord.File(favorites[:][2], "favorites.txt"))
         else:
             await interaction.message.channel.send("No favorite sounds found.")
 

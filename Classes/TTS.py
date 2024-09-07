@@ -8,6 +8,7 @@ from pydub import AudioSegment
 import io
 import json
 import aiohttp
+from Classes.Database import Database
 
 class TTS:
     def __init__(self, behavior, bot, filename="tts.mp3", cooldown_seconds=10):
@@ -47,6 +48,7 @@ class TTS:
         boost_volume = 0
         
         filenames = self.db.get_most_similar_filenames(input_audio_name)
+        
         filename = filenames[0][1] if filenames else None
         audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", filename))
 
