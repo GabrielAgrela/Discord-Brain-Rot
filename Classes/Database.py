@@ -159,23 +159,43 @@ class Database:
         except sqlite3.Error as e:
             print(f"An error occurred: {e}")
 
-    def get_sounds(self, favorite=None, blacklist=None, num_sounds=25, sort="DESC"):
+    def get_sounds(self, favorite=None, blacklist=None, num_sounds=25, sort="DESC", user=None, days=None):
         # if favorite/blacklist is true then make it 1, else 0
         favorite = 1 if favorite else 0
         blacklist = 1 if blacklist else 0
 
         try:
-            if favorite is not None and blacklist is not None:
-                self.cursor.execute("SELECT * FROM sounds WHERE favorite = ? AND blacklist = ? ORDER BY id " + sort + " LIMIT ?;", (favorite, blacklist, num_sounds))
-            elif favorite is not None:
-                self.cursor.execute("SELECT * FROM sounds WHERE favorite = ? ORDER BY id " + sort + " LIMIT ?;", (favorite, num_sounds))
-            elif blacklist is not None:
-                self.cursor.execute("SELECT * FROM sounds WHERE blacklist = ? ORDER BY id " + sort + " LIMIT ?;", (blacklist, num_sounds))
-            else:
-                self.cursor.execute("SELECT * FROM sounds ORDER BY id " + sort + " LIMIT ?;", (num_sounds,))
+            query = "SELECT DISTINCT s.* FROM sounds s"
+            conditions = []
+            params = []
+
+            if user or days:
+                query += " LEFT JOIN actions a ON s.id = a.target"
+
+            if favorite is not None:
+                conditions.append("s.favorite = ?")
+                params.append(favorite)
+            if blacklist is not None:
+                conditions.append("s.blacklist = ?")
+                params.append(blacklist)
+            if user:
+                conditions.append("a.username = ?")
+                params.append(user)
+            if days:
+                conditions.append("a.timestamp >= datetime('now', '-' || ? || ' days')")
+                params.append(days)
+
+            if conditions:
+                query += " WHERE " + " AND ".join(conditions)
+
+            query += f" ORDER BY s.id {sort} LIMIT ?"
+            params.append(num_sounds)
+
+            self.cursor.execute(query, tuple(params))
             return self.cursor.fetchall()
         except sqlite3.Error as e:
             print(f"An error occurred: {e}")
+            return []
 
     def get_top_users(self, number=5, days=0, by="plays"):
         try:
@@ -199,6 +219,7 @@ class Database:
         except sqlite3.Error as e:
             print(f"An error occurred: {e}")
             return []
+        
         
 
     async def update_sound(self, filename, new_filename=None, favorite=None, blacklist=None):

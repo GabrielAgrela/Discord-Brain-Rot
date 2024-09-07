@@ -75,6 +75,9 @@ class BotBehavior:
                 embed.set_thumbnail(url=discord_user.default_avatar.url)
 
             # You might want to add top sounds for each user here if that data is available
+            top_sounds = Database().get_top_sounds(username, number, days)
+            for sound in top_sounds:
+                embed.add_field(name=f"🎵 **{sound[1]}**", value=f"Played **{sound[2]}** times", inline=False)
 
             message = await bot_channel.send(embed=embed)
             messages.append(message)
