@@ -132,7 +132,7 @@ class ListFavoritesButton(Button):
             with open("favorites.txt", "w") as f:
                 f.write(favorites_content)
             
-            await self.bot_behavior.send_message("🤩 Favorites 🤩", file=discord.File(favorites_content, "favorites.txt"))
+            await self.bot_behavior.send_message("🤩 Favorites 🤩", file=discord.File("favorites.txt", "favorites.txt"))
             os.remove("favorites.txt")  # Clean up the temporary file
         else:
             await interaction.message.channel.send("No favorite sounds found.")
@@ -146,11 +146,17 @@ class ListBlacklistButton(Button):
         await interaction.response.defer()
         blacklisted = self.bot_behavior.db.get_blacklisted_sounds()
         if len(blacklisted) > 0:
-            await self.bot_behavior.write_list(blacklisted, "Blacklisted sounds")
+            blacklisted_entries = [f"{sound[0]}: {sound[2]}" for sound in blacklisted]
+            blacklisted_content = "\n".join(blacklisted_entries)
+            
+            with open("blacklisted.txt", "w") as f:
+                f.write(blacklisted_content)
+            
+            await self.bot_behavior.send_message("🗑️ Blacklisted Sounds 🗑️", file=discord.File("blacklisted.txt", "blacklisted.txt"))
+            os.remove("blacklisted.txt")  # Clean up the temporary file
         else:
             await interaction.message.channel.send("No blacklisted sounds found.")
         self.bot_behavior.other_actions_db.add_entry(interaction.user.name, "list_blacklisted_sounds")
-            
 
 class PlaySlapButton(Button):
     def __init__(self, bot_behavior, **kwargs):
