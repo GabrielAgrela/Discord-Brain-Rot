@@ -177,6 +177,30 @@ class Database:
         except sqlite3.Error as e:
             print(f"An error occurred: {e}")
 
+    def get_top_users(self, number=5, days=0, by="plays"):
+        try:
+            query = """
+            SELECT username, COUNT(*) as count
+            FROM actions
+            WHERE action IN ('play_random_sound', 'replay_sound', 'play_random_favorite_sound', 'play_request')
+            """
+            
+            if days > 0:
+                query += f" AND timestamp >= datetime('now', '-{days} days')"
+            
+            query += """
+            GROUP BY username
+            ORDER BY count DESC
+            LIMIT ?
+            """
+            
+            self.cursor.execute(query, (number,))
+            return self.cursor.fetchall()
+        except sqlite3.Error as e:
+            print(f"An error occurred: {e}")
+            return []
+        
+
     async def update_sound(self, filename, new_filename=None, favorite=None, blacklist=None):
         new_filename = new_filename + ".mp3"
         try:

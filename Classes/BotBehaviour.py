@@ -48,6 +48,11 @@ class BotBehavior:
         self.cooldown_message = None
         self.error_message = None
 
+    async def display_top_users(self, user, number=5, days=7, by="plays"):
+        Database().insert_action(user.name, "list_top_users", by)
+        top_users = Database().get_top_users(number, days, by)
+        await self.write_list(top_users, f"Top {number} users in the last {days} days")
+
     async def prompt_upload_sound(self, interaction):
         if self.upload_lock.locked():
             message = await interaction.channel.send(embed=discord.Embed(title="Another upload is in progress. Wait caralho 😤", color=self.color))

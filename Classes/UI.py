@@ -213,8 +213,9 @@ class ListTopSoundsButton(Button):
 
     async def callback(self, interaction):
         await interaction.response.defer()
-        asyncio.create_task(self.bot_behavior.player_history_db.write_top_played_sounds())
-        self.bot_behavior.other_actions_db.add_entry(interaction.user.name, "list_top_sounds")
+        asyncio.create_task(self.bot_behavior.display_top_users(interaction.user))
+        #asyncio.create_task(self.bot_behavior.player_history_db.write_top_played_sounds())
+        #self.bot_behavior.other_actions_db.add_entry(interaction.user.name, "list_top_sounds")
 
 class ListTopUsersButton(Button):
     def __init__(self, bot_behavior, **kwargs):
