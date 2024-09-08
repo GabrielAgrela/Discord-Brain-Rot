@@ -152,6 +152,30 @@
             fetchFavorites(currentPageFavorites);
             fetchAllSounds(currentPageAllSounds);
         }, 5000);
+
+        function adjustFontSize() {
+            const cells = document.querySelectorAll('td');
+            cells.forEach(cell => {
+                const content = cell.textContent;
+                const span = document.createElement('span');
+                span.textContent = content;
+                cell.textContent = '';
+                cell.appendChild(span);
+
+                let fontSize = 0.9;
+                span.style.fontSize = `${fontSize}em`;
+
+                while (span.scrollWidth > cell.clientWidth && fontSize > 0.5) {
+                    fontSize -= 0.05;
+                    span.style.fontSize = `${fontSize}em`;
+                }
+            });
+        }
+
+        // Call the function when the page loads
+        window.addEventListener('load', adjustFontSize);
+        // Also call it if the window is resized
+        window.addEventListener('resize', adjustFontSize);
     </script>
 </body>
 </html>
