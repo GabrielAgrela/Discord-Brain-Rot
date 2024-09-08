@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>lulucas</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            background: #f3f3f3;
+            font-family: Arial, sans-serif;
+        }
+        h1 {
+            font-size: 5rem;
+            background: linear-gradient(90deg, red, orange, yellow, green, blue, indigo, violet);
+            background-size: 400%;
+            -webkit-background-clip: text;
+            color: transparent;
+            animation: rainbow 5s ease infinite;
+        }
+        @keyframes rainbow {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+        table {
+            margin-top: 2rem;
+            border-collapse: collapse;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+        .pagination {
+            margin-top: 1rem;
+        }
+        .pagination button {
+            margin: 0 0.5rem;
+        }
+    </style>
+</head>
+<body>
+    <h1>O LUCAS TEM PERNINHAS DE FRANGO</h1>
+    <table id="actionsTable">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Username</th>
+                <th>Action</th>
+                <th>Target</th>
+                <th>Timestamp</th>
+            </tr>
+        </thead>
+        <tbody id="tableBody">
+            <!-- Data will be inserted here dynamically -->
+        </tbody>
+    </table>
+    <div class="pagination">
+        <button id="prevPage">Previous</button>
+        <span id="currentPage">1</span>
+        <button id="nextPage">Next</button>
+    </div>
+
+    <script>
+        const itemsPerPage = 10;
+        let currentPage = 1;
+
+        function fetchData(page) {
+            fetch(`/api/actions?page=${page}&per_page=${itemsPerPage}`)
+                .then(response => response.json())
+                .then(data => {
+                    const tableBody = document.getElementById('tableBody');
+                    tableBody.innerHTML = '';
+                    data.forEach(action => {
+                        const row = `
+                            <tr>
+                                <td>${action.id}</td>
+                                <td>${action.username}</td>
+                                <td>${action.action}</td>
+                                <td>${action.target}</td>
+                                <td>${action.timestamp}</td>
+                            </tr>
+                        `;
+                        tableBody.innerHTML += row;
+                    });
+                    document.getElementById('currentPage').textContent = currentPage;
+                });
+        }
+
+        document.getElementById('prevPage').addEventListener('click', () => {
+            if (currentPage > 1) {
+                currentPage--;
+                fetchData(currentPage);
+            }
+        });
+
+        document.getElementById('nextPage').addEventListener('click', () => {
+            currentPage++;
+            fetchData(currentPage);
+        });
+
+        // Initial data fetch
+        fetchData(currentPage);
+
+        // Auto-refresh every second
+        setInterval(() => fetchData(currentPage), 1000);
+    </script>
+</body>
+</html>

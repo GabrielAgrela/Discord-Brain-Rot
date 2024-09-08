@@ -278,7 +278,8 @@ class Database:
         
 
     async def update_sound(self, filename, new_filename=None, favorite=None, blacklist=None):
-        new_filename = new_filename + ".mp3"
+        if new_filename is not None:
+            new_filename = new_filename + ".mp3"
         favorite = 1 if favorite else 0
         blacklist = 1 if blacklist else 0
         try:
@@ -289,7 +290,8 @@ class Database:
             if blacklist is not None:
                 self.cursor.execute("UPDATE sounds SET blacklist = ? WHERE Filename = ?;", (blacklist, filename))
             self.conn.commit()
-            await self.behavior.send_message(title=f"Modified {filename} to {new_filename}")
+            if new_filename is not None:
+                await self.behavior.send_message(title=f"Modified {filename} to {new_filename}")
             print("Sound updated successfully")
         except sqlite3.Error as e:
             print(f"An error occurred: {e}")

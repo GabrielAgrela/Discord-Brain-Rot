@@ -341,7 +341,7 @@ class BotBehavior:
             bot_channel = discord.utils.get(self.bot.guilds[0].text_channels, name='bot')
             if bot_channel and not is_entrance:
                 if audio_file.split('/')[-1].replace('.mp3', '') not in ["slap", "tiro", "pubg-pan-sound-effect", "gunshot", "slap-oh_LGvkhyt"]:
-                    await self.send_message(view=SoundBeingPlayedView(self, audio_file), title=f"🔊 **{audio_file.split('/')[-1].replace('.mp3', '')}** 🔊", description = f"Similarity: {extra}%" if extra != "" else None, footer = f"{user} requested '{original_message}'" if original_message else f"Requested by {user}", send_controls=send_controls)
+                    await self.send_message(view=SoundBeingPlayedView(self, audio_file), title=f"🔊 **{Database().get_sound(audio_file, True)[2].replace('.mp3', '')}** 🔊", description = f"Similarity: {extra}%" if extra != "" else None, footer = f"{user} requested '{original_message}'" if original_message else f"Requested by {user}", send_controls=send_controls)
 
             # Stop the audio if it is already playing
             if voice_client.is_playing():
@@ -452,7 +452,7 @@ class BotBehavior:
         for guild in self.bot.guilds:
             channel = self.get_user_voice_channel(guild, user)
             if channel is not None:
-                asyncio.create_task(self.play_audio(channel, filenames[0][2], user, original_message=id, send_controls = False if filenames[1:] else True))
+                asyncio.create_task(self.play_audio(channel, filenames[0][1], user, original_message=id, send_controls = False if filenames[1:] else True))
                 Database().insert_action(user, "play_request", filenames[0][0])
                 await asyncio.sleep(2)
                 if filenames[1:]:
