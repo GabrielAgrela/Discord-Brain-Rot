@@ -15,10 +15,16 @@ def get_actions():
 
     conn = sqlite3.connect('/home/sopqos/github/Discord-Brain-Rot/database.db')
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM actions ORDER BY id DESC LIMIT ? OFFSET ?", (per_page, offset))
+    cursor.execute("""
+        SELECT f.filename, a.username, a.action, a.target, a.timestamp
+        FROM actions a
+        JOIN files f ON a.file_id = f.id
+        ORDER BY a.id DESC
+        LIMIT ? OFFSET ?
+    """, (per_page, offset))
     actions = [
         {
-            'id': row[0],
+            'filename': row[0],
             'username': row[1],
             'action': row[2],
             'target': row[3],
