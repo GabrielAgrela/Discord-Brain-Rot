@@ -47,7 +47,11 @@ def get_actions():
 
 @app.route('/api/favorites')
 def get_favorites():
-    page = int(request.args.get('page', 1))
+    try:
+        page = max(1, int(request.args.get('page', 1)))
+    except ValueError:
+        page = 1
+    
     per_page = int(request.args.get('per_page', 10))
     offset = (page - 1) * per_page
 
@@ -72,7 +76,11 @@ def get_favorites():
 
 @app.route('/api/all_sounds')
 def get_all_sounds():
-    page = int(request.args.get('page', 1))
+    try:
+        page = max(1, int(request.args.get('page', 1)))
+    except ValueError:
+        page = 1
+    
     per_page = int(request.args.get('per_page', 10))
     offset = (page - 1) * per_page
 

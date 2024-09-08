@@ -119,17 +119,14 @@
         }
 
         function fetchActions(page) {
-            console.log(`Fetching actions for page ${page}`);
             fetchData('actions', page, 'actionsTableBody', 'currentPageActions');
         }
 
         function fetchFavorites(page) {
-            console.log(`Fetching favorites for page ${page}`);
             fetchData('favorites', page, 'favoritesTableBody', 'currentPageFavorites');
         }
 
         function fetchAllSounds(page) {
-            console.log(`Fetching all sounds for page ${page}`);
             fetchData('all_sounds', page, 'allSoundsTableBody', 'currentPageAllSounds');
         }
 
