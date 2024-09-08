@@ -41,6 +41,55 @@ def get_actions():
     conn.close()
     return jsonify(actions)
 
+@app.route('/api/favorites')
+def get_favorites():
+    page = int(request.args.get('page', 1))
+    per_page = int(request.args.get('per_page', 10))
+    offset = (page - 1) * per_page
+
+    conn = sqlite3.connect('/home/sopqos/github/Discord-Brain-Rot/database.db')
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT Filename, originalfilename
+        FROM sounds
+        WHERE favorite = 1
+        ORDER BY id DESC
+        LIMIT ? OFFSET ?
+    """, (per_page, offset))
+    favorites = [
+        {
+            'filename': row[0],
+            'originalfilename': row[1]
+        }
+        for row in cursor.fetchall()
+    ]
+    conn.close()
+    return jsonify(favorites)
+
+@app.route('/api/all_sounds')
+def get_all_sounds():
+    page = int(request.args.get('page', 1))
+    per_page = int(request.args.get('per_page', 10))
+    offset = (page - 1) * per_page
+
+    conn = sqlite3.connect('/home/sopqos/github/Discord-Brain-Rot/database.db')
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT Filename, originalfilename
+        FROM sounds
+        ORDER BY id DESC
+        LIMIT ? OFFSET ?
+    """, (per_page, offset))
+    all_sounds = [
+        {
+            'filename': row[0],
+            'originalfilename': row[1]
+        }
+        for row in cursor.fetchall()
+    ]
+    conn.close()
+    return jsonify(all_sounds)
+
 def run_http_server():
     app.run(host='0.0.0.0', port=80)
 

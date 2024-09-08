@@ -5,72 +5,143 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>lulucas</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <style>
+        .table-container {
+            margin-bottom: 2rem;
+        }
+    </style>
 </head>
 <body>
     <h1>O LUCAS TEM PERNINHAS DE FRANGO</h1>
-    <table id="actionsTable">
-        <thead>
-            <tr>
-                <th>Filename</th>
-                <th>Username</th>
-                <th>Action</th>
-                <th>Target</th>
-                <th>Timestamp</th>
-            </tr>
-        </thead>
-        <tbody id="tableBody">
-            <!-- Data will be inserted here dynamically -->
-        </tbody>
-    </table>
-    <div class="pagination">
-        <button id="prevPage">Previous</button>
-        <span id="currentPage">1</span>
-        <button id="nextPage">Next</button>
+
+    <div class="table-container">
+        <h2>Recent Actions</h2>
+        <table id="actionsTable">
+            <thead>
+                <tr>
+                    <th>Filename</th>
+                    <th>Username</th>
+                    <th>Action</th>
+                    <th>Target</th>
+                    <th>Timestamp</th>
+                </tr>
+            </thead>
+            <tbody id="actionsTableBody">
+                <!-- Data will be inserted here dynamically -->
+            </tbody>
+        </table>
+        <div class="pagination">
+            <button id="prevPageActions">Previous</button>
+            <span id="currentPageActions">1</span>
+            <button id="nextPageActions">Next</button>
+        </div>
+    </div>
+
+    <div class="table-container">
+        <h2>Favorite Sounds</h2>
+        <table id="favoritesTable">
+            <thead>
+                <tr>
+                    <th>Filename</th>
+                    <th>Original Filename</th>
+                </tr>
+            </thead>
+            <tbody id="favoritesTableBody">
+                <!-- Data will be inserted here dynamically -->
+            </tbody>
+        </table>
+        <div class="pagination">
+            <button id="prevPageFavorites">Previous</button>
+            <span id="currentPageFavorites">1</span>
+            <button id="nextPageFavorites">Next</button>
+        </div>
+    </div>
+
+    <div class="table-container">
+        <h2>All Sounds</h2>
+        <table id="allSoundsTable">
+            <thead>
+                <tr>
+                    <th>Filename</th>
+                    <th>Original Filename</th>
+                </tr>
+            </thead>
+            <tbody id="allSoundsTableBody">
+                <!-- Data will be inserted here dynamically -->
+            </tbody>
+        </table>
+        <div class="pagination">
+            <button id="prevPageAllSounds">Previous</button>
+            <span id="currentPageAllSounds">1</span>
+            <button id="nextPageAllSounds">Next</button>
+        </div>
     </div>
 
     <script>
         const itemsPerPage = 10;
-        let currentPage = 1;
+        let currentPageActions = 1;
+        let currentPageFavorites = 1;
+        let currentPageAllSounds = 1;
 
-        function fetchData(page) {
-            fetch(`/api/actions?page=${page}&per_page=${itemsPerPage}`)
+        function fetchData(endpoint, page, tableBodyId, currentPageId) {
+            fetch(`/api/${endpoint}?page=${page}&per_page=${itemsPerPage}`)
                 .then(response => response.json())
                 .then(data => {
-                    const tableBody = document.getElementById('tableBody');
+                    const tableBody = document.getElementById(tableBodyId);
                     tableBody.innerHTML = '';
-                    data.forEach(action => {
-                        const row = `
-                            <tr>
-                                <td>${action.filename}</td>
-                                <td>${action.username}</td>
-                                <td>${action.action}</td>
-                                <td>${action.target}</td>
-                                <td>${action.timestamp}</td>
-                            </tr>
-                        `;
+                    data.forEach(item => {
+                        let row = '<tr>';
+                        for (let key in item) {
+                            row += `<td>${item[key]}</td>`;
+                        }
+                        row += '</tr>';
                         tableBody.innerHTML += row;
                     });
-                    document.getElementById('currentPage').textContent = currentPage;
+                    document.getElementById(currentPageId).textContent = page;
                 });
         }
 
-        document.getElementById('prevPage').addEventListener('click', () => {
-            if (currentPage > 1) {
-                currentPage--;
-                fetchData(currentPage);
-            }
-        });
+        function setupPagination(prevButtonId, nextButtonId, currentPageVar, fetchFunction) {
+            document.getElementById(prevButtonId).addEventListener('click', () => {
+                if (window[currentPageVar] > 1) {
+                    window[currentPageVar]--;
+                    fetchFunction(window[currentPageVar]);
+                }
+            });
 
-        document.getElementById('nextPage').addEventListener('click', () => {
-            currentPage++;
-            fetchData(currentPage);
-        });
+            document.getElementById(nextButtonId).addEventListener('click', () => {
+                window[currentPageVar]++;
+                fetchFunction(window[currentPageVar]);
+            });
+        }
+
+        function fetchActions(page) {
+            fetchData('actions', page, 'actionsTableBody', 'currentPageActions');
+        }
+
+        function fetchFavorites(page) {
+            fetchData('favorites', page, 'favoritesTableBody', 'currentPageFavorites');
+        }
+
+        function fetchAllSounds(page) {
+            fetchData('all_sounds', page, 'allSoundsTableBody', 'currentPageAllSounds');
+        }
+
+        setupPagination('prevPageActions', 'nextPageActions', 'currentPageActions', fetchActions);
+        setupPagination('prevPageFavorites', 'nextPageFavorites', 'currentPageFavorites', fetchFavorites);
+        setupPagination('prevPageAllSounds', 'nextPageAllSounds', 'currentPageAllSounds', fetchAllSounds);
 
         // Initial data fetch
-        fetchData(currentPage);
+        fetchActions(currentPageActions);
+        fetchFavorites(currentPageFavorites);
+        fetchAllSounds(currentPageAllSounds);
 
-        // Auto-refresh every second
-        setInterval(() => fetchData(currentPage), 1000);
+        // Auto-refresh every 5 seconds (adjust as needed)
+        setInterval(() => {
+            fetchActions(currentPageActions);
+            fetchFavorites(currentPageFavorites);
+            fetchAllSounds(currentPageAllSounds);
+        }, 5000);
     </script>
 </body>
 </html>
