@@ -84,12 +84,11 @@
         let currentPageAllSounds = 1;
 
         function fetchData(endpoint, page, tableBodyId, currentPageId) {
-            // Ensure page is a valid number
-            page = isNaN(page) ? 1 : Math.max(1, parseInt(page));
-
+            console.log(`Fetching ${endpoint} data for page ${page}`);
             fetch(`/api/${endpoint}?page=${page}&per_page=${itemsPerPage}`)
                 .then(response => response.json())
                 .then(data => {
+                    console.log(`Received ${data.length} items for ${endpoint}`);
                     const tableBody = document.getElementById(tableBodyId);
                     tableBody.innerHTML = '';
                     data.forEach(item => {
@@ -110,27 +109,34 @@
             const nextButton = document.getElementById(nextButtonId);
 
             prevButton.addEventListener('click', () => {
+                console.log(`Previous button clicked for ${currentPageVar}`);
                 if (window[currentPageVar] > 1) {
                     window[currentPageVar]--;
+                    console.log(`${currentPageVar} is now ${window[currentPageVar]}`);
                     fetchFunction(window[currentPageVar]);
                 }
             });
 
             nextButton.addEventListener('click', () => {
+                console.log(`Next button clicked for ${currentPageVar}`);
                 window[currentPageVar]++;
+                console.log(`${currentPageVar} is now ${window[currentPageVar]}`);
                 fetchFunction(window[currentPageVar]);
             });
         }
 
         function fetchActions(page) {
+            console.log(`Fetching actions for page ${page}`);
             fetchData('actions', page, 'actionsTableBody', 'currentPageActions');
         }
 
         function fetchFavorites(page) {
+            console.log(`Fetching favorites for page ${page}`);
             fetchData('favorites', page, 'favoritesTableBody', 'currentPageFavorites');
         }
 
         function fetchAllSounds(page) {
+            console.log(`Fetching all sounds for page ${page}`);
             fetchData('all_sounds', page, 'allSoundsTableBody', 'currentPageAllSounds');
         }
 
