@@ -102,14 +102,17 @@
         }
 
         function setupPagination(prevButtonId, nextButtonId, currentPageVar, fetchFunction) {
-            document.getElementById(prevButtonId).addEventListener('click', () => {
+            const prevButton = document.getElementById(prevButtonId);
+            const nextButton = document.getElementById(nextButtonId);
+
+            prevButton.addEventListener('click', () => {
                 if (window[currentPageVar] > 1) {
                     window[currentPageVar]--;
                     fetchFunction(window[currentPageVar]);
                 }
             });
 
-            document.getElementById(nextButtonId).addEventListener('click', () => {
+            nextButton.addEventListener('click', () => {
                 window[currentPageVar]++;
                 fetchFunction(window[currentPageVar]);
             });
