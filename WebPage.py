@@ -15,7 +15,11 @@ def index():
 
 @app.route('/api/actions')
 def get_actions():
-    page = int(request.args.get('page', 1))
+    try:
+        page = max(1, int(request.args.get('page', 1)))
+    except ValueError:
+        page = 1
+    
     per_page = int(request.args.get('per_page', 10))
     offset = (page - 1) * per_page
 

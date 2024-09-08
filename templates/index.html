@@ -84,6 +84,9 @@
         let currentPageAllSounds = 1;
 
         function fetchData(endpoint, page, tableBodyId, currentPageId) {
+            // Ensure page is a valid number
+            page = isNaN(page) ? 1 : Math.max(1, parseInt(page));
+
             fetch(`/api/${endpoint}?page=${page}&per_page=${itemsPerPage}`)
                 .then(response => response.json())
                 .then(data => {
@@ -98,7 +101,8 @@
                         tableBody.innerHTML += row;
                     });
                     document.getElementById(currentPageId).textContent = page;
-                });
+                })
+                .catch(error => console.error('Error:', error));
         }
 
         function setupPagination(prevButtonId, nextButtonId, currentPageVar, fetchFunction) {
