@@ -106,18 +106,14 @@
             const nextButton = document.getElementById(nextButtonId);
 
             prevButton.addEventListener('click', () => {
-                console.log(`Previous button clicked for ${currentPageVar}`);
                 if (window[currentPageVar] > 1) {
                     window[currentPageVar]--;
-                    console.log(`${currentPageVar} is now ${window[currentPageVar]}`);
                     fetchFunction(window[currentPageVar]);
                 }
             });
 
             nextButton.addEventListener('click', () => {
-                console.log(`Next button clicked for ${currentPageVar}`);
                 window[currentPageVar]++;
-                console.log(`${currentPageVar} is now ${window[currentPageVar]}`);
                 fetchFunction(window[currentPageVar]);
             });
         }
