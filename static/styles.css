@@ -1,21 +1,22 @@
 body {
     display: flex;
     flex-direction: column;
-    justify-content: center;
     align-items: center;
     min-height: 100vh;
     margin: 0;
     background: #f3f3f3;
     font-family: Arial, sans-serif;
+    overflow: hidden;
 }
 
 h1 {
-    font-size: 5rem;
+    font-size: 3rem;
     background: linear-gradient(90deg, red, orange, yellow, green, blue, indigo, violet);
     background-size: 400%;
     -webkit-background-clip: text;
     color: transparent;
     animation: rainbow 5s ease infinite;
+    margin-bottom: 1rem;
 }
 
 @keyframes rainbow {
@@ -24,20 +25,40 @@ h1 {
     100% { background-position: 0% 50%; }
 }
 
+.tables-container {
+    display: flex;
+    justify-content: space-between;
+    width: 98%;
+    height: calc(100vh - 100px);
+    overflow: hidden;
+}
+
+.table-container {
+    flex: 1;
+    margin: 0 10px;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+h2 {
+    font-size: 1.5rem;
+    margin-bottom: 0.5rem;
+}
+
 table {
-    margin-top: 2rem;
     border-collapse: separate;
     border-spacing: 0;
-    width: 80%;
-    max-width: 1000px;
+    width: 100%;
     background-color: #fff;
     border-radius: 10px;
     overflow: hidden;
     box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
+    flex-grow: 1;
 }
 
 th, td {
-    padding: 15px;
+    padding: 10px;
     text-align: left;
     border-bottom: 1px solid #f2f2f2;
 }
@@ -46,8 +67,23 @@ th {
     background-color: #f8f8f8;
     font-weight: bold;
     text-transform: uppercase;
-    font-size: 0.85em;
+    font-size: 0.75em;
     color: #666;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+tbody {
+    overflow-y: auto;
+    height: calc(100% - 40px);
+    display: block;
+}
+
+thead, tbody tr {
+    display: table;
+    width: 100%;
+    table-layout: fixed;
 }
 
 tr:last-child td {
@@ -63,12 +99,15 @@ tr:hover {
 }
 
 .pagination {
-    margin-top: 1rem;
+    margin-top: 0.5rem;
+    display: flex;
+    justify-content: center;
+    align-items: center;
 }
 
 .pagination button {
-    margin: 0 0.5rem;
-    padding: 8px 16px;
+    margin: 0 0.25rem;
+    padding: 5px 10px;
     background-color: #f8f8f8;
     border: none;
     border-radius: 5px;
@@ -82,5 +121,5 @@ tr:hover {
 
 #currentPage {
     font-weight: bold;
-    margin: 0 10px;
+    margin: 0 5px;
 }
