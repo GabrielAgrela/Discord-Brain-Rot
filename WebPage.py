@@ -17,7 +17,7 @@ def get_actions():
     per_page = int(request.args.get('per_page', 10))
     offset = (page - 1) * per_page
 
-    conn = sqlite3.connect('/home/sopqos/github/Discord-Brain-Rot/database.db')
+    conn = sqlite3.connect('/home/gabi/github/Discord-Brain-Rot/database.db')
     cursor = conn.cursor()
     cursor.execute("""
         SELECT s.Filename, a.username, a.action, a.target, a.timestamp
@@ -48,7 +48,7 @@ def get_favorites():
     per_page = int(request.args.get('per_page', 10))
     offset = (page - 1) * per_page
 
-    conn = sqlite3.connect('/home/sopqos/github/Discord-Brain-Rot/database.db')
+    conn = sqlite3.connect('/home/gabi/github/Discord-Brain-Rot/database.db')
     cursor = conn.cursor()
     cursor.execute("""
         SELECT Filename, originalfilename
@@ -76,7 +76,7 @@ def get_all_sounds():
     per_page = int(request.args.get('per_page', 10))
     offset = (page - 1) * per_page
 
-    conn = sqlite3.connect('/home/sopqos/github/Discord-Brain-Rot/database.db')
+    conn = sqlite3.connect('/home/gabi/github/Discord-Brain-Rot/database.db')
     cursor = conn.cursor()
     cursor.execute("""
         SELECT Filename, originalfilename

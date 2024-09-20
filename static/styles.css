@@ -1,12 +1,14 @@
+@import url('https://fonts.googleapis.com/css2?family=Bungee+Shade&display=swap');
+
 body {
     display: flex;
     flex-direction: column;
     align-items: center;
-    height: 100vh;
+    height: 100vh; /* Changed from min-height to height */
     margin: 0;
     background: #f3f3f3;
     font-family: Arial, sans-serif;
-    overflow: hidden;
+    overflow: hidden; /* This will prevent scrolling on both axes */
 }
 
 h1 {
@@ -29,19 +31,19 @@ h1 {
     display: flex;
     justify-content: space-between;
     width: 98%;
-    /* Remove the fixed height */
-    /* height: calc(100vh - 100px); */
-    overflow: visible; /* Change from hidden to visible */
-    margin-bottom: 20px; /* Add some margin at the bottom */
+    flex-direction: row;
+    flex-wrap: wrap;
+    height: calc(100vh - 120px); /* Adjusted for title container height */
+    overflow: hidden; /* Changed from visible to hidden */
 }
 
 .table-container {
     margin: 0 10px;
     display: flex;
     flex-direction: column;
-    /* Remove the fixed height */
-    /* height: 100%; */
     min-width: 0;
+    height: 100%;
+    overflow: hidden;
 }
 
 .table-container:first-child {
@@ -55,6 +57,9 @@ h1 {
 h2 {
     font-size: 1.2rem;
     margin-bottom: 0.5rem;
+    margin-top: 0rem;
+    flex-shrink: 0;
+
 }
 
 table {
@@ -65,30 +70,28 @@ table {
     border-radius: 10px;
     overflow: hidden;
     box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
-    /* Remove flex properties */
-    /* flex-grow: 1; */
-    /* display: flex; */
-    /* flex-direction: column; */
     table-layout: fixed;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    height: calc(100% - 70px); /* Adjust based on h2 and pagination height */
 }
 
-thead, tbody, tr {
-    display: table;
-    width: 100%;
-    table-layout: fixed;
+thead {
+    flex-shrink: 0; /* Prevent header from shrinking */
 }
 
 tbody {
-    /* Remove these properties */
-    /* flex-grow: 1; */
-    /* overflow-y: auto; */
-    /* display: block; */
+    flex: 1; /* Make tbody take up all available space */
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
 }
 
 tr {
-    display: table;
+    display: flex;
+    flex: 1;
     width: 100%;
-    table-layout: fixed;
 }
 
 th, td {
@@ -98,6 +101,10 @@ th, td {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    display: flex;
+    align-items: center; /* Vertically center content */
+    justify-content: flex-start;
+    flex: 1; /* Make cells expand to fill row height */
 }
 
 td {
@@ -126,6 +133,7 @@ tr:hover {
     display: flex;
     justify-content: center;
     align-items: center;
+    flex-shrink: 0;
 }
 
 .pagination button {
@@ -145,4 +153,140 @@ tr:hover {
 #currentPage {
     font-weight: bold;
     margin: 0 5px;
+}
+
+.title-container {
+    position: relative;
+    width: 100%;
+    height: 100px; /* Increased height to accommodate larger text */
+    overflow: hidden;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.title-text, .title-shadow {
+    font-family: 'Bungee Shade', cursive;
+    font-size: 1.8rem; /* Slightly reduced font size */
+    text-align: center;
+    width: 90%; /* Limit width to prevent wrapping */
+    white-space: nowrap; /* Prevent text from wrapping */
+    font-weight: bold; /* Added bold font weight */
+}
+
+.title-text {
+    animation: bounce 2s ease-in-out infinite, colorCycle 5s linear infinite;
+}
+
+.title-shadow {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: rgba(0, 0, 0, 0.2);
+    animation: shadowPulse 2s ease-in-out infinite;
+    z-index: -1;
+}
+
+@keyframes bounce {
+    0%, 100% { transform: translateY(20px); }
+    50% { transform: translateY(-20px); }
+}
+
+@keyframes colorCycle {
+    0% { color: #ff0000; }
+    16.66% { color: #ff8000; }
+    33.33% { color: #ffff00; }
+    50% { color: #00ff00; }
+    66.66% { color: #0000ff; }
+    83.33% { color: #8000ff; }
+    100% { color: #ff0000; }
+}
+
+@keyframes shadowPulse {
+    0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 0.2; }
+    50% { transform: translate(-50%, -50%) scale(1.1); opacity: 0.4; }
+}
+
+/* Modify the existing media query */
+@media (max-aspect-ratio: 1/1) {
+    body {
+        height: 100vh;
+        overflow: hidden;
+    }
+
+    .tables-container {
+        flex-direction: column;
+        height: calc(100vh - 100px); /* Adjust based on title container height */
+        overflow: hidden;
+    }
+
+    .table-container {
+        width: 100%;
+        margin: 0 0 10px 0;
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden; /* Prevent individual table containers from scrolling */
+    }
+
+    tbody {
+        overflow-y: auto; /* Allow scrolling within table bodies */
+    }
+
+}
+
+/* Add a new media query for mobile devices */
+@media (max-width: 768px) and (max-height: 1024px) {
+    body {
+        position: fixed;
+        width: 100%;
+        height: 100%;
+    }
+
+    .title-container {
+        height: 60px; /* Further reduce height on mobile */
+    }
+
+    .tables-container {
+        height: calc(100vh - 60px);
+    }
+
+    .table-container {
+        max-height: 33vh; /* Limit height of each table container on mobile */
+    }
+}
+
+@media (max-width: 768px) {
+    .title-text, .title-shadow {
+        font-size: 1.2rem; /* Further reduced font size for smaller screens */
+        width: 95%; /* Allow more width on smaller screens */
+    }
+    
+    .title-container {
+        height: 80px; /* Adjusted height for smaller screens */
+    }
+}
+
+@media (max-width: 480px) {
+    h1 {
+        font-size: 1.2rem;
+    }
+
+    h2 {
+        font-size: 0.9rem;
+    }
+
+    th, td {
+        font-size: 0.7em;
+        padding: 4px;
+    }
+
+    .title-text, .title-shadow {
+        font-size: 1rem; /* Even smaller font size for very small screens */
+    }
+    
+    .title-container {
+        height: 60px; /* Further adjusted height for very small screens */
+    }
 }

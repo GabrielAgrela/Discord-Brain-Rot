@@ -17,7 +17,7 @@ intents = discord.Intents(guilds=True, voice_states=True, messages=True, message
 bot = Bot(command_prefix="*", intents=intents, token=env.bot_token, ffmpeg_path=env.ffmpeg_path)
 
 # Usage
-userUtils = UsersUtils(os.path.abspath(os.path.join(os.path.dirname(__file__), "Data", "Users.json")))
+#userUtils = UsersUtils(os.path.abspath(os.path.join(os.path.dirname(__file__), "Data", "Users.json")))
 
 behavior = BotBehavior(bot, env.ffmpeg_path)
 db = Database(behavior=behavior)
