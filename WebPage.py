@@ -1,11 +1,5 @@
 from flask import Flask, render_template, jsonify, request
 import sqlite3
-from flask import Flask, render_template
-import sqlite3
-from waitress import serve
-from paste.translogger import TransLogger
-import ssl
-import threading
 
 app = Flask(__name__)
 
@@ -19,7 +13,7 @@ def get_actions():
         page = max(1, int(request.args.get('page', 1)))
     except ValueError:
         page = 1
-    
+
     per_page = int(request.args.get('per_page', 10))
     offset = (page - 1) * per_page
 
@@ -37,7 +31,6 @@ def get_actions():
             'filename': row[0] if row[0] else 'N/A',
             'username': row[1],
             'action': row[2],
-            'target': row[3],
             'timestamp': row[4]
         }
         for row in cursor.fetchall()
@@ -51,7 +44,7 @@ def get_favorites():
         page = max(1, int(request.args.get('page', 1)))
     except ValueError:
         page = 1
-    
+
     per_page = int(request.args.get('per_page', 10))
     offset = (page - 1) * per_page
 
@@ -66,8 +59,7 @@ def get_favorites():
     """, (per_page, offset))
     favorites = [
         {
-            'filename': row[0],
-            'originalfilename': row[1]
+            'filename': row[0]
         }
         for row in cursor.fetchall()
     ]
@@ -80,7 +72,7 @@ def get_all_sounds():
         page = max(1, int(request.args.get('page', 1)))
     except ValueError:
         page = 1
-    
+
     per_page = int(request.args.get('per_page', 10))
     offset = (page - 1) * per_page
 
@@ -94,31 +86,9 @@ def get_all_sounds():
     """, (per_page, offset))
     all_sounds = [
         {
-            'filename': row[0],
-            'originalfilename': row[1]
+            'filename': row[0]
         }
         for row in cursor.fetchall()
     ]
     conn.close()
     return jsonify(all_sounds)
-
-def run_http_server():
-    app.run(host='0.0.0.0', port=80)
-
-def run_https_server():
-    ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-    ssl_context.load_cert_chain(
-        '/etc/letsencrypt/live/gabrielagrela.com/fullchain.pem', 
-        '/etc/letsencrypt/live/gabrielagrela.com/privkey.pem'
-    )
-    app.run(host='0.0.0.0', port=443, ssl_context=ssl_context)
-
-if __name__ == '__main__':
-    http_thread = threading.Thread(target=run_http_server)
-    https_thread = threading.Thread(target=run_https_server)
-    
-    http_thread.start()
-    https_thread.start()
-    
-    http_thread.join()
-    https_thread.join()

@@ -10,6 +10,7 @@ from discord import default_permissions
 from Classes.UsersUtils import UsersUtils
 from Classes.SoundDownloader import SoundDownloader
 from Classes.Database import Database
+import random
 
 env = Environment()
 intents = discord.Intents(guilds=True, voice_states=True, messages=True, message_content=True, members=True)
@@ -258,7 +259,7 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
 
     try:
         user_events = db.get_user_events(member_str, event)
-        sound = user_events[0][2]
+        sound = random.choice(user_events)[2]
         db.insert_action(member_str, event, db.get_sounds_by_similarity(sound)[0][0])
         if user_events:
             behavior.last_channel[member_str] = channel

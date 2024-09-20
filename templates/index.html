@@ -15,11 +15,10 @@
             <table id="actionsTable">
                 <thead>
                     <tr>
-                        <th>Filename</th>
-                        <th>Username</th>
                         <th>Action</th>
-                        <th>Target</th>
+                        <th>Filename</th>
                         <th>Timestamp</th>
+                        <th>Username</th>
                     </tr>
                 </thead>
                 <tbody id="actionsTableBody">
@@ -39,7 +38,6 @@
                 <thead>
                     <tr>
                         <th>Filename</th>
-                        <th>Original Filename</th>
                     </tr>
                 </thead>
                 <tbody id="favoritesTableBody">
@@ -59,7 +57,6 @@
                 <thead>
                     <tr>
                         <th>Filename</th>
-                        <th>Original Filename</th>
                     </tr>
                 </thead>
                 <tbody id="allSoundsTableBody">
@@ -75,7 +72,7 @@
     </div>
 
     <script>
-        const itemsPerPage = 10;
+        const itemsPerPage = 20;
         let currentPageActions = 1;
         let currentPageFavorites = 1;
         let currentPageAllSounds = 1;
@@ -101,51 +98,52 @@
                 .catch(error => console.error('Error:', error));
         }
 
-        function setupPagination(prevButtonId, nextButtonId, currentPageVar, fetchFunction) {
+        function setupPagination(prevButtonId, nextButtonId, fetchFunction) {
             const prevButton = document.getElementById(prevButtonId);
             const nextButton = document.getElementById(nextButtonId);
 
             prevButton.addEventListener('click', () => {
-                if (window[currentPageVar] > 1) {
-                    window[currentPageVar]--;
-                    fetchFunction(window[currentPageVar]);
-                }
+                fetchFunction(false);
             });
 
             nextButton.addEventListener('click', () => {
-                window[currentPageVar]++;
-                fetchFunction(window[currentPageVar]);
+                fetchFunction(true);
             });
         }
 
-        function fetchActions(page) {
-            fetchData('actions', page, 'actionsTableBody', 'currentPageActions');
+        function fetchActions(increment = null) {
+            if (increment === true) currentPageActions++;
+            else if (increment === false && currentPageActions > 1) currentPageActions--;
+            fetchData('actions', currentPageActions, 'actionsTableBody', 'currentPageActions');
         }
 
-        function fetchFavorites(page) {
-            fetchData('favorites', page, 'favoritesTableBody', 'currentPageFavorites');
+        function fetchFavorites(increment = null) {
+            if (increment === true) currentPageFavorites++;
+            else if (increment === false && currentPageFavorites > 1) currentPageFavorites--;
+            fetchData('favorites', currentPageFavorites, 'favoritesTableBody', 'currentPageFavorites');
         }
 
-        function fetchAllSounds(page) {
-            fetchData('all_sounds', page, 'allSoundsTableBody', 'currentPageAllSounds');
+        function fetchAllSounds(increment = null) {
+            if (increment === true) currentPageAllSounds++;
+            else if (increment === false && currentPageAllSounds > 1) currentPageAllSounds--;
+            fetchData('all_sounds', currentPageAllSounds, 'allSoundsTableBody', 'currentPageAllSounds');
         }
 
-        setupPagination('prevPageActions', 'nextPageActions', 'currentPageActions', fetchActions);
-        setupPagination('prevPageFavorites', 'nextPageFavorites', 'currentPageFavorites', fetchFavorites);
-        setupPagination('prevPageAllSounds', 'nextPageAllSounds', 'currentPageAllSounds', fetchAllSounds);
+        setupPagination('prevPageActions', 'nextPageActions', fetchActions);
+        setupPagination('prevPageFavorites', 'nextPageFavorites', fetchFavorites);
+        setupPagination('prevPageAllSounds', 'nextPageAllSounds', fetchAllSounds);
 
         // Initial data fetch
-        fetchActions(currentPageActions);
-        fetchFavorites(currentPageFavorites);
-        fetchAllSounds(currentPageAllSounds);
+        fetchActions();
+        fetchFavorites();
+        fetchAllSounds();
 
         // Auto-refresh every 5 seconds (adjust as needed)
         setInterval(() => {
-            fetchActions(currentPageActions);
-            fetchFavorites(currentPageFavorites);
-            fetchAllSounds(currentPageAllSounds);
+            fetchActions();
+            fetchFavorites();
+            fetchAllSounds();
         }, 5000);
-
     </script>
 </body>
 </html>

@@ -29,17 +29,27 @@ h1 {
     display: flex;
     justify-content: space-between;
     width: 98%;
-    height: calc(100vh - 100px);
-    overflow: hidden;
+    /* Remove the fixed height */
+    /* height: calc(100vh - 100px); */
+    overflow: visible; /* Change from hidden to visible */
+    margin-bottom: 20px; /* Add some margin at the bottom */
 }
 
 .table-container {
-    flex: 1;
     margin: 0 10px;
     display: flex;
     flex-direction: column;
-    height: 100%;
-    min-width: 0; // Add this line
+    /* Remove the fixed height */
+    /* height: 100%; */
+    min-width: 0;
+}
+
+.table-container:first-child {
+    flex: 2;  /* This makes the first table take up 2 parts */
+}
+
+.table-container:not(:first-child) {
+    flex: 1;  /* This makes the other tables take up 1 part each */
 }
 
 h2 {
@@ -55,20 +65,24 @@ table {
     border-radius: 10px;
     overflow: hidden;
     box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
-    flex-grow: 1;
-    display: flex;
-    flex-direction: column;
-    table-layout: fixed; // Add this line
+    /* Remove flex properties */
+    /* flex-grow: 1; */
+    /* display: flex; */
+    /* flex-direction: column; */
+    table-layout: fixed;
 }
 
-thead, tbody {
-    display: block;
+thead, tbody, tr {
+    display: table;
     width: 100%;
+    table-layout: fixed;
 }
 
 tbody {
-    overflow-y: auto;
-    flex-grow: 1;
+    /* Remove these properties */
+    /* flex-grow: 1; */
+    /* overflow-y: auto; */
+    /* display: block; */
 }
 
 tr {
@@ -83,24 +97,17 @@ th, td {
     border-bottom: 1px solid #f2f2f2;
     white-space: nowrap;
     overflow: hidden;
-}
-
-td {
-    font-size: 0.9em; // Default font size
-}
-
-td span {
-    display: inline-block;
-    max-width: 100%;
-    overflow: hidden;
     text-overflow: ellipsis;
 }
 
-th:nth-child(1) { width: 30%; } /* FILENAME */
-th:nth-child(2) { width: 20%; } /* USERNAME */
-th:nth-child(3) { width: 10%; } /* ACTION */
-th:nth-child(4) { width: 20%; } /* TARGET */
-th:nth-child(5) { width: 20%; } /* TIMESTAMP */
+td {
+    font-size: 0.9em;
+}
+
+th:nth-child(1), td:nth-child(1) { width: 25%; }
+th:nth-child(2), td:nth-child(2) { width: 40%; }
+th:nth-child(3), td:nth-child(3) { width: 25%; }
+th:nth-child(4), td:nth-child(4) { width: 15%; }
 
 tr:last-child td {
     border-bottom: none;
