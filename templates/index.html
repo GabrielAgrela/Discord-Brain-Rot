@@ -9,8 +9,8 @@
 </head>
 <body>
     <div class="title-container">
-        <div class="title-shadow">O LUCASS TEM PERNINHAS DE FRANGO</div>
-        <div class="title-text">O LUCASS TEM PERNINHAS DE FRANGO</div>
+        <div class="title-shadow">O LUCAS TEM PERNINHAS DE FRANGO</div>
+        <div class="title-text">O LUCAS TEM PERNINHAS DE FRANGO</div>
     </div>
     
     <div class="tables-container">
@@ -31,7 +31,7 @@
             </table>
             <div class="pagination">
                 <button id="prevPageActions">Previous</button>
-                <span id="currentPageActions">1</span>
+                <span id="currentPageActions">1</span> / <span id="totalPagesActions">1</span>
                 <button id="nextPageActions">Next</button>
             </div>
         </div>
@@ -50,7 +50,7 @@
             </table>
             <div class="pagination">
                 <button id="prevPageFavorites">Previous</button>
-                <span id="currentPageFavorites">1</span>
+                <span id="currentPageFavorites">1</span> / <span id="totalPagesFavorites">1</span>
                 <button id="nextPageFavorites">Next</button>
             </div>
         </div>
@@ -61,6 +61,7 @@
                 <thead>
                     <tr>
                         <th>Filename</th>
+                        <th>Date</th>
                     </tr>
                 </thead>
                 <tbody id="allSoundsTableBody">
@@ -69,68 +70,147 @@
             </table>
             <div class="pagination">
                 <button id="prevPageAllSounds">Previous</button>
-                <span id="currentPageAllSounds">1</span>
+                <span id="currentPageAllSounds">1</span> / <span id="totalPagesAllSounds">1</span>
                 <button id="nextPageAllSounds">Next</button>
             </div>
         </div>
     </div>
 
     <script>
-        const itemsPerPage = 20;
+        const itemsPerPage = window.matchMedia("(max-width: 768px) and (max-height: 1024px)").matches ? 5 : 15;
         let currentPageActions = 1;
         let currentPageFavorites = 1;
         let currentPageAllSounds = 1;
 
-        function fetchData(endpoint, page, tableBodyId, currentPageId) {
+        // Store the last fetched data for each endpoint
+        const lastFetchedData = {
+            actions: null,
+            favorites: null,
+            all_sounds: null
+        };
+
+        function fetchData(endpoint, page, tableBodyId, currentPageId, totalPagesId, prevButtonId, nextButtonId) {
             console.log(`Fetching ${endpoint} data for page ${page}`);
-            fetch(`/api/${endpoint}?page=${page}&per_page=${itemsPerPage}`)
+            const tableBody = document.getElementById(tableBodyId);
+            const prevButton = document.getElementById(prevButtonId);
+            const nextButton = document.getElementById(nextButtonId);
+            
+            return fetch(`/api/${endpoint}?page=${page}&per_page=${itemsPerPage}`)
                 .then(response => response.json())
                 .then(data => {
-                    console.log(`Received ${data.length} items for ${endpoint}`);
-                    const tableBody = document.getElementById(tableBodyId);
-                    tableBody.innerHTML = '';
-                    data.forEach(item => {
-                        let row = '<tr>';
-                        for (let key in item) {
-                            row += `<td>${item[key]}</td>`;
-                        }
-                        row += '</tr>';
-                        tableBody.innerHTML += row;
-                    });
-                    document.getElementById(currentPageId).textContent = page;
+                    console.log(`Received ${data.items.length} items for ${endpoint}`);
+                    
+                    // Check if the new data is different from the last fetched data
+                    const hasNewEntries = JSON.stringify(data.items) !== JSON.stringify(lastFetchedData[endpoint]);
+                    
+                    if (hasNewEntries) {
+                        // Update the last fetched data
+                        lastFetchedData[endpoint] = data.items;
+
+                        // Fade out the existing content
+                        tableBody.style.opacity = '0';
+                        tableBody.style.transition = 'opacity 0.2s';
+
+                        // Wait for fade out to complete before updating content
+                        setTimeout(() => {
+                            // Clear existing rows
+                            tableBody.innerHTML = '';
+
+                            // Create and insert new rows
+                            data.items.forEach((item, index) => {
+                                let row = document.createElement('tr');
+                                row.style.opacity = '0';
+                                row.style.transition = 'opacity 0.3s';
+                                row.style.transitionDelay = `${index * 20}ms`;
+                                
+                                for (let key in item) {
+                                    let cell = document.createElement('td');
+                                    cell.textContent = item[key];
+                                    row.appendChild(cell);
+                                }
+                                
+                                tableBody.appendChild(row);
+                            });
+
+                            document.getElementById(currentPageId).textContent = page;
+                            document.getElementById(totalPagesId).textContent = data.total_pages;
+
+                            // Update button states
+                            prevButton.disabled = (page <= 1);
+                            nextButton.disabled = (page >= data.total_pages);
+
+                            // Trigger reflow to ensure new opacity is applied
+                            void tableBody.offsetWidth;
+
+                            // Fade in the new content
+                            tableBody.style.opacity = '1';
+                            Array.from(tableBody.children).forEach(row => {
+                                row.style.opacity = '1';
+                            });
+
+                            // Remove transition styles after animation completes
+                            setTimeout(() => {
+                                tableBody.style.transition = '';
+                                Array.from(tableBody.children).forEach(row => {
+                                    row.style.transition = '';
+                                    row.style.transitionDelay = '';
+                                });
+                            }, data.items.length * 50 + 300);
+                        }, 100); // Wait for fade out to complete
+                    } else {
+                        console.log(`No new entries for ${endpoint}`);
+                    }
+                    
+                    return hasNewEntries;
                 })
-                .catch(error => console.error('Error:', error));
+                .catch(error => {
+                    console.error('Error:', error);
+                    return false;
+                });
         }
 
         function setupPagination(prevButtonId, nextButtonId, fetchFunction) {
             const prevButton = document.getElementById(prevButtonId);
             const nextButton = document.getElementById(nextButtonId);
+            let isButtonCooldown = false;
 
-            prevButton.addEventListener('click', () => {
-                fetchFunction(false);
-            });
+            function handleButtonClick(increment) {
+                if (!isButtonCooldown && !this.disabled) {
+                    isButtonCooldown = true;
+                    fetchFunction(increment);
+                    
+                    // Disable buttons visually
+                    prevButton.disabled = true;
+                    nextButton.disabled = true;
 
-            nextButton.addEventListener('click', () => {
-                fetchFunction(true);
-            });
+                    setTimeout(() => {
+                        isButtonCooldown = false;
+                        // Re-enable buttons (if they should be enabled)
+                        fetchFunction();
+                    }, 500); // 500ms cooldown
+                }
+            }
+
+            prevButton.addEventListener('click', () => handleButtonClick(false));
+            nextButton.addEventListener('click', () => handleButtonClick(true));
         }
 
         function fetchActions(increment = null) {
             if (increment === true) currentPageActions++;
             else if (increment === false && currentPageActions > 1) currentPageActions--;
-            fetchData('actions', currentPageActions, 'actionsTableBody', 'currentPageActions');
+            return fetchData('actions', currentPageActions, 'actionsTableBody', 'currentPageActions', 'totalPagesActions', 'prevPageActions', 'nextPageActions');
         }
 
         function fetchFavorites(increment = null) {
             if (increment === true) currentPageFavorites++;
             else if (increment === false && currentPageFavorites > 1) currentPageFavorites--;
-            fetchData('favorites', currentPageFavorites, 'favoritesTableBody', 'currentPageFavorites');
+            return fetchData('favorites', currentPageFavorites, 'favoritesTableBody', 'currentPageFavorites', 'totalPagesFavorites', 'prevPageFavorites', 'nextPageFavorites');
         }
 
         function fetchAllSounds(increment = null) {
             if (increment === true) currentPageAllSounds++;
             else if (increment === false && currentPageAllSounds > 1) currentPageAllSounds--;
-            fetchData('all_sounds', currentPageAllSounds, 'allSoundsTableBody', 'currentPageAllSounds');
+            return fetchData('all_sounds', currentPageAllSounds, 'allSoundsTableBody', 'currentPageAllSounds', 'totalPagesAllSounds', 'prevPageAllSounds', 'nextPageAllSounds');
         }
 
         setupPagination('prevPageActions', 'nextPageActions', fetchActions);
@@ -144,10 +224,16 @@
 
         // Auto-refresh every 5 seconds (adjust as needed)
         setInterval(() => {
-            fetchActions();
-            fetchFavorites();
-            fetchAllSounds();
-        }, 5000);
+            Promise.all([fetchActions(), fetchFavorites(), fetchAllSounds()])
+                .then(results => {
+                    const hasNewEntries = results.some(result => result);
+                    if (hasNewEntries) {
+                        console.log('New entries found, animation triggered');
+                    } else {
+                        console.log('No new entries, no animation');
+                    }
+                });
+        }, 500);
     </script>
 </body>
 </html>

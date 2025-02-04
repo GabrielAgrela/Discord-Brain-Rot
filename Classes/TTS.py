@@ -17,6 +17,7 @@ class TTS:
         self.voice_id = os.getenv('EL_voice_id_pt')
         self.voice_id_pt = os.getenv('EL_voice_id_pt')
         self.voice_id_en = os.getenv('EL_voice_id_en')
+        self.voice_id_costa = os.getenv('EL_voice_id_costa')
         self.filename = filename
         self.behavior = behavior
         self.bot = bot
@@ -47,15 +48,28 @@ class TTS:
     async def speech_to_speech(self, input_audio_name, char="en", region=""):
         boost_volume = 0
         
-        filenames = self.db.get_most_similar_filenames(input_audio_name)
+        filenames = Database().get_sounds_by_similarity(input_audio_name)
         
         filename = filenames[0][1] if filenames else None
+
+        tmp_filename = f"{filename}-{char}.mp3"
+         # Check if the file already exists
+        if Database().get_sound(tmp_filename, True):
+            # If the file exists, play it and return
+            for guild in self.bot.guilds:
+                channel = self.behavior.get_largest_voice_channel(guild)
+            await self.behavior.play_audio(channel, self.filename, "admin", is_tts=True)
+            return
+
         audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", filename))
 
-        self.filename = f"{filename}-{char}-{time.strftime('%d-%m-%y-%H-%M-%S')}.mp3"
+        self.filename = f"{filename}-{char}.mp3"
         
         if char == "ventura":
             self.voice_id = self.voice_id_pt
+        elif char == "costa":
+            self.voice_id = self.voice_id_costa
+            boost_volume = 15
         elif char == "tyson":
             self.voice_id = self.voice_id_en
             boost_volume = 15
@@ -113,8 +127,7 @@ class TTS:
                     louder_audio = audio + boost_volume
 
                     path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", self.filename))
-                    self.db.add_entry(os.path.basename(self.filename))
-
+                    Database().insert_sound(os.path.basename(self.filename), os.path.basename(self.filename))
                     louder_audio.export(path, format="mp3")
 
                     for guild in self.bot.guilds:
@@ -207,6 +220,9 @@ class TTS:
         self.filename = f"{text[:10]}-{time.strftime('%d-%m-%y-%H-%M-%S')}.mp3"
         if lang == "pt":
             self.voice_id = self.voice_id_pt
+        elif lang == "costa":
+            self.voice_id = self.voice_id_costa
+            boost_volume = 15
         elif lang == "en":
             self.voice_id = self.voice_id_en
             boost_volume = 15
@@ -228,10 +244,11 @@ class TTS:
         data = {
             "text": text,
             "model_id": "eleven_multilingual_v2",
+            "output_format": "mp3_44100_128",
             "voice_settings": {
-                "stability": 0.7,
-                "similarity_boost": 0.9,
-                "style": 0.7,
+                "stability": 1.0,
+                "similarity_boost": 1.0,
+                "style": 0.5,
                 "use_speaker_boost": True
             }
         }
@@ -244,7 +261,8 @@ class TTS:
                     louder_audio = audio + boost_volume
 
                     path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", self.filename))
-                    self.db.add_entry(os.path.basename(self.filename))
+                    Database().insert_sound(os.path.basename(self.filename), os.path.basename(self.filename))
+                    #self.db.add_entry(os.path.basename(self.filename))
 
                     louder_audio.export(path, format="mp3")
 

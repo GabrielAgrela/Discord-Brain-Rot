@@ -4,8 +4,9 @@ import os
 import uuid
 
 class ManualSoundDownloader:
-    def tiktok_to_mp3(url, output_dir='.', custom_filename=None, time_limit=None):
-        # Replace "photo" with "video" in the URL if present
+    @staticmethod
+    def video_to_mp3(url, output_dir='.', custom_filename=None, time_limit=None):
+        # Replace "photo" with "video" in the URL if present (for TikTok)
         if "photo" in url:
             url = url.replace("photo", "video")
 
@@ -18,6 +19,13 @@ class ManualSoundDownloader:
         # Download the video and extract audio
         with yt_dlp.YoutubeDL() as ydl:
             info_dict = ydl.extract_info(url, download=False)
+            
+            # Check if it's a YouTube video and its duration
+            if 'youtube.com' in url or 'youtu.be' in url:
+                duration = info_dict.get('duration', 0)
+                if duration > 600:  # 600 seconds = 10 minutes
+                    raise ValueError("YouTube video is longer than 10 minutes. Please choose a shorter video.")
+
             title = sanitize_title(info_dict.get('title', ''))
             mp3_filename = f"{custom_filename}" if custom_filename else f"{title}"
             mp3_filepath = os.path.join(output_dir, mp3_filename)
@@ -42,3 +50,8 @@ class ManualSoundDownloader:
             trimmed_audio.export(mp3_filepath, format="mp3")
         
         return mp3_filename
+
+    # For backwards compatibility, keep the tiktok_to_mp3 method
+    @staticmethod
+    def tiktok_to_mp3(url, output_dir='.', custom_filename=None, time_limit=None):
+        return ManualSoundDownloader.video_to_mp3(url, output_dir, custom_filename, time_limit)

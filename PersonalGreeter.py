@@ -11,6 +11,7 @@ from Classes.UsersUtils import UsersUtils
 from Classes.SoundDownloader import SoundDownloader
 from Classes.Database import Database
 import random
+import time
 
 env = Environment()
 intents = discord.Intents(guilds=True, voice_states=True, messages=True, message_content=True, members=True)
@@ -23,10 +24,36 @@ behavior = BotBehavior(bot, env.ffmpeg_path)
 db = Database(behavior=behavior)
 file_name = 'play_requests.csv'
 
+class CooldownManager:
+    def __init__(self, cooldown_time):
+        self.cooldown = 0
+        self.cooldown_time = cooldown_time
+        self.latest_event = None
+
+    def is_on_cooldown(self):
+        return time.time() - self.cooldown < self.cooldown_time
+
+    def set_cooldown(self):
+        self.cooldown = time.time()
+
+    def set_latest_event(self, event):
+        self.latest_event = event
+
+    def get_and_clear_latest_event(self):
+        event = self.latest_event
+        self.latest_event = None
+        return event
+
+    def time_left(self):
+        return max(0, self.cooldown_time - (time.time() - self.cooldown))
+
+cooldown_manager = CooldownManager(5)  # 5 seconds cooldown
+
 @default_permissions(manage_messages=True)
 @bot.event
 async def on_ready():
     print(f"We have logged in as {bot.user}")
+    #bot.loop.create_task(behavior.check_if_in_game())
     await behavior.delete_controls_message()
     await behavior.clean_buttons()
     await behavior.send_controls(force=True)
@@ -36,7 +63,7 @@ async def on_ready():
     bot.loop.create_task(behavior.update_bot_status())
     bot.loop.create_task(SoundDownloader(behavior, behavior.db, os.getenv("CHROMEDRIVER_PATH")).move_sounds())
 
-@bot.slash_command(name="play", description="Write a name of something you want to hear")
+@bot.slash_command(name="toca", description="Write a name of something you want to hear")
 async def play_requested(ctx: interactions.ComponentContext, message: Option(str, "Sound name ('random' for random)", required=True), request_number: Option(str, "Number of Similar Sounds", default=5)):
     await ctx.respond("Processing your request...", delete_after=0)
     request_number = int(request_number)
@@ -80,6 +107,8 @@ async def tts(ctx, message: Option(str, "What you want to say", required=True), 
     try:
         if language == "pt":
             await behavior.tts_EL(user, message, "pt")
+        elif language == "costa":
+            await behavior.tts_EL(user, message, "costa")
         elif language == "br":
             await behavior.tts(user, message, "pt", "com.br")
         elif language == "es":
@@ -103,13 +132,13 @@ async def tts(ctx, message: Option(str, "What you want to say", required=True), 
         return
     
 @bot.slash_command(name='sts', description='Speech-To-Speech. Press tab and enter to select message and write')
-async def tts(ctx, sound: Option(str, "Base sound you want to convert", required=True), char: Option(str, "tyson, ventura", required=True)):
+async def tts(ctx, sound: Option(str, "Base sound you want to convert", required=True), char: Option(str, "tyson, ventura, costa", required=True)):
     await ctx.respond("Processing your request...", delete_after=0)
 
     user = discord.utils.get(bot.get_all_members(), name=ctx.user.name)
 
     behavior.color = discord.Color.dark_blue()
-    if char in ["tyson", "ventura"]:
+    if char in ["tyson", "ventura", "costa"]:
         url = "https://play-lh.googleusercontent.com/cyy3sqDw73x3LRwLbqMmWVHtCFp36RHaMO7Hh_YGqD6NRiLa8B5X8x-OLjAnnXbhYaw=w240-h480-rw" if char == "ventura" else "https://www.famousbirthdays.com/headshots/mike-tyson-7.jpg"
     else:
         char = "tyson"
@@ -178,6 +207,36 @@ async def change(ctx, number: Option(str, "number of sounds", default=10)):
     await ctx.respond("Processing your request...", delete_after=0)
     await behavior.list_sounds(ctx.user, int(number))    
 
+# @bot.slash_command(name="userlolstats", description="get your lol stats", channel_ids=["1321095299367833723"])
+# async def userlolstats(ctx, username: Option(str, "username", required=True), gamemode: Option(str, "ARAM, CHERRY, CLASSIC, NEXUSBLITZ, ONEFORALL, STRAWBERRY, ULTBOOK, URF", required=True), champion: Option(str, "champion (ignore if you want all)", required=False)):
+#     await ctx.respond("Processing your request...", delete_after=0)
+#     await behavior.userlolstats(username, gamemode, champion)
+
+# @bot.slash_command(name="user_vs_userlolstats", description="get your lol stats vs another user", channel_ids=["1321095299367833723"])
+# async def user_vs_userlolstats(ctx, username1: Option(str, "username1", required=True), username2: Option(str, "username2", required=True), gamemode: Option(str, "ARAM, CHERRY, CLASSIC, NEXUSBLITZ, ONEFORALL, STRAWBERRY, ULTBOOK, URF", required=True), champion: Option(str, "champion name", required=True)):
+#     await ctx.respond("Processing your request...", delete_after=0)
+#     await behavior.user_vs_userlolstats(username1, username2, gamemode, champion)
+
+# @bot.slash_command(name="loltime", description="get this servers users lol time played this year(ish)", channel_ids=["1321095299367833723"])
+# async def loltime(ctx):
+#     await ctx.respond("Processing your request...", delete_after=0)
+#     await behavior.userloltime()
+
+# @bot.slash_command(name="lolfriends", description="stats of your friends in league of legends when you play with them", channel_ids=["1321095299367833723"])
+# async def lolfriends(ctx, username: Option(str, "username", required=True)):
+#     await ctx.respond("Processing your request...", delete_after=0)
+#     await behavior.userlolfriends(username)
+
+# @bot.slash_command(name="addloluser", description="username#tagline", channel_ids=["1321095299367833723"])
+# async def addloluser(ctx, username: Option(str, "username", required=True)):
+#     await ctx.respond("Processing your request...", delete_after=0)
+#     await behavior.insertLoLUser(username)
+
+# @bot.slash_command(name="refreshgames", description="refresh games")
+# async def refreshgames(ctx):
+#     await ctx.respond("Processing your request...", delete_after=0)
+#     await behavior.refreshgames()
+
 
 
 
@@ -234,9 +293,6 @@ async def stop_recording(ctx):
     else:
         print("not recording")
 
-
-
-
 @bot.event
 async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
     member_str = f"{member.name}#{member.discriminator}"
@@ -251,26 +307,51 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
     elif before.channel is not None and after.channel is None:
         event = "leave"
         channel = before.channel
+        db.insert_action(member_str, event, db.get_sounds_by_similarity("gay-echo.mp3")[0][0])
     elif before.channel != after.channel:
         event = "join"
         channel = after.channel
     else:
         return  # No relevant change
 
+    if cooldown_manager.is_on_cooldown():
+        # Store the latest event while on cooldown
+        cooldown_manager.set_latest_event((member, member_str, event, channel))
+        return
+
+    # Play audio immediately
+    await play_audio_for_event(member, member_str, event, channel)
+
+    # Set cooldown after playing
+    cooldown_manager.set_cooldown()
+
+    # Schedule checking for latest event after cooldown
+    bot.loop.create_task(check_latest_event_after_cooldown())
+
+async def check_latest_event_after_cooldown():
+    await asyncio.sleep(cooldown_manager.time_left())
+    latest_event = cooldown_manager.get_and_clear_latest_event()
+    if latest_event:
+        member, member_str, event, channel = latest_event
+        await play_audio_for_event(member, member_str, event, channel)
+        cooldown_manager.set_cooldown()  # Reset cooldown after playing the latest event
+
+async def play_audio_for_event(member, member_str, event, channel):
     try:
         user_events = db.get_user_events(member_str, event)
-        sound = random.choice(user_events)[2]
-        db.insert_action(member_str, event, db.get_sounds_by_similarity(sound)[0][0])
         if user_events:
+            sound = random.choice(user_events)[2]
+            db.insert_action(member_str, event, db.get_sounds_by_similarity(sound)[0][0])
             behavior.last_channel[member_str] = channel
-            await asyncio.sleep(.5)
             if channel:
-                  # Assuming the sound is in the third column
                 print(f"Playing {sound} for {member_str} on {event}")
                 await behavior.play_audio(channel, db.get_sounds_by_similarity(sound)[0][2], member_str, is_entrance=True)
-        elif event == "join" and not db.get_user_events(member_str):
+        elif event == "join":
             await behavior.play_audio(channel, "gay-echo.mp3", "admin", is_entrance=True)
-        
+            db.insert_action(member_str, event, db.get_sounds_by_similarity("gay-echo.mp3")[0][0])
+        elif event == "leave":
+            db.insert_action(member_str, event, "-")
+            await behavior.is_channel_empty(channel)
     except Exception as e:
         print(f"An error occurred: {e}")
 

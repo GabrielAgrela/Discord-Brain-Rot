@@ -1,5 +1,6 @@
 from flask import Flask, render_template, jsonify, request
 import sqlite3
+import math
 
 app = Flask(__name__)
 
@@ -28,7 +29,7 @@ def get_actions():
     """, (per_page, offset))
     actions = [
         {
-            'filename': row[0] if row[0] else 'N/A',
+            'filename': row[0] if row[0] else row[3],
             'username': row[1],
             'action': row[2],
             'timestamp': row[4]
@@ -36,7 +37,22 @@ def get_actions():
         for row in cursor.fetchall()
     ]
     conn.close()
-    return jsonify(actions)
+
+    total_count = get_total_count('actions')
+    total_pages = math.ceil(total_count / per_page)
+
+    return jsonify({
+        'items': actions,
+        'total_pages': total_pages
+    })
+
+def get_total_count(table_name):
+    conn = sqlite3.connect('/home/gabi/github/Discord-Brain-Rot/database.db')
+    cursor = conn.cursor()
+    cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
+    count = cursor.fetchone()[0]
+    conn.close()
+    return count
 
 @app.route('/api/favorites')
 def get_favorites():
@@ -64,7 +80,14 @@ def get_favorites():
         for row in cursor.fetchall()
     ]
     conn.close()
-    return jsonify(favorites)
+
+    total_count = get_total_count('sounds WHERE favorite = 1')
+    total_pages = math.ceil(total_count / per_page)
+
+    return jsonify({
+        'items': favorites,
+        'total_pages': total_pages
+    })
 
 @app.route('/api/all_sounds')
 def get_all_sounds():
@@ -79,16 +102,24 @@ def get_all_sounds():
     conn = sqlite3.connect('/home/gabi/github/Discord-Brain-Rot/database.db')
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT Filename, originalfilename
+        SELECT Filename, originalfilename, timestamp
         FROM sounds
         ORDER BY id DESC
         LIMIT ? OFFSET ?
     """, (per_page, offset))
     all_sounds = [
         {
-            'filename': row[0]
+            'filename': row[0],
+            'timestamp': row[2]
         }
         for row in cursor.fetchall()
     ]
     conn.close()
-    return jsonify(all_sounds)
+
+    total_count = get_total_count('sounds')
+    total_pages = math.ceil(total_count / per_page)
+
+    return jsonify({
+        'items': all_sounds,
+        'total_pages': total_pages
+    })

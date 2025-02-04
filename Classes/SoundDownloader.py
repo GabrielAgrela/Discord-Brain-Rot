@@ -46,24 +46,30 @@ class SoundDownloader:
         try:
             print(self.__class__.__name__,": Opening Chrome")
             self.driver = webdriver.Chrome(service=self.service, options=self.options)
-            base_url = "https://www.myinstants.com/en/index/"
+            base_url = "https://www.myinstants.com/en/"
+            categories = random.choice(["index"])
             country = random.choice(["pt", "us", "br"])
-            self.driver.get(base_url+country+"/")
-            print(self.__class__.__name__,": Opening ", base_url+country+"/")
+            self.driver.get(base_url+categories+"/"+country+"/")
+            print(self.__class__.__name__,": Opening ", base_url+categories+"/"+country+"/")
             wait = WebDriverWait(self.driver, 0)
-            consent_button = wait.until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[3]/div[2]/div[1]/div[2]/div[2]/button[1]/p')))
-            print(self.__class__.__name__,": Clicking consent button")
-            consent_button.click()
+            try:
+                consent_button = wait.until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[3]/div[2]/div[1]/div[2]/div[2]/button[1]/p')))
+                print(self.__class__.__name__,": Clicking consent button")
+                consent_button.click()
+            except Exception as e:
+                print(self.__class__.__name__,": No consent button found")
             print(self.__class__.__name__,": Scrolling down to get more sounds")
             self.scroll_a_little(self.driver)
-            sound_elements = wait.until(EC.presence_of_all_elements_located((By.XPATH, '//a[@class="instant-link link-secondary"]')))
+            #get all divs with class instant
+            sound_elements = self.driver.find_elements(By.CSS_SELECTOR, 'div.instant')
             print(self.__class__.__name__,": Found ", len(sound_elements), " sounds")
             new_sounds_detected = 0
             new_sounds_downloaded = 0
             new_sounds_invalid = 0
-            #for each sound_elements, download the sound by going to the url "https://www.myinstants.com/media/sounds/"+sound element text to lowercase+".mp3"
             for i in range(0, len(sound_elements)):
-                filename = unidecode(sound_elements[i].text.lower().replace("*", "").replace("_", "-").replace("'", "").replace(" ", "-").replace(",", "").replace("?", "").replace("!", "").replace(":", "").replace("(", "").replace(")", "")) + ".mp3"
+                button = sound_elements[i].find_element(By.CSS_SELECTOR, 'button.small-button')
+                onclick_attr = button.get_attribute('onclick')
+                filename = onclick_attr.split("'")[1].split('/')[-1]
                 #sometimes it has multiple - in a row, so we need to replace them with just one
                 filename = filename.replace("~", "")
                 filename = filename.replace("#", "")
@@ -91,8 +97,11 @@ class SoundDownloader:
         except Exception as e:
             print(self.__class__.__name__,": Error downloading sound: ", e)
             self.driver.quit()
-        print(self.__class__.__name__,": Sound Dowloader finished " + str(new_sounds_detected) + " sounds detected, " + str(new_sounds_downloaded) + " sounds downloaded, " + str(new_sounds_invalid) + " sounds invalid")
-        print("\n-----------------------------------\n")
+        try:
+            print(self.__class__.__name__,": Sound Dowloader finished. " + str(new_sounds_detected) + " new sounds detected, " + str(new_sounds_downloaded) + " sounds added, " + str(new_sounds_invalid) + " sounds invalid (wrong url)")
+            print("\n-----------------------------------\n")
+        except Exception as e:
+            print(self.__class__.__name__,": Error printing sound downloader finished: ", e)
 
         self.driver.quit()
 
@@ -113,6 +122,7 @@ class SoundDownloader:
                         await self.bot.send_message(title="I stole "+os.path.basename(file)+" to our database hehe", view=sound_view)
                         shutil.move(file, os.path.join(destination_folder, os.path.basename(file)))
                         Database().insert_sound(os.path.basename(file), os.path.basename(file))
+                        Database().insert_action("admin", "scrape_sound", os.path.basename(file))
                     else:
                         print(self.__class__.__name__," MOVER: Sound already exists ", os.path.basename(file))
                         print(self.__class__.__name__," MOVER: Removing file")

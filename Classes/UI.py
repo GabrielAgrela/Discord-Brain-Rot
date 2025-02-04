@@ -31,7 +31,7 @@ class STSButton(Button):
     async def callback(self, interaction):
         await interaction.response.defer()
         asyncio.create_task(self.bot_behavior.sts_EL(interaction.message.channel, self.audio_file, self.char))
-        Database().insert_action(interaction.user.name, "sts_EL", Database().get_sounds_by_similarity(self.audio_file)[0][0])
+        Database().insert_action(interaction.user.name, "sts_EL", Database().get_sound(self.audio_file, True)[0])
 
 class IsolateButton(Button):
     def __init__(self, bot_behavior, audio_file, **kwargs):
@@ -47,35 +47,56 @@ class IsolateButton(Button):
 
 class FavoriteButton(Button):
     def __init__(self, bot_behavior, audio_file):
-        if bot_behavior.db.is_favorite(audio_file):
+        self.bot_behavior = bot_behavior
+        self.audio_file = audio_file
+        self.update_button_state()
+
+    def update_button_state(self):
+        if Database().get_sound(self.audio_file, True)[3]:  # Check if favorite (index 3)
             super().__init__(label="⭐❌", style=discord.ButtonStyle.primary)
         else:
             super().__init__(label="⭐", style=discord.ButtonStyle.primary)
-        self.bot_behavior = bot_behavior
-        self.audio_file = audio_file
 
     async def callback(self, interaction: discord.Interaction):
         await interaction.response.defer()
-        sound = Database().get_sounds_by_similarity(self.audio_file)[0]
+        sound = Database().get_sound(self.audio_file, True)
         favorite = 1 if not sound[3] else 0
         await Database().update_sound(sound[2], None, favorite)
+
+        
+        # Update the button state
+        self.update_button_state()
+        
+        # Update the entire view
         await interaction.message.edit(view=SoundBeingPlayedView(self.bot_behavior, self.audio_file))
-        Database().insert_action(interaction.user.name, "favorite_sound", Database().get_sounds_by_similarity(self.audio_file)[0][0]) 
+        Database().insert_action(interaction.user.name, "favorite_sound", sound[0])
 
 class BlacklistButton(Button):
+
     def __init__(self, bot_behavior, audio_file):
-        if bot_behavior.db.is_blacklisted(audio_file):
-            super().__init__( label="🗑️❌", style=discord.ButtonStyle.primary)
-        else:
-            super().__init__(label="", emoji="🗑️", style=discord.ButtonStyle.primary)
         self.bot_behavior = bot_behavior
         self.audio_file = audio_file
+        self.update_button_state()
+
+    def update_button_state(self):
+        if Database().get_sound(self.audio_file, True)[4]:  # Check if blacklisted (index 4)
+            super().__init__(label="🗑️❌", style=discord.ButtonStyle.primary)
+        else:
+            super().__init__(label="", emoji="🗑️", style=discord.ButtonStyle.primary)
 
     async def callback(self, interaction: discord.Interaction):
         await interaction.response.defer()
-        Database().update_sound(self.audio_file, None, None, not Database().get_sounds_by_similarity(self.audio_file)[0][4])
+        sound = Database().get_sound(self.audio_file, True)
+        blacklist = 1 if not sound[4] else 0
+        await Database().update_sound(sound[2], None, None, blacklist)
+
+        
+        # Update the button state
+        self.update_button_state()
+        
+        # Update the entire view
         await interaction.message.edit(view=SoundBeingPlayedView(self.bot_behavior, self.audio_file))
-        Database().insert_action(interaction.user.name, "blacklist_sound", Database().get_sounds_by_similarity(self.audio_file)[0][0]) 
+        Database().insert_action(interaction.user.name, "blacklist_sound", sound[0])
 
 class ChangeSoundNameButton(Button):
     def __init__(self, bot_behavior, sound_name, **kwargs):
@@ -168,7 +189,7 @@ class PlaySlapButton(Button):
 
     async def callback(self, interaction):
         await interaction.response.defer()
-        asyncio.create_task(self.bot_behavior.play_request(random.choice(["slap.mp3", "tiro.mp3", "pubg-pan-sound-effect.mp3", "slap-oh_LGvkhyt"]), interaction.user.name, 1))
+        asyncio.create_task(self.bot_behavior.play_request(random.choice(["slap.mp3", "tiro.mp3", "pubg-pan-sound-effect.mp3", "slap-oh_LGvkhyt.mp3", "kid-slap-oh.mp3", "gunshot-one.mp3"]), interaction.user.name, 1))
        
 
 class ListSoundsButton(Button):
@@ -214,14 +235,14 @@ class BrainRotButton(Button):
         self.bot_behavior = bot_behavior
 
     async def callback(self, interaction):
-        if (datetime.now() - self.bot_behavior.lastInteractionDateTime).total_seconds() > 10:
+        if (datetime.now() - self.bot_behavior.lastInteractionDateTime).total_seconds() > 1:
             asyncio.create_task(interaction.channel.send("Gertrudes may need some seconds for this one", delete_after=3))
             self.bot_behavior.color = discord.Color.teal()
             task = random.choice([self.bot_behavior.family_guy, self.bot_behavior.family_guy, self.bot_behavior.family_guy, self.bot_behavior.subway_surfers, self.bot_behavior.slice_all])
             asyncio.create_task(task(interaction.user))
             self.bot_behavior.lastInteractionDateTime = datetime.now()
         else:
-            asyncio.create_task(interaction.channel.send("STOP SPAMMING, GERTRUDES IS RUNNING ON A RASPBERRY PI 🔥🔥🔥", delete_after=3))
+            asyncio.create_task(interaction.channel.send("STOP SPAMMING, GERTRUDES IS RUNNING ON 150€ AMAZON SECOND HAND THINKPAD 🔥🔥🔥", delete_after=3))
         await interaction.response.defer()
 
 class StatsButton(Button):
@@ -252,7 +273,7 @@ class PlaySoundButton(Button):
 
     async def callback(self, interaction):
         await interaction.response.defer()
-        asyncio.create_task(self.bot_behavior.play_audio(interaction.message.channel, self.sound_name, interaction.user.name))
+        asyncio.create_task(self.bot_behavior.play_audio(self.bot_behavior.get_user_voice_channel(interaction.guild, interaction.user.name), self.sound_name, interaction.user.name))
 
 class SoundBeingPlayedView(View):
     def __init__(self, bot_behavior, audio_file):
@@ -264,6 +285,7 @@ class SoundBeingPlayedView(View):
         self.add_item(IsolateButton(bot_behavior, audio_file, label="🧑‍🎤🎶❌", style=discord.ButtonStyle.primary))
         self.add_item(STSButton(bot_behavior, audio_file, "ventura", label="🐷", style=discord.ButtonStyle.primary))
         self.add_item(STSButton(bot_behavior, audio_file, "tyson", label="🐵", style=discord.ButtonStyle.primary))
+        self.add_item(STSButton(bot_behavior, audio_file, "costa", label="🐗", style=discord.ButtonStyle.primary))
         
 
 class ControlsView(View):

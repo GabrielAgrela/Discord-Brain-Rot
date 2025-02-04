@@ -59,7 +59,6 @@ h2 {
     margin-bottom: 0.5rem;
     margin-top: 0rem;
     flex-shrink: 0;
-
 }
 
 table {
@@ -75,6 +74,7 @@ table {
     display: flex;
     flex-direction: column;
     height: calc(100% - 70px); /* Adjust based on h2 and pagination height */
+    position: relative; /* Ensure the table has a relative positioning */
 }
 
 thead {
@@ -85,7 +85,8 @@ tbody {
     flex: 1; /* Make tbody take up all available space */
     display: flex;
     flex-direction: column;
-    overflow-y: auto;
+    overflow: hidden; /* Prevent scrolling within tbody */
+    position: relative; /* Ensure the table body has a relative positioning */
 }
 
 tr {
@@ -98,13 +99,16 @@ th, td {
     padding: 8px;
     text-align: left;
     border-bottom: 1px solid #f2f2f2;
-    white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     display: flex;
     align-items: center; /* Vertically center content */
     justify-content: flex-start;
     flex: 1; /* Make cells expand to fill row height */
+    font-size: clamp(0.7em, 1vw, 1em); /* Adjust font size dynamically */
+    min-width: 0; /* Allow the cell to shrink */
+    flex-shrink: 1; /* Allow the cell to shrink */
+    word-break: break-word; /* Break long words */
 }
 
 td {
@@ -112,9 +116,9 @@ td {
 }
 
 th:nth-child(1), td:nth-child(1) { width: 25%; }
-th:nth-child(2), td:nth-child(2) { width: 40%; }
+th:nth-child(2), td:nth-child(2) { width: 45%; }
 th:nth-child(3), td:nth-child(3) { width: 25%; }
-th:nth-child(4), td:nth-child(4) { width: 15%; }
+th:nth-child(4), td:nth-child(4) { width: 10%; }
 
 tr:last-child td {
     border-bottom: none;
@@ -231,7 +235,7 @@ tr:hover {
     }
 
     tbody {
-        overflow-y: auto; /* Allow scrolling within table bodies */
+        overflow: hidden; /* Prevent scrolling within table bodies */
     }
 
 }
@@ -289,4 +293,62 @@ tr:hover {
     .title-container {
         height: 60px; /* Further adjusted height for very small screens */
     }
+}
+
+/* Add these styles at the end of your CSS file */
+
+@keyframes fadeOut {
+    0% { opacity: 1; }
+    100% { opacity: 0; }
+}
+
+@keyframes fadeIn {
+    0% { opacity: 0; }
+    100% { opacity: 1; }
+}
+
+.table-body-fade-out {
+    animation: fadeOut 0.5s forwards;
+}
+
+.table-body-fade-in {
+    animation: fadeIn 0.5s forwards;
+}
+
+@keyframes easeIn {
+    0% { opacity: 0; transform: translateY(-100px); }
+    100% { opacity: 1; transform: translateY(0); }
+}
+
+.new-entry {
+    animation: easeIn 0.5s ease-in-out;
+}
+
+@keyframes slideDown {
+    0% { transform: translateY(0); }
+    100% { transform: translateY(100%); }
+}
+
+@keyframes fadeInFromTop {
+    0% { 
+        opacity: 0;
+        transform: translateY(-100%);
+    }
+    100% { 
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.slide-down {
+    animation: slideDown 0.5s ease-out forwards;
+}
+
+.fade-in-from-top {
+    animation: fadeInFromTop 0.5s ease-out forwards;
+}
+
+.pagination button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
 }

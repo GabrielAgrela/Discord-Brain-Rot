@@ -2,6 +2,7 @@ import sqlite3
 import os
 import csv
 import json
+import datetime
 from fuzzywuzzy import fuzz
 
 class Database:
@@ -93,9 +94,9 @@ class Database:
         except sqlite3.Error as e:
             print(f"An error occurred: {e}")
 
-    def insert_sound(self, originalfilename, filename, favorite=0, blacklist=0):
+    def insert_sound(self, originalfilename, filename, favorite=0, blacklist=0, date=datetime.datetime.now()):
         try:
-            self.cursor.execute("INSERT INTO sounds (originalfilename, Filename, favorite, blacklist) VALUES (?, ?, ?, ?);", (originalfilename, filename, favorite, blacklist))
+            self.cursor.execute("INSERT INTO sounds (originalfilename, Filename, favorite, blacklist, timestamp) VALUES (?, ?, ?, ?, ?);", (originalfilename, filename, favorite, blacklist, date))
             self.conn.commit()
             print("Sound inserted successfully")
         except sqlite3.Error as e:
@@ -120,51 +121,84 @@ class Database:
         except sqlite3.Error as e:
             print(f"An error occurred: {e}")
 
-    def get_sounds_by_similarity(self, req_sound, num_results=1):
-        # Split the input into individual words
-        words = req_sound.split()
-        
-        # Build the SQL query with LIKE conditions
-        conditions = " OR ".join([f"Filename LIKE ?" for _ in words])
-        
-        # Create the parameters for the LIKE queries
-        params = [f"%{word}%" for word in words]
+    def normalize_text(self,text):
+        substitutions = {
+            '0': 'o',
+            '1': 'i',
+            '3': 'e',
+            '4': 'a',
+            '5': 's',
+            '7': 't',
+            '@': 'a',
+            '$': 's',
+            '!': 'i',
+            # Add more substitutions as needed
+        }
+        for key, value in substitutions.items():
+            text = text.replace(key, value)
+        return text.lower()
 
+    def get_sounds_by_similarity(self, req_sound, num_results=5):
+        # Normalize the requested sound to handle character substitutions
+        normalized_req = self.normalize_text(req_sound)
+        
+        # Create a broader LIKE pattern for the SQL query
+        pattern = f"%{req_sound}%"
+        
         try:
-            # Execute the query to get potential matches
-            query = f"""
+            # Initial broad search using the original pattern
+            query = """
                 SELECT *
                 FROM sounds 
-                WHERE {conditions}
+                WHERE Filename LIKE ?
+                   OR SOUNDEX(Filename) = SOUNDEX(?)
             """
-            
-            self.cursor.execute(query, params)
+            self.cursor.execute(query, (pattern, req_sound))
             potential_matches = self.cursor.fetchall()
-
-            # Calculate similarity scores
-            scored_matches = []
-            for sound in potential_matches:
-                filename = sound[2]  # Assuming 'Filename' is at index 2
-                score = fuzz.token_sort_ratio(req_sound.lower(), filename.lower())
-
-                # Increment score for each matching word
-                for word in words:
-                    if word.lower() in filename.lower():
-                        score_increment = (100 - score) / 1.5
-                        score += score_increment
-
-                scored_matches.append((round(score, 2), sound))
-
-            # Sort by score in descending order and get top results
-            scored_matches.sort(key=lambda x: x[0], reverse=True)
-            top_matches = scored_matches[:num_results]
-
-            print("Sounds found successfully")
-            return [match[1] for match in top_matches]  # Return only the sound data
-
+            
+            # If no matches found, use a broader pattern based on the first three characters
+            if not potential_matches:
+                broad_pattern = f"%{req_sound[:3]}%"
+                self.cursor.execute("SELECT * FROM sounds WHERE Filename LIKE ?", (broad_pattern,))
+                potential_matches = self.cursor.fetchall()
+            
+            # If still no matches, retrieve all sounds for comprehensive similarity scoring
+            if not potential_matches:
+                print("Initial search yielded no results. Retrieving all sounds for similarity scoring.")
+                self.cursor.execute("SELECT * FROM sounds")
+                potential_matches = self.cursor.fetchall()
+            
+            if potential_matches:
+                scored_matches = []
+                for sound in potential_matches:
+                    filename = sound[2]  # Assuming 'Filename' is at index 2
+                    normalized_filename = self.normalize_text(filename)
+                    
+                    # Calculate multiple fuzzy matching scores
+                    token_set_score = fuzz.token_set_ratio(normalized_req, normalized_filename)
+                    partial_ratio_score = fuzz.partial_ratio(normalized_req, normalized_filename)
+                    token_sort_score = fuzz.token_sort_ratio(normalized_req, normalized_filename)
+                    
+                    # Combine scores with weighted average for a more robust similarity measure
+                    combined_score = (0.5 * token_set_score) + (0.3 * partial_ratio_score) + (0.2 * token_sort_score)
+                    
+                    scored_matches.append((combined_score, sound))
+                
+                # Sort the matches by combined score in descending order
+                scored_matches.sort(key=lambda x: x[0], reverse=True)
+                
+                # Select the top N matches based on the desired number of results
+                top_matches = scored_matches[:num_results]
+                
+                print("Sounds found successfully")
+                return [match[1] for match in top_matches]  # Return only the sound data
+            else:
+                print("No sounds found matching the criteria.")
+                return []
+        
         except sqlite3.Error as e:
             print(f"An error occurred: {e}")
-        return []
+            return []
     
     def get_sound(self, sound_filename, original_filename=False):
         try:
