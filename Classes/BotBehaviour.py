@@ -990,9 +990,32 @@ class BotBehavior:
 
             await asyncio.sleep(10)
     
+    async def add_user_event(self, username, event, sound_name):
+        """Add a join/leave event sound for a user"""
+        try:
+            # Find the most similar sound in the database
+            similar_sounds = Database().get_sounds_by_similarity(sound_name)
+            if not similar_sounds:
+                return False
+            
+            # Get the most similar sound
+            most_similar_sound = similar_sounds[0][2].split('/')[-1].replace('.mp3', '')
+            
+            # Add the event sound to the database
+            success = Database().toggle_user_event_sound(username, event, most_similar_sound)
+            
+            # Log the action
+            if success:
+                Database().insert_action(username, f"add_{event}_sound", most_similar_sound)
+            
+            return success
+        except Exception as e:
+            print(f"Error adding user event: {e}")
+            return False
+
     async def update_database_loop(self):
-            await self.riotAPI.update_database()
-            await asyncio.sleep(200)
+        await self.riotAPI.update_database()
+        await asyncio.sleep(200)
 
     async def refreshgames(self):
         num_matches_updated = await self.riotAPI.update_database()

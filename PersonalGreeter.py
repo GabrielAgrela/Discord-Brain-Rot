@@ -237,8 +237,18 @@ async def change(ctx, number: Option(str, "number of sounds", default=10)):
 #     await ctx.respond("Processing your request...", delete_after=0)
 #     await behavior.refreshgames()
 
-
-
+@bot.slash_command(name="addevent", description="Add a join/leave event sound for a user")
+async def add_event(ctx, 
+    username: Option(str, "Username with discriminator (e.g. user#1234)", required=True),
+    event: Option(str, "Event type", choices=["join", "leave"], required=True),
+    sound: Option(str, "Sound name to play", required=True)):
+    
+    await ctx.respond("Processing your request...", delete_after=0)
+    success = await behavior.add_user_event(username, event, sound)
+    if success:
+        await ctx.followup.send(f"Successfully added {sound} as {event} sound for {username}!", ephemeral=True, delete_after=5)
+    else:
+        await ctx.followup.send("Failed to add event sound. Make sure the username and sound are correct!", ephemeral=True, delete_after=5)
 
 connections = {}
 

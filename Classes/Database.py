@@ -141,61 +141,35 @@ class Database:
     def get_sounds_by_similarity(self, req_sound, num_results=5):
         # Normalize the requested sound to handle character substitutions
         normalized_req = self.normalize_text(req_sound)
-        
-        # Create a broader LIKE pattern for the SQL query
-        pattern = f"%{req_sound}%"
-        
         try:
-            # Initial broad search using the original pattern
-            query = """
-                SELECT *
-                FROM sounds 
-                WHERE Filename LIKE ?
-                   OR SOUNDEX(Filename) = SOUNDEX(?)
-            """
-            self.cursor.execute(query, (pattern, req_sound))
-            potential_matches = self.cursor.fetchall()
-            
-            # If no matches found, use a broader pattern based on the first three characters
-            if not potential_matches:
-                broad_pattern = f"%{req_sound[:3]}%"
-                self.cursor.execute("SELECT * FROM sounds WHERE Filename LIKE ?", (broad_pattern,))
-                potential_matches = self.cursor.fetchall()
-            
-            # If still no matches, retrieve all sounds for comprehensive similarity scoring
-            if not potential_matches:
-                print("Initial search yielded no results. Retrieving all sounds for similarity scoring.")
-                self.cursor.execute("SELECT * FROM sounds")
-                potential_matches = self.cursor.fetchall()
-            
-            if potential_matches:
-                scored_matches = []
-                for sound in potential_matches:
-                    filename = sound[2]  # Assuming 'Filename' is at index 2
-                    normalized_filename = self.normalize_text(filename)
-                    
-                    # Calculate multiple fuzzy matching scores
-                    token_set_score = fuzz.token_set_ratio(normalized_req, normalized_filename)
-                    partial_ratio_score = fuzz.partial_ratio(normalized_req, normalized_filename)
-                    token_sort_score = fuzz.token_sort_ratio(normalized_req, normalized_filename)
-                    
-                    # Combine scores with weighted average for a more robust similarity measure
-                    combined_score = (0.5 * token_set_score) + (0.3 * partial_ratio_score) + (0.2 * token_sort_score)
-                    
-                    scored_matches.append((combined_score, sound))
-                
-                # Sort the matches by combined score in descending order
-                scored_matches.sort(key=lambda x: x[0], reverse=True)
-                
-                # Select the top N matches based on the desired number of results
-                top_matches = scored_matches[:num_results]
-                
-                print("Sounds found successfully")
-                return [match[1] for match in top_matches]  # Return only the sound data
-            else:
-                print("No sounds found matching the criteria.")
+            self.cursor.execute("SELECT * FROM sounds")
+            all_sounds = self.cursor.fetchall()
+            if not all_sounds:
+                print("No sounds available for similarity scoring.")
                 return []
-        
+            scored_matches = []
+            for sound in all_sounds:
+                filename = sound[2]  # Assuming 'Filename' is at index 2
+                normalized_filename = self.normalize_text(filename)
+
+                # Calculate multiple fuzzy matching scores
+                token_set_score = fuzz.token_set_ratio(normalized_req, normalized_filename)
+                partial_ratio_score = fuzz.partial_ratio(normalized_req, normalized_filename)
+                token_sort_score = fuzz.token_sort_ratio(normalized_req, normalized_filename)
+
+                # Combine scores with weighted average for a more robust similarity measure
+                combined_score = (0.5 * token_set_score) + (0.3 * partial_ratio_score) + (0.2 * token_sort_score)
+
+                scored_matches.append((combined_score, sound))
+            
+            # Sort the matches by combined score in descending order
+            scored_matches.sort(key=lambda x: x[0], reverse=True)
+            
+            # Select the top N matches based on the desired number of results
+            top_matches = scored_matches[:num_results]
+            
+            print("Sounds found successfully")
+            return [match[1] for match in top_matches]  # Return only the sound data
         except sqlite3.Error as e:
             print(f"An error occurred: {e}")
             return []
@@ -210,11 +184,30 @@ class Database:
         except sqlite3.Error as e:
             print(f"An error occurred: {e}")
 
-    def get_sounds(self, favorite=None, blacklist=None, num_sounds=25, sort="DESC"):
-        # if favorite/blacklist is true then make it 1, else 0
+    def get_sounds(self, favorite=None, blacklist=None, num_sounds=25, sort="DESC", favorite_by_user=False, user=None):
+        if favorite_by_user and user:
+            try:
+                # Query the actions table for favorite_sound actions by the specified user
+                self.cursor.execute("SELECT DISTINCT target FROM actions WHERE username = ? AND action = 'favorite_sound';", (user,))
+                rows = self.cursor.fetchall()
+                if not rows:
+                    return []
+                sound_ids = [row[0] for row in rows if row[0] is not None]
+                if not sound_ids:
+                    return []
+                # Build the IN clause dynamically based on the number of sound ids
+                placeholders = ",".join("?" for _ in sound_ids)
+                query = "SELECT * FROM sounds WHERE id IN (" + placeholders + ") ORDER BY id " + sort + " LIMIT ?;"
+                parameters = sound_ids + [num_sounds]
+                self.cursor.execute(query, tuple(parameters))
+                return self.cursor.fetchall()
+            except sqlite3.Error as e:
+                print(f"An error occurred: {e}")
+                return []
+        
+        # Existing functionality
         favorite = 1 if favorite else 0
         blacklist = 1 if blacklist else 0
-
         try:
             if favorite is not None and blacklist is not None:
                 self.cursor.execute("SELECT * FROM sounds WHERE favorite = ? AND blacklist = ? ORDER BY id " + sort + " LIMIT ?;", (favorite, blacklist, num_sounds))
@@ -309,7 +302,52 @@ class Database:
             print(f"An error occurred: {e}")
             return []
         
-        
+    def get_user_event_sound(self, user_id, event, sound):
+        """Check if a specific user event sound exists"""
+        try:
+            self.cursor.execute("SELECT * FROM users WHERE id = ? AND event = ? AND sound = ?;", (user_id, event, sound))
+            return self.cursor.fetchone()
+        except sqlite3.Error as e:
+            print(f"An error occurred: {e}")
+            return None
+
+    def insert_user_event_sound(self, user_id, event, sound):
+        """Insert a new user event sound"""
+        try:
+            self.cursor.execute("INSERT INTO users (id, event, sound) VALUES (?, ?, ?);", (user_id, event, sound))
+            self.conn.commit()
+            print("User event sound inserted successfully")
+            return True
+        except sqlite3.Error as e:
+            print(f"An error occurred: {e}")
+            return False
+
+    def remove_user_event_sound(self, user_id, event, sound):
+        """Remove a user event sound"""
+        try:
+            self.cursor.execute("DELETE FROM users WHERE id = ? AND event = ? AND sound = ?;", (user_id, event, sound))
+            self.conn.commit()
+            print("User event sound removed successfully")
+            return True
+        except sqlite3.Error as e:
+            print(f"An error occurred: {e}")
+            return False
+
+    def toggle_user_event_sound(self, user_id, event, sound):
+        """Toggle a user event sound (add if doesn't exist, remove if exists)"""
+        try:
+            # Check if the event sound exists
+            existing = self.get_user_event_sound(user_id, event, sound)
+            
+            if existing:
+                # If exists, remove it
+                return self.remove_user_event_sound(user_id, event, sound)
+            else:
+                # If doesn't exist, add it
+                return self.insert_user_event_sound(user_id, event, sound)
+        except sqlite3.Error as e:
+            print(f"An error occurred: {e}")
+            return False
 
     async def update_sound(self, filename, new_filename=None, favorite=None, blacklist=None):
         if new_filename is not None:

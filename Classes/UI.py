@@ -267,16 +267,89 @@ class ListLastScrapedSoundsButton(Button):
 
 class PlaySoundButton(Button):
     def __init__(self, bot_behavior, sound_name, **kwargs):
+        row = kwargs.pop('row', None)  # Extract row from kwargs
         super().__init__(**kwargs)
         self.bot_behavior = bot_behavior
         self.sound_name = sound_name
+        if row is not None:
+            self.row = row  # Set the row if provided
 
     async def callback(self, interaction):
         await interaction.response.defer()
         asyncio.create_task(self.bot_behavior.play_audio(self.bot_behavior.get_user_voice_channel(interaction.guild, interaction.user.name), self.sound_name, interaction.user.name))
 
+class JoinEventButton(Button):
+    def __init__(self, bot_behavior, audio_file, user_id=None):
+        self.bot_behavior = bot_behavior
+        self.audio_file = audio_file
+        self.user_id = user_id
+        self.last_used = {}  # Dictionary to track last usage per user
+        super().__init__(label="", emoji="👋", style=discord.ButtonStyle.primary)
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        
+        # Check cooldown
+        user_id = str(interaction.user.id)
+        current_time = datetime.now()
+        if user_id in self.last_used:
+            time_diff = (current_time - self.last_used[user_id]).total_seconds()
+            if time_diff < 5:  # 5 second cooldown
+                await interaction.followup.send("Please wait 5 seconds before using this button again!", ephemeral=True, delete_after=5)
+                return
+        
+        sound_name = self.audio_file.split('/')[-1].replace('.mp3', '')
+        user_full_name = f"{interaction.user.name}#{interaction.user.discriminator}"
+        
+        # Check if sound is already set
+        is_set = Database().get_user_event_sound(user_full_name, "join", sound_name)
+        
+        # Toggle the sound and send appropriate message
+        Database().toggle_user_event_sound(user_full_name, "join", sound_name)
+        
+        message = f"{'Removed' if is_set else 'Added'} {sound_name} as join sound!"
+        await interaction.followup.send(message, ephemeral=True, delete_after=5)
+        
+        # Update last used time
+        self.last_used[user_id] = current_time
+
+class LeaveEventButton(Button):
+    def __init__(self, bot_behavior, audio_file, user_id=None):
+        self.bot_behavior = bot_behavior
+        self.audio_file = audio_file
+        self.user_id = user_id
+        self.last_used = {}  # Dictionary to track last usage per user
+        super().__init__(label="", emoji="👋", style=discord.ButtonStyle.danger)
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        
+        # Check cooldown
+        user_id = str(interaction.user.id)
+        current_time = datetime.now()
+        if user_id in self.last_used:
+            time_diff = (current_time - self.last_used[user_id]).total_seconds()
+            if time_diff < 5:  # 5 second cooldown
+                await interaction.followup.send("Please wait 5 seconds before using this button again!", ephemeral=True, delete_after=5)
+                return
+        
+        sound_name = self.audio_file.split('/')[-1].replace('.mp3', '')
+        user_full_name = f"{interaction.user.name}#{interaction.user.discriminator}"
+        
+        # Check if sound is already set
+        is_set = Database().get_user_event_sound(user_full_name, "leave", sound_name)
+        
+        # Toggle the sound and send appropriate message
+        Database().toggle_user_event_sound(user_full_name, "leave", sound_name)
+        
+        message = f"{'Removed' if is_set else 'Added'} {sound_name} as leave sound!"
+        await interaction.followup.send(message, ephemeral=True, delete_after=5)
+        
+        # Update last used time
+        self.last_used[user_id] = current_time
+
 class SoundBeingPlayedView(View):
-    def __init__(self, bot_behavior, audio_file):
+    def __init__(self, bot_behavior, audio_file, user_id=None):
         super().__init__(timeout=None)
         self.add_item(ReplayButton(bot_behavior, audio_file, label=None, emoji="🔁", style=discord.ButtonStyle.primary))
         self.add_item(FavoriteButton(bot_behavior, audio_file))
@@ -286,17 +359,133 @@ class SoundBeingPlayedView(View):
         self.add_item(STSButton(bot_behavior, audio_file, "ventura", label="🐷", style=discord.ButtonStyle.primary))
         self.add_item(STSButton(bot_behavior, audio_file, "tyson", label="🐵", style=discord.ButtonStyle.primary))
         self.add_item(STSButton(bot_behavior, audio_file, "costa", label="🐗", style=discord.ButtonStyle.primary))
+        self.add_item(JoinEventButton(bot_behavior, audio_file, user_id))
+        self.add_item(LeaveEventButton(bot_behavior, audio_file, user_id))
         
+
+class PaginationButton(Button):
+    def __init__(self, label, emoji, style, custom_id, row):
+        super().__init__(label=label, emoji=emoji, style=style, custom_id=custom_id, row=row)
+
+    async def callback(self, interaction):
+        await interaction.response.defer()
+        view = self.view
+        
+        # Check if the user who clicked is the same who created the view
+        if interaction.user.name != view.owner:
+            await interaction.followup.send("Only the user who requested the favorites can navigate through pages! 😤", ephemeral=True)
+            return
+            
+        if self.custom_id == "previous":
+            # If on first page and going previous, wrap to last page
+            if view.current_page == 0:
+                view.current_page = len(view.pages) - 1
+            else:
+                view.current_page = view.current_page - 1
+        elif self.custom_id == "next":
+            # If on last page and going next, wrap to first page
+            if view.current_page == len(view.pages) - 1:
+                view.current_page = 0
+            else:
+                view.current_page = view.current_page + 1
+        
+        # Update buttons state
+        view.update_buttons()
+        
+        # Update both the content and description
+        total_favorites = sum(len(page) for page in view.pages)
+        current_page_start = (view.current_page * 20) + 1
+        current_page_end = min((view.current_page + 1) * 20, total_favorites)
+        
+        await interaction.message.edit(
+            content=None,
+            embed=discord.Embed(
+                title=f"🤩 My Favorites (Page {view.current_page + 1}/{len(view.pages)}) 🤩",
+                description=f"Showing sounds {current_page_start}-{current_page_end} of {total_favorites}",
+                color=discord.Color.blue()
+            ),
+            view=view
+        )
+
+class PaginatedFavoritesView(View):
+    def __init__(self, bot_behavior, favorites, owner):
+        super().__init__(timeout=None)
+        self.bot_behavior = bot_behavior
+        self.current_page = 0
+        self.owner = owner  # Store the user who created the view
+        
+        # We can have 4 rows of sound buttons (row 0 is navigation)
+        # Each row can have 5 buttons
+        # So we can show 20 sounds per page
+        chunk_size = 20
+        self.pages = [favorites[i:i + chunk_size] for i in range(0, len(favorites), chunk_size)]
+        
+        # Add navigation buttons
+        self.add_item(PaginationButton("Previous", "⬅️", discord.ButtonStyle.primary, "previous", 0))
+        self.add_item(PaginationButton("Next", "➡️", discord.ButtonStyle.primary, "next", 0))
+        
+        # Add initial sound buttons
+        self.update_page_buttons()
+    
+    def update_buttons(self):
+        # Clear existing sound buttons (row 1 and beyond)
+        self.clear_items()
+        
+        # Re-add navigation buttons
+        self.add_item(PaginationButton("Previous", "⬅️", discord.ButtonStyle.primary, "previous", 0))
+        self.add_item(PaginationButton("Next", "➡️", discord.ButtonStyle.primary, "next", 0))
+        
+        # Add sound buttons for current page
+        self.update_page_buttons()
+    
+    def update_page_buttons(self):
+        if not self.pages:
+            return
+            
+        current_sounds = self.pages[self.current_page]
+        for i, sound in enumerate(current_sounds):
+            # Calculate row (starting from row 1, as row 0 is for navigation)
+            # We have 5 buttons per row, and 4 available rows (1-4)
+            row = (i // 5) + 1  # This will give us rows 1, 2, 3, 4 for up to 20 items
+            self.add_item(PlaySoundButton(
+                self.bot_behavior,
+                sound[1],
+                style=discord.ButtonStyle.danger,
+                label=sound[2].split('/')[-1].replace('.mp3', ''),
+                row=row
+            ))
+
+class ListUserFavoritesButton(Button):
+    def __init__(self, bot_behavior, **kwargs):
+        super().__init__(**kwargs)
+        self.bot_behavior = bot_behavior
+
+    async def callback(self, interaction):
+        await interaction.response.defer()
+        favorites = Database().get_sounds(num_sounds=1000, favorite_by_user=True, user=interaction.user.name)
+        Database().insert_action(interaction.user.name, "list_user_favorites", len(favorites))
+        
+        if len(favorites) > 0:
+            view = PaginatedFavoritesView(self.bot_behavior, favorites, interaction.user.name)  # Pass the owner
+            await self.bot_behavior.send_message(
+                title=f"🤩 My Favorites (Page 1/{len(view.pages)}) 🤩",
+                description=f"Your favorite sounds based on your history\nShowing sounds 1-{min(20, len(favorites))} of {len(favorites)}",
+                view=view,
+                delete_time=300
+            )
+        else:
+            await interaction.message.channel.send("No favorite sounds found.", delete_after=10)
 
 class ControlsView(View):
     def __init__(self, bot_behavior):
         super().__init__(timeout=None)
         self.add_item(PlayRandomButton(bot_behavior, label="🎲Play Random🎲", style=discord.ButtonStyle.success))
         self.add_item(PlayRandomFavoriteButton(bot_behavior, label="🎲Play Random Favorite⭐", style=discord.ButtonStyle.success))
-        self.add_item(PlaySlapButton(bot_behavior, label="👋/🔫/🍳", style=discord.ButtonStyle.success))
         self.add_item(ListFavoritesButton(bot_behavior, label="⭐Favorites⭐", style=discord.ButtonStyle.success))
+        self.add_item(ListUserFavoritesButton(bot_behavior, label="💖My Favorites💖", style=discord.ButtonStyle.success))
         self.add_item(ListBlacklistButton(bot_behavior, label="🗑️Blacklisted🗑️", style=discord.ButtonStyle.success))
-        
+        self.add_item(PlaySlapButton(bot_behavior, label="👋/🔫/🍳", style=discord.ButtonStyle.success))
+
         self.add_item(BrainRotButton(bot_behavior, label="🧠Brain Rot🧠", style=discord.ButtonStyle.success))
         self.add_item(StatsButton(bot_behavior, label="📊Stats📊", style=discord.ButtonStyle.success))
         self.add_item(UploadSoundButton(bot_behavior, label="⬆️Upload Sound⬆️", style=discord.ButtonStyle.success))
@@ -311,4 +500,4 @@ class SoundView(View):
     def __init__(self, bot_behavior, similar_sounds):
         super().__init__(timeout=None)
         for sound in similar_sounds:
-            self.add_item(PlaySoundButton(bot_behavior, sound[2], style=discord.ButtonStyle.danger, label=sound[2].split('/')[-1].replace('.mp3', '')))
+            self.add_item(PlaySoundButton(bot_behavior, sound[1], style=discord.ButtonStyle.danger, label=sound[2].split('/')[-1].replace('.mp3', '')))
