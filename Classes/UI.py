@@ -141,25 +141,38 @@ class PlayRandomFavoriteButton(Button):
         asyncio.create_task(self.bot_behavior.play_random_favorite_sound(interaction.user.name))
 
 class ListFavoritesButton(Button):
+    # Class variable to track the current all favorites message
+    current_favorites_message = None
+
     def __init__(self, bot_behavior, **kwargs):
         super().__init__(**kwargs)
         self.bot_behavior = bot_behavior
 
     async def callback(self, interaction):
         await interaction.response.defer()
+        
+        # Delete previous all favorites message if it exists
+        if ListFavoritesButton.current_favorites_message:
+            try:
+                await ListFavoritesButton.current_favorites_message.delete()
+            except:
+                pass  # Message might already be deleted
+        
         favorites = Database().get_sounds(num_sounds=1000, favorite=True)
         Database().insert_action(interaction.user.name, "list_favorites", len(favorites))
+        
         if len(favorites) > 0:
-            favorite_entries = [f"{favorite[0]}: {favorite[2]}" for favorite in favorites]
-            favorites_content = "\n".join(favorite_entries)
-            
-            with open("favorites.txt", "w") as f:
-                f.write(favorites_content)
-            
-            await self.bot_behavior.send_message("🤩 Favorites 🤩",description="Check https://gabrielagrela.com for more details! 🤛🏿🐵", file=discord.File("favorites.txt", "favorites.txt"), delete_time=30)
-            os.remove("favorites.txt")  # Clean up the temporary file
+            view = PaginatedFavoritesView(self.bot_behavior, favorites, interaction.user.name)  # Pass the owner
+            message = await self.bot_behavior.send_message(
+                title=f"⭐ All Favorite Sounds (Page 1/{len(view.pages)}) ⭐",
+                description=f"All favorite sounds in the database\nShowing sounds 1-{min(20, len(favorites))} of {len(favorites)}",
+                view=view,
+                delete_time=300
+            )
+            # Store the new message
+            ListFavoritesButton.current_favorites_message = message
         else:
-            await interaction.message.channel.send("No favorite sounds found.")
+            await interaction.message.channel.send("No favorite sounds found.", delete_after=10)
 
 class ListBlacklistButton(Button):
     def __init__(self, bot_behavior, **kwargs):
@@ -371,8 +384,11 @@ class PaginationButton(Button):
         await interaction.response.defer()
         view = self.view
         
-        # Check if the user who clicked is the same who created the view
-        if interaction.user.name != view.owner:
+        # Check if these are user favorites or all favorites based on the title
+        is_user_favorites = "My Favorites" in interaction.message.embeds[0].title or "'s Favorites" in interaction.message.embeds[0].title
+        
+        # Only check ownership for user-specific favorites
+        if is_user_favorites and interaction.user.name != view.owner:
             await interaction.followup.send("Only the user who requested the favorites can navigate through pages! 😤", ephemeral=True)
             return
             
@@ -397,11 +413,18 @@ class PaginationButton(Button):
         current_page_start = (view.current_page * 20) + 1
         current_page_end = min((view.current_page + 1) * 20, total_favorites)
         
+        title = (f"🤩 {view.owner}'s Favorites (Page {view.current_page + 1}/{len(view.pages)}) 🤩" if is_user_favorites 
+                else f"⭐ All Favorite Sounds (Page {view.current_page + 1}/{len(view.pages)}) ⭐")
+        
+        description = (f"Your favorite sounds based on your history\n" if is_user_favorites 
+                      else f"All favorite sounds in the database\n")
+        description += f"Showing sounds {current_page_start}-{current_page_end} of {total_favorites}"
+        
         await interaction.message.edit(
             content=None,
             embed=discord.Embed(
-                title=f"🤩 My Favorites (Page {view.current_page + 1}/{len(view.pages)}) 🤩",
-                description=f"Showing sounds {current_page_start}-{current_page_end} of {total_favorites}",
+                title=title,
+                description=description,
                 color=discord.Color.blue()
             ),
             view=view
@@ -456,23 +479,36 @@ class PaginatedFavoritesView(View):
             ))
 
 class ListUserFavoritesButton(Button):
+    # Dictionary to track current favorites message per user
+    current_user_messages = {}
+
     def __init__(self, bot_behavior, **kwargs):
         super().__init__(**kwargs)
         self.bot_behavior = bot_behavior
 
     async def callback(self, interaction):
         await interaction.response.defer()
+        
+        # Delete previous message for this user if it exists
+        if interaction.user.name in ListUserFavoritesButton.current_user_messages:
+            try:
+                await ListUserFavoritesButton.current_user_messages[interaction.user.name].delete()
+            except:
+                pass  # Message might already be deleted
+        
         favorites = Database().get_sounds(num_sounds=1000, favorite_by_user=True, user=interaction.user.name)
         Database().insert_action(interaction.user.name, "list_user_favorites", len(favorites))
         
         if len(favorites) > 0:
             view = PaginatedFavoritesView(self.bot_behavior, favorites, interaction.user.name)  # Pass the owner
-            await self.bot_behavior.send_message(
-                title=f"🤩 My Favorites (Page 1/{len(view.pages)}) 🤩",
+            message = await self.bot_behavior.send_message(
+                title=f"🤩 {interaction.user.name}'s Favorites (Page 1/{len(view.pages)}) 🤩",
                 description=f"Your favorite sounds based on your history\nShowing sounds 1-{min(20, len(favorites))} of {len(favorites)}",
                 view=view,
                 delete_time=300
             )
+            # Store the new message for this user
+            ListUserFavoritesButton.current_user_messages[interaction.user.name] = message
         else:
             await interaction.message.channel.send("No favorite sounds found.", delete_after=10)
 
