@@ -188,18 +188,17 @@ class Database:
         if favorite_by_user and user:
             try:
                 # Query the actions table for favorite_sound actions by the specified user
-                self.cursor.execute("SELECT DISTINCT target FROM actions WHERE username = ? AND action = 'favorite_sound';", (user,))
-                rows = self.cursor.fetchall()
-                if not rows:
-                    return []
-                sound_ids = [row[0] for row in rows if row[0] is not None]
-                if not sound_ids:
-                    return []
-                # Build the IN clause dynamically based on the number of sound ids
-                placeholders = ",".join("?" for _ in sound_ids)
-                query = "SELECT * FROM sounds WHERE id IN (" + placeholders + ") ORDER BY id " + sort + " LIMIT ?;"
-                parameters = sound_ids + [num_sounds]
-                self.cursor.execute(query, tuple(parameters))
+                # Join with sounds table and order by the timestamp of when it was favorited
+                query = """
+                SELECT DISTINCT s.* 
+                FROM sounds s
+                JOIN actions a ON s.id = a.target
+                WHERE a.username = ? 
+                AND a.action = 'favorite_sound'
+                ORDER BY a.timestamp DESC
+                LIMIT ?;
+                """
+                self.cursor.execute(query, (user, num_sounds))
                 return self.cursor.fetchall()
             except sqlite3.Error as e:
                 print(f"An error occurred: {e}")
