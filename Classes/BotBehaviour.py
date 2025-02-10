@@ -131,14 +131,15 @@ class BotBehavior:
             return
         
         async with self.upload_lock:
-            message = await interaction.channel.send(embed=discord.Embed(title="Upload an .mp3, or provide an MP3/TikTok/YouTube URL (max 10 minutes for YouTube). You have 60s ☝️🤓", color=self.color))
+            message = await interaction.channel.send(embed=discord.Embed(title="Upload an .mp3, or provide an MP3/TikTok/YouTube/Instagram URL (max 10 minutes for YouTube). You have 60s ☝️🤓", color=self.color))
 
             def check(m):
                 is_attachment = len(m.attachments) > 0 and m.attachments[0].filename.endswith('.mp3')
                 is_mp3_url = re.match(r'^https?://.*\.mp3$', m.content)
                 is_tiktok_url = re.match(r'^https?://.*tiktok\.com/.*$', m.content)
                 is_youtube_url = re.match(r'^https?://(www\.)?(youtube\.com|youtu\.be)/.*$', m.content)
-                return m.author == interaction.user and m.channel == interaction.channel and (is_attachment or is_mp3_url or is_tiktok_url or is_youtube_url)
+                is_instagram_url = re.match(r'^https?://(www\.)?instagram\.com/(p|reel|stories)/.*$', m.content)
+                return m.author == interaction.user and m.channel == interaction.channel and (is_attachment or is_mp3_url or is_tiktok_url or is_youtube_url or is_instagram_url)
 
             try:
                 response = await self.bot.wait_for('message', check=check, timeout=60.0)
@@ -153,9 +154,11 @@ class BotBehavior:
                     elif len(parts) > 1 and parts[0].startswith('http'):
                         custom_filename = parts[1]
 
-                # Handle time limit for TikTok and YouTube
+                # Handle time limit for TikTok, YouTube and Instagram
                 time_limit = None
-                if re.match(r'^https?://.*tiktok\.com/.*$', response.content) or re.match(r'^https?://(www\.)?(youtube\.com|youtu\.be)/.*$', response.content):
+                if re.match(r'^https?://.*tiktok\.com/.*$', response.content) or \
+                   re.match(r'^https?://(www\.)?(youtube\.com|youtu\.be)/.*$', response.content) or \
+                   re.match(r'^https?://(www\.)?instagram\.com/(p|reel|stories)/.*$', response.content):
                     parts = response.content.split(maxsplit=2)
                     if len(parts) > 1 and parts[1].isdigit():
                         time_limit = int(parts[1])
@@ -166,7 +169,9 @@ class BotBehavior:
                 
                 if len(response.attachments) > 0:
                     file_path = await self.save_uploaded_sound(response.attachments[0], custom_filename)
-                elif re.match(r'^https?://.*tiktok\.com/.*$', response.content) or re.match(r'^https?://(www\.)?(youtube\.com|youtu\.be)/.*$', response.content):
+                elif re.match(r'^https?://.*tiktok\.com/.*$', response.content) or \
+                     re.match(r'^https?://(www\.)?(youtube\.com|youtu\.be)/.*$', response.content) or \
+                     re.match(r'^https?://(www\.)?instagram\.com/(p|reel|stories)/.*$', response.content):
                     await self.send_message(title="Downloading video... 🤓", description="Espera, bixa", delete_time=5)
                     try:
                         file_path = await self.save_sound_from_video(response.content, custom_filename, time_limit=time_limit)
