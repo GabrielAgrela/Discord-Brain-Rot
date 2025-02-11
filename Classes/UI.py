@@ -195,6 +195,31 @@ class ListBlacklistButton(Button):
         else:
             await interaction.message.channel.send("No blacklisted sounds found.")
 
+class SlapButton(Button):
+    def __init__(self, bot_behavior, audio_file):
+        self.bot_behavior = bot_behavior
+        self.audio_file = audio_file
+        self.update_button_state()
+
+    def update_button_state(self):
+        if Database().get_sound(self.audio_file, True)[6]:  # Check if slap (index 5)
+            super().__init__(label="👋❌", style=discord.ButtonStyle.primary)
+        else:
+            super().__init__(label="", emoji="👋", style=discord.ButtonStyle.primary)
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        sound = Database().get_sound(self.audio_file, True)
+        slap = 1 if not sound[6] else 0
+        await Database().update_sound(sound[2], slap=slap)
+        
+        # Update the button state
+        self.update_button_state()
+        
+        # Update the entire view
+        await interaction.message.edit(view=SoundBeingPlayedView(self.bot_behavior, self.audio_file))
+        Database().insert_action(interaction.user.name, "slap_sound", sound[0])
+
 class PlaySlapButton(Button):
     def __init__(self, bot_behavior, **kwargs):
         super().__init__(**kwargs)
@@ -202,8 +227,13 @@ class PlaySlapButton(Button):
 
     async def callback(self, interaction):
         await interaction.response.defer()
-        asyncio.create_task(self.bot_behavior.play_request(random.choice(["slap.mp3", "tiro.mp3", "pubg-pan-sound-effect.mp3", "slap-oh_LGvkhyt.mp3", "kid-slap-oh.mp3", "gunshot-one.mp3"]), interaction.user.name, 1))
-       
+        # Get a random slap sound from the database
+        slap_sounds = Database().get_sounds(slap=True)
+        if slap_sounds:
+            random_slap = random.choice(slap_sounds)
+            asyncio.create_task(self.bot_behavior.play_request(random_slap, interaction.user.name, 1, True)) #dont do this at home kids
+        else:
+            await interaction.followup.send("No slap sounds found in the database!", ephemeral=True, delete_after=5)
 
 class ListSoundsButton(Button):
     def __init__(self, bot_behavior, **kwargs):
@@ -265,7 +295,7 @@ class StatsButton(Button):
 
     async def callback(self, interaction):
         await interaction.response.defer()
-        asyncio.create_task(self.bot_behavior.display_top_users(interaction.user, number=5, days=30, by="plays"))
+        asyncio.create_task(self.bot_behavior.display_top_users(interaction.user, number=5, days=7, by="plays"))
 
 
 class ListLastScrapedSoundsButton(Button):
@@ -297,7 +327,7 @@ class JoinEventButton(Button):
         self.audio_file = audio_file
         self.user_id = user_id
         self.last_used = {}  # Dictionary to track last usage per user
-        super().__init__(label="", emoji="👋", style=discord.ButtonStyle.primary)
+        super().__init__(label="", emoji="📢", style=discord.ButtonStyle.primary)
 
     async def callback(self, interaction: discord.Interaction):
         await interaction.response.defer()
@@ -332,7 +362,7 @@ class LeaveEventButton(Button):
         self.audio_file = audio_file
         self.user_id = user_id
         self.last_used = {}  # Dictionary to track last usage per user
-        super().__init__(label="", emoji="👋", style=discord.ButtonStyle.danger)
+        super().__init__(label="", emoji="📢", style=discord.ButtonStyle.danger)
 
     async def callback(self, interaction: discord.Interaction):
         await interaction.response.defer()
@@ -368,7 +398,8 @@ class SoundBeingPlayedView(View):
         self.add_item(FavoriteButton(bot_behavior, audio_file))
         self.add_item(BlacklistButton(bot_behavior, audio_file))
         self.add_item(ChangeSoundNameButton(bot_behavior, audio_file, label="📝", style=discord.ButtonStyle.primary))
-        self.add_item(IsolateButton(bot_behavior, audio_file, label="🧑‍🎤🎶❌", style=discord.ButtonStyle.primary))
+        self.add_item(SlapButton(bot_behavior, audio_file))
+        #self.add_item(IsolateButton(bot_behavior, audio_file, label="🧑‍🎤🎶❌", style=discord.ButtonStyle.primary))
         self.add_item(STSButton(bot_behavior, audio_file, "ventura", label="🐷", style=discord.ButtonStyle.primary))
         self.add_item(STSButton(bot_behavior, audio_file, "tyson", label="🐵", style=discord.ButtonStyle.primary))
         self.add_item(STSButton(bot_behavior, audio_file, "costa", label="🐗", style=discord.ButtonStyle.primary))

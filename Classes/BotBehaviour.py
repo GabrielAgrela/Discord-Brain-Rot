@@ -90,8 +90,8 @@ class BotBehavior:
             message = await bot_channel.send(embed=embed)
             messages.append(message)
 
-        sound_summary, total_plays = Database().get_top_sounds(number=100000, days=30, user=None)
-        average_per_day = total_plays / 30
+        sound_summary, total_plays = Database().get_top_sounds(number=100000, days=days, user=None)
+        average_per_day = total_plays / days
         title = f"🎵 **TOP MANUALLY PLAYED SOUNDS IN THE LAST {days} DAYS! TOTAL PLAYS: {total_plays}** 🎵"
         description = f"Average of {average_per_day:.0f} plays per day!"
         color = discord.Color.yellow()
@@ -380,7 +380,11 @@ class BotBehavior:
             sound_message = None
             
             if bot_channel and not is_entrance:
-                if audio_file.split('/')[-1] not in ["slap.mp3", "tiro.mp3", "pubg-pan-sound-effect.mp3", "slap-oh_LGvkhyt.mp3", "kid-slap-oh.mp3", "gunshot-one.mp3"]:
+                # Get sound info from database to check if it's a slap sound
+                sound_info = Database().get_sound(audio_file, True)
+                is_slap_sound = sound_info and sound_info[6] == 1  # Check slap attribute from database
+                
+                if not is_slap_sound:
                     description = []
                     if extra != "":
                         description.append(f"Similarity: {extra}%")
@@ -425,7 +429,11 @@ class BotBehavior:
 
             # Play the audio file
             try:
-                if audio_file.split('/')[-1] not in ["slap.mp3", "tiro.mp3", "pubg-pan-sound-effect.mp3", "slap-oh_LGvkhyt.mp3", "kid-slap-oh.mp3", "gunshot-one.mp3"]:
+                # Get sound info from database to check if it's a slap sound
+                sound_info = Database().get_sound(audio_file, True)
+                is_slap_sound = sound_info and sound_info[6] == 1  # Check slap attribute from database
+                
+                if not is_slap_sound:
                     await asyncio.sleep(.5)
                 audio_source = discord.FFmpegPCMAudio(executable=self.ffmpeg_path, source=audio_file_path)
                 voice_client.play(audio_source, after=after_playing)
@@ -552,8 +560,11 @@ class BotBehavior:
             temp_color = discord.Color.random()
         self.color = temp_color
     
-    async def play_request(self, id, user, request_number=5):
-        filenames = Database().get_sounds_by_similarity(id,request_number)
+    async def play_request(self, id, user, request_number=5, exact=False):
+        if exact:
+            filenames = [id]
+        else:
+            filenames = Database().get_sounds_by_similarity(id,request_number)
         for guild in self.bot.guilds:
             channel = self.get_user_voice_channel(guild, user)
             if channel is not None:

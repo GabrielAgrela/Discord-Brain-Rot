@@ -55,7 +55,8 @@ class Database:
                 originalfilename TEXT NOT NULL,
                 Filename TEXT NOT NULL,
                 favorite BOOLEAN NOT NULL CHECK (favorite IN (0, 1)),
-                blacklist BOOLEAN NOT NULL CHECK (blacklist IN (0, 1))
+                blacklist BOOLEAN NOT NULL CHECK (blacklist IN (0, 1)),
+                slap BOOLEAN NOT NULL CHECK (slap IN (0, 1)) DEFAULT 0
             );
             '''
 
@@ -184,7 +185,7 @@ class Database:
         except sqlite3.Error as e:
             print(f"An error occurred: {e}")
 
-    def get_sounds(self, favorite=None, blacklist=None, num_sounds=25, sort="DESC", favorite_by_user=False, user=None):
+    def get_sounds(self, favorite=None, blacklist=None, slap=None, num_sounds=25, sort="DESC", favorite_by_user=False, user=None):
         if favorite_by_user and user:
             try:
                 # Query the actions table for favorite_sound actions by the specified user
@@ -207,15 +208,28 @@ class Database:
         # Existing functionality
         favorite = 1 if favorite else 0
         blacklist = 1 if blacklist else 0
+        slap = 1 if slap else 0
         try:
-            if favorite is not None and blacklist is not None:
-                self.cursor.execute("SELECT * FROM sounds WHERE favorite = ? AND blacklist = ? ORDER BY id " + sort + " LIMIT ?;", (favorite, blacklist, num_sounds))
-            elif favorite is not None:
-                self.cursor.execute("SELECT * FROM sounds WHERE favorite = ? ORDER BY id " + sort + " LIMIT ?;", (favorite, num_sounds))
-            elif blacklist is not None:
-                self.cursor.execute("SELECT * FROM sounds WHERE blacklist = ? ORDER BY id " + sort + " LIMIT ?;", (blacklist, num_sounds))
-            else:
-                self.cursor.execute("SELECT * FROM sounds ORDER BY id " + sort + " LIMIT ?;", (num_sounds,))
+            conditions = []
+            params = []
+            
+            if favorite is not None:
+                conditions.append("favorite = ?")
+                params.append(favorite)
+            if blacklist is not None:
+                conditions.append("blacklist = ?")
+                params.append(blacklist)
+            if slap is not None:
+                conditions.append("slap = ?")
+                params.append(slap)
+            
+            query = "SELECT * FROM sounds"
+            if conditions:
+                query += " WHERE " + " AND ".join(conditions)
+            query += f" ORDER BY id {sort} LIMIT ?"
+            params.append(num_sounds)
+            
+            self.cursor.execute(query, tuple(params))
             return self.cursor.fetchall()
         except sqlite3.Error as e:
             print(f"An error occurred: {e}")
@@ -223,16 +237,18 @@ class Database:
     def get_top_users(self, number=5, days=0, by="plays"):
         try:
             query = """
-            SELECT username, COUNT(*) as count
-            FROM actions
-            WHERE action IN ('play_random_sound', 'replay_sound', 'play_random_favorite_sound', 'play_request')
+            SELECT a.username, COUNT(*) as count
+            FROM actions a
+            JOIN sounds s ON a.target = s.id
+            WHERE a.action IN ('play_random_sound', 'replay_sound', 'play_random_favorite_sound', 'play_request')
+            AND s.slap = 0
             """
             
             if days > 0:
-                query += f" AND timestamp >= datetime('now', '-{days} days')"
+                query += f" AND a.timestamp >= datetime('now', '-{days} days')"
             
             query += """
-            GROUP BY username
+            GROUP BY a.username
             ORDER BY count DESC
             LIMIT ?
             """
@@ -250,6 +266,7 @@ class Database:
             FROM actions a
             JOIN sounds s ON a.target = s.id
             WHERE a.action IN ('play_random_sound', 'replay_sound', 'play_random_favorite_sound', 'play_request')
+            AND s.slap = 0
             """
             
             params = []
@@ -276,7 +293,9 @@ class Database:
             total_count_query = """
             SELECT COUNT(*) as total_count
             FROM actions a
+            JOIN sounds s ON a.target = s.id
             WHERE a.action IN ('play_random_sound', 'replay_sound', 'play_random_favorite_sound', 'play_request')
+            AND s.slap = 0
             """
             
             if days > 0:
@@ -348,11 +367,13 @@ class Database:
             print(f"An error occurred: {e}")
             return False
 
-    async def update_sound(self, filename, new_filename=None, favorite=None, blacklist=None):
+    async def update_sound(self, filename, new_filename=None, favorite=None, blacklist=None, slap=None):
         if new_filename is not None:
             new_filename = new_filename + ".mp3"
-        favorite = 1 if favorite else 0
-        blacklist = 1 if blacklist else 0
+        favorite = 1 if favorite else 0 if favorite is not None else None
+        blacklist = 1 if blacklist else 0 if blacklist is not None else None
+        slap = 1 if slap else 0 if slap is not None else None
+
         try:
             if new_filename:
                 self.cursor.execute("UPDATE sounds SET Filename = ? WHERE Filename = ?;", (new_filename, filename))
@@ -360,6 +381,8 @@ class Database:
                 self.cursor.execute("UPDATE sounds SET favorite = ? WHERE Filename = ?;", (favorite, filename))
             if blacklist is not None:
                 self.cursor.execute("UPDATE sounds SET blacklist = ? WHERE Filename = ?;", (blacklist, filename))
+            if slap is not None:
+                self.cursor.execute("UPDATE sounds SET slap = ? WHERE Filename = ?;", (slap, filename))
             self.conn.commit()
             if new_filename is not None:
                 await self.behavior.send_message(title=f"Modified {filename} to {new_filename}")
