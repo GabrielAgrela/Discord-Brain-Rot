@@ -57,9 +57,9 @@ class BotBehavior:
         self.error_message = None
         self.checking_voice_connection = False
 
-    async def display_top_users(self, user, number=5, days=7, by="plays"):
+    async def display_top_users(self, user, number_users=5, number_sounds=5, days=7, by="plays"):
         Database().insert_action(user.name, "list_top_users", by)
-        top_users = Database().get_top_users(number, days, by)
+        top_users = Database().get_top_users(number_users, days, by)
         
         bot_channel = await self.get_bot_channel()
         
@@ -83,7 +83,7 @@ class BotBehavior:
                 embed.set_thumbnail(url=discord_user.default_avatar.url)
 
             # You might want to add top sounds for each user here if that data is available
-            top_sounds = Database().get_top_sounds(number=number, days=days, user=username)
+            top_sounds = Database().get_top_sounds(number=number_sounds, days=days, user=username)
             for sound in top_sounds[0]:
                 embed.add_field(name=f"🎵 **{sound[0]}**", value=f"Played **{sound[1]}** times", inline=False)
 

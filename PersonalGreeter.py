@@ -317,7 +317,6 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
     elif before.channel is not None and after.channel is None:
         event = "leave"
         channel = before.channel
-        db.insert_action(member_str, event, db.get_sounds_by_similarity("gay-echo.mp3")[0][0])
     elif before.channel != after.channel:
         event = "join"
         channel = after.channel
@@ -350,12 +349,14 @@ async def play_audio_for_event(member, member_str, event, channel):
     try:
         user_events = db.get_user_events(member_str, event)
         if user_events:
+            if await behavior.is_channel_empty(channel):
+                return
             sound = random.choice(user_events)[2]
-            db.insert_action(member_str, event, db.get_sounds_by_similarity(sound)[0][0])
             behavior.last_channel[member_str] = channel
             if channel:
                 print(f"Playing {sound} for {member_str} on {event}")
                 await behavior.play_audio(channel, db.get_sounds_by_similarity(sound)[0][2], member_str, is_entrance=True)
+                db.insert_action(member_str, event, db.get_sounds_by_similarity(sound)[0][0])
         elif event == "join":
             await behavior.play_audio(channel, "gay-echo.mp3", "admin", is_entrance=True)
             db.insert_action(member_str, event, db.get_sounds_by_similarity("gay-echo.mp3")[0][0])

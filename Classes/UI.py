@@ -295,7 +295,7 @@ class StatsButton(Button):
 
     async def callback(self, interaction):
         await interaction.response.defer()
-        asyncio.create_task(self.bot_behavior.display_top_users(interaction.user, number=5, days=7, by="plays"))
+        asyncio.create_task(self.bot_behavior.display_top_users(interaction.user, number_users=10, number_sounds=5, days=7, by="plays"))
 
 
 class ListLastScrapedSoundsButton(Button):
