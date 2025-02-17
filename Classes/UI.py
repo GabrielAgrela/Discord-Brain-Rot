@@ -568,3 +568,145 @@ class SoundView(View):
         super().__init__(timeout=None)
         for sound in similar_sounds:
             self.add_item(PlaySoundButton(bot_behavior, sound[1], style=discord.ButtonStyle.danger, label=sound[2].split('/')[-1].replace('.mp3', '')))
+
+class DeleteEventButton(Button):
+    def __init__(self, bot_behavior, user_id, event, sound):
+        super().__init__(label=sound, style=discord.ButtonStyle.danger)
+        self.bot_behavior = bot_behavior
+        self.user_id = user_id
+        self.event = event
+        self.sound = sound
+
+    async def callback(self, interaction):
+        await interaction.response.defer()
+        
+        # If the owner clicks, delete the event
+        if interaction.user.name == self.user_id.split('#')[0]:
+            # Remove the event
+            if Database().remove_user_event_sound(self.user_id, self.event, self.sound):
+                Database().insert_action(interaction.user.name, f"delete_{self.event}_event", self.sound)
+                
+                # Get remaining events of this type
+                remaining_events = Database().get_user_events(self.user_id, self.event)
+                
+                if not remaining_events:
+                    # If no events left of this type, delete the message
+                    await interaction.message.delete()
+                else:
+                    # Create new paginated view with remaining events
+                    view = PaginatedEventView(self.bot_behavior, remaining_events, self.user_id, self.event)
+                    
+                    # Update the message with the first page
+                    total_events = len(remaining_events)
+                    current_page_end = min(20, total_events)
+                    
+                    description = "**Current sounds:**\n"
+                    description += "\n".join([f"• {event[2]}" for event in remaining_events[:current_page_end]])
+                    description += f"\nShowing sounds 1-{current_page_end} of {total_events}"
+                    
+                    embed = interaction.message.embeds[0]
+                    embed.description = description
+                    
+                    await interaction.message.edit(embed=embed, view=view)
+                
+                await interaction.followup.send(f"Event {self.event} with sound {self.sound} deleted!", ephemeral=True)
+            else:
+                await interaction.followup.send("Failed to delete the event!", ephemeral=True)
+        # If another user clicks, play the sound
+        else:
+            channel = self.bot_behavior.get_user_voice_channel(interaction.guild, interaction.user.name)
+            if channel:
+                #get most similar sound
+                similar_sounds = Database().get_sounds_by_similarity(self.sound,1)
+                await self.bot_behavior.play_audio(channel, similar_sounds[0][1], interaction.user.name)
+                Database().insert_action(interaction.user.name, f"play_{self.event}_event_sound", self.sound)
+            else:
+                await interaction.followup.send("You need to be in a voice channel to play sounds! ��", ephemeral=True)
+
+class EventPaginationButton(Button):
+    def __init__(self, label, emoji, style, custom_id, row):
+        super().__init__(label=label, emoji=emoji, style=style, custom_id=custom_id, row=row)
+
+    async def callback(self, interaction):
+        await interaction.response.defer()
+        view = self.view
+        
+        if self.custom_id == "previous":
+            if view.current_page == 0:
+                view.current_page = len(view.pages) - 1
+            else:
+                view.current_page = view.current_page - 1
+        elif self.custom_id == "next":
+            if view.current_page == len(view.pages) - 1:
+                view.current_page = 0
+            else:
+                view.current_page = view.current_page + 1
+        
+        # Update buttons state
+        view.update_buttons()
+        
+        # Update the content and description
+        total_events = sum(len(page) for page in view.pages)
+        current_page_start = (view.current_page * 20) + 1
+        current_page_end = min((view.current_page + 1) * 20, total_events)
+        
+        description = "**Current sounds:**\n"
+        description += "\n".join([f"• {event[2]}" for event in view.pages[view.current_page]])
+        description += f"\nShowing sounds {current_page_start}-{current_page_end} of {total_events}"
+        
+        await interaction.message.edit(
+            embed=discord.Embed(
+                title=f"🎵 {view.event.capitalize()} Event Sounds for {view.user_id.split('#')[0]} (Page {view.current_page + 1}/{len(view.pages)})",
+                description=description,
+                color=discord.Color.blue()
+            ),
+            view=view
+        )
+
+class PaginatedEventView(View):
+    def __init__(self, bot_behavior, events, user_id, event):
+        super().__init__(timeout=None)
+        self.bot_behavior = bot_behavior
+        self.current_page = 0
+        self.user_id = user_id
+        self.event = event
+        
+        # Split events into pages of 20 events each (4 rows of 5 buttons)
+        chunk_size = 20
+        self.pages = [events[i:i + chunk_size] for i in range(0, len(events), chunk_size)]
+        
+        # Add navigation buttons
+        self.add_item(EventPaginationButton("Previous", "⬅️", discord.ButtonStyle.primary, "previous", 0))
+        self.add_item(EventPaginationButton("Next", "➡️", discord.ButtonStyle.primary, "next", 0))
+        
+        # Add initial event buttons
+        self.update_page_buttons()
+    
+    def update_buttons(self):
+        # Clear existing buttons
+        self.clear_items()
+        
+        # Re-add navigation buttons
+        self.add_item(EventPaginationButton("Previous", "⬅️", discord.ButtonStyle.primary, "previous", 0))
+        self.add_item(EventPaginationButton("Next", "➡️", discord.ButtonStyle.primary, "next", 0))
+        
+        # Add event buttons for current page
+        self.update_page_buttons()
+    
+    def update_page_buttons(self):
+        if not self.pages:
+            return
+            
+        current_events = self.pages[self.current_page]
+        for i, event in enumerate(current_events):
+            # Calculate row (1-4) and position in row (0-4)
+            row = (i // 5) + 1  # +1 because row 0 is for navigation buttons
+            button = DeleteEventButton(self.bot_behavior, self.user_id, self.event, event[2])
+            button.row = row
+            self.add_item(button)
+
+class EventView(View):
+    def __init__(self, bot_behavior, user_id, event, sounds):
+        super().__init__(timeout=None)
+        for sound in sounds:
+            self.add_item(DeleteEventButton(bot_behavior, user_id, event, sound))

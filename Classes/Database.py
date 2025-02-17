@@ -140,41 +140,87 @@ class Database:
         return text.lower()
 
     def get_sounds_by_similarity(self, req_sound, num_results=5):
-        # Normalize the requested sound to handle character substitutions
+        # Normalize the requested sound
         normalized_req = self.normalize_text(req_sound)
         try:
-            self.cursor.execute("SELECT * FROM sounds")
-            all_sounds = self.cursor.fetchall()
-            if not all_sounds:
-                print("No sounds available for similarity scoring.")
+            # First, get potential matches using LIKE - much faster than Python-side matching
+            search_pattern = f"%{normalized_req}%"
+            self.cursor.execute("""
+                SELECT * FROM sounds 
+                WHERE blacklist = 0 
+                AND LOWER(Filename) LIKE ? 
+                LIMIT 50
+            """, (search_pattern,))
+            
+            potential_matches = self.cursor.fetchall()
+            
+            if not potential_matches:
+                # If no matches with LIKE, try getting all non-blacklisted sounds
+                self.cursor.execute("SELECT * FROM sounds WHERE blacklist = 0 LIMIT 50")
+                potential_matches = self.cursor.fetchall()
+
+            if not potential_matches:
                 return []
+
+            # Score only the potential matches
             scored_matches = []
-            for sound in all_sounds:
-                filename = sound[2]  # Assuming 'Filename' is at index 2
+            for sound in potential_matches:
+                filename = sound[2]  # Filename is at index 2
                 normalized_filename = self.normalize_text(filename)
-
-                # Calculate multiple fuzzy matching scores
-                token_set_score = fuzz.token_set_ratio(normalized_req, normalized_filename)
-                partial_ratio_score = fuzz.partial_ratio(normalized_req, normalized_filename)
-                token_sort_score = fuzz.token_sort_ratio(normalized_req, normalized_filename)
-
-                # Combine scores with weighted average for a more robust similarity measure
-                combined_score = (0.5 * token_set_score) + (0.3 * partial_ratio_score) + (0.2 * token_sort_score)
-
-                scored_matches.append((combined_score, sound))
+                
+                # Use only token_set_ratio for speed - it's usually good enough
+                score = fuzz.token_set_ratio(normalized_req, normalized_filename)
+                scored_matches.append((score, sound))
             
-            # Sort the matches by combined score in descending order
+            # Sort by score and get top matches
             scored_matches.sort(key=lambda x: x[0], reverse=True)
+            return [match[1] for match in scored_matches[:num_results]]
             
-            # Select the top N matches based on the desired number of results
-            top_matches = scored_matches[:num_results]
-            
-            print("Sounds found successfully")
-            return [match[1] for match in top_matches]  # Return only the sound data
         except sqlite3.Error as e:
             print(f"An error occurred: {e}")
             return []
-    
+
+    def get_sounds_by_similarity_optimized(self, req_sound, num_results=5):
+        # Normalize the requested sound
+        normalized_req = self.normalize_text(req_sound)
+        try:
+            # First, get potential matches using LIKE - much faster than Python-side matching
+            search_pattern = f"%{normalized_req}%"
+            self.cursor.execute("""
+                SELECT * FROM sounds 
+                WHERE blacklist = 0 
+                AND LOWER(Filename) LIKE ? 
+                LIMIT 50
+            """, (search_pattern,))
+            
+            potential_matches = self.cursor.fetchall()
+            
+            if not potential_matches:
+                # If no matches with LIKE, try getting all non-blacklisted sounds
+                self.cursor.execute("SELECT * FROM sounds WHERE blacklist = 0 LIMIT 50")
+                potential_matches = self.cursor.fetchall()
+
+            if not potential_matches:
+                return []
+
+            # Score only the potential matches
+            scored_matches = []
+            for sound in potential_matches:
+                filename = sound[2]  # Filename is at index 2
+                normalized_filename = self.normalize_text(filename)
+                
+                # Use only token_set_ratio for speed - it's usually good enough
+                score = fuzz.token_set_ratio(normalized_req, normalized_filename)
+                scored_matches.append((score, sound))
+            
+            # Sort by score and get top matches
+            scored_matches.sort(key=lambda x: x[0], reverse=True)
+            return [match[1] for match in scored_matches[:num_results]]
+            
+        except sqlite3.Error as e:
+            print(f"An error occurred: {e}")
+            return []
+
     def get_sound(self, sound_filename, original_filename=False):
         try:
             if original_filename:
@@ -189,14 +235,24 @@ class Database:
         if favorite_by_user and user:
             try:
                 # Query the actions table for favorite_sound actions by the specified user
-                # Join with sounds table and order by the timestamp of when it was favorited
+                # Join with sounds table and only get sounds where the most recent action is 'favorite_sound'
                 query = """
+                WITH LastActions AS (
+                    SELECT target,
+                           action,
+                           timestamp,
+                           ROW_NUMBER() OVER (PARTITION BY target ORDER BY timestamp DESC) as rn
+                    FROM actions
+                    WHERE username = ?
+                    AND action IN ('favorite_sound', 'unfavorite_sound')
+                )
                 SELECT DISTINCT s.* 
                 FROM sounds s
-                JOIN actions a ON s.id = a.target
-                WHERE a.username = ? 
-                AND a.action = 'favorite_sound'
-                ORDER BY a.timestamp DESC
+                JOIN LastActions la ON s.id = la.target
+                WHERE la.rn = 1 
+                AND la.action = 'favorite_sound'
+                AND s.favorite = 1
+                ORDER BY la.timestamp DESC
                 LIMIT ?;
                 """
                 self.cursor.execute(query, (user, num_sounds))
@@ -314,12 +370,24 @@ class Database:
         
     def get_user_events(self, user, event):
         try:
-            self.cursor.execute("SELECT * FROM users WHERE id = ? AND event = ?;", (user, event))
+            if user == "*":
+                self.cursor.execute("SELECT DISTINCT id FROM users WHERE event = ?;", (event,))
+            else:
+                self.cursor.execute("SELECT * FROM users WHERE id = ? AND event = ?;", (user, event))
             return self.cursor.fetchall()
         except sqlite3.Error as e:
             print(f"An error occurred: {e}")
             return []
-        
+
+    def get_all_users(self):
+        """Get all unique users who have event sounds configured"""
+        try:
+            self.cursor.execute("SELECT DISTINCT id FROM users;")
+            return [user[0] for user in self.cursor.fetchall()]
+        except sqlite3.Error as e:
+            print(f"An error occurred: {e}")
+            return []
+
     def get_user_event_sound(self, user_id, event, sound):
         """Check if a specific user event sound exists"""
         try:

@@ -63,8 +63,39 @@ async def on_ready():
     bot.loop.create_task(behavior.update_bot_status())
     bot.loop.create_task(SoundDownloader(behavior, behavior.db, os.getenv("CHROMEDRIVER_PATH")).move_sounds())
 
+async def get_sound_autocomplete(ctx):
+    try:
+        # Get the current input value and return immediately if too short
+        current = ctx.value.lower() if ctx.value else ""
+        if not current or len(current) < 2:
+            return []
+        
+        # Benchmark the query time
+        start_time = time.time()
+        similar_sounds = Database().get_sounds_by_similarity_optimized(current, 15)
+        end_time = time.time()
+        query_time = end_time - start_time
+        print(f"get_sounds_by_similarity took {query_time:.3f} seconds for query: '{current}'")
+        
+        # Quick process and return
+        return [sound[2].split('/')[-1].replace('.mp3', '') for sound in similar_sounds]
+    except Exception as e:
+        print(f"Autocomplete error: {e}")
+        return []
+
 @bot.slash_command(name="toca", description="Write a name of something you want to hear")
-async def play_requested(ctx: interactions.ComponentContext, message: Option(str, "Sound name ('random' for random)", required=True), request_number: Option(str, "Number of Similar Sounds", default=5)):
+@discord.option(
+    "message",
+    description="Sound name ('random' for random)",
+    autocomplete=get_sound_autocomplete,
+    required=True
+)
+@discord.option(
+    "request_number",
+    description="Number of Similar Sounds",
+    default="5"
+)
+async def play_requested(ctx, message: str, request_number: str = "5"):
     await ctx.respond("Processing your request...", delete_after=0)
     request_number = int(request_number)
     if request_number > 25:
@@ -80,7 +111,7 @@ async def play_requested(ctx: interactions.ComponentContext, message: Option(str
         if(message == "random"):
             asyncio.run_coroutine_threadsafe(behavior.play_random_sound(username_with_discriminator), bot.loop)
         else:
-            await behavior.play_request(message, author.name,request_number=number_similar_sounds)
+            await behavior.play_request(message, author.name, request_number=number_similar_sounds)
     except Exception as e:
         print(e)
         asyncio.run_coroutine_threadsafe(behavior.play_random_sound(username_with_discriminator), bot.loop)
@@ -239,7 +270,7 @@ async def change(ctx, number: Option(str, "number of sounds", default=10)):
 
 @bot.slash_command(name="addevent", description="Add a join/leave event sound for a user")
 async def add_event(ctx, 
-    username: Option(str, "Username with discriminator (e.g. user#1234)", required=True),
+    username: Option(str, "Select a user", choices=db.get_all_users(), required=True),
     event: Option(str, "Event type", choices=["join", "leave"], required=True),
     sound: Option(str, "Sound name to play", required=True)):
     
@@ -249,6 +280,21 @@ async def add_event(ctx,
         await ctx.followup.send(f"Successfully added {sound} as {event} sound for {username}!", ephemeral=True, delete_after=5)
     else:
         await ctx.followup.send("Failed to add event sound. Make sure the username and sound are correct!", ephemeral=True, delete_after=5)
+
+@bot.slash_command(name="listevents", description="List your join/leave event sounds")
+async def list_events(ctx, 
+    username: Option(str, "User to list events for (defaults to you)", choices=db.get_all_users(), required=False)):
+    await ctx.respond("Processing your request...", delete_after=0)
+    
+    if username:
+        target_user = username
+        target_user_full = username  # Since the database already stores the full username
+    else:
+        target_user = ctx.user.name
+        target_user_full = f"{ctx.user.name}#{ctx.user.discriminator}"
+    
+    if not await behavior.list_user_events(target_user, target_user_full, requesting_user=ctx.user.name):
+        await ctx.followup.send(f"No event sounds found for {target_user}!", ephemeral=True)
 
 connections = {}
 
@@ -355,7 +401,7 @@ async def play_audio_for_event(member, member_str, event, channel):
             behavior.last_channel[member_str] = channel
             if channel:
                 print(f"Playing {sound} for {member_str} on {event}")
-                await behavior.play_audio(channel, db.get_sounds_by_similarity(sound)[0][2], member_str, is_entrance=True)
+                await behavior.play_audio(channel, db.get_sounds_by_similarity(sound)[0][1], member_str, is_entrance=True)
                 db.insert_action(member_str, event, db.get_sounds_by_similarity(sound)[0][0])
         elif event == "join":
             await behavior.play_audio(channel, "gay-echo.mp3", "admin", is_entrance=True)

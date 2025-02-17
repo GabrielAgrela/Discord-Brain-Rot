@@ -13,7 +13,7 @@ from Classes.PlayHistoryDatabase import PlayHistoryDatabase
 from Classes.OtherActionsDatabase import OtherActionsDatabase
 from Classes.TTS import TTS
 import csv
-from Classes.UI import SoundBeingPlayedView, ControlsView, SoundView
+from Classes.UI import SoundBeingPlayedView, ControlsView, SoundView, EventView, PaginatedEventView
 from Classes.ManualSoundDownloader import ManualSoundDownloader
 from moviepy.editor import VideoFileClip
 
@@ -56,6 +56,9 @@ class BotBehavior:
         self.cooldown_message = None
         self.error_message = None
         self.checking_voice_connection = False
+        self.current_sound_message = None  # Track the current sound's message
+        self.stop_progress_update = False  # Flag to control progress updates
+        self.progress_already_updated = False  # Flag to track if progress has been updated with emoji
 
     async def display_top_users(self, user, number_users=5, number_sounds=5, days=7, by="plays"):
         Database().insert_action(user.name, "list_top_users", by)
@@ -350,6 +353,39 @@ class BotBehavior:
                 return
         self.last_played_time = datetime.now()
 
+        # Stop updating the previous sound's progress
+        if self.current_sound_message and not self.progress_already_updated:
+            self.stop_progress_update = True
+            try:
+                # Get the current progress bar state
+                if self.current_sound_message.embeds:
+                    embed = self.current_sound_message.embeds[0]
+                    description_lines = embed.description.split('\n') if embed.description else []
+                    progress_line = next((line for line in description_lines if line.startswith("Progress:")), None)
+                    
+                    if progress_line and not any(emoji in progress_line for emoji in ["👋", "⏭️"]):
+                        description = []
+                        if extra != "":
+                            description.append(f"Similarity: {extra}%")
+                        
+                        # Check if interrupted by a slap sound
+                        sound_info = Database().get_sound(audio_file, True)
+                        is_slap_sound = sound_info and sound_info[6] == 1
+                        interrupt_emoji = "👋" if is_slap_sound else "⏭️"
+                        
+                        for line in description_lines:
+                            if line.startswith("Progress:"):
+                                description.append(f"{line} {interrupt_emoji}")
+                            else:
+                                description.append(line)
+                        description_text = "\n".join(description)
+                        
+                        embed.description = description_text
+                        await self.current_sound_message.edit(embed=embed)
+                        self.progress_already_updated = True
+            except Exception as e:
+                print(f"Error updating previous sound message: {e}")
+
         try:
             voice_client = await self.ensure_voice_connected(channel)
 
@@ -402,6 +438,9 @@ class BotBehavior:
                         footer=f"{user} requested '{original_message}'" if original_message else f"Requested by {user}", 
                         send_controls=send_controls
                     )
+                    self.current_sound_message = sound_message
+                    self.stop_progress_update = False
+                    self.progress_already_updated = False  # Reset the flag for the new sound
 
             # Stop the audio if it is already playing
             if voice_client.is_playing():
@@ -440,7 +479,7 @@ class BotBehavior:
                 
                 # Update progress bar while playing
                 start_time = time.time()
-                while voice_client.is_playing():
+                while voice_client.is_playing() and not self.stop_progress_update:
                     if sound_message and duration > 0:
                         elapsed = time.time() - start_time
                         progress = min(elapsed / duration, 1.0)
@@ -466,7 +505,7 @@ class BotBehavior:
                     await asyncio.sleep(1)
                 
                 # Remove only the progress bar when done
-                if sound_message:
+                if sound_message and not self.stop_progress_update:
                     description = []
                     if extra != "":
                         description.append(f"Similarity: {extra}%")
@@ -1040,6 +1079,52 @@ class BotBehavior:
             description=f"Added {num_matches_updated} matches to the database ({await self.lol_db.get_match_count()} total)",
             bot_channel="botlol"
         )
+
+    async def list_user_events(self, user, user_full_name, requesting_user=None):
+        """List all join/leave events for a user with delete buttons"""
+        # Get user's events from database
+        join_events = Database().get_user_events(user_full_name, "join")
+        leave_events = Database().get_user_events(user_full_name, "leave")
+        
+        if not join_events and not leave_events:
+            return False
+        
+        # Log the action
+        action_user = requesting_user if requesting_user else user
+        Database().insert_action(action_user, "list_events", f"{len(join_events) + len(leave_events)} events for {user}")
+        
+        # Send a message for each event type with all its events
+        if join_events:
+            total_events = len(join_events)
+            current_page_end = min(20, total_events)
+            
+            description = "**Current sounds:**\n"
+            description += "\n".join([f"• {event[2]}" for event in join_events[:current_page_end]])
+            description += f"\nShowing sounds 1-{current_page_end} of {total_events}"
+            
+            await self.send_message(
+                title=f"🎵 Join Event Sounds (Page 1/{(total_events + 19) // 20})",
+                description=description,
+                view=PaginatedEventView(self, join_events, user_full_name, "join"),
+                delete_time=60
+            )
+        
+        if leave_events:
+            total_events = len(leave_events)
+            current_page_end = min(20, total_events)
+            
+            description = "**Current sounds:**\n"
+            description += "\n".join([f"• {event[2]}" for event in leave_events[:current_page_end]])
+            description += f"\nShowing sounds 1-{current_page_end} of {total_events}"
+            
+            await self.send_message(
+                title=f"🎵 Leave Event Sounds (Page 1/{(total_events + 19) // 20})",
+                description=description,
+                view=PaginatedEventView(self, leave_events, user_full_name, "leave"),
+                delete_time=60
+            )
+        
+        return True
 
 
 
