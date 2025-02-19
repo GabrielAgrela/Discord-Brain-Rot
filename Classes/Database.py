@@ -179,29 +179,95 @@ class Database:
         # Normalize the requested sound
         normalized_req = self.normalize_text(req_sound)
         try:
-            # First, get potential matches using LIKE - much faster than Python-side matching
-            search_pattern = f"%{normalized_req}%"
-            self.cursor.execute("""
+            # Split the search term into words and create a more flexible search pattern
+            search_words = normalized_req.replace('-', ' ').split()
+            
+            # Build a dynamic SQL query that searches for any of the words
+            like_conditions = []
+            params = []
+
+            # Handle special word combinations first
+            i = 0
+            while i < len(search_words):
+                current_word = search_words[i]
+                next_word = search_words[i + 1] if i + 1 < len(search_words) else None
+
+                # Handle "he is" / "hes" variations
+                if current_word == "he" and next_word == "is":
+                    like_conditions.extend([
+                        "LOWER(Filename) LIKE ?",
+                        "LOWER(Filename) LIKE ?"
+                    ])
+                    params.extend([
+                        f"%he%is%",
+                        f"%hes%"
+                    ])
+                    i += 2  # Skip next word since we handled it
+                    continue
+                # Handle "hes" as "he is"
+                elif current_word == "hes":
+                    like_conditions.extend([
+                        "LOWER(Filename) LIKE ?",
+                        "LOWER(Filename) LIKE ?"
+                    ])
+                    params.extend([
+                        f"%he%is%",
+                        f"%hes%"
+                    ])
+                # Handle "is" / "'s" variations
+                elif current_word == "is":
+                    like_conditions.extend([
+                        "LOWER(Filename) LIKE ?",
+                        "LOWER(Filename) LIKE ?"
+                    ])
+                    params.extend([
+                        f"%is%",
+                        f"%'s%"
+                    ])
+                # For all other words, add flexible matching
+                else:
+                    like_conditions.append("LOWER(Filename) LIKE ?")
+                    params.append(f"%{current_word}%")
+
+                i += 1
+
+            # Add a condition that tries to match the entire phrase
+            like_conditions.append("LOWER(Filename) LIKE ?")
+            full_phrase = normalized_req.replace(' ', '%')
+            params.append(f"%{full_phrase}%")
+            
+            # Combine conditions with OR to match any variation
+            query = f"""
                 SELECT * FROM sounds 
                 WHERE blacklist = 0 
-                AND LOWER(Filename) LIKE ? 
-                LIMIT 50
-            """, (search_pattern,))
+                AND ({" OR ".join(like_conditions)})
+                LIMIT 150
+            """
             
+            self.cursor.execute(query, tuple(params))
             potential_matches = self.cursor.fetchall()
 
             if not potential_matches:
                 return []
 
-            # Score only the potential matches
+            # Score matches using multiple fuzzy ratios for better accuracy
             scored_matches = []
             for sound in potential_matches:
                 filename = sound[2]  # Filename is at index 2
                 normalized_filename = self.normalize_text(filename)
                 
-                # Use only token_set_ratio for speed - it's usually good enough
-                score = fuzz.token_set_ratio(normalized_req, normalized_filename)
-                scored_matches.append((score, sound))
+                # Use multiple scoring methods for better accuracy
+                token_set_score = fuzz.token_set_ratio(normalized_req, normalized_filename)
+                partial_ratio_score = fuzz.partial_ratio(normalized_req, normalized_filename)
+                token_sort_score = fuzz.token_sort_ratio(normalized_req, normalized_filename)
+                
+                # Add extra weight for matches that contain all search words
+                all_words_present = all(word in normalized_filename for word in search_words)
+                word_presence_bonus = 20 if all_words_present else 0
+                
+                # Weighted combination of scores with word presence bonus
+                combined_score = (0.5 * token_set_score) + (0.3 * partial_ratio_score) + (0.2 * token_sort_score) + word_presence_bonus
+                scored_matches.append((combined_score, sound))
             
             # Sort by score and get top matches
             scored_matches.sort(key=lambda x: x[0], reverse=True)
