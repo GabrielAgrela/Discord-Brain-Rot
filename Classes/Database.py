@@ -140,42 +140,37 @@ class Database:
         return text.lower()
 
     def get_sounds_by_similarity(self, req_sound, num_results=5):
-        # Normalize the requested sound
+        # Normalize the requested sound to handle character substitutions
         normalized_req = self.normalize_text(req_sound)
         try:
-            # First, get potential matches using LIKE - much faster than Python-side matching
-            search_pattern = f"%{normalized_req}%"
-            self.cursor.execute("""
-                SELECT * FROM sounds 
-                WHERE blacklist = 0 
-                AND LOWER(Filename) LIKE ? 
-                LIMIT 50
-            """, (search_pattern,))
-            
-            potential_matches = self.cursor.fetchall()
-            
-            if not potential_matches:
-                # If no matches with LIKE, try getting all non-blacklisted sounds
-                self.cursor.execute("SELECT * FROM sounds WHERE blacklist = 0 LIMIT 50")
-                potential_matches = self.cursor.fetchall()
-
-            if not potential_matches:
+            self.cursor.execute("SELECT * FROM sounds")
+            all_sounds = self.cursor.fetchall()
+            if not all_sounds:
+                print("No sounds available for similarity scoring.")
                 return []
-
-            # Score only the potential matches
             scored_matches = []
-            for sound in potential_matches:
-                filename = sound[2]  # Filename is at index 2
+            for sound in all_sounds:
+                filename = sound[2]  # Assuming 'Filename' is at index 2
                 normalized_filename = self.normalize_text(filename)
-                
-                # Use only token_set_ratio for speed - it's usually good enough
-                score = fuzz.token_set_ratio(normalized_req, normalized_filename)
-                scored_matches.append((score, sound))
+
+                # Calculate multiple fuzzy matching scores
+                token_set_score = fuzz.token_set_ratio(normalized_req, normalized_filename)
+                partial_ratio_score = fuzz.partial_ratio(normalized_req, normalized_filename)
+                token_sort_score = fuzz.token_sort_ratio(normalized_req, normalized_filename)
+
+                # Combine scores with weighted average for a more robust similarity measure
+                combined_score = (0.5 * token_set_score) + (0.3 * partial_ratio_score) + (0.2 * token_sort_score)
+
+                scored_matches.append((combined_score, sound))
             
-            # Sort by score and get top matches
+            # Sort the matches by combined score in descending order
             scored_matches.sort(key=lambda x: x[0], reverse=True)
-            return [match[1] for match in scored_matches[:num_results]]
             
+            # Select the top N matches based on the desired number of results
+            top_matches = scored_matches[:num_results]
+            
+            print("Sounds found successfully")
+            return [match[1] for match in top_matches]  # Return only the sound data
         except sqlite3.Error as e:
             print(f"An error occurred: {e}")
             return []
@@ -194,11 +189,6 @@ class Database:
             """, (search_pattern,))
             
             potential_matches = self.cursor.fetchall()
-            
-            if not potential_matches:
-                # If no matches with LIKE, try getting all non-blacklisted sounds
-                self.cursor.execute("SELECT * FROM sounds WHERE blacklist = 0 LIMIT 50")
-                potential_matches = self.cursor.fetchall()
 
             if not potential_matches:
                 return []
