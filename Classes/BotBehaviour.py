@@ -167,8 +167,6 @@ class BotBehavior:
                         time_limit = int(parts[1])
                         if len(parts) > 2:
                             custom_filename = parts[2]
-
-                await response.delete()
                 
                 if len(response.attachments) > 0:
                     file_path = await self.save_uploaded_sound(response.attachments[0], custom_filename)
@@ -187,6 +185,7 @@ class BotBehavior:
                     file_path = await self.save_sound_from_url(response.content, custom_filename)
 
                 Database().insert_action(interaction.user.name, "upload_sound", file_path)
+                await response.delete()
                 confirmation_message = await interaction.channel.send(embed=discord.Embed(title="Sound uploaded successfully! (may take up to 10s to be available)", color=self.color))
                 await asyncio.sleep(10)
                 await confirmation_message.delete()
@@ -1085,6 +1084,7 @@ class BotBehavior:
         # Get user's events from database
         join_events = Database().get_user_events(user_full_name, "join")
         leave_events = Database().get_user_events(user_full_name, "leave")
+        user_name = user_full_name.split('#')[0]
         
         if not join_events and not leave_events:
             return False
@@ -1103,7 +1103,7 @@ class BotBehavior:
             description += f"\nShowing sounds 1-{current_page_end} of {total_events}"
             
             await self.send_message(
-                title=f"🎵 Join Event Sounds (Page 1/{(total_events + 19) // 20})",
+                title=f"🎵 {user_name}'s Join Event Sounds (Page 1/{(total_events + 19) // 20})",
                 description=description,
                 view=PaginatedEventView(self, join_events, user_full_name, "join"),
                 delete_time=60
@@ -1118,7 +1118,7 @@ class BotBehavior:
             description += f"\nShowing sounds 1-{current_page_end} of {total_events}"
             
             await self.send_message(
-                title=f"🎵 Leave Event Sounds (Page 1/{(total_events + 19) // 20})",
+                title=f"🎵 {user_name}'s Leave Event Sounds (Page 1/{(total_events + 19) // 20})",
                 description=description,
                 view=PaginatedEventView(self, leave_events, user_full_name, "leave"),
                 delete_time=60

@@ -447,9 +447,7 @@ class PaginationButton(Button):
         title = (f"🤩 {view.owner}'s Favorites (Page {view.current_page + 1}/{len(view.pages)}) 🤩" if is_user_favorites 
                 else f"⭐ All Favorite Sounds (Page {view.current_page + 1}/{len(view.pages)}) ⭐")
         
-        description = (f"Your favorite sounds based on your history\n" if is_user_favorites 
-                      else f"All favorite sounds in the database\n")
-        description += f"Showing sounds {current_page_start}-{current_page_end} of {total_favorites}"
+        description = f"Showing sounds {current_page_start}-{current_page_end} of {total_favorites}"
         
         await interaction.message.edit(
             content=None,
@@ -534,7 +532,7 @@ class ListUserFavoritesButton(Button):
             view = PaginatedFavoritesView(self.bot_behavior, favorites, interaction.user.name)  # Pass the owner
             message = await self.bot_behavior.send_message(
                 title=f"🤩 {interaction.user.name}'s Favorites (Page 1/{len(view.pages)}) 🤩",
-                description=f"Your favorite sounds based on your history\nShowing sounds 1-{min(20, len(favorites))} of {len(favorites)}",
+                description=f"Showing sounds 1-{min(20, len(favorites))} of {len(favorites)}",
                 view=view,
                 delete_time=300
             )
