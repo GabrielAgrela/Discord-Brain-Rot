@@ -220,6 +220,7 @@ class TTS:
         self.filename = f"{text[:10]}-{time.strftime('%d-%m-%y-%H-%M-%S')}.mp3"
         if lang == "pt":
             self.voice_id = self.voice_id_pt
+            boost_volume = 10
         elif lang == "costa":
             self.voice_id = self.voice_id_costa
             boost_volume = 15
@@ -246,7 +247,8 @@ class TTS:
             "model_id": "eleven_multilingual_v2",
             "output_format": "mp3_44100_128",
             "voice_settings": {
-                "stability": 1.0,
+                "speed": 0.8,
+                "stability": 0.35,
                 "similarity_boost": 1.0,
                 "style": 0.5,
                 "use_speaker_boost": True

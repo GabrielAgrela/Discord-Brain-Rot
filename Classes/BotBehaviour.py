@@ -517,7 +517,7 @@ class BotBehavior:
                 
             except discord.ClientException as e:
                 if "Not connected to voice" in str(e):
-                    await self.send_error_message("Lost voice connection. Attempting to reconnect...")
+                    #await self.send_error_message("Lost voice connection. Attempting to reconnect...")
                     if retry_count < MAX_RETRIES:
                         await self.play_audio(channel, audio_file, user, is_entrance, is_tts, extra, original_message, send_controls, retry_count + 1)
                     return
@@ -533,11 +533,15 @@ class BotBehavior:
             await self.playback_done.wait()
 
         except Exception as e:
-            await self.send_error_message(f"An error occurred: {e}")
             print(f"An error occurred: {e}")
-            if retry_count < MAX_RETRIES:
-                await asyncio.sleep(1)
-                await self.play_audio(channel, audio_file, user, is_entrance, is_tts, extra, original_message, send_controls, retry_count + 1)
+            #if error is  'NoneType' object is not subscriptable send message to bot channel
+            if "NoneType" in str(e):
+                await self.send_error_message(f"Seems like that sound is not available anymore.")
+            else:
+                await self.send_error_message(f"An error occurred: {e}")
+                if retry_count < MAX_RETRIES:
+                    await asyncio.sleep(1)
+                    await self.play_audio(channel, audio_file, user, is_entrance, is_tts, extra, original_message, send_controls, retry_count + 1)
 
     async def update_bot_status(self):
         while True:
