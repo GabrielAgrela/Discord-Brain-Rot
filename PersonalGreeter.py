@@ -83,6 +83,37 @@ async def get_sound_autocomplete(ctx):
         print(f"Autocomplete error: {e}")
         return []
 
+async def get_list_autocomplete(ctx):
+    try:
+        # Get the current input value
+        current = ctx.value.lower() if ctx.value else ""
+        
+        # Get all lists
+        all_lists = db.get_sound_lists()
+        
+        # If no input, return all lists (up to 25)
+        if not current:
+            return [list_name for _, list_name, _, _ in all_lists][:25]
+        
+        # Filter lists based on input
+        matching_lists = []
+        for list_id, list_name, creator, created_at in all_lists:
+            if current in list_name.lower():
+                # Format as "list_name"
+                matching_lists.append(f"{list_name}")
+        
+        # Sort by relevance (exact matches first, then starts with, then contains)
+        exact_matches = [name for name in matching_lists if name.lower() == current]
+        starts_with = [name for name in matching_lists if name.lower().startswith(current) and name.lower() != current]
+        contains = [name for name in matching_lists if current in name.lower() and not name.lower().startswith(current) and name.lower() != current]
+        
+        # Combine and limit to 25 results
+        sorted_results = exact_matches + starts_with + contains
+        return sorted_results[:25]
+    except Exception as e:
+        print(f"List autocomplete error: {e}")
+        return []
+
 @bot.slash_command(name="toca", description="Write a name of something you want to hear")
 @discord.option(
     "message",
@@ -230,13 +261,11 @@ async def change(ctx):
 
 @bot.slash_command(name="slice", description="returns database of sounds")
 async def change(ctx):
-    await ctx.respond("Processing your request...", delete_after=0)
-    await behavior.slice_all()
+    await behavior.slice_all(ctx)
 
 @bot.slash_command(name="lastsounds", description="returns last sounds downloaded")
 async def change(ctx, number: Option(str, "number of sounds", default=10)):
-    await ctx.respond("Processing your request...", delete_after=0)
-    await behavior.list_sounds(ctx.user, int(number))    
+    await behavior.list_sounds(ctx, int(number))
 
 # @bot.slash_command(name="userlolstats", description="get your lol stats", channel_ids=["1321095299367833723"])
 # async def userlolstats(ctx, username: Option(str, "username", required=True), gamemode: Option(str, "ARAM, CHERRY, CLASSIC, NEXUSBLITZ, ONEFORALL, STRAWBERRY, ULTBOOK, URF", required=True), champion: Option(str, "champion (ignore if you want all)", required=False)):
@@ -296,58 +325,185 @@ async def list_events(ctx,
     if not await behavior.list_user_events(target_user, target_user_full, requesting_user=ctx.user.name):
         await ctx.followup.send(f"No event sounds found for {target_user}!", ephemeral=True)
 
-connections = {}
-
-async def once_done(sink: discord.sinks, channel: discord.TextChannel, *args):
-    recorded_users = [
-        f"<@{user_id}>"
-        for user_id, audio in sink.audio_data.items()
-    ]
-    await sink.vc.disconnect()
-    files = [discord.File(audio.file, f"{user_id}.{sink.encoding}") for user_id, audio in sink.audio_data.items()]
-    # STT files
-    await behavior.stt(files)
-
-@bot.command(name="re")
-async def record_sound(ctx):
-    voice = ctx.author.voice
-    if not voice:
-        await ctx.send("You aren't in a voice channel!")
+# Sound List Commands
+@bot.slash_command(name="createlist", description="Create a new sound list")
+async def create_list(ctx, list_name: Option(str, "Name for your sound list", required=True)):
+    # Check if the user already has a list with this name
+    existing_list = db.get_list_by_name(list_name, ctx.author.name)
+    if existing_list:
+        await ctx.respond(f"You already have a list named '{list_name}'.", ephemeral=True)
         return
-
-    #get connected voice client
-    try:
-        vc = await voice.channel.connect()
-    except:
-        vc = discord.utils.get(bot.voice_clients, guild=ctx.guild)
-    connections.update({ctx.guild.id: vc})
-
-    # Start recording
-    vc.start_recording(
-        discord.sinks.WaveSink(), 
-        once_done, 
-        ctx.channel
-    )
-    print("Started recording!")
-
-    # Wait for 5 seconds
-    await asyncio.sleep(5)
-
-    # Stop recording after 5 seconds
-    if ctx.guild.id in connections:
-        vc = connections[ctx.guild.id]
-        vc.stop_recording()
-        del connections[ctx.guild.id]
-
-@bot.command()
-async def stop_recording(ctx):
-    if ctx.guild.id in connections:
-        vc = connections[ctx.guild.id]
-        vc.stop_recording()
-        del connections[ctx.guild.id]
-        print("Stopped recording.")
+        
+    # Create the list
+    list_id = db.create_sound_list(list_name, ctx.author.name)
+    if list_id:
+        await ctx.respond(f"Created list '{list_name}'.", ephemeral=True)
+        
+        # Send a message confirming the creation
+        await behavior.send_message(
+            title="List Created",
+            description=f"Created a new sound list: '{list_name}'\nAdd sounds with `/addtolist`."
+        )
     else:
-        print("not recording")
+        await ctx.respond("Failed to create list.", ephemeral=True)
+
+@bot.slash_command(name="addtolist", description="Add a sound to a sound list")
+async def add_to_list(
+    ctx, 
+    sound: Option(str, "Sound to add to the list", autocomplete=get_sound_autocomplete, required=True),
+    list_name: Option(str, "Name of the list", autocomplete=get_list_autocomplete, required=True)
+):
+    # Get the list
+    sound_list = db.get_list_by_name(list_name)
+    if not sound_list:
+        await ctx.respond(f"List '{list_name}' not found.", ephemeral=True)
+        return
+    
+    # Get the sound ID
+    soundid = db.get_sounds_by_similarity(sound)[0][1]
+        
+    # Add the sound to the list
+    success, message = db.add_sound_to_list(sound_list[0], soundid)
+    if success:
+        # Get the list creator for the success message
+        list_creator = sound_list[2]
+        
+        # If the user adding the sound is not the creator, include that in the message
+        if list_creator != ctx.author.name:
+            await ctx.respond(f"Added sound '{sound}' to {list_creator}'s list '{list_name}'.", ephemeral=True)
+            
+            # Optionally notify in the channel about the addition
+            await behavior.send_message(
+                title=f"Sound Added to List",
+                description=f"{ctx.author.name} added '{sound}' to {list_creator}'s list '{list_name}'."
+            )
+        else:
+            await ctx.respond(f"Added sound '{sound}' to your list '{list_name}'.", ephemeral=True)
+    else:
+        await ctx.respond(f"Failed to add sound to list: {message}", ephemeral=True)
+
+@bot.slash_command(name="removefromlist", description="Remove a sound from one of your lists")
+async def remove_from_list(
+    ctx, 
+    sound: Option(str, "Sound to remove from the list", required=True),
+    list_name: Option(str, "Name of your list", autocomplete=get_list_autocomplete, required=True)
+):
+    # Get the list
+    sound_list = db.get_list_by_name(list_name)
+    if not sound_list:
+        await ctx.respond(f"List '{list_name}' not found.", ephemeral=True)
+        return
+    
+    # Check if the user is the creator of the list
+    if sound_list[2] != ctx.author.name:
+        await ctx.respond(f"You don't have permission to modify the list '{list_name}'. Only the creator ({sound_list[2]}) can remove sounds from it.", ephemeral=True)
+        return
+        
+    # Remove the sound from the list
+    success = db.remove_sound_from_list(sound_list[0], sound)
+    if success:
+        await ctx.respond(f"Removed sound '{sound}' from list '{list_name}'.", ephemeral=True)
+    else:
+        await ctx.respond("Failed to remove sound from list.", ephemeral=True)
+
+@bot.slash_command(name="deletelist", description="Delete one of your sound lists")
+async def delete_list(ctx, list_name: Option(str, "Name of your list", autocomplete=get_list_autocomplete, required=True)):
+    # Get the list
+    sound_list = db.get_list_by_name(list_name)
+    if not sound_list:
+        await ctx.respond(f"List '{list_name}' not found.", ephemeral=True)
+        return
+    
+    # Check if the user is the creator of the list
+    if sound_list[2] != ctx.author.name:
+        await ctx.respond(f"You don't have permission to delete the list '{list_name}'. Only the creator ({sound_list[2]}) can delete it.", ephemeral=True)
+        return
+        
+    # Delete the list
+    success = db.delete_sound_list(sound_list[0])
+    if success:
+        await ctx.respond(f"Deleted list '{list_name}'.", ephemeral=True)
+        
+        # Send a message confirming the deletion
+        await behavior.send_message(
+            title="List Deleted",
+            description=f"The list '{list_name}' has been deleted."
+        )
+    else:
+        await ctx.respond("Failed to delete list.", ephemeral=True)
+
+@bot.slash_command(name="showlist", description="Display a sound list with buttons")
+async def show_list(ctx, list_name: Option(str, "Name of the list to display", autocomplete=get_list_autocomplete, required=True)):
+    # Get the list
+    sound_list = db.get_list_by_name(list_name)
+    if not sound_list:
+        await ctx.respond(f"List '{list_name}' not found.", ephemeral=True)
+        return
+        
+    list_id = sound_list[0]
+    
+    # Get the sounds in the list
+    sounds = db.get_sounds_in_list(list_id)
+    if not sounds:
+        await ctx.respond(f"List '{list_name}' is empty.", ephemeral=True)
+        return
+        
+    # Create a paginated view with buttons for each sound
+    from Classes.UI import PaginatedSoundListView
+    view = PaginatedSoundListView(behavior, list_id, list_name, sounds, ctx.author.name)
+    
+    # Send a message with the view
+    await behavior.send_message(
+        title=f"Sound List: {list_name} (Page 1/{len(view.pages)})",
+        description=f"Contains {len(sounds)} sounds. Showing sounds 1-{min(8, len(sounds))} of {len(sounds)}",
+        view=view
+    )
+    
+    # Remove the redundant confirmation message
+    await ctx.respond(delete_after=0)
+
+@bot.slash_command(name="mylists", description="Show your sound lists")
+async def my_lists(ctx):
+    # Get the user's lists
+    lists = db.get_sound_lists(creator=ctx.author.name)
+    if not lists:
+        await ctx.respond("You don't have any sound lists yet. Create one with `/createlist`.", ephemeral=True)
+        return
+        
+    # Create a view with buttons for each list
+    from Classes.UI import UserSoundListsView
+    view = UserSoundListsView(behavior, lists, ctx.author.name)
+    
+    # Send a message with the view
+    await behavior.send_message(
+        title="Your Sound Lists",
+        description=f"You have {len(lists)} sound lists. Click a list to view its sounds.",
+        view=view
+    )
+    
+    # Remove the redundant confirmation message
+    await ctx.respond(delete_after=0)
+
+@bot.slash_command(name="showlists", description="Show all available sound lists")
+async def show_lists(ctx):
+    # Get all sound lists
+    lists = db.get_sound_lists()
+    if not lists:
+        await ctx.respond("There are no sound lists available yet. Create one with `/createlist`.", ephemeral=True)
+        return
+    
+    # Create a view with buttons for each list
+    from Classes.UI import UserSoundListsView
+    view = UserSoundListsView(behavior, lists, None)  # Pass None as creator to indicate showing all lists
+    
+    # Send a message with the view
+    await behavior.send_message(
+        title="All Sound Lists",
+        description=f"There are {len(lists)} sound lists available. Click a list to view its sounds.",
+        view=view
+    )
+    
+    await ctx.respond(delete_after=0)
 
 @bot.event
 async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):

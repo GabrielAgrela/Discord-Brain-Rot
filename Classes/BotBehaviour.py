@@ -424,6 +424,32 @@ class BotBehavior:
                     if extra != "":
                         description.append(f"Similarity: {extra}%")
                     
+                    # Get lists containing this sound
+                    db = Database()
+                    sound_filename = sound_info[2] if sound_info else audio_file
+                    sound_id = sound_info[0] if sound_info else None
+                    
+                    # Add lists information
+                    lists = db.get_lists_containing_sound(sound_filename)
+                    if lists:
+                        list_names = [f"**{list_name}** (by {creator})" for _, list_name, creator in lists]
+                        if len(list_names) == 1:
+                            description.append(f"📋 In list: {list_names[0]}")
+                        else:
+                            description.append(f"📋 In lists: {', '.join(list_names[:3])}")
+                            if len(list_names) > 3:
+                                description[-1] += f" and {len(list_names) - 3} more"
+                    
+                    # Add favorites information
+                    if sound_id:
+                        favorited_by = db.get_users_who_favorited_sound(sound_id)
+                        if favorited_by:
+                            if len(favorited_by) == 1:
+                                description.append(f"⭐ Favorited by: **{favorited_by[0]}**")
+                            else:
+                                description.append(f"⭐ Favorited by: **{favorited_by[0]}**, **{favorited_by[1]}**" + 
+                                                 (f" and {len(favorited_by) - 2} others" if len(favorited_by) > 2 else ""))
+                    
                     # Initialize progress bar
                     current_time = "0:00"
                     description.append(f"Duration: {current_time} / {duration_str}")
@@ -491,29 +517,43 @@ class BotBehavior:
                         current_seconds = int(elapsed % 60)
                         current_time = f"{current_minutes}:{current_seconds:02d}"
                         
-                        description = []
-                        if extra != "":
-                            description.append(f"Similarity: {extra}%")
-                        description.append(f"Duration: {current_time} / {duration_str}")
-                        description.append(f"Progress: {progress_bar}")
-                        description_text = "\n".join(description)
+                        # Get the current description and update only the progress parts
+                        if sound_message.embeds:
+                            embed = sound_message.embeds[0]
+                            description_lines = embed.description.split('\n') if embed.description else []
+                            
+                            # Keep all lines except duration and progress
+                            updated_description = []
+                            for line in description_lines:
+                                if not line.startswith("Duration:") and not line.startswith("Progress:"):
+                                    updated_description.append(line)
+                            
+                            # Add updated duration and progress
+                            updated_description.append(f"Duration: {current_time} / {duration_str}")
+                            updated_description.append(f"Progress: {progress_bar}")
+                            
+                            embed.description = "\n".join(updated_description)
+                            await sound_message.edit(embed=embed)
                         
-                        embed = sound_message.embeds[0]
-                        embed.description = description_text
-                        await sound_message.edit(embed=embed)
-                    await asyncio.sleep(1)
+                        await asyncio.sleep(1)  # Update every second
                 
                 # Remove only the progress bar when done
                 if sound_message and not self.stop_progress_update:
-                    description = []
-                    if extra != "":
-                        description.append(f"Similarity: {extra}%")
-                    description.append(f"Duration: {duration_str}")
-                    description_text = "\n".join(description) if description else None
-                    
-                    embed = sound_message.embeds[0]
-                    embed.description = description_text
-                    await sound_message.edit(embed=embed)
+                    if sound_message.embeds:
+                        embed = sound_message.embeds[0]
+                        description_lines = embed.description.split('\n') if embed.description else []
+                        
+                        # Keep all lines except duration and progress
+                        updated_description = []
+                        for line in description_lines:
+                            if not line.startswith("Duration:") and not line.startswith("Progress:"):
+                                updated_description.append(line)
+                        
+                        # Add just the final duration
+                        updated_description.append(f"Duration: {duration_str}")
+                        
+                        embed.description = "\n".join(updated_description)
+                        await sound_message.edit(embed=embed)
                 
             except discord.ClientException as e:
                 if "Not connected to voice" in str(e):

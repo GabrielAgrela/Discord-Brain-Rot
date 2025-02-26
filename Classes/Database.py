@@ -47,7 +47,28 @@ class Database:
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
             );
             '''
-
+            
+            # SQL command to create 'sound_lists' table if it doesn't exist
+            create_sound_lists_table = '''
+            CREATE TABLE IF NOT EXISTS sound_lists (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                list_name TEXT NOT NULL,
+                creator TEXT NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+            '''
+            
+            # SQL command to create 'sound_list_items' table if it doesn't exist
+            create_sound_list_items_table = '''
+            CREATE TABLE IF NOT EXISTS sound_list_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                list_id INTEGER NOT NULL,
+                sound_filename TEXT NOT NULL,
+                added_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (list_id) REFERENCES sound_lists (id) ON DELETE CASCADE
+            );
+            '''
+            
             # SQL command to create 'sounds' table if it doesn't exist
             create_sounds_table = '''
             CREATE TABLE IF NOT EXISTS sounds (
@@ -71,16 +92,19 @@ class Database:
             '''
 
             # Execute the SQL commands
-            cursor.execute(create_actions_table)
-            cursor.execute(create_sounds_table)
-            cursor.execute(create_users_table)
+            #cursor.execute(create_actions_table)
+            cursor.execute(create_sound_lists_table)
+            cursor.execute(create_sound_list_items_table)
+            #cursor.execute(create_sounds_table)
+            #cursor.execute(create_users_table)
+            
             print("Tables created successfully")
 
             # Commit the changes and close the connection
             conn.commit()
             print("Changes committed")
-        except sqlite3.Error as e:
-            print(f"An error occurred: {e}")
+        except Exception as e:
+            print(f"Error setting up database: {e}")
         finally:
             if conn:
                 conn.close()
@@ -506,18 +530,186 @@ class Database:
             if blacklist is not None:
                 self.cursor.execute("UPDATE sounds SET blacklist = ? WHERE Filename = ?;", (blacklist, filename))
             if slap is not None:
-                self.cursor.execute("UPDATE sounds SET slap = ? WHERE Filename = ?;", (slap, filename))
+                self.cursor.execute("UPDATE sounds SET slap = ? WHERE filename = ?", (slap, filename))
             self.conn.commit()
-            if new_filename is not None:
-                await self.behavior.send_message(title=f"Modified {filename} to {new_filename}")
-            print("Sound updated successfully")
-        except sqlite3.Error as e:
-            print(f"An error occurred: {e}")
+            return True
+        except Exception as e:
+            print(f"Error updating sound: {e}")
+            return False
+            
+    # Sound List Methods
+    def create_sound_list(self, list_name, creator):
+        """Create a new sound list"""
+        try:
+            self.cursor.execute(
+                "INSERT INTO sound_lists (list_name, creator) VALUES (?, ?)",
+                (list_name, creator)
+            )
+            self.conn.commit()
+            return self.cursor.lastrowid
+        except Exception as e:
+            print(f"Error creating sound list: {e}")
+            return None
+            
+    def add_sound_to_list(self, list_id, sound_filename):
+        """Add a sound to a list"""
+        try:
+            # Check if the sound exists
+            self.cursor.execute("SELECT filename FROM sounds WHERE originalfilename = ?", (sound_filename,))
+            sound = self.cursor.fetchone()
+            if not sound:
+                return False, "Sound not found"
+                
+            # Check if the sound is already in the list
+            self.cursor.execute(
+                "SELECT id FROM sound_list_items WHERE list_id = ? AND sound_filename = ?",
+                (list_id, sound_filename)
+            )
+            if self.cursor.fetchone():
+                return False, "Sound already in list"
+                
+            # Add the sound to the list
+            self.cursor.execute(
+                "INSERT INTO sound_list_items (list_id, sound_filename) VALUES (?, ?)",
+                (list_id, sound_filename)
+            )
+            self.conn.commit()
+            return True, "Sound added to list"
+        except Exception as e:
+            print(f"Error adding sound to list: {e}")
+            return False, str(e)
+            
+    def remove_sound_from_list(self, list_id, sound_filename):
+        """Remove a sound from a list"""
+        try:
+            self.cursor.execute(
+                "DELETE FROM sound_list_items WHERE list_id = ? AND sound_filename = ?",
+                (list_id, sound_filename)
+            )
+            self.conn.commit()
+            return True
+        except Exception as e:
+            print(f"Error removing sound from list: {e}")
+            return False
+            
+    def delete_sound_list(self, list_id):
+        """Delete a sound list"""
+        try:
+            # Delete the list items first
+            self.cursor.execute("DELETE FROM sound_list_items WHERE list_id = ?", (list_id,))
+            # Delete the list
+            self.cursor.execute("DELETE FROM sound_lists WHERE id = ?", (list_id,))
+            self.conn.commit()
+            return True
+        except Exception as e:
+            print(f"Error deleting sound list: {e}")
+            return False
+            
+    def get_sound_lists(self, creator=None):
+        """Get all sound lists or lists created by a specific user"""
+        try:
+            if creator:
+                self.cursor.execute(
+                    "SELECT id, list_name, creator, created_at FROM sound_lists WHERE creator = ? ORDER BY created_at DESC",
+                    (creator,)
+                )
+            else:
+                self.cursor.execute(
+                    "SELECT id, list_name, creator, created_at FROM sound_lists ORDER BY created_at DESC"
+                )
+            return self.cursor.fetchall()
+        except Exception as e:
+            print(f"Error getting sound lists: {e}")
+            return []
+            
+    def get_sound_list(self, list_id):
+        """Get a specific sound list by ID"""
+        try:
+            self.cursor.execute(
+                "SELECT id, list_name, creator, created_at FROM sound_lists WHERE id = ?",
+                (list_id,)
+            )
+            return self.cursor.fetchone()
+        except Exception as e:
+            print(f"Error getting sound list: {e}")
+            return None
+            
+    def get_sounds_in_list(self, list_id):
+        """Get all sounds in a list"""
+        try:
+            self.cursor.execute(
+                """
+                SELECT s.filename, s.originalfilename 
+                FROM sound_list_items sli
+                JOIN sounds s ON sli.sound_filename = s.filename
+                WHERE sli.list_id = ?
+                ORDER BY sli.added_at
+                """,
+                (list_id,)
+            )
+            return self.cursor.fetchall()
+        except Exception as e:
+            print(f"Error getting sounds in list: {e}")
+            return []
+            
+    def get_list_by_name(self, list_name, creator=None):
+        """Get a list by name and optionally creator"""
+        try:
+            if creator:
+                self.cursor.execute(
+                    "SELECT id, list_name, creator, created_at FROM sound_lists WHERE list_name = ? AND creator = ?",
+                    (list_name, creator)
+                )
+            else:
+                self.cursor.execute(
+                    "SELECT id, list_name, creator, created_at FROM sound_lists WHERE list_name = ?",
+                    (list_name,)
+                )
+            return self.cursor.fetchone()
+        except Exception as e:
+            print(f"Error getting list by name: {e}")
+            return None
 
-
-
-
-
+    def get_lists_containing_sound(self, sound_filename):
+        """Get all lists that contain a specific sound"""
+        try:
+            self.cursor.execute("""
+                SELECT sl.id, sl.list_name, sl.creator
+                FROM sound_lists sl
+                JOIN sound_list_items sli ON sl.id = sli.list_id
+                WHERE sli.sound_filename = ?
+                ORDER BY sl.list_name
+            """, (sound_filename,))
+            return self.cursor.fetchall()
+        except Exception as e:
+            print(f"Error getting lists containing sound: {e}")
+            return []
+            
+    def get_users_who_favorited_sound(self, sound_id):
+        """Get all users who have favorited a specific sound"""
+        try:
+            # Get the most recent favorite/unfavorite action for each user for this sound
+            query = """
+            WITH UserActions AS (
+                SELECT 
+                    username,
+                    action,
+                    timestamp,
+                    ROW_NUMBER() OVER (PARTITION BY username ORDER BY timestamp DESC) as rn
+                FROM actions
+                WHERE target = ?
+                AND action IN ('favorite_sound', 'unfavorite_sound')
+            )
+            SELECT username
+            FROM UserActions
+            WHERE rn = 1 AND action = 'favorite_sound'
+            ORDER BY username
+            """
+            self.cursor.execute(query, (sound_id,))
+            return [row[0] for row in self.cursor.fetchall()]
+        except Exception as e:
+            print(f"Error getting users who favorited sound: {e}")
+            return []
 
 class Migrate:
     # function that migrates sounds.csv to the database table 'sounds'

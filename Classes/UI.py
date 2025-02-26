@@ -278,15 +278,8 @@ class BrainRotButton(Button):
         self.bot_behavior = bot_behavior
 
     async def callback(self, interaction):
-        if (datetime.now() - self.bot_behavior.lastInteractionDateTime).total_seconds() > 1:
-            asyncio.create_task(interaction.channel.send("Gertrudes may need some seconds for this one", delete_after=3))
-            self.bot_behavior.color = discord.Color.teal()
-            task = random.choice([self.bot_behavior.family_guy, self.bot_behavior.family_guy, self.bot_behavior.family_guy, self.bot_behavior.subway_surfers, self.bot_behavior.slice_all])
-            asyncio.create_task(task(interaction.user))
-            self.bot_behavior.lastInteractionDateTime = datetime.now()
-        else:
-            asyncio.create_task(interaction.channel.send("STOP SPAMMING, GERTRUDES IS RUNNING ON 150€ AMAZON SECOND HAND THINKPAD 🔥🔥🔥", delete_after=3))
         await interaction.response.defer()
+        await self.bot_behavior.send_message(title="Brain Rot", description="Sounds that will rot your brain", footer="Brain Rot", thumbnail="https://i.imgur.com/5QKvYRR.png")
 
 class StatsButton(Button):
     def __init__(self, bot_behavior, **kwargs):
@@ -394,18 +387,39 @@ class LeaveEventButton(Button):
 class SoundBeingPlayedView(View):
     def __init__(self, bot_behavior, audio_file, user_id=None):
         super().__init__(timeout=None)
-        self.add_item(ReplayButton(bot_behavior, audio_file, label=None, emoji="🔁", style=discord.ButtonStyle.primary))
-        self.add_item(FavoriteButton(bot_behavior, audio_file))
-        self.add_item(BlacklistButton(bot_behavior, audio_file))
-        self.add_item(ChangeSoundNameButton(bot_behavior, audio_file, label="📝", style=discord.ButtonStyle.primary))
-        self.add_item(SlapButton(bot_behavior, audio_file))
-        #self.add_item(IsolateButton(bot_behavior, audio_file, label="🧑‍🎤🎶❌", style=discord.ButtonStyle.primary))
-        self.add_item(STSButton(bot_behavior, audio_file, "ventura", label="🐷", style=discord.ButtonStyle.primary))
-        self.add_item(STSButton(bot_behavior, audio_file, "tyson", label="🐵", style=discord.ButtonStyle.primary))
-        self.add_item(STSButton(bot_behavior, audio_file, "costa", label="🐗", style=discord.ButtonStyle.primary))
-        self.add_item(JoinEventButton(bot_behavior, audio_file, user_id))
-        self.add_item(LeaveEventButton(bot_behavior, audio_file, user_id))
+        self.bot_behavior = bot_behavior
+        self.audio_file = audio_file
+        self.user_id = user_id
         
+        # Add the replay button
+        self.add_item(ReplayButton(bot_behavior=bot_behavior, audio_file=audio_file, emoji="🔁", style=discord.ButtonStyle.primary))
+        
+        # Add the favorite button
+        self.add_item(FavoriteButton(bot_behavior=bot_behavior, audio_file=audio_file))
+        
+        # Add the blacklist button
+        self.add_item(BlacklistButton(bot_behavior=bot_behavior, audio_file=audio_file))
+        
+        # Add the slap button
+        self.add_item(SlapButton(bot_behavior=bot_behavior, audio_file=audio_file))
+        
+        # Add the isolate button
+        #self.add_item(IsolateButton(bot_behavior=bot_behavior, audio_file=audio_file, label="Isolate", style=discord.ButtonStyle.secondary))
+        
+        # Add the change sound name button
+        self.add_item(ChangeSoundNameButton(bot_behavior=bot_behavior, sound_name=audio_file, emoji="📝", style=discord.ButtonStyle.primary))
+        
+        # Add the join event button
+        self.add_item(JoinEventButton(bot_behavior=bot_behavior, audio_file=audio_file, user_id=user_id))
+        
+        # Add the leave event button
+        self.add_item(LeaveEventButton(bot_behavior=bot_behavior, audio_file=audio_file, user_id=user_id))
+        
+        # Add the STS button
+        #self.add_item(STSButton(bot_behavior=bot_behavior, audio_file=audio_file, char="ventura", label="STS Ventura", style=discord.ButtonStyle.secondary))
+        
+        # Add the Add to List button
+        self.add_item(AddToListButton(bot_behavior=bot_behavior, sound_filename=audio_file, emoji="📃", style=discord.ButtonStyle.success))
 
 class PaginationButton(Button):
     def __init__(self, label, emoji, style, custom_id, row):
@@ -708,3 +722,423 @@ class EventView(View):
         super().__init__(timeout=None)
         for sound in sounds:
             self.add_item(DeleteEventButton(bot_behavior, user_id, event, sound))
+
+# Sound List UI Components
+class SoundListButton(Button):
+    def __init__(self, bot_behavior, list_id, list_name, **kwargs):
+        # If label is not provided in kwargs, use list_name as the label
+        if 'label' not in kwargs:
+            kwargs['label'] = list_name
+        if 'style' not in kwargs:
+            kwargs['style'] = discord.ButtonStyle.primary
+        super().__init__(**kwargs)
+        self.bot_behavior = bot_behavior
+        self.list_id = list_id
+        self.list_name = list_name
+
+    async def callback(self, interaction):
+        await interaction.response.defer()
+        # Get the sounds in the list
+        sounds = Database().get_sounds_in_list(self.list_id)
+        if not sounds:
+            await self.bot_behavior.send_message(
+                title=f"Sound List: {self.list_name}",
+                description="This list is empty. Add sounds with `/addtolist`."
+            )
+            return
+            
+        # Create a paginated view with buttons for each sound
+        view = PaginatedSoundListView(self.bot_behavior, self.list_id, self.list_name, sounds, interaction.user.name)
+        
+        # Send a message with the view
+        await self.bot_behavior.send_message(
+            title=f"Sound List: {self.list_name} (Page 1/{len(view.pages)})",
+            description=f"Contains {len(sounds)} sounds. Showing sounds 1-{min(8, len(sounds))} of {len(sounds)}",
+            view=view
+        )
+
+class SoundListItemButton(Button):
+    def __init__(self, bot_behavior, sound_filename, display_name, **kwargs):
+        # If label is not provided in kwargs, use display_name as the label
+        if 'label' not in kwargs:
+            kwargs['label'] = display_name
+        if 'style' not in kwargs:
+            kwargs['style'] = discord.ButtonStyle.secondary
+        super().__init__(**kwargs)
+        self.bot_behavior = bot_behavior
+        self.sound_filename = sound_filename
+
+    async def callback(self, interaction):
+        await interaction.response.defer()
+        # Play the sound
+        asyncio.create_task(self.bot_behavior.play_audio(
+            interaction.channel, 
+            self.sound_filename, 
+            interaction.user.name
+        ))
+        # Record the action
+        Database().insert_action(interaction.user.name, "play_from_list", self.sound_filename)
+
+class CreateListButton(Button):
+    def __init__(self, bot_behavior, **kwargs):
+        super().__init__(**kwargs)
+        self.bot_behavior = bot_behavior
+
+    async def callback(self, interaction):
+        # Create a modal for the user to enter the list name
+        modal = CreateListModal(self.bot_behavior)
+        await interaction.response.send_modal(modal)
+
+class AddToListButton(Button):
+    def __init__(self, bot_behavior, sound_filename, **kwargs):
+        super().__init__(**kwargs)
+        self.bot_behavior = bot_behavior
+        self.sound_filename = sound_filename
+
+    async def callback(self, interaction):
+        # Get all available lists instead of just the user's lists
+        lists = Database().get_sound_lists()
+        if not lists:
+            await interaction.response.send_message(
+                "There are no sound lists available. Create one with `/createlist`.",
+                ephemeral=True
+            )
+            return
+            
+        # Create a select menu with all available lists
+        select = AddToListSelect(self.bot_behavior, self.sound_filename, lists)
+        view = discord.ui.View()
+        view.add_item(select)
+        
+        await interaction.response.send_message(
+            "Select a list to add this sound to:",
+            view=view,
+            ephemeral=True
+        )
+
+class RemoveFromListButton(Button):
+    def __init__(self, bot_behavior, list_id, list_name, sound_filename, **kwargs):
+        super().__init__(**kwargs)
+        self.bot_behavior = bot_behavior
+        self.list_id = list_id
+        self.list_name = list_name
+        self.sound_filename = sound_filename
+
+    async def callback(self, interaction):
+        await interaction.response.defer()
+        # Get the list
+        sound_list = Database().get_sound_list(self.list_id)
+        if not sound_list:
+            await interaction.followup.send("List not found.", ephemeral=True)
+            return
+            
+        # Check if the user is the creator of the list
+        if sound_list[2] != interaction.user.name:
+            await interaction.followup.send("You can only remove sounds from your own lists.", ephemeral=True)
+            return
+            
+        # Remove the sound from the list
+        success = Database().remove_sound_from_list(self.list_id, self.sound_filename)
+        if success:
+            await interaction.followup.send(f"Removed sound from list '{self.list_name}'.", ephemeral=True)
+            
+            # Refresh the list view
+            sounds = Database().get_sounds_in_list(self.list_id)
+            if not sounds:
+                await self.bot_behavior.send_message(
+                    title=f"Sound List: {self.list_name}",
+                    description="This list is now empty. Add sounds with `/addtolist`."
+                )
+                return
+                
+            # Use the paginated view instead of the regular view
+            view = PaginatedSoundListView(self.bot_behavior, self.list_id, self.list_name, sounds, interaction.user.name)
+            await self.bot_behavior.send_message(
+                title=f"Sound List: {self.list_name} (Page 1/{len(view.pages)})",
+                description=f"Contains {len(sounds)} sounds. Showing sounds 1-{min(8, len(sounds))} of {len(sounds)}",
+                view=view
+            )
+        else:
+            await interaction.followup.send("Failed to remove sound from list.", ephemeral=True)
+
+class DeleteListButton(Button):
+    def __init__(self, bot_behavior, list_id, list_name, **kwargs):
+        super().__init__(**kwargs)
+        self.bot_behavior = bot_behavior
+        self.list_id = list_id
+        self.list_name = list_name
+
+    async def callback(self, interaction):
+        await interaction.response.defer()
+        # Get the list
+        sound_list = Database().get_sound_list(self.list_id)
+        if not sound_list:
+            await interaction.followup.send("List not found.", ephemeral=True)
+            return
+            
+        # Check if the user is the creator of the list
+        if sound_list[2] != interaction.user.name:
+            await interaction.followup.send("You can only delete your own lists.", ephemeral=True)
+            return
+            
+        # Delete the list
+        success = Database().delete_sound_list(self.list_id)
+        if success:
+            await interaction.followup.send(f"Deleted list '{self.list_name}'.", ephemeral=True)
+            
+            # Send a message confirming the deletion
+            await self.bot_behavior.send_message(
+                title="List Deleted",
+                description=f"The list '{self.list_name}' has been deleted."
+            )
+        else:
+            await interaction.followup.send("Failed to delete list.", ephemeral=True)
+
+class AddToListSelect(discord.ui.Select):
+    def __init__(self, bot_behavior, sound_filename, lists):
+        self.bot_behavior = bot_behavior
+        self.sound_filename = sound_filename
+        
+        # Create options for each list, showing the creator's name
+        options = [
+            discord.SelectOption(
+                label=f"{list_info[1]} (by {list_info[2]})",  # list_name (by creator)
+                value=str(list_info[0]),  # list_id
+                description=f"Created by {list_info[2]}"  # Show creator in description
+            )
+            for list_info in lists[:25]  # Discord limits to 25 options
+        ]
+        
+        super().__init__(
+            placeholder="Choose a list...",
+            min_values=1,
+            max_values=1,
+            options=options
+        )
+        
+    async def callback(self, interaction):
+        await interaction.response.defer()
+        list_id = int(self.values[0])
+        
+        # Get the list name and creator
+        list_info = Database().get_sound_list(list_id)
+        if not list_info:
+            await interaction.followup.send("List not found.", ephemeral=True)
+            return
+            
+        list_name = list_info[1]
+        list_creator = list_info[2]
+        
+        # Add the sound to the list
+        success, message = Database().add_sound_to_list(list_id, self.sound_filename)
+        if success:
+            # If the user adding the sound is not the creator, include that in the message
+            if list_creator != interaction.user.name:
+                await interaction.followup.send(f"Added sound to {list_creator}'s list '{list_name}'.", ephemeral=True)
+                
+                # Optionally notify in the channel about the addition
+                await self.bot_behavior.send_message(
+                    title=f"Sound Added to List",
+                    description=f"{interaction.user.name} added a sound to {list_creator}'s list '{list_name}'."
+                )
+            else:
+                await interaction.followup.send(f"Added sound to your list '{list_name}'.", ephemeral=True)
+        else:
+            await interaction.followup.send(f"Failed to add sound to list: {message}", ephemeral=True)
+
+class CreateListModal(discord.ui.Modal):
+    def __init__(self, bot_behavior):
+        super().__init__(title="Create Sound List")
+        self.bot_behavior = bot_behavior
+        
+        self.list_name = discord.ui.TextInput(
+            label="List Name",
+            placeholder="Enter a name for your sound list",
+            min_length=1,
+            max_length=100
+        )
+        self.add_item(self.list_name)
+        
+    async def on_submit(self, interaction):
+        await interaction.response.defer()
+        list_name = self.list_name.value
+        
+        # Check if the user already has a list with this name
+        existing_list = Database().get_list_by_name(list_name, interaction.user.name)
+        if existing_list:
+            await interaction.followup.send(f"You already have a list named '{list_name}'.", ephemeral=True)
+            return
+            
+        # Create the list
+        list_id = Database().create_sound_list(list_name, interaction.user.name)
+        if list_id:
+            await interaction.followup.send(f"Created list '{list_name}'.", ephemeral=True)
+            
+            # Send a message confirming the creation
+            await self.bot_behavior.send_message(
+                title="List Created",
+                description=f"Created a new sound list: '{list_name}'\nAdd sounds with `/addtolist`."
+            )
+        else:
+            await interaction.followup.send("Failed to create list.", ephemeral=True)
+
+class SoundListPaginationButton(Button):
+    def __init__(self, label, emoji, style, custom_id, row):
+        super().__init__(label=label, emoji=emoji, style=style, custom_id=custom_id, row=row)
+
+    async def callback(self, interaction):
+        await interaction.response.defer()
+        view = self.view
+        
+        # Check if the user who clicked is the owner of the view
+        if interaction.user.name != view.owner:
+            await interaction.followup.send("Only the user who opened this list can navigate through pages! 😤", ephemeral=True)
+            return
+            
+        if self.custom_id == "previous":
+            # If on first page and going previous, wrap to last page
+            if view.current_page == 0:
+                view.current_page = len(view.pages) - 1
+            else:
+                view.current_page = view.current_page - 1
+        elif self.custom_id == "next":
+            # If on last page and going next, wrap to first page
+            if view.current_page == len(view.pages) - 1:
+                view.current_page = 0
+            else:
+                view.current_page = view.current_page + 1
+        
+        # Update buttons state
+        view.update_buttons()
+        
+        # Update both the content and description
+        total_sounds = sum(len(page) for page in view.pages)
+        current_page_start = (view.current_page * 8) + 1
+        current_page_end = min((view.current_page + 1) * 8, total_sounds)
+        
+        await interaction.message.edit(
+            content=None,
+            embed=discord.Embed(
+                title=f"Sound List: {view.list_name} (Page {view.current_page + 1}/{len(view.pages)})",
+                description=f"Contains {total_sounds} sounds. Showing sounds {current_page_start}-{current_page_end} of {total_sounds}",
+                color=discord.Color.blue()
+            ),
+            view=view
+        )
+
+class PaginatedSoundListView(View):
+    def __init__(self, bot_behavior, list_id, list_name, sounds, owner):
+        super().__init__(timeout=None)
+        self.bot_behavior = bot_behavior
+        self.list_id = list_id
+        self.list_name = list_name
+        self.current_page = 0
+        self.owner = owner  # Store the user who created the view
+        
+        # We can have 4 rows of sound buttons (row 1-4, as row 0 is for navigation)
+        # Each row can have 2 pairs of buttons (sound + remove)
+        # So we can show 8 sounds per page (2 pairs * 4 rows)
+        chunk_size = 8
+        self.pages = [sounds[i:i + chunk_size] for i in range(0, len(sounds), chunk_size)]
+        
+        # Add navigation buttons
+        self.add_item(SoundListPaginationButton("Previous", "⬅️", discord.ButtonStyle.primary, "previous", 0))
+        self.add_item(SoundListPaginationButton("Next", "➡️", discord.ButtonStyle.primary, "next", 0))
+        
+        # Add delete list button in the navigation row if on first page
+        if self.current_page == 0:
+            self.add_item(DeleteListButton(
+                bot_behavior=self.bot_behavior,
+                list_id=self.list_id,
+                list_name=self.list_name,
+                label="Delete List",
+                style=discord.ButtonStyle.danger,
+                row=0
+            ))
+        
+        # Add initial sound buttons
+        self.update_page_buttons()
+    
+    def update_buttons(self):
+        # Clear existing sound buttons
+        self.clear_items()
+        
+        # Re-add navigation buttons
+        self.add_item(SoundListPaginationButton("Previous", "⬅️", discord.ButtonStyle.primary, "previous", 0))
+        self.add_item(SoundListPaginationButton("Next", "➡️", discord.ButtonStyle.primary, "next", 0))
+        
+        # Add delete list button in the navigation row if on first page
+        if self.current_page == 0:
+            self.add_item(DeleteListButton(
+                bot_behavior=self.bot_behavior,
+                list_id=self.list_id,
+                list_name=self.list_name,
+                label="Delete List",
+                style=discord.ButtonStyle.danger,
+                row=0
+            ))
+        
+        # Add sound buttons for current page
+        self.update_page_buttons()
+    
+    def update_page_buttons(self):
+        if not self.pages:
+            return
+            
+        current_sounds = self.pages[self.current_page]
+        for i, (filename, original_name) in enumerate(current_sounds):
+            # Use the original name if available, otherwise use the filename
+            display_name = original_name if original_name else filename
+            # Truncate long names
+            if len(display_name) > 80:
+                display_name = display_name[:77] + "..."
+            
+            # Calculate row (starting from row 1, as row 0 is for navigation)
+            # We can fit 2 pairs (sound + remove) per row
+            row = (i // 2) + 1  # This will give us rows 1, 2, 3, 4 for up to 8 items
+            
+            # Add sound button
+            self.add_item(SoundListItemButton(
+                bot_behavior=self.bot_behavior,
+                sound_filename=filename,
+                display_name=display_name,
+                row=row
+            ))
+            
+            # Add remove button next to the sound button
+            self.add_item(RemoveFromListButton(
+                bot_behavior=self.bot_behavior,
+                list_id=self.list_id,
+                list_name=self.list_name,
+                sound_filename=filename,
+                label="❌",
+                style=discord.ButtonStyle.blurple,
+                row=row
+            ))
+
+class UserSoundListsView(discord.ui.View):
+    def __init__(self, bot_behavior, lists, username):
+        super().__init__(timeout=None)
+        self.bot_behavior = bot_behavior
+        
+        # Add buttons for each list (up to 25 due to Discord's limit)
+        for i, (list_id, list_name, creator, created_at) in enumerate(lists[:25]):
+            button_label = list_name
+            # If showing all lists (username is None), include creator name in button label
+            if username is None:
+                button_label = f"{list_name} (by {creator})"
+                
+            self.add_item(SoundListButton(
+                bot_behavior=bot_behavior,
+                list_id=list_id,
+                list_name=list_name,
+                label=button_label,
+                row=i // 5  # Organize buttons in rows of 5
+            ))
+            
+        # Add a create list button only when showing a specific user's lists
+        if username is not None:
+            self.add_item(CreateListButton(
+                bot_behavior=bot_behavior,
+                row=5  # Put at the bottom
+            ))
