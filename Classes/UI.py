@@ -1159,31 +1159,16 @@ class STSCharacterSelectButton(Button):
         await interaction.response.defer()
         
         # Create a view with buttons for each character
-        view = View(timeout=10)  # Auto-timeout after 20 seconds
-        view.add_item(STSButton(self.bot_behavior, self.audio_file, "ventura", label="Ventura 🐷", style=discord.ButtonStyle.secondary))
-        view.add_item(STSButton(self.bot_behavior, self.audio_file, "tyson", label="Tyson 🐵", style=discord.ButtonStyle.secondary))
-        view.add_item(STSButton(self.bot_behavior, self.audio_file, "costa", label="Costa 🐗", style=discord.ButtonStyle.secondary))
-        
-        # Add on_timeout handler to delete the message after the timeout
-        async def on_timeout():
-            try:
-                # Get the message from stored reference and delete it
-                if hasattr(view, 'message') and view.message:
-                    await view.message.delete()
-            except:
-                pass
-        
-        view.on_timeout = on_timeout
+        view = View(timeout=None)
+        view.add_item(STSButton(self.bot_behavior, self.audio_file, "ventura", label="STS Ventura", style=discord.ButtonStyle.secondary))
+        view.add_item(STSButton(self.bot_behavior, self.audio_file, "tyson", label="STS Tyson", style=discord.ButtonStyle.secondary))
+        view.add_item(STSButton(self.bot_behavior, self.audio_file, "costa", label="STS Costa", style=discord.ButtonStyle.secondary))
         
         # Send a message with the character selection buttons
-        message = await interaction.followup.send(
+        await interaction.followup.send(
             content=f"Select a character for Speech-To-Speech with sound '{os.path.basename(self.audio_file).replace('.mp3', '')}':",
             view=view,
-            ephemeral=True
+            ephemeral=True,
+            delete_after=10
         )
-        
-        # Store message reference on the view for deletion
-        view.message = message
-        
-        # Record the action
         Database().insert_action(interaction.user.name, "sts_character_select", Database().get_sound(self.audio_file, True)[0])
