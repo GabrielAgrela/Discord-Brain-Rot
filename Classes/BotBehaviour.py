@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 import time
 import discord
 import random
@@ -59,6 +59,8 @@ class BotBehavior:
         self.current_sound_message = None  # Track the current sound's message
         self.stop_progress_update = False  # Flag to control progress updates
         self.progress_already_updated = False  # Flag to track if progress has been updated with emoji
+        self.volume = 1.0  # Default volume for sound playback
+
 
     async def display_top_users(self, user, number_users=5, number_sounds=5, days=7, by="plays"):
         Database().insert_action(user.name, "list_top_users", by)
@@ -429,6 +431,53 @@ class BotBehavior:
                     sound_filename = sound_info[2] if sound_info else audio_file
                     sound_id = sound_info[0] if sound_info else None
                     
+                    # Get play count for this sound
+                    play_count = 0
+                    if sound_id:
+                        play_count = db.get_sound_play_count(sound_id)
+                        description.append(f"🔢 Play count: **{play_count + 1}**")
+                    
+                    # Add download date information
+                    if sound_id:
+                        download_date = db.get_sound_download_date(sound_id)
+                        if download_date and download_date != "Unknown date":
+                            try:
+                                # Check for the hardcoded date first
+                                if isinstance(download_date, str) and "2023-10-30" in download_date:
+                                    description.append(f"📅 Added: **Before Oct 30, 2023**")
+                                else:
+                                    # Parse the date string to a datetime object
+                                    if isinstance(download_date, str):
+                                        # Try different date formats
+                                        date_formats = [
+                                            "%Y-%m-%d %H:%M:%S",
+                                            "%Y-%m-%d %H:%M:%S.%f",
+                                            "%Y-%m-%dT%H:%M:%S",
+                                            "%Y-%m-%d"
+                                        ]
+                                        
+                                        date_obj = None
+                                        for date_format in date_formats:
+                                            try:
+                                                date_obj = datetime.strptime(download_date, date_format)
+                                                break
+                                            except ValueError:
+                                                continue
+                                        
+                                        if not date_obj:
+                                            raise ValueError(f"Could not parse date: {download_date}")
+                                    else:
+                                        date_obj = download_date
+                                    
+                                    # Format the date in a user-friendly way
+                                    formatted_date = date_obj.strftime("%b %d, %Y")
+                                    description.append(f"📅 Added: **{formatted_date}**")
+                            except Exception as e:
+                                print(f"Error formatting date: {e}")
+                                description.append(f"📅 Added: **{download_date}**")
+                        elif download_date:
+                            description.append(f"📅 Added: **{download_date}**")
+                    
                     # Add lists information
                     lists = db.get_lists_containing_sound(sound_filename)
                     if lists:
@@ -452,7 +501,7 @@ class BotBehavior:
                     
                     # Initialize progress bar
                     current_time = "0:00"
-                    description.append(f"Duration: {current_time} / {duration_str}")
+                    description.append(f"⏱️ Duration: {current_time} / {duration_str}")
                     description.append(f"Progress: ░░░░░░░░░░░░░░░░░░░░")
                     description_text = "\n".join(description) if description else None
                     
@@ -493,95 +542,93 @@ class BotBehavior:
 
             # Play the audio file
             try:
-                # Get sound info from database to check if it's a slap sound
-                sound_info = Database().get_sound(audio_file, True)
-                is_slap_sound = sound_info and sound_info[6] == 1  # Check slap attribute from database
+                audio_source = discord.FFmpegPCMAudio(
+                    audio_file_path,
+                    executable=self.ffmpeg_path,
+                    options=f'-af "volume={self.volume}"'
+                )
                 
-                if not is_slap_sound:
-                    await asyncio.sleep(.5)
-                audio_source = discord.FFmpegPCMAudio(executable=self.ffmpeg_path, source=audio_file_path)
+                # Required to avoid robotic sound
+                audio_source = discord.PCMVolumeTransformer(audio_source)
+
                 voice_client.play(audio_source, after=after_playing)
                 
-                # Update progress bar while playing
-                start_time = time.time()
-                while voice_client.is_playing() and not self.stop_progress_update:
-                    if sound_message and duration > 0:
-                        elapsed = time.time() - start_time
-                        progress = min(elapsed / duration, 1.0)
-                        bar_length = 20
-                        filled = '█' * int(bar_length * progress)
-                        empty = '░' * (bar_length - int(bar_length * progress))
-                        progress_bar = f"{filled}{empty}"
-                        
-                        current_minutes = int(elapsed // 60)
-                        current_seconds = int(elapsed % 60)
-                        current_time = f"{current_minutes}:{current_seconds:02d}"
-                        
-                        # Get the current description and update only the progress parts
-                        if sound_message.embeds:
-                            embed = sound_message.embeds[0]
-                            description_lines = embed.description.split('\n') if embed.description else []
-                            
-                            # Keep all lines except duration and progress
-                            updated_description = []
-                            for line in description_lines:
-                                if not line.startswith("Duration:") and not line.startswith("Progress:"):
-                                    updated_description.append(line)
-                            
-                            # Add updated duration and progress
-                            updated_description.append(f"Duration: {current_time} / {duration_str}")
-                            updated_description.append(f"Progress: {progress_bar}")
-                            
-                            embed.description = "\n".join(updated_description)
-                            await sound_message.edit(embed=embed)
-                        
-                        await asyncio.sleep(1)  # Update every second
-                
-                # Remove only the progress bar when done
-                if sound_message and not self.stop_progress_update:
-                    if sound_message.embeds:
-                        embed = sound_message.embeds[0]
-                        description_lines = embed.description.split('\n') if embed.description else []
-                        
-                        # Keep all lines except duration and progress
-                        updated_description = []
-                        for line in description_lines:
-                            if not line.startswith("Duration:") and not line.startswith("Progress:"):
-                                updated_description.append(line)
-                        
-                        # Add just the final duration
-                        updated_description.append(f"Duration: {duration_str}")
-                        
-                        embed.description = "\n".join(updated_description)
-                        await sound_message.edit(embed=embed)
-                
-            except discord.ClientException as e:
-                if "Not connected to voice" in str(e):
-                    #await self.send_error_message("Lost voice connection. Attempting to reconnect...")
-                    if retry_count < MAX_RETRIES:
-                        await self.play_audio(channel, audio_file, user, is_entrance, is_tts, extra, original_message, send_controls, retry_count + 1)
-                    return
-                else:
-                    raise e
+                self.playback_done.clear()
+                if sound_message and not is_slap_sound and duration > 0:
+                    # Start updating the progress bar
+                    await self.update_progress_bar(sound_message, duration)
+
+                return True
             except Exception as e:
-                await self.send_error_message(f"Error playing audio: {e}")
+                await self.send_error_message(f"Error playing sound: {e}")
                 print(f"Error playing audio: {e}")
-                if retry_count < MAX_RETRIES:
-                    await self.play_audio(channel, audio_file, user, is_entrance, is_tts, extra, original_message, send_controls, retry_count + 1)
-                return
-
-            await self.playback_done.wait()
-
+                import traceback
+                traceback.print_exc()
+                return False
         except Exception as e:
-            print(f"An error occurred: {e}")
-            #if error is  'NoneType' object is not subscriptable send message to bot channel
-            if "NoneType" in str(e):
-                await self.send_error_message(f"Seems like that sound is not available anymore.")
-            else:
-                await self.send_error_message(f"An error occurred: {e}")
-                if retry_count < MAX_RETRIES:
-                    await asyncio.sleep(1)
-                    await self.play_audio(channel, audio_file, user, is_entrance, is_tts, extra, original_message, send_controls, retry_count + 1)
+            await self.send_error_message(f"Error in play_audio: {e}")
+            print(f"Error in play_audio: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+    async def update_progress_bar(self, sound_message, duration):
+        """Update the progress bar for the currently playing sound"""
+        start_time = time.time()
+        duration_str = f"{int(duration // 60)}:{int(duration % 60):02d}"
+        voice_client = discord.utils.get(self.bot.voice_clients, channel__guild=sound_message.guild)
+        
+        while voice_client and voice_client.is_playing() and not self.stop_progress_update:
+            elapsed = time.time() - start_time
+            progress = min(elapsed / duration, 1.0)
+            bar_length = 20
+            filled = '█' * int(bar_length * progress)
+            empty = '░' * (bar_length - int(bar_length * progress))
+            progress_bar = f"{filled}{empty}"
+            
+            current_minutes = int(elapsed // 60)
+            current_seconds = int(elapsed % 60)
+            current_time = f"{current_minutes}:{current_seconds:02d}"
+            
+            # Get the current description and update only the progress parts
+            if sound_message.embeds:
+                embed = sound_message.embeds[0]
+                description_lines = embed.description.split('\n') if embed.description else []
+                
+                # Keep all lines except duration and progress
+                updated_description = []
+                for line in description_lines:
+                    # Check for any variation of the duration line (with or without emoji)
+                    if "Duration:" not in line and not line.startswith("Progress:"):
+                        updated_description.append(line)
+                
+                # Add updated duration and progress
+                updated_description.append(f"⏱️ Duration: {current_time} / {duration_str}")
+                updated_description.append(f"Progress: {progress_bar}")
+                
+                embed.description = "\n".join(updated_description)
+                await sound_message.edit(embed=embed)
+            
+            await asyncio.sleep(1)  # Update every second
+        
+        # Remove only the progress bar when done
+        if sound_message and not self.stop_progress_update:
+            if sound_message.embeds:
+                embed = sound_message.embeds[0]
+                description_lines = embed.description.split('\n') if embed.description else []
+                
+                # Keep all lines except duration and progress
+                updated_description = []
+                for line in description_lines:
+                    # Check for any variation of the duration line (with or without emoji)
+                    if "Duration:" not in line and not line.startswith("Progress:"):
+                        updated_description.append(line)
+                
+                # Add just the final duration
+                updated_description.append(f"⏱️ Duration: {duration_str}")
+                
+                embed.description = "\n".join(updated_description)
+                await sound_message.edit(embed=embed)
 
     async def update_bot_status(self):
         while True:

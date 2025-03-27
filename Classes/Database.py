@@ -448,6 +448,23 @@ class Database:
             print(f"An error occurred: {e}")
             return [], 0
         
+    def get_sound_play_count(self, sound_id):
+        """Get the total play count for a specific sound"""
+        try:
+            query = """
+            SELECT COUNT(*) as play_count
+            FROM actions a
+            WHERE a.target = ?
+            AND a.action IN ('play_random_sound', 'replay_sound', 'play_random_favorite_sound', 'play_request')
+            """
+            
+            self.cursor.execute(query, (sound_id,))
+            result = self.cursor.fetchone()
+            return result[0] if result else 0
+        except sqlite3.Error as e:
+            print(f"An error occurred getting play count: {e}")
+            return 0
+        
     def get_user_events(self, user, event):
         try:
             if user == "*":
@@ -710,6 +727,40 @@ class Database:
         except Exception as e:
             print(f"Error getting users who favorited sound: {e}")
             return []
+
+    def get_sound_download_date(self, sound_id):
+        """Get the date when a sound was downloaded/added to the database"""
+        try:
+            # First check if the sound has a timestamp in the sounds table
+            self.cursor.execute("SELECT timestamp FROM sounds WHERE id = ?", (sound_id,))
+            result = self.cursor.fetchone()
+            
+            if result and result[0]:
+                # Check if it's close to the hardcoded date
+                if isinstance(result[0], str) and result[0].startswith("2023-10-30"):
+                    return "2023-10-30 11:04:46"  # Mark as the hardcoded date
+                return result[0]
+            
+            # Check if this is one of the sounds with the hardcoded date
+            # by looking for the earliest action and checking if it's the hardcoded date
+            query = """
+            SELECT MIN(timestamp) 
+            FROM actions 
+            WHERE target = ? 
+            """
+            self.cursor.execute(query, (sound_id,))
+            result = self.cursor.fetchone()
+            
+            if result and result[0]:
+                # If the date is exactly or close to the hardcoded date, mark it specially
+                if isinstance(result[0], str) and result[0].startswith("2023-10-30"):
+                    return "2023-10-30 11:04:46"
+                return result[0]
+                
+            return "Unknown date"
+        except Exception as e:
+            print(f"Error getting sound download date: {e}")
+            return "Unknown date"
 
 class Migrate:
     # function that migrates sounds.csv to the database table 'sounds'

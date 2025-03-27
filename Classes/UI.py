@@ -30,8 +30,15 @@ class STSButton(Button):
 
     async def callback(self, interaction):
         await interaction.response.defer()
+        # Start the STS process
         asyncio.create_task(self.bot_behavior.sts_EL(interaction.message.channel, self.audio_file, self.char))
+        # Record the action
         Database().insert_action(interaction.user.name, "sts_EL", Database().get_sound(self.audio_file, True)[0])
+        # Delete the character selection message
+        try:
+            await interaction.message.delete()
+        except:
+            pass  # Message might already be deleted or ephemeral
 
 class IsolateButton(Button):
     def __init__(self, bot_behavior, audio_file, **kwargs):
@@ -49,27 +56,26 @@ class FavoriteButton(Button):
     def __init__(self, bot_behavior, audio_file):
         self.bot_behavior = bot_behavior
         self.audio_file = audio_file
-        self.update_button_state()
-
-    def update_button_state(self):
-        if Database().get_sound(self.audio_file, True)[3]:  # Check if favorite (index 3)
-            super().__init__(label="⭐❌", style=discord.ButtonStyle.primary)
-        else:
-            super().__init__(label="⭐", style=discord.ButtonStyle.primary)
+        # Always use the star emoji regardless of favorite status
+        super().__init__(label="", emoji="⭐", style=discord.ButtonStyle.primary)
 
     async def callback(self, interaction: discord.Interaction):
         await interaction.response.defer()
         sound = Database().get_sound(self.audio_file, True)
         favorite = 1 if not sound[3] else 0
         await Database().update_sound(sound[2], None, favorite)
-
         
-        # Update the button state
-        self.update_button_state()
+        # Send a message instead of changing the button
+        sound_name = sound[2].replace('.mp3', '')
+        if favorite == 1:
+            await interaction.followup.send(f"Added **{sound_name}** to your favorites! ⭐", ephemeral=True, delete_after=5)
+            action_type = "favorite_sound"
+        else:
+            await interaction.followup.send(f"Removed **{sound_name}** from your favorites!", ephemeral=True, delete_after=5)
+            action_type = "unfavorite_sound"
         
-        # Update the entire view
-        await interaction.message.edit(view=SoundBeingPlayedView(self.bot_behavior, self.audio_file))
-        Database().insert_action(interaction.user.name, "favorite_sound", sound[0])
+        # No need to update the button state or view
+        Database().insert_action(interaction.user.name, action_type, sound[0])
 
 class BlacklistButton(Button):
 
@@ -288,7 +294,7 @@ class StatsButton(Button):
 
     async def callback(self, interaction):
         await interaction.response.defer()
-        asyncio.create_task(self.bot_behavior.display_top_users(interaction.user, number_users=10, number_sounds=5, days=7, by="plays"))
+        asyncio.create_task(self.bot_behavior.display_top_users(interaction.user, number_users=10, number_sounds=5, days=700, by="plays"))
 
 
 class ListLastScrapedSoundsButton(Button):
@@ -415,8 +421,8 @@ class SoundBeingPlayedView(View):
         # Add the leave event button
         self.add_item(LeaveEventButton(bot_behavior=bot_behavior, audio_file=audio_file, user_id=user_id))
         
-        # Add the STS button
-        #self.add_item(STSButton(bot_behavior=bot_behavior, audio_file=audio_file, char="ventura", label="STS Ventura", style=discord.ButtonStyle.secondary))
+        # Add the STS character select button
+        self.add_item(STSCharacterSelectButton(bot_behavior=bot_behavior, audio_file=audio_file, emoji="🗣️", style=discord.ButtonStyle.primary))
         
         # Add the Add to List button
         self.add_item(AddToListButton(bot_behavior=bot_behavior, sound_filename=audio_file, emoji="📃", style=discord.ButtonStyle.success))
@@ -1142,3 +1148,42 @@ class UserSoundListsView(discord.ui.View):
                 bot_behavior=bot_behavior,
                 row=5  # Put at the bottom
             ))
+
+class STSCharacterSelectButton(Button):
+    def __init__(self, bot_behavior, audio_file, **kwargs):
+        super().__init__(**kwargs)
+        self.bot_behavior = bot_behavior
+        self.audio_file = audio_file
+
+    async def callback(self, interaction):
+        await interaction.response.defer()
+        
+        # Create a view with buttons for each character
+        view = View(timeout=10)  # Auto-timeout after 20 seconds
+        view.add_item(STSButton(self.bot_behavior, self.audio_file, "ventura", label="Ventura 🐷", style=discord.ButtonStyle.secondary))
+        view.add_item(STSButton(self.bot_behavior, self.audio_file, "tyson", label="Tyson 🐵", style=discord.ButtonStyle.secondary))
+        view.add_item(STSButton(self.bot_behavior, self.audio_file, "costa", label="Costa 🐗", style=discord.ButtonStyle.secondary))
+        
+        # Add on_timeout handler to delete the message after the timeout
+        async def on_timeout():
+            try:
+                # Get the message from stored reference and delete it
+                if hasattr(view, 'message') and view.message:
+                    await view.message.delete()
+            except:
+                pass
+        
+        view.on_timeout = on_timeout
+        
+        # Send a message with the character selection buttons
+        message = await interaction.followup.send(
+            content=f"Select a character for Speech-To-Speech with sound '{os.path.basename(self.audio_file).replace('.mp3', '')}':",
+            view=view,
+            ephemeral=True
+        )
+        
+        # Store message reference on the view for deletion
+        view.message = message
+        
+        # Record the action
+        Database().insert_action(interaction.user.name, "sts_character_select", Database().get_sound(self.audio_file, True)[0])
