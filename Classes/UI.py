@@ -1160,9 +1160,9 @@ class STSCharacterSelectButton(Button):
         
         # Create a view with buttons for each character
         view = View(timeout=None)
-        view.add_item(STSButton(self.bot_behavior, self.audio_file, "ventura", label="STS Ventura", style=discord.ButtonStyle.secondary))
-        view.add_item(STSButton(self.bot_behavior, self.audio_file, "tyson", label="STS Tyson", style=discord.ButtonStyle.secondary))
-        view.add_item(STSButton(self.bot_behavior, self.audio_file, "costa", label="STS Costa", style=discord.ButtonStyle.secondary))
+        view.add_item(STSButton(self.bot_behavior, self.audio_file, "ventura", label="Ventura 🐷", style=discord.ButtonStyle.secondary))
+        view.add_item(STSButton(self.bot_behavior, self.audio_file, "tyson", label="Tyson 🐵", style=discord.ButtonStyle.secondary))
+        view.add_item(STSButton(self.bot_behavior, self.audio_file, "costa", label="Costa 🐗", style=discord.ButtonStyle.secondary))
         
         # Send a message with the character selection buttons
         await interaction.followup.send(
