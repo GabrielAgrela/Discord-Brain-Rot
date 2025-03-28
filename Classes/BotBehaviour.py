@@ -50,6 +50,8 @@ class BotBehavior:
         self.controls_message = None
         self.color = discord.Color.red()
         self.upload_lock = asyncio.Lock()
+        self.brain_rot_lock = asyncio.Lock()  # Lock for brain rot functions
+        self.brain_rot_cooldown_message = None # Message indicating brain rot is active
         # self.lastInteractionDateTime = current
         self.lastInteractionDateTime = datetime.now()
         self.last_played_time = None
@@ -61,6 +63,14 @@ class BotBehavior:
         self.progress_already_updated = False  # Flag to track if progress has been updated with emoji
         self.volume = 1.0  # Default volume for sound playback
 
+
+    def is_admin_or_mod(self, member: discord.Member) -> bool:
+        """Checks if a member has the DEVELOPER or MODERATOR role."""
+        allowed_roles = {"DEVELOPER", "MODERATOR"}
+        for role in member.roles:
+            if role.name in allowed_roles:
+                return True
+        return False
 
     async def display_top_users(self, user, number_users=5, number_sounds=5, days=7, by="plays"):
         Database().insert_action(user.name, "list_top_users", by)

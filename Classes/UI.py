@@ -285,7 +285,62 @@ class BrainRotButton(Button):
 
     async def callback(self, interaction):
         await interaction.response.defer()
-        await self.bot_behavior.send_message(title="Brain Rot", description="Sounds that will rot your brain", footer="Brain Rot", thumbnail="https://i.imgur.com/5QKvYRR.png")
+
+        # Check if the brain rot lock is already held
+        if self.bot_behavior.brain_rot_lock.locked():
+            # Delete previous cooldown message if it exists
+            if self.bot_behavior.brain_rot_cooldown_message:
+                try:
+                    await self.bot_behavior.brain_rot_cooldown_message.delete()
+                except discord.NotFound:
+                    pass # Message already deleted
+                except discord.Forbidden:
+                    pass # Missing permissions
+            # Send public message using send_message and store it
+            self.bot_behavior.brain_rot_cooldown_message = await self.bot_behavior.send_message(
+                title="🧠 Brain Rot Active 🧠",
+                description="A brain rot function is already in progress. Please wait!",
+                delete_time=5, # Make message public, but delete after 30s
+                send_controls=False # Don't resend controls for just a status message
+            )
+            return
+
+        # Function to run the chosen brain rot action with lock
+        async def run_brain_rot():
+            try:
+                async with self.bot_behavior.brain_rot_lock:
+                    # List of possible brain rot functions
+                    brain_rot_functions = [
+                        self.bot_behavior.subway_surfers,
+                        self.bot_behavior.slice_all,
+                        self.bot_behavior.family_guy
+                    ]
+                    # Choose one randomly
+                    chosen_function = random.choice(brain_rot_functions)
+                    
+                    # Execute the chosen function
+                    try:
+                        await chosen_function(interaction.user)
+                        # Log the action only on successful execution
+                        function_name = chosen_function.__name__
+                        Database().insert_action(interaction.user.name, f"brain_rot_{function_name}", "")
+                    except Exception as e:
+                        print(f"Error during brain rot function '{chosen_function.__name__}': {e}")
+                        # Optionally send an error message to the user/channel
+                        # await interaction.followup.send(f"An error occurred during {chosen_function.__name__}.", ephemeral=True)
+            finally:
+                 # Clean up the cooldown message after lock is released
+                if self.bot_behavior.brain_rot_cooldown_message:
+                    try:
+                        await self.bot_behavior.brain_rot_cooldown_message.delete()
+                    except discord.NotFound:
+                        pass # Message already deleted
+                    except discord.Forbidden:
+                        pass # Missing permissions
+                    self.bot_behavior.brain_rot_cooldown_message = None
+
+        # Create a task to run the brain rot function in the background
+        asyncio.create_task(run_brain_rot())
 
 class StatsButton(Button):
     def __init__(self, bot_behavior, **kwargs):
