@@ -16,6 +16,7 @@
     <div class="tables-container">
         <div class="table-container">
             <h2>Recent Actions</h2>
+            <input type="text" id="searchActions" placeholder="Search Actions...">
             <table id="actionsTable">
                 <thead>
                     <tr>
@@ -38,10 +39,12 @@
 
         <div class="table-container">
             <h2>Favorite Sounds</h2>
+            <input type="text" id="searchFavorites" placeholder="Search Favorites...">
             <table id="favoritesTable">
                 <thead>
                     <tr>
                         <th>Filename</th>
+                        <th>Play</th>
                     </tr>
                 </thead>
                 <tbody id="favoritesTableBody">
@@ -57,11 +60,13 @@
 
         <div class="table-container">
             <h2>All Sounds</h2>
+            <input type="text" id="searchAllSounds" placeholder="Search Sounds...">
             <table id="allSoundsTable">
                 <thead>
                     <tr>
                         <th>Filename</th>
                         <th>Date</th>
+                        <th>Play</th>
                     </tr>
                 </thead>
                 <tbody id="allSoundsTableBody">
@@ -89,13 +94,18 @@
             all_sounds: null
         };
 
-        function fetchData(endpoint, page, tableBodyId, currentPageId, totalPagesId, prevButtonId, nextButtonId) {
+        function fetchData(endpoint, page, tableBodyId, currentPageId, totalPagesId, prevButtonId, nextButtonId, searchInputId) {
             console.log(`Fetching ${endpoint} data for page ${page}`);
             const tableBody = document.getElementById(tableBodyId);
             const prevButton = document.getElementById(prevButtonId);
             const nextButton = document.getElementById(nextButtonId);
+            const searchInput = document.getElementById(searchInputId);
+            const searchQuery = searchInput.value.trim(); // Get search query
             
-            return fetch(`/api/${endpoint}?page=${page}&per_page=${itemsPerPage}`)
+            // Construct API URL with search parameter
+            const apiUrl = `/api/${endpoint}?page=${page}&per_page=${itemsPerPage}&search=${encodeURIComponent(searchQuery)}`;
+
+            return fetch(apiUrl)
                 .then(response => response.json())
                 .then(data => {
                     console.log(`Received ${data.items.length} items for ${endpoint}`);
@@ -122,13 +132,56 @@
                                 row.style.opacity = '0';
                                 row.style.transition = 'opacity 0.3s';
                                 row.style.transitionDelay = `${index * 20}ms`;
-                                
-                                for (let key in item) {
-                                    let cell = document.createElement('td');
-                                    cell.textContent = item[key];
-                                    row.appendChild(cell);
+
+                                if (endpoint === 'actions') {
+                                    let actionCell = document.createElement('td');
+                                    actionCell.textContent = item.action;
+                                    row.appendChild(actionCell);
+
+                                    let filenameCell = document.createElement('td');
+                                    filenameCell.textContent = item.filename || item.target; // Display filename if available
+                                    row.appendChild(filenameCell);
+
+                                    let timestampCell = document.createElement('td');
+                                    timestampCell.textContent = item.timestamp;
+                                    row.appendChild(timestampCell);
+
+                                    let usernameCell = document.createElement('td');
+                                    usernameCell.textContent = item.username;
+                                    row.appendChild(usernameCell);
+                                } else if (endpoint === 'favorites') {
+                                    let filenameCell = document.createElement('td');
+                                    filenameCell.textContent = item.filename;
+                                    row.appendChild(filenameCell);
+
+                                    // Add Play button cell for favorites
+                                    const playCell = document.createElement('td');
+                                    const playButton = document.createElement('button');
+                                    playButton.textContent = 'Play';
+                                    playButton.className = 'play-button'; 
+                                    playButton.setAttribute('data-filename', item.filename);
+                                    playCell.appendChild(playButton);
+                                    row.appendChild(playCell);
+                                } else if (endpoint === 'all_sounds') {
+                                    // Explicitly create cells for all_sounds
+                                    let filenameCell = document.createElement('td');
+                                    filenameCell.textContent = item.filename;
+                                    row.appendChild(filenameCell);
+
+                                    let dateCell = document.createElement('td');
+                                    dateCell.textContent = item.timestamp;
+                                    row.appendChild(dateCell);
+
+                                    // Add Play button cell
+                                    const playCell = document.createElement('td');
+                                    const playButton = document.createElement('button');
+                                    playButton.textContent = 'Play';
+                                    playButton.className = 'play-button'; // Add class for styling/selection
+                                    playButton.setAttribute('data-filename', item.filename); // Store filename
+                                    playCell.appendChild(playButton);
+                                    row.appendChild(playCell); // Append the play cell to the row
                                 }
-                                
+
                                 tableBody.appendChild(row);
                             });
 
@@ -195,32 +248,102 @@
             nextButton.addEventListener('click', () => handleButtonClick(true));
         }
 
-        function fetchActions(increment = null) {
-            if (increment === true) currentPageActions++;
-            else if (increment === false && currentPageActions > 1) currentPageActions--;
-            return fetchData('actions', currentPageActions, 'actionsTableBody', 'currentPageActions', 'totalPagesActions', 'prevPageActions', 'nextPageActions');
+        function fetchActions(increment = null, forcePageOne = false) {
+            if (forcePageOne) {
+                currentPageActions = 1;
+            } else {
+                if (increment === true) currentPageActions++;
+                else if (increment === false && currentPageActions > 1) currentPageActions--;
+            }
+            return fetchData('actions', currentPageActions, 'actionsTableBody', 'currentPageActions', 'totalPagesActions', 'prevPageActions', 'nextPageActions', 'searchActions');
         }
 
-        function fetchFavorites(increment = null) {
-            if (increment === true) currentPageFavorites++;
-            else if (increment === false && currentPageFavorites > 1) currentPageFavorites--;
-            return fetchData('favorites', currentPageFavorites, 'favoritesTableBody', 'currentPageFavorites', 'totalPagesFavorites', 'prevPageFavorites', 'nextPageFavorites');
+        function fetchFavorites(increment = null, forcePageOne = false) {
+            if (forcePageOne) {
+                currentPageFavorites = 1;
+            } else {
+                if (increment === true) currentPageFavorites++;
+                else if (increment === false && currentPageFavorites > 1) currentPageFavorites--;
+            }
+            return fetchData('favorites', currentPageFavorites, 'favoritesTableBody', 'currentPageFavorites', 'totalPagesFavorites', 'prevPageFavorites', 'nextPageFavorites', 'searchFavorites');
         }
 
-        function fetchAllSounds(increment = null) {
-            if (increment === true) currentPageAllSounds++;
-            else if (increment === false && currentPageAllSounds > 1) currentPageAllSounds--;
-            return fetchData('all_sounds', currentPageAllSounds, 'allSoundsTableBody', 'currentPageAllSounds', 'totalPagesAllSounds', 'prevPageAllSounds', 'nextPageAllSounds');
+        function fetchAllSounds(increment = null, forcePageOne = false) {
+            if (forcePageOne) {
+                currentPageAllSounds = 1;
+            } else {
+                if (increment === true) currentPageAllSounds++;
+                else if (increment === false && currentPageAllSounds > 1) currentPageAllSounds--;
+            }
+            return fetchData('all_sounds', currentPageAllSounds, 'allSoundsTableBody', 'currentPageAllSounds', 'totalPagesAllSounds', 'prevPageAllSounds', 'nextPageAllSounds', 'searchAllSounds');
         }
 
         setupPagination('prevPageActions', 'nextPageActions', fetchActions);
         setupPagination('prevPageFavorites', 'nextPageFavorites', fetchFavorites);
         setupPagination('prevPageAllSounds', 'nextPageAllSounds', fetchAllSounds);
 
-        // Initial data fetch
-        fetchActions();
-        fetchFavorites();
-        fetchAllSounds();
+        // --- Event listener for Play buttons (adjusted to listen on tables-container) ---
+        document.querySelector('.tables-container').addEventListener('click', async (event) => {
+            if (event.target.classList.contains('play-button')) {
+                const button = event.target;
+                const filename = button.getAttribute('data-filename');
+                if (!filename) return;
+
+                console.log(`Requesting playback for: ${filename}`);
+                button.disabled = true; // Disable button temporarily
+                button.textContent = 'Queueing...';
+
+                try {
+                    const response = await fetch('/api/play_sound', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ sound_filename: filename })
+                    });
+
+                    if (response.ok) {
+                        console.log(`Successfully queued: ${filename}`);
+                        button.textContent = 'Queued';
+                        // Optionally re-enable after a delay or change text permanently
+                        setTimeout(() => {
+                            button.textContent = 'Play';
+                            button.disabled = false;
+                         }, 2000); // Re-enable after 2 seconds
+                    } else {
+                        const errorData = await response.json();
+                        console.error(`Failed to queue ${filename}: ${errorData.error || response.statusText}`);
+                        button.textContent = 'Error';
+                        // Keep button disabled or provide other feedback
+                    }
+                } catch (error) {
+                    console.error(`Network error queuing ${filename}:`, error);
+                    button.textContent = 'Error';
+                     // Keep button disabled or provide other feedback
+                }
+            }
+        });
+        // --- End of play button code ---
+
+        // --- Backend Search Trigger --- 
+        function setupBackendSearch(inputId, fetchFunction) {
+            const searchInput = document.getElementById(inputId);
+            let debounceTimer;
+
+            searchInput.addEventListener('input', () => {
+                clearTimeout(debounceTimer);
+                debounceTimer = setTimeout(() => {
+                    // Trigger fetch function, forcing page 1
+                    fetchFunction(null, true); // Pass special flag/arg to force page 1
+                }, 350); // Debounce search input slightly longer for backend
+            });
+        }
+
+        // Setup search input listeners
+        setupBackendSearch('searchActions', fetchActions);
+        setupBackendSearch('searchFavorites', fetchFavorites);
+        setupBackendSearch('searchAllSounds', fetchAllSounds);
+        // --- End of Backend Search Trigger ---
 
         // Auto-refresh every 5 seconds (adjust as needed)
         setInterval(() => {
@@ -228,12 +351,18 @@
                 .then(results => {
                     const hasNewEntries = results.some(result => result);
                     if (hasNewEntries) {
-                        console.log('New entries found, animation triggered');
+                        console.log('New entries found, table updated.');
+                        // Search filter will be reapplied by MutationObserver
                     } else {
-                        console.log('No new entries, no animation');
+                        // console.log('No new entries, no table update needed.');
                     }
                 });
-        }, 500);
+        }, 5000); // Changed interval to 5000ms
+
+        // Initial data fetch
+        fetchActions();
+        fetchFavorites();
+        fetchAllSounds();
     </script>
 </body>
 </html>

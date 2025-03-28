@@ -91,12 +91,24 @@ class Database:
             );
             '''
 
+            # SQL command to create 'playback_queue' table if it doesn't exist
+            create_playback_queue_table = '''
+            CREATE TABLE IF NOT EXISTS playback_queue (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id INTEGER NOT NULL,
+                sound_filename TEXT NOT NULL,
+                requested_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                played_at DATETIME NULL
+            );
+            '''
+
             # Execute the SQL commands
             #cursor.execute(create_actions_table)
             cursor.execute(create_sound_lists_table)
             cursor.execute(create_sound_list_items_table)
             #cursor.execute(create_sounds_table)
             #cursor.execute(create_users_table)
+            cursor.execute(create_playback_queue_table)
             
             print("Tables created successfully")
 

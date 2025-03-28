@@ -4,6 +4,7 @@ import time
 import discord
 import random
 from mutagen.mp3 import MP3
+import math # Added for ceiling function
 
 from requests import HTTPError
 from Classes.SoundDownloader import SoundDownloader
@@ -350,7 +351,7 @@ class BotBehavior:
             voice_client = await channel.connect()
         return voice_client
 
-    async def play_audio(self, channel, audio_file, user, is_entrance=False, is_tts=False, extra="", original_message="", send_controls=True, retry_count=0):
+    async def play_audio(self, channel, audio_file, user, is_entrance=False, is_tts=False, extra="", original_message="", send_controls=True, retry_count=0, effects=None):
         MAX_RETRIES = 3
 
         # Check cooldown first
@@ -530,13 +531,56 @@ class BotBehavior:
             if voice_client.is_playing():
                 voice_client.stop()
 
+            # --- FFmpeg Options Setup ---
+            ffmpeg_options = '-af "'
+            filters = []
+
+            # Default volume filter
+            filters.append(f'volume={self.volume}')
+
+            # Apply effects if provided
+            if effects:
+                # Volume adjustment (multiplier)
+                volume_multiplier = effects.get("volume", 1.0)
+                if volume_multiplier != 1.0:
+                    filters.append(f'volume={volume_multiplier:.4f}')
+
+                # Speed adjustment (tempo)
+                speed = effects.get("speed", 1.0)
+                if speed != 1.0:
+                    # FFmpeg atempo filter works best in [0.5, 2.0] range.
+                    # Chain multiple filters if needed.
+                    # Max speed 3.0, so max 2 filters needed (2.0 * 1.5)
+                    # Min speed 0.5, so max 1 filter needed.
+                    current_speed = speed
+                    while current_speed > 2.0:
+                        filters.append('atempo=2.0')
+                        current_speed /= 2.0
+                    if current_speed < 0.5:
+                        # Should not happen due to clamping in /toca, but safety check
+                        filters.append('atempo=0.5')
+                    elif current_speed != 1.0:
+                         # Only add if it's not exactly 1 after adjustments
+                        filters.append(f'atempo={current_speed:.4f}') 
+
+                # Reverse
+                if effects.get("reverse", False):
+                    filters.append('areverse')
+            
+            # Join filters if any were added
+            if filters:
+                ffmpeg_options += ",".join(filters)
+            ffmpeg_options += '"' # Close the -af option string
+            # ---------------------------
+
             def after_playing(error):
                 if error:
                     asyncio.run_coroutine_threadsafe(self.send_error_message(f"Error in playback, but Gertrudes will retry: {error}"), self.bot.loop)
                     print(f'Error in playback: {error}')
                     if retry_count < MAX_RETRIES:
                         time.sleep(5)
-                        asyncio.run_coroutine_threadsafe(self.play_audio(channel, audio_file, user, is_entrance, is_tts, extra, original_message, send_controls, retry_count + 1), self.bot.loop)
+                        # Pass effects to recursive call
+                        asyncio.run_coroutine_threadsafe(self.play_audio(channel, audio_file, user, is_entrance, is_tts, extra, original_message, send_controls, retry_count + 1, effects), self.bot.loop)
                 self.bot.loop.call_soon_threadsafe(self.playback_done.set)
 
             # Check if FFmpeg path is set and valid
@@ -555,10 +599,13 @@ class BotBehavior:
                 audio_source = discord.FFmpegPCMAudio(
                     audio_file_path,
                     executable=self.ffmpeg_path,
-                    options=f'-af "volume={self.volume}"'
+                    # Pass the constructed ffmpeg options
+                    options=ffmpeg_options
                 )
                 
-                # Required to avoid robotic sound
+                # PCMVolumeTransformer might interfere with ffmpeg volume filter,
+                # but is often needed for smoother playback. Test if it causes issues.
+                # If volume seems off, consider removing this or adjusting ffmpeg volume.
                 audio_source = discord.PCMVolumeTransformer(audio_source)
 
                 voice_client.play(audio_source, after=after_playing)
@@ -673,7 +720,7 @@ class BotBehavior:
                 print(f"4An error occurred: {e}")
                 await asyncio.sleep(60)
 
-    async def play_random_sound(self, user="admin"):
+    async def play_random_sound(self, user="admin", effects=None):
         try:
             for guild in self.bot.guilds:
                 if (user == "admin"):
@@ -682,7 +729,7 @@ class BotBehavior:
                     channel = self.get_user_voice_channel(guild,user)
                 if channel is not None:
                     random_sound = Database().get_random_sounds()
-                    asyncio.create_task(self.play_audio(channel, random_sound[0][2], user))
+                    asyncio.create_task(self.play_audio(channel, random_sound[0][2], user, effects=effects))
                     Database().insert_action(user, "play_random_sound", random_sound[0][0])
         except Exception as e:
             print(f"3An error occurred: {e}")
@@ -699,7 +746,7 @@ class BotBehavior:
             temp_color = discord.Color.random()
         self.color = temp_color
     
-    async def play_request(self, id, user, request_number=5, exact=False):
+    async def play_request(self, id, user, request_number=5, exact=False, effects=None):
         if exact:
             filenames = [id]
         else:
@@ -707,7 +754,7 @@ class BotBehavior:
         for guild in self.bot.guilds:
             channel = self.get_user_voice_channel(guild, user)
             if channel is not None:
-                asyncio.create_task(self.play_audio(channel, filenames[0][1], user, original_message=id, send_controls = False if filenames[1:] else True))
+                asyncio.create_task(self.play_audio(channel, filenames[0][1], user, original_message=id, send_controls = False if filenames[1:] else True, effects=effects))
                 Database().insert_action(user, "play_request", filenames[0][0])
                 await asyncio.sleep(2)
                 if filenames[1:]:

@@ -61,6 +61,17 @@ h2 {
     flex-shrink: 0;
 }
 
+/* Style for Search Inputs */
+.table-container input[type="text"] {
+    padding: 8px 12px;
+    margin-bottom: 10px;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    font-size: 0.9rem;
+    width: calc(100% - 26px); /* Account for padding and border */
+    box-sizing: border-box; /* Include padding and border in the element's total width and height */
+}
+
 table {
     border-collapse: separate;
     border-spacing: 0;
@@ -75,6 +86,8 @@ table {
     flex-direction: column;
     height: calc(100% - 70px); /* Adjust based on h2 and pagination height */
     position: relative; /* Ensure the table has a relative positioning */
+    text-align: center;
+    vertical-align: middle; /* Vertically center content */
 }
 
 thead {
@@ -138,6 +151,7 @@ tr:hover {
     justify-content: center;
     align-items: center;
     flex-shrink: 0;
+    padding: 10px 0;
 }
 
 .pagination button {
@@ -216,26 +230,42 @@ tr:hover {
 @media (max-aspect-ratio: 1/1) {
     body {
         height: 100vh;
-        overflow: hidden;
+        overflow: hidden; /* Keep body overflow hidden */
     }
 
     .tables-container {
         flex-direction: column;
         height: calc(100vh - 100px); /* Adjust based on title container height */
-        overflow: hidden;
+        overflow: hidden; /* Keep overall container overflow hidden */
+        width: 95%; /* Slightly reduce width */
     }
 
     .table-container {
-        width: 100%;
+        width: 100%; /* Take full width in column mode */
         margin: 0 0 10px 0;
-        flex: 1;
-        display: flex;
+        flex: 1; /* Allow containers to share space */
+        min-height: 0; /* Important for flex shrinking in column */
+        display: flex; /* Ensure flex context for children */
         flex-direction: column;
-        overflow: hidden; /* Prevent individual table containers from scrolling */
+        overflow: hidden; /* Keep container overflow hidden */
+    }
+    
+    .table-container h2,
+    .table-container input[type="text"] {
+        flex-shrink: 0; /* Prevent title and search from shrinking table */
+    }
+    
+    /* Table takes remaining space */
+    .table-container table {
+       flex: 1;
+       height: auto; /* Override fixed height calculation */
     }
 
+    /* Allow vertical scrolling within table body */
     tbody {
-        overflow: hidden; /* Prevent scrolling within table bodies */
+        overflow-y: auto; 
+        overflow-x: hidden;
+        flex: 1; /* Ensure tbody tries to fill space */
     }
 
 }
@@ -351,4 +381,39 @@ tr:hover {
 .pagination button:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+}
+
+/* Style for Play Buttons */
+.play-button {
+    padding: 5px 10px;
+    font-size: 0.8rem;
+    background-color: #4CAF50; /* Green */
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.2s ease, opacity 0.2s ease;
+    min-width: 60px; /* Ensure buttons have a minimum width */
+    text-align: center;
+}
+
+.play-button:hover {
+    background-color: #45a049;
+}
+
+.play-button:disabled,
+.play-button[textContent="Queueing..."] {
+    background-color: #aaa; /* Grey when disabled or queueing */
+    cursor: not-allowed;
+    opacity: 0.7;
+}
+
+.play-button[textContent="Queued"] {
+    background-color: #2196F3; /* Blue for queued */
+    cursor: default;
+}
+
+.play-button[textContent="Error"] {
+    background-color: #f44336; /* Red for error */
+    cursor: default;
 }

@@ -1,6 +1,9 @@
 import asyncio
 import os
 import discord
+from discord.ext import tasks
+import sqlite3
+import datetime
 from Classes.Environment import Environment
 from Classes.Bot import Bot
 from Classes.BotBehaviour import BotBehavior
@@ -49,6 +52,99 @@ class CooldownManager:
 
 cooldown_manager = CooldownManager(5)  # 5 seconds cooldown
 
+# --- New Background Task --- 
+@tasks.loop(seconds=5.0) # Check every 5 seconds
+async def check_playback_queue():
+    # Use a separate connection for the task to avoid potential threading issues with the main db connection
+    conn = None 
+    try:
+        conn = sqlite3.connect(db.db_path)
+        conn.row_factory = sqlite3.Row # Optional: Access columns by name
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT id, guild_id, sound_filename 
+            FROM playback_queue 
+            WHERE played_at IS NULL 
+            ORDER BY requested_at ASC
+        """)
+        pending_requests = cursor.fetchall()
+
+        if not pending_requests:
+            return # No pending requests
+
+        print(f"[Playback Queue] Found {len(pending_requests)} pending requests.")
+
+        for request in pending_requests:
+            req_id = request['id']
+            guild_id = request['guild_id']
+            sound_filename = request['sound_filename']
+            
+            print(f"[Playback Queue] Processing request ID {req_id}: Play '{sound_filename}' in guild {guild_id}")
+
+            # Find the guild
+            guild = bot.get_guild(guild_id)
+            if not guild:
+                print(f"[Playback Queue] Error: Bot is not in guild {guild_id}. Skipping request {req_id}.")
+                # Mark as played to prevent retrying indefinitely if bot left server
+                cursor.execute("UPDATE playback_queue SET played_at = ? WHERE id = ?", (datetime.datetime.now(), req_id))
+                conn.commit()
+                continue
+            
+            # Get sound details from DB (needed for path?)
+            # Assuming get_sound returns a tuple/row with filename at index 2
+            sound_data = db.get_sound(sound_filename)
+            if not sound_data:
+                 print(f"[Playback Queue] Error: Sound '{sound_filename}' not found in database. Skipping request {req_id}.")
+                 cursor.execute("UPDATE playback_queue SET played_at = ? WHERE id = ?", (datetime.datetime.now(), req_id)) # Mark as played
+                 conn.commit()
+                 continue
+
+            # --- Play the sound --- 
+            # Using behavior.play_sound directly might be simpler if it takes a path
+            # We need the actual sound file path. Let's assume it's in a specific folder
+            # TODO: Adjust this path based on where sounds are stored!
+            sound_folder = os.path.abspath(os.path.join(os.path.dirname(__file__), "Sounds"))
+            sound_path = os.path.join(sound_folder, sound_filename) 
+
+            if not os.path.exists(sound_path):
+                print(f"[Playback Queue] Error: Sound file not found at '{sound_path}'. Skipping request {req_id}.")
+                cursor.execute("UPDATE playback_queue SET played_at = ? WHERE id = ?", (datetime.datetime.now(), req_id)) # Mark as played
+                conn.commit()
+                continue
+            
+            try:
+                # Use the core play_sound method from BotBehavior (assuming it exists and takes path + voice_client)
+                # Need to check BotBehavior for the correct method signature
+                # Let's assume it's behavior.play_sound(sound_path, voice_client)
+                channel = behavior.get_largest_voice_channel(guild)
+                if channel is not None:
+                    await behavior.play_audio(channel, sound_filename, "webpage")
+                    Database().insert_action("admin", "play_sound_periodically", sound_filename)
+                print(f"[Playback Queue] Successfully played '{sound_filename}' for request {req_id}.")
+                
+                # Mark as played in DB
+                cursor.execute("UPDATE playback_queue SET played_at = ? WHERE id = ?", (datetime.datetime.now(), req_id))
+                conn.commit()
+
+                # Optional: Small delay between sounds if processing multiple
+                await asyncio.sleep(1) 
+
+            except Exception as e:
+                print(f"[Playback Queue] Error playing sound for request {req_id}: {e}")
+                # Mark as played even on error to avoid retrying constantly
+                cursor.execute("UPDATE playback_queue SET played_at = ? WHERE id = ?", (datetime.datetime.now(), req_id))
+                conn.commit()
+        
+    except sqlite3.Error as db_err:
+        print(f"[Playback Queue] Database error: {db_err}")
+    except Exception as e:
+        print(f"[Playback Queue] Unexpected error in background task: {e}")
+    finally:
+        if conn:
+            conn.close()
+# --- End Background Task ---
+
 @default_permissions(manage_messages=True)
 @bot.event
 async def on_ready():
@@ -62,6 +158,7 @@ async def on_ready():
     bot.loop.create_task(behavior.play_sound_periodically())
     bot.loop.create_task(behavior.update_bot_status())
     bot.loop.create_task(SoundDownloader(behavior, behavior.db, os.getenv("CHROMEDRIVER_PATH")).move_sounds())
+    check_playback_queue.start() # Start the new background task
 
 async def get_sound_autocomplete(ctx):
     try:
@@ -126,26 +223,70 @@ async def get_list_autocomplete(ctx):
     description="Number of Similar Sounds",
     default="5"
 )
-async def play_requested(ctx, message: str, request_number: str = "5"):
+@discord.option(
+    "speed",
+    description="Playback speed multiplier (e.g., 1.5 for faster, 0.8 for slower). Default: 1.0",
+    required=False,
+    type=float, # Specify type for better validation
+    default=1.0
+)
+@discord.option(
+    "volume",
+    description="Volume multiplier (e.g., 1.5 for 150%, 0.5 for 50%). Default: 1.0",
+    required=False,
+    type=float, # Specify type for better validation
+    default=1.0 # Default multiplier is 1.0 (no change)
+)
+@discord.option(
+    "reverse",
+    description="Play the sound in reverse? (True/False). Default: False",
+    required=False,
+    type=bool, # Specify type for better validation
+    default=False
+)
+async def play_requested(ctx, message: str, request_number: str = "5", speed: float = 1.0, volume: float = 1.0, reverse: bool = False):
     await ctx.respond("Processing your request...", delete_after=0)
-    request_number = int(request_number)
-    if request_number > 25:
-        request_number = 25
+
+    # --- Input Validation/Clamping ---
+    try:
+        request_number = int(request_number)
+        if not 1 <= request_number <= 25:
+            await ctx.followup.send("Request number must be between 1 and 25.", ephemeral=True, delete_after=5)
+            return
+    except ValueError:
+        await ctx.followup.send("Invalid request number. Please enter a whole number.", ephemeral=True, delete_after=5)
+        return
+
+    # Clamp speed to a reasonable range (e.g., 0.5x to 3.0x)
+    speed = max(0.5, min(speed, 3.0))
+    # Clamp volume multiplier (e.g., 0.1x to 5.0x)
+    volume = max(0.1, min(volume, 5.0))
+    # --------------------------------
+
     author = ctx.user
     username_with_discriminator = f"{author.name}#{author.discriminator}"
+
+    effects = {
+        "speed": speed,
+        "volume": volume, # Now a multiplier
+        "reverse": reverse
+    }
+
+    print(f"Playing '{message}' for {username_with_discriminator} with effects: {effects}")
     try:
-        number_similar_sounds = int(request_number)
-    except:
-        number_similar_sounds = 5
-    print(f"Playing {message} for {username_with_discriminator}")
-    try:
-        if(message == "random"):
-            asyncio.run_coroutine_threadsafe(behavior.play_random_sound(username_with_discriminator), bot.loop)
+        if message == "random":
+            # Note: Applying effects to random sounds might need adjustments in play_random_sound
+            # For now, let's pass effects=None or handle it inside play_random_sound
+            asyncio.run_coroutine_threadsafe(behavior.play_random_sound(username_with_discriminator, effects=effects), bot.loop)
         else:
-            await behavior.play_request(message, author.name, request_number=number_similar_sounds)
+            # Pass the effects dictionary to play_request
+            await behavior.play_request(message, author.name, request_number=request_number, effects=effects)
     except Exception as e:
-        print(e)
-        asyncio.run_coroutine_threadsafe(behavior.play_random_sound(username_with_discriminator), bot.loop)
+        print(f"Error in play_requested: {e}")
+        # Fallback to random sound without effects on error? Or just report error?
+        # Let's just report the error for now.
+        await ctx.followup.send(f"An error occurred while trying to play '{message}'. Please try again later.", ephemeral=True, delete_after=10)
+        # asyncio.run_coroutine_threadsafe(behavior.play_random_sound(username_with_discriminator), bot.loop) # Optional fallback
         return
     
 @bot.slash_command(name='tts', description='TTS with google translate. Press tab and enter to select message and write')
