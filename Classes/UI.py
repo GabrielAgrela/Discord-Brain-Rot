@@ -17,7 +17,7 @@ class ReplayButton(Button):
 
     async def callback(self, interaction):
         await interaction.response.defer()
-        asyncio.create_task(self.bot_behavior.play_audio(interaction.message.channel, self.audio_file, interaction.user.name))
+        asyncio.create_task(self.bot_behavior.play_audio(interaction.user.voice.channel, self.audio_file, interaction.user.name))
         Database().insert_action(interaction.user.name, "replay_sound", Database().get_sounds_by_similarity(self.audio_file)[0][0])
 
 class STSButton(Button):
@@ -72,7 +72,6 @@ class FavoriteButton(Button):
             action_type = "favorite_sound"
         else:
             await interaction.followup.send(f"Removed **{sound_name}** from your favorites!", ephemeral=True, delete_after=5)
-            action_type = "unfavorite_sound"
         
         # No need to update the button state or view
         Database().insert_action(interaction.user.name, action_type, sound[0])
@@ -117,6 +116,273 @@ class ChangeSoundNameButton(Button):
             #get username
             await self.bot_behavior.change_filename(self.sound_name, new_name,interaction.user)
             #self.bot_behavior.other_actions_db.add_entry(interaction.user.name, "change_sound_name", self.sound_name)
+
+# New User Event Assignment Components Start
+
+class EventTypeSelect(discord.ui.Select):
+    def __init__(self, bot_behavior):
+        self.bot_behavior = bot_behavior
+        options = [
+            discord.SelectOption(label="Join Event", value="join", description="Sound plays when user joins voice."),
+            discord.SelectOption(label="Leave Event", value="leave", description="Sound plays when user leaves voice.")
+        ]
+        super().__init__(
+            placeholder="Select event type...",
+            min_values=1,
+            max_values=1,
+            options=options,
+            custom_id="event_type_select"
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        # Store selection on the view for the confirm button to access
+        self.view.selected_event_type = self.values[0]
+        await interaction.response.defer() # Acknowledge this select interaction
+        # Update the main message
+        await self.view.update_display_message(interaction)
+
+
+class UserSelect(discord.ui.Select):
+    def __init__(self, bot_behavior, guild_members):
+        self.bot_behavior = bot_behavior
+        options = []
+        for member in guild_members[:25]: # Discord limits to 25 options
+            if not member.bot: # Exclude bots
+                options.append(discord.SelectOption(
+                    label=member.display_name,
+                    value=f"{member.name}#{member.discriminator}",
+                    description=f"ID: {member.id}"
+                ))
+        
+        if not options: # Handle case where no non-bot members are found (e.g. only bots in a small server)
+             options.append(discord.SelectOption(label="No users available", value="no_users", disabled=True))
+
+
+        super().__init__(
+            placeholder="Select user...",
+            min_values=1,
+            max_values=1,
+            options=options if options else [discord.SelectOption(label="No users found", value="dummy_no_user", disabled=True)], # Ensure options is never empty
+            custom_id="user_select"
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        # Store selection on the view for the confirm button to access
+        if self.values and self.values[0] != "no_users" and self.values[0] != "dummy_no_user":
+            self.view.selected_user_id = self.values[0]
+        else:
+            self.view.selected_user_id = None # Clear if invalid selection
+        await interaction.response.defer() # Acknowledge this select interaction
+        # Update the main message
+        await self.view.update_display_message(interaction)
+
+
+class ConfirmUserEventButton(Button):
+    def __init__(self, bot_behavior, audio_file, **kwargs):
+        super().__init__(label="Confirm", style=discord.ButtonStyle.success, custom_id="confirm_user_event", **kwargs)
+        self.bot_behavior = bot_behavior
+        self.audio_file = audio_file
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True) # Defer with ephemeral for followup
+
+        event_type_select = self.view.event_type_select
+        user_select = self.view.user_select
+        
+        selected_event_type = getattr(self.view, 'selected_event_type', None)
+        selected_user_id_for_db = getattr(self.view, 'selected_user_id', None) # This is "name#discriminator"
+
+        if not selected_event_type:
+            await interaction.followup.send("Please select an event type.", ephemeral=True)
+            return
+        if not selected_user_id_for_db:
+            await interaction.followup.send("Please select a user.", ephemeral=True)
+            return
+
+        # Permission Check
+        acting_user_full_name = f"{interaction.user.name}#{interaction.user.discriminator}"
+        is_admin = self.bot_behavior.is_admin_or_mod(interaction.user)
+        is_self_assign = (acting_user_full_name == selected_user_id_for_db)
+
+        if not (is_self_assign or is_admin):
+            user_display_name_target = selected_user_id_for_db.split('#')[0]
+            await interaction.followup.send(
+                f"You do not have permission to assign an event for {user_display_name_target}. Admins can assign to any user, and users can assign to themselves.",
+                ephemeral=True
+            )
+            # Edit original message to remove components after action
+            if self.view.message_to_edit: # Check if message_to_edit exists
+                try:
+                    await self.view.message_to_edit.edit(content=f"Permission denied for event assignment to {user_display_name_target}.", view=None)
+                except discord.NotFound:
+                    print(f"ConfirmUserEventButton: message_to_edit (ID: {self.view.message_to_edit.id}) not found for permission denial edit.")
+                except Exception as e:
+                    print(f"ConfirmUserEventButton: Error editing message_to_edit on permission denial: {e}")
+            return
+
+        sound_name = self.audio_file.split('/')[-1].replace('.mp3', '')
+        
+        # Check current status for the message
+        is_set = Database().get_user_event_sound(selected_user_id_for_db, selected_event_type, sound_name)
+        
+        success = Database().toggle_user_event_sound(selected_user_id_for_db, selected_event_type, sound_name)
+
+        if success:
+            action_message = "Removed" if is_set else "Added"
+            user_display_name = selected_user_id_for_db.split('#')[0]
+            # Edit original message to remove components after action and reflect the outcome - this is now the single final message
+            final_content_message = f"{action_message} '{sound_name}' as {selected_event_type} sound for {user_display_name}."
+            if self.view.message_to_edit: # Check if message_to_edit exists
+                try:
+                    await self.view.message_to_edit.edit(content=final_content_message, view=None)
+                except discord.NotFound:
+                    print(f"ConfirmUserEventButton: message_to_edit (ID: {self.view.message_to_edit.id}) not found for edit.")
+                except Exception as e:
+                    print(f"ConfirmUserEventButton: Error editing message_to_edit on failure: {e}")
+        else:
+            await interaction.followup.send("Failed to update event sound. Please try again.", ephemeral=True)
+            user_display_name = selected_user_id_for_db.split('#')[0]
+            final_content_message = f"Failed to process event assignment for '{sound_name}' to {user_display_name}."
+            if self.view.message_to_edit: # Check if message_to_edit exists
+                try:
+                    await self.view.message_to_edit.edit(content=final_content_message, view=None)
+                except discord.NotFound:
+                    print(f"ConfirmUserEventButton: message_to_edit (ID: {self.view.message_to_edit.id}) not found for failure edit.")
+                except Exception as e:
+                    print(f"ConfirmUserEventButton: Error editing message_to_edit on failure: {e}")
+
+
+class CancelButton(Button):
+    def __init__(self, **kwargs):
+        super().__init__(label="Cancel", style=discord.ButtonStyle.grey, custom_id="cancel_user_event", **kwargs)
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        if self.view.message_to_edit: # Check if message_to_edit exists
+            try:
+                await self.view.message_to_edit.delete()
+            except discord.NotFound:
+                print(f"CancelButton: message_to_edit (ID: {self.view.message_to_edit.id}) not found for delete.")
+            except Exception as e:
+                print(f"CancelButton: Error deleting message_to_edit: {e}")
+        # Fallback or alternative if message_to_edit is None (though it shouldn't be with the new flow)
+        # await interaction.message.delete() # This would be the problematic one
+
+
+class UserEventSelectView(View):
+    def __init__(self, bot_behavior, audio_file, guild_members, interaction_user_id, message_to_edit=None):
+        super().__init__(timeout=180)
+        self.bot_behavior = bot_behavior
+        self.audio_file = audio_file
+        self.sound_name_no_ext = audio_file.split('/')[-1].replace('.mp3', '')
+        self.interaction_user_id = interaction_user_id
+        self.message_to_edit = message_to_edit # Store the message reference
+
+        self.selected_event_type = None
+        self.selected_user_id = None
+
+        self.event_type_select = EventTypeSelect(bot_behavior)
+        self.user_select = UserSelect(bot_behavior, guild_members)
+        self.confirm_button = ConfirmUserEventButton(bot_behavior, audio_file)
+        self.cancel_button = CancelButton()
+
+        self.add_item(self.event_type_select)
+        self.add_item(self.user_select)
+        self.add_item(self.confirm_button)
+        self.add_item(self.cancel_button)
+
+    async def get_initial_message_content(self):
+        return f"Assigning event for sound: **{self.sound_name_no_ext}**\n"
+
+    async def update_display_message(self, interaction_from_select: discord.Interaction):
+        new_content = f"Assigning event for sound: **{self.sound_name_no_ext}**\n"
+        
+        if self.selected_event_type and self.selected_user_id:
+            is_set = Database().get_user_event_sound(self.selected_user_id, self.selected_event_type, self.sound_name_no_ext)
+            action_preview_text = "REMOVE" if is_set else "ADD"
+            user_display_name_target = self.selected_user_id.split('#')[0]
+            
+            new_content += (f"\n **{action_preview_text}** this sound "
+                            f"as a **{self.selected_event_type}** event for **{user_display_name_target}**.")
+        else:
+            if not self.selected_event_type and not self.selected_user_id:
+                 new_content += "Please select an event type and a user."
+            elif not self.selected_event_type:
+                new_content += "Please select an event type."
+            elif not self.selected_user_id:
+                new_content += "Please select a user."
+        
+        try:
+            if self.message_to_edit: # Check if message_to_edit exists
+                # Set defaults for EventTypeSelect before editing
+                for option in self.event_type_select.options:
+                    option.default = (self.selected_event_type is not None and option.value == self.selected_event_type)
+
+                # Set defaults for UserSelect before editing
+                for option in self.user_select.options:
+                    option.default = (self.selected_user_id is not None and option.value == self.selected_user_id)
+                
+                await self.message_to_edit.edit(content=new_content, view=self)
+            else:
+                print("UserEventSelectView.update_display_message: self.message_to_edit is None. Cannot edit.")
+        except discord.NotFound:
+            print(f"UserEventSelectView.update_display_message: Stored message (ID: {self.message_to_edit.id if self.message_to_edit else 'Unknown'}) not found. It might have been deleted.")
+        except Exception as e:
+            print(f"UserEventSelectView.update_display_message: Error editing message: {e}")
+
+
+    # Optional: Interaction check to ensure only the user who clicked the initial button can interact
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.interaction_user_id:
+            await interaction.response.send_message("You cannot interact with this menu.", ephemeral=True)
+            return False
+        return True
+    
+    async def on_timeout(self):
+        # Optionally disable components or send a message when the view times out
+        for item in self.children:
+            item.disabled = True
+        # Check if the message still exists before trying to edit
+        if self.message_to_edit:
+            try:
+                await self.message_to_edit.edit(content=f"Event assignment for '{self.sound_name_no_ext}' timed out.", view=self)
+            except discord.NotFound:
+                print(f"UserEventSelectView.on_timeout: Stored message (ID: {self.message_to_edit.id}) not found for timeout edit.")
+                pass # Message already deleted or gone
+            except Exception as e:
+                print(f"UserEventSelectView.on_timeout: Error editing message on timeout: {e}")
+
+
+class AssignUserEventButton(Button):
+    def __init__(self, bot_behavior, audio_file, emoji="👤", style=discord.ButtonStyle.primary, **kwargs):
+        super().__init__(label="", emoji=emoji, style=style, custom_id="assign_user_event_button", **kwargs)
+        self.bot_behavior = bot_behavior
+        self.audio_file = audio_file
+
+    async def callback(self, interaction: discord.Interaction):
+        # Fetch non-bot members from the current guild
+        guild_members = [m for m in interaction.guild.members if not m.bot]
+        
+        if not guild_members:
+            await interaction.response.send_message("No users available in this server to assign an event to.", ephemeral=True)
+            return
+
+        view = UserEventSelectView(self.bot_behavior, self.audio_file, guild_members, interaction.user.id)
+        initial_message_content = await view.get_initial_message_content()
+        
+        # Send the message and get the InteractionMessage object
+        # This requires interaction.response.send_message to be awaited if it returns the message.
+        # If it returns None, or we need original_response, this approach might need adjustment.
+        # For now, assuming followup is needed to get the message object if send_message doesn't return it directly.
+        await interaction.response.send_message(
+            content=initial_message_content, 
+            view=view, 
+            ephemeral=True
+        )
+        message = await interaction.original_response() # Fetch the message we just sent
+        view.message_to_edit = message # Assign it to the view instance
+
+# New User Event Assignment Components End
 
 class UploadSoundButton(Button):
     def __init__(self, bot_behavior, **kwargs):
@@ -208,13 +474,19 @@ class SlapButton(Button):
         self.update_button_state()
 
     def update_button_state(self):
-        if Database().get_sound(self.audio_file, True)[6]:  # Check if slap (index 5)
+        if Database().get_sound(self.audio_file, True)[6]:  # Check if slap (index 6)
             super().__init__(label="👋❌", style=discord.ButtonStyle.primary)
         else:
             super().__init__(label="", emoji="👋", style=discord.ButtonStyle.primary)
 
     async def callback(self, interaction: discord.Interaction):
         await interaction.response.defer()
+        
+        # Check if user has admin/mod permissions
+        if not self.bot_behavior.is_admin_or_mod(interaction.user):
+            await interaction.followup.send("Only admins and moderators can add slap sounds! 😤", ephemeral=True)
+            return
+            
         sound = Database().get_sound(self.audio_file, True)
         slap = 1 if not sound[6] else 0
         await Database().update_sound(sound[2], slap=slap)
@@ -234,10 +506,11 @@ class PlaySlapButton(Button):
     async def callback(self, interaction):
         await interaction.response.defer()
         # Get a random slap sound from the database
-        slap_sounds = Database().get_sounds(slap=True)
+        slap_sounds = Database().get_sounds(slap=True, num_sounds=100)
         if slap_sounds:
             random_slap = random.choice(slap_sounds)
-            asyncio.create_task(self.bot_behavior.play_request(random_slap, interaction.user.name, 1, True)) #dont do this at home kids
+
+            asyncio.create_task(self.bot_behavior.play_request(random_slap[1], interaction.user.name, exact=True)) #dont do this at home kids
         else:
             await interaction.followup.send("No slap sounds found in the database!", ephemeral=True, delete_after=5)
 
@@ -349,7 +622,7 @@ class StatsButton(Button):
 
     async def callback(self, interaction):
         await interaction.response.defer()
-        asyncio.create_task(self.bot_behavior.display_top_users(interaction.user, number_users=10, number_sounds=5, days=700, by="plays"))
+        asyncio.create_task(self.bot_behavior.display_top_users(interaction.user, number_users=20, number_sounds=5, days=700, by="plays"))
 
 
 class ListLastScrapedSoundsButton(Button):
@@ -375,112 +648,124 @@ class PlaySoundButton(Button):
         await interaction.response.defer()
         asyncio.create_task(self.bot_behavior.play_audio(self.bot_behavior.get_user_voice_channel(interaction.guild, interaction.user.name), self.sound_name, interaction.user.name))
 
-class JoinEventButton(Button):
-    def __init__(self, bot_behavior, audio_file, user_id=None):
-        self.bot_behavior = bot_behavior
-        self.audio_file = audio_file
-        self.user_id = user_id
-        self.last_used = {}  # Dictionary to track last usage per user
-        super().__init__(label="", emoji="📢", style=discord.ButtonStyle.primary)
-
-    async def callback(self, interaction: discord.Interaction):
-        await interaction.response.defer()
-        
-        # Check cooldown
-        user_id = str(interaction.user.id)
-        current_time = datetime.now()
-        if user_id in self.last_used:
-            time_diff = (current_time - self.last_used[user_id]).total_seconds()
-            if time_diff < 5:  # 5 second cooldown
-                await interaction.followup.send("Please wait 5 seconds before using this button again!", ephemeral=True, delete_after=5)
-                return
-        
-        sound_name = self.audio_file.split('/')[-1].replace('.mp3', '')
-        user_full_name = f"{interaction.user.name}#{interaction.user.discriminator}"
-        
-        # Check if sound is already set
-        is_set = Database().get_user_event_sound(user_full_name, "join", sound_name)
-        
-        # Toggle the sound and send appropriate message
-        Database().toggle_user_event_sound(user_full_name, "join", sound_name)
-        
-        message = f"{'Removed' if is_set else 'Added'} {sound_name} as join sound!"
-        await interaction.followup.send(message, ephemeral=True, delete_after=5)
-        
-        # Update last used time
-        self.last_used[user_id] = current_time
-
-class LeaveEventButton(Button):
-    def __init__(self, bot_behavior, audio_file, user_id=None):
-        self.bot_behavior = bot_behavior
-        self.audio_file = audio_file
-        self.user_id = user_id
-        self.last_used = {}  # Dictionary to track last usage per user
-        super().__init__(label="", emoji="📢", style=discord.ButtonStyle.danger)
-
-    async def callback(self, interaction: discord.Interaction):
-        await interaction.response.defer()
-        
-        # Check cooldown
-        user_id = str(interaction.user.id)
-        current_time = datetime.now()
-        if user_id in self.last_used:
-            time_diff = (current_time - self.last_used[user_id]).total_seconds()
-            if time_diff < 5:  # 5 second cooldown
-                await interaction.followup.send("Please wait 5 seconds before using this button again!", ephemeral=True, delete_after=5)
-                return
-        
-        sound_name = self.audio_file.split('/')[-1].replace('.mp3', '')
-        user_full_name = f"{interaction.user.name}#{interaction.user.discriminator}"
-        
-        # Check if sound is already set
-        is_set = Database().get_user_event_sound(user_full_name, "leave", sound_name)
-        
-        # Toggle the sound and send appropriate message
-        Database().toggle_user_event_sound(user_full_name, "leave", sound_name)
-        
-        message = f"{'Removed' if is_set else 'Added'} {sound_name} as leave sound!"
-        await interaction.followup.send(message, ephemeral=True, delete_after=5)
-        
-        # Update last used time
-        self.last_used[user_id] = current_time
-
 class SoundBeingPlayedView(View):
-    def __init__(self, bot_behavior, audio_file, user_id=None):
+    def __init__(self, bot_behavior, audio_file, user_id=None, include_add_to_list_select: bool = False):
         super().__init__(timeout=None)
         self.bot_behavior = bot_behavior
         self.audio_file = audio_file
         self.user_id = user_id
-        
+
+        # Conditionally add AddToList button or select menu FIRST - only if explicitly requested
+        if include_add_to_list_select:
+            lists = Database().get_sound_lists()
+            if lists: # Only add select if there are lists
+                # Check which list(s) the sound is already in
+                lists_containing_sound = Database().get_lists_containing_sound(self.audio_file)
+                default_list_id = lists_containing_sound[0][0] if lists_containing_sound else None
+
+                # Ensure AddToListSelect can fit, check component count if necessary
+                if len(self.children) < 25: # Basic check for component limit
+                    # Pass the default_list_id to AddToListSelect
+                    self.add_item(AddToListSelect(self.bot_behavior, self.audio_file, lists, default_list_id=default_list_id))
+                else:
+                    print("Warning: Could not add AddToListSelect to SoundBeingPlayedView due to component limit.")
+                    # Fallback to button maybe? Or just omit. For now, omit if limit reached.
+                    pass
+            # If no lists, don't add the select or the button
+        else:
+            # Add the Add to List button only if explicitly requested
+            if False:  # Removed - don't add button by default either
+                if len(self.children) < 25:
+                    self.add_item(AddToListButton(bot_behavior=bot_behavior, sound_filename=audio_file, emoji="📃", style=discord.ButtonStyle.success))
+                else:
+                    print("Warning: Could not add AddToListButton to SoundBeingPlayedView due to component limit.")
+
         # Add the replay button
         self.add_item(ReplayButton(bot_behavior=bot_behavior, audio_file=audio_file, emoji="🔁", style=discord.ButtonStyle.primary))
-        
+
         # Add the favorite button
         self.add_item(FavoriteButton(bot_behavior=bot_behavior, audio_file=audio_file))
-        
+
         # Add the blacklist button
         self.add_item(BlacklistButton(bot_behavior=bot_behavior, audio_file=audio_file))
-        
+
         # Add the slap button
         self.add_item(SlapButton(bot_behavior=bot_behavior, audio_file=audio_file))
-        
+
         # Add the isolate button
         #self.add_item(IsolateButton(bot_behavior=bot_behavior, audio_file=audio_file, label="Isolate", style=discord.ButtonStyle.secondary))
-        
+
         # Add the change sound name button
         self.add_item(ChangeSoundNameButton(bot_behavior=bot_behavior, sound_name=audio_file, emoji="📝", style=discord.ButtonStyle.primary))
-        
-        # Add the join event button
-        self.add_item(JoinEventButton(bot_behavior=bot_behavior, audio_file=audio_file, user_id=user_id))
-        
-        # Add the leave event button
-        self.add_item(LeaveEventButton(bot_behavior=bot_behavior, audio_file=audio_file, user_id=user_id))
-        
+
+        # Add the new AssignUserEventButton
+        self.add_item(AssignUserEventButton(bot_behavior=bot_behavior, audio_file=audio_file, emoji="📢", style=discord.ButtonStyle.primary))
+
+        # Add the STS character select button
+        self.add_item(STSCharacterSelectButton(bot_behavior=bot_behavior, audio_file=audio_file, emoji="🗣️", style=discord.ButtonStyle.primary))
+
+class SoundBeingPlayedWithSuggestionsView(View):
+    def __init__(self, bot_behavior, audio_file, similar_sounds, user_id=None, include_add_to_list_select: bool = False):
+        super().__init__(timeout=None)
+        self.bot_behavior = bot_behavior
+        self.audio_file = audio_file
+        self.user_id = user_id
+        # Store similar sounds as an instance variable for later access
+        self.similar_sounds = similar_sounds
+
+        # First add all the buttons from SoundBeingPlayedView
+        # Conditionally add AddToList button or select menu FIRST
+        if include_add_to_list_select:
+            lists = Database().get_sound_lists()
+            if lists: # Only add select if there are lists
+                # Check which list(s) the sound is already in
+                lists_containing_sound = Database().get_lists_containing_sound(self.audio_file)
+                default_list_id = lists_containing_sound[0][0] if lists_containing_sound else None
+
+                # Ensure AddToListSelect can fit, check component count if necessary
+                if len(self.children) < 25: # Basic check for component limit
+                    # Pass the default_list_id to AddToListSelect
+                    self.add_item(AddToListSelect(self.bot_behavior, self.audio_file, lists, default_list_id=default_list_id))
+                else:
+                    print("Warning: Could not add AddToListSelect to SoundBeingPlayedView due to component limit.")
+                    # Fallback to button maybe? Or just omit. For now, omit if limit reached.
+                    pass
+            # If no lists, don't add the select or the button
+
+        # Add the replay button
+        self.add_item(ReplayButton(bot_behavior=bot_behavior, audio_file=audio_file, emoji="🔁", style=discord.ButtonStyle.primary))
+
+        # Add the favorite button
+        self.add_item(FavoriteButton(bot_behavior=bot_behavior, audio_file=audio_file))
+
+        # Add the blacklist button
+        self.add_item(BlacklistButton(bot_behavior=bot_behavior, audio_file=audio_file))
+
+        # Add the slap button
+        self.add_item(SlapButton(bot_behavior=bot_behavior, audio_file=audio_file))
+
+        # Add the change sound name button
+        self.add_item(ChangeSoundNameButton(bot_behavior=bot_behavior, sound_name=audio_file, emoji="📝", style=discord.ButtonStyle.primary))
+
+        # Add the new AssignUserEventButton
+        self.add_item(AssignUserEventButton(bot_behavior=bot_behavior, audio_file=audio_file, emoji="📢", style=discord.ButtonStyle.primary))
+
         # Add the STS character select button
         self.add_item(STSCharacterSelectButton(bot_behavior=bot_behavior, audio_file=audio_file, emoji="🗣️", style=discord.ButtonStyle.primary))
         
-        # Add the Add to List button
-        self.add_item(AddToListButton(bot_behavior=bot_behavior, sound_filename=audio_file, emoji="📃", style=discord.ButtonStyle.success))
+        # Now add the similar sound buttons in the third row (index 2)
+        # Limit to exactly 5 buttons (maximum per row in Discord)
+        limited_similar_sounds = similar_sounds[:5]
+        for i, sound in enumerate(limited_similar_sounds):
+            button = PlaySoundButton(
+                bot_behavior, 
+                sound[1], 
+                style=discord.ButtonStyle.danger,
+                label=sound[2].split('/')[-1].replace('.mp3', '')
+            )
+            # Force all similar sound buttons to be in row 2 (third row)
+            button.row = 3
+            self.add_item(button)
 
 class PaginationButton(Button):
     def __init__(self, label, emoji, style, custom_id, row):
@@ -956,56 +1241,46 @@ class DeleteListButton(Button):
             await interaction.followup.send("Failed to delete list.", ephemeral=True)
 
 class AddToListSelect(discord.ui.Select):
-    def __init__(self, bot_behavior, sound_filename, lists):
+    def __init__(self, bot_behavior, sound_filename, lists, default_list_id: int = None):
         self.bot_behavior = bot_behavior
         self.sound_filename = sound_filename
-        
+
         # Create options for each list, showing the creator's name
-        options = [
-            discord.SelectOption(
+        options = []
+        for list_info in lists[:25]:  # Discord limits to 25 options
+            list_id = list_info[0]
+            option = discord.SelectOption(
                 label=f"{list_info[1]} (by {list_info[2]})",  # list_name (by creator)
-                value=str(list_info[0]),  # list_id
+                value=str(list_id),  # list_id
                 description=f"Created by {list_info[2]}"  # Show creator in description
             )
-            for list_info in lists[:25]  # Discord limits to 25 options
-        ]
-        
+            # Set default if this list_id matches the provided default_list_id
+            if default_list_id is not None and list_id == default_list_id:
+                option.default = True
+            options.append(option)
+
         super().__init__(
             placeholder="Choose a list...",
             min_values=1,
             max_values=1,
             options=options
         )
-        
+
     async def callback(self, interaction):
         await interaction.response.defer()
         list_id = int(self.values[0])
-        
+
         # Get the list name and creator
         list_info = Database().get_sound_list(list_id)
         if not list_info:
             await interaction.followup.send("List not found.", ephemeral=True)
             return
-            
+
         list_name = list_info[1]
         list_creator = list_info[2]
-        
+
         # Add the sound to the list
         success, message = Database().add_sound_to_list(list_id, self.sound_filename)
-        if success:
-            # If the user adding the sound is not the creator, include that in the message
-            if list_creator != interaction.user.name:
-                await interaction.followup.send(f"Added sound to {list_creator}'s list '{list_name}'.", ephemeral=True)
-                
-                # Optionally notify in the channel about the addition
-                await self.bot_behavior.send_message(
-                    title=f"Sound Added to List",
-                    description=f"{interaction.user.name} added a sound to {list_creator}'s list '{list_name}'."
-                )
-            else:
-                await interaction.followup.send(f"Added sound to your list '{list_name}'.", ephemeral=True)
-        else:
-            await interaction.followup.send(f"Failed to add sound to list: {message}", ephemeral=True)
 
 class CreateListModal(discord.ui.Modal):
     def __init__(self, bot_behavior):

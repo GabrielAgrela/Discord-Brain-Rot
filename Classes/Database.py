@@ -127,7 +127,6 @@ class Database:
         try:
             self.cursor.execute("INSERT INTO actions (username, action, target) VALUES (?, ?, ?);", (username, action, target))
             self.conn.commit()
-            print("Action inserted successfully")
         except sqlite3.Error as e:
             print(f"An error occurred: {e}")
 
@@ -323,6 +322,34 @@ class Database:
         except sqlite3.Error as e:
             print(f"An error occurred: {e}")
 
+    def get_sound_by_name(self, sound_name):
+        """Get a sound by its name (with or without .mp3 extension)"""
+        try:
+            # Add .mp3 extension if not already present
+            if not sound_name.lower().endswith('.mp3'):
+                sound_name = f"{sound_name}.mp3"
+                
+            # First try to match exact filename
+            self.cursor.execute("SELECT * FROM sounds WHERE Filename = ?;", (sound_name,))
+            result = self.cursor.fetchone()
+            if result:
+                return result
+                
+            # If no result, try to match against original filename
+            self.cursor.execute("SELECT * FROM sounds WHERE originalfilename = ?;", (sound_name,))
+            result = self.cursor.fetchone()
+            if result:
+                return result
+                
+            # If still no result, try to do a LIKE search
+            sound_name_pattern = f"%{sound_name}%"
+            self.cursor.execute("SELECT * FROM sounds WHERE Filename LIKE ? OR originalfilename LIKE ?;", 
+                               (sound_name_pattern, sound_name_pattern))
+            return self.cursor.fetchone()
+        except sqlite3.Error as e:
+            print(f"An error occurred: {e}")
+            return None
+
     def get_sounds(self, favorite=None, blacklist=None, slap=None, num_sounds=25, sort="DESC", favorite_by_user=False, user=None):
         if favorite_by_user and user:
             try:
@@ -368,6 +395,10 @@ class Database:
                 conditions.append("blacklist = ?")
                 params.append(blacklist)
             if slap is not None:
+                if slap == 1:
+                    #remove conditions
+                    conditions = []
+                    params = []
                 conditions.append("slap = ?")
                 params.append(slap)
             
@@ -413,7 +444,7 @@ class Database:
             SELECT s.Filename, COUNT(*) as count
             FROM actions a
             JOIN sounds s ON a.target = s.id
-            WHERE a.action IN ('play_random_sound', 'replay_sound', 'play_random_favorite_sound', 'play_request')
+            WHERE a.action IN ('play_sound_periodically','play_random_sound', 'replay_sound', 'play_random_favorite_sound', 'play_request')
             AND s.slap = 0
             """
             
@@ -639,12 +670,25 @@ class Database:
         try:
             if creator:
                 self.cursor.execute(
-                    "SELECT id, list_name, creator, created_at FROM sound_lists WHERE creator = ? ORDER BY created_at DESC",
+                    """
+                    SELECT sl.id, sl.list_name, sl.creator, sl.created_at, COUNT(sli.id) as sound_count
+                    FROM sound_lists sl
+                    LEFT JOIN sound_list_items sli ON sl.id = sli.list_id
+                    WHERE sl.creator = ?
+                    GROUP BY sl.id
+                    ORDER BY sound_count DESC
+                    """,
                     (creator,)
                 )
             else:
                 self.cursor.execute(
-                    "SELECT id, list_name, creator, created_at FROM sound_lists ORDER BY created_at DESC"
+                    """
+                    SELECT sl.id, sl.list_name, sl.creator, sl.created_at, COUNT(sli.id) as sound_count
+                    FROM sound_lists sl
+                    LEFT JOIN sound_list_items sli ON sl.id = sli.list_id
+                    GROUP BY sl.id
+                    ORDER BY sound_count DESC
+                    """
                 )
             return self.cursor.fetchall()
         except Exception as e:

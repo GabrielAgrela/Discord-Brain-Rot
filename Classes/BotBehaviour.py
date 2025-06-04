@@ -14,7 +14,7 @@ from Classes.PlayHistoryDatabase import PlayHistoryDatabase
 from Classes.OtherActionsDatabase import OtherActionsDatabase
 from Classes.TTS import TTS
 import csv
-from Classes.UI import SoundBeingPlayedView, ControlsView, SoundView, EventView, PaginatedEventView
+from Classes.UI import SoundBeingPlayedView, SoundBeingPlayedWithSuggestionsView, ControlsView, SoundView, EventView, PaginatedEventView
 from Classes.ManualSoundDownloader import ManualSoundDownloader
 from moviepy.editor import VideoFileClip
 
@@ -147,14 +147,14 @@ class BotBehavior:
             return
         
         async with self.upload_lock:
-            message = await interaction.channel.send(embed=discord.Embed(title="Upload an .mp3, or provide an MP3/TikTok/YouTube/Instagram URL (max 10 minutes for YouTube). You have 60s ☝️🤓", color=self.color))
+            message = await interaction.channel.send(embed=discord.Embed(title="MP3/TikTok/YouTube/Instagram URL + custom name (optional). You can also DM me instead. ☝️🤓", color=self.color))
 
             def check(m):
                 is_attachment = len(m.attachments) > 0 and m.attachments[0].filename.endswith('.mp3')
                 is_mp3_url = re.match(r'^https?://.*\.mp3$', m.content)
                 is_tiktok_url = re.match(r'^https?://.*tiktok\.com/.*$', m.content)
                 is_youtube_url = re.match(r'^https?://(www\.)?(youtube\.com|youtu\.be)/.*$', m.content)
-                is_instagram_url = re.match(r'^https?://(www\.)?instagram\.com/(p|reel|stories)/.*$', m.content)
+                is_instagram_url = re.match(r'^https?://(www\.)?instagram\.com/(p|reels|reel|stories)/.*$', m.content)
                 return m.author == interaction.user and m.channel == interaction.channel and (is_attachment or is_mp3_url or is_tiktok_url or is_youtube_url or is_instagram_url)
 
             try:
@@ -174,7 +174,7 @@ class BotBehavior:
                 time_limit = None
                 if re.match(r'^https?://.*tiktok\.com/.*$', response.content) or \
                    re.match(r'^https?://(www\.)?(youtube\.com|youtu\.be)/.*$', response.content) or \
-                   re.match(r'^https?://(www\.)?instagram\.com/(p|reel|stories)/.*$', response.content):
+                   re.match(r'^https?://(www\.)?instagram\.com/(p|reels|reel|stories)/.*$', response.content):
                     parts = response.content.split(maxsplit=2)
                     if len(parts) > 1 and parts[1].isdigit():
                         time_limit = int(parts[1])
@@ -185,7 +185,7 @@ class BotBehavior:
                     file_path = await self.save_uploaded_sound(response.attachments[0], custom_filename)
                 elif re.match(r'^https?://.*tiktok\.com/.*$', response.content) or \
                      re.match(r'^https?://(www\.)?(youtube\.com|youtu\.be)/.*$', response.content) or \
-                     re.match(r'^https?://(www\.)?instagram\.com/(p|reel|stories)/.*$', response.content):
+                     re.match(r'^https?://(www\.)?instagram\.com/(p|reels|reel|stories)/.*$', response.content):
                     await self.send_message(title="Downloading video... 🤓", description="Espera, bixa", delete_time=5)
                     try:
                         file_path = await self.save_sound_from_video(response.content, custom_filename, time_limit=time_limit)
@@ -343,15 +343,97 @@ class BotBehavior:
         #await self.cooldown_message.delete()
 
     async def ensure_voice_connected(self, channel):
-        voice_client = discord.utils.get(self.bot.voice_clients, guild=channel.guild)
-        if voice_client and voice_client.is_connected():
-            if voice_client.channel != channel:
-                await voice_client.move_to(channel)
-        else:
-            voice_client = await channel.connect()
-        return voice_client
+        """Ensures a stable voice connection with improved cleanup and race condition handling"""
+        guild_id = channel.guild.id
+        
+        # Use a connection lock to prevent race conditions
+        if not hasattr(self, 'connection_locks'):
+            self.connection_locks = {}
+        if guild_id not in self.connection_locks:
+            self.connection_locks[guild_id] = asyncio.Lock()
+            
+        async with self.connection_locks[guild_id]:
+            # Check for existing voice client in this guild
+            voice_client = discord.utils.get(self.bot.voice_clients, guild=channel.guild)
+            
+            if voice_client and voice_client.is_connected():
+                # If already in the target channel, just return it
+                if voice_client.channel == channel:
+                    print(f"Already connected to {channel.name}, reusing connection")
+                    return voice_client
+                
+                # Different channel - need to disconnect and reconnect
+                print(f"Switching from {voice_client.channel.name} to {channel.name} - disconnecting first")
+                try:
+                    await voice_client.disconnect(force=True)
+                    await asyncio.sleep(1)
+                except Exception as e:
+                    print(f"Error disconnecting voice client: {e}")
+            
+            # Now attempt to connect fresh
+            max_retries = 5
+            for attempt in range(max_retries):
+                try:
+                    print(f"Connecting to voice channel: {channel.name} (attempt {attempt+1}/{max_retries})")
+                    
+                    # Try to connect
+                    voice_client = await channel.connect(timeout=10.0)
+                    
+                    # Wait for connection to stabilize
+                    await asyncio.sleep(1)
+                    
+                    # Verify the connection is good and responsive
+                    if voice_client.is_connected():
+                        # Try a quick test to ensure the connection is responsive
+                        try:
+                            # Check if we can access basic properties
+                            _ = voice_client.latency
+                            print(f"Successfully connected to {channel.name} (latency: {voice_client.latency:.2f}ms)")
+                            return voice_client
+                        except Exception as e:
+                            print(f"Connection verification failed: {e}")
+                            # Disconnect and try again
+                            try:
+                                await voice_client.disconnect(force=True)
+                            except:
+                                pass
+                    else:
+                        print(f"Connection failed verification on attempt {attempt+1}")
+                        
+                except discord.ClientException as e:
+                    error_msg = str(e).lower()
+                    if "already connected" in error_msg:
+                        print(f"Already connected error detected, forcing cleanup...")
+                        # More aggressive cleanup
+                        for vc in list(self.bot.voice_clients):
+                            if vc.guild.id == guild_id:
+                                try:
+                                    await vc.disconnect(force=True)
+                                except:
+                                    pass
+                        await asyncio.sleep(2)
+                    else:
+                        print(f"Connection error on attempt {attempt+1}: {e}")
+                        
+                except asyncio.TimeoutError:
+                    print(f"Connection timeout on attempt {attempt+1}")
+                    
+                except Exception as e:
+                    print(f"Unexpected error connecting to voice channel on attempt {attempt+1}: {e}")
+                
+                # Wait before retry, with exponential backoff
+                wait_time = min(2 ** attempt, 8)
+                await asyncio.sleep(wait_time)
+            
+            # If we get here, all connection attempts failed
+            raise discord.ClientException("Failed to establish a stable voice connection after multiple attempts")
 
-    async def play_audio(self, channel, audio_file, user, is_entrance=False, is_tts=False, extra="", original_message="", send_controls=True, retry_count=0, effects=None):
+    async def play_audio(self, channel, audio_file, user, 
+                        is_entrance=False, is_tts=False, extra="", 
+                        original_message="", # Crucial for finding relevant suggestions
+                        send_controls=True, retry_count=0, effects=None, 
+                        show_suggestions: bool = True, # New flag
+                        num_suggestions: int = 5): # Control how many suggestions to fetch
         MAX_RETRIES = 3
 
         # Check cooldown first
@@ -406,10 +488,17 @@ class BotBehavior:
 
             # Check if the audio file exists
             if not os.path.exists(audio_file_path):
-                audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", Database().get_sound(audio_file, True)[2]))
-                if not os.path.exists(audio_file_path):
-                    await self.send_error_message(f"Audio file not found: {audio_file_path}")
-                    print(f"Audio file not found: {audio_file_path}")
+                # Try to get the sound from database
+                sound_info = Database().get_sound(audio_file, True)
+                if sound_info and len(sound_info) > 2:
+                    audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", sound_info[2]))
+                    if not os.path.exists(audio_file_path):
+                        await self.send_error_message(f"Audio file not found: {audio_file_path}")
+                        print(f"Audio file not found: {audio_file_path}")
+                        return
+                else:
+                    await self.send_error_message(f"Sound '{audio_file}' not found in database")
+                    print(f"Sound '{audio_file}' not found in database")
                     return
 
             # Get audio duration
@@ -489,17 +578,6 @@ class BotBehavior:
                         elif download_date:
                             description.append(f"📅 Added: **{download_date}**")
                     
-                    # Add lists information
-                    lists = db.get_lists_containing_sound(sound_filename)
-                    if lists:
-                        list_names = [f"**{list_name}** (by {creator})" for _, list_name, creator in lists]
-                        if len(list_names) == 1:
-                            description.append(f"📋 In list: {list_names[0]}")
-                        else:
-                            description.append(f"📋 In lists: {', '.join(list_names[:3])}")
-                            if len(list_names) > 3:
-                                description[-1] += f" and {len(list_names) - 3} more"
-                    
                     # Add favorites information
                     if sound_id:
                         favorited_by = db.get_users_who_favorited_sound(sound_id)
@@ -509,23 +587,40 @@ class BotBehavior:
                             else:
                                 description.append(f"⭐ Favorited by: **{favorited_by[0]}**, **{favorited_by[1]}**" + 
                                                  (f" and {len(favorited_by) - 2} others" if len(favorited_by) > 2 else ""))
+                                
+                     # Add lists information
+                    lists = db.get_lists_containing_sound(sound_filename)
+                    if lists:
+                        list_names = [f"**{list_name}** (by {creator})" for _, list_name, creator in lists]
+                        if len(list_names) == 1:
+                            description.append(f"📋 In list: {list_names[0]}")
+                        else:
+                            description.append(f"📋 In lists: {', '.join(list_names[:3])}")
+                            if len(list_names) > 3:
+                                description[-1] += f" and {len(list_names) - 3} more"
+
                     
                     # Initialize progress bar
                     current_time = "0:00"
-                    description.append(f"⏱️ Duration: {current_time} / {duration_str}")
-                    description.append(f"Progress: ░░░░░░░░░░░░░░░░░░░░")
+                    description.append(f"⏱️ Duration: {duration_str}")
+                    description.append(f"Progress: Loading...")
                     description_text = "\n".join(description) if description else None
                     
                     sound_message = await self.send_message(
-                        view=SoundBeingPlayedView(self, audio_file), 
-                        title=f"🔊 **{Database().get_sound(audio_file, True)[2].replace('.mp3', '')}** 🔊", 
+                        view=SoundBeingPlayedView(self, audio_file, include_add_to_list_select=False),
+                        title=f"🔊 **{sound_info[2].replace('.mp3', '') if sound_info and len(sound_info) > 2 else audio_file.replace('.mp3', '')}** 🔊",
                         description=description_text,
-                        footer=f"{user} requested '{original_message}'" if original_message else f"Requested by {user}", 
-                        send_controls=send_controls
+                        footer=f"{user} requested '{original_message}'" if original_message else f"Requested by {user}",
+                        # Only send controls on the main message if no similar sounds are being shown
+                        send_controls=True   
                     )
+
+                    
                     self.current_sound_message = sound_message
                     self.stop_progress_update = False
                     self.progress_already_updated = False  # Reset the flag for the new sound
+                    
+                   
 
             # Stop the audio if it is already playing
             if voice_client.is_playing():
@@ -575,13 +670,45 @@ class BotBehavior:
 
             def after_playing(error):
                 if error:
-                    asyncio.run_coroutine_threadsafe(self.send_error_message(f"Error in playback, but Gertrudes will retry: {error}"), self.bot.loop)
-                    print(f'Error in playback: {error}')
-                    if retry_count < MAX_RETRIES:
-                        time.sleep(5)
-                        # Pass effects to recursive call
-                        asyncio.run_coroutine_threadsafe(self.play_audio(channel, audio_file, user, is_entrance, is_tts, extra, original_message, send_controls, retry_count + 1, effects), self.bot.loop)
-                self.bot.loop.call_soon_threadsafe(self.playback_done.set)
+                    error_message = str(error)
+                    print(f'Error in playback: {error_message}')
+                    
+                    if "not connected" in error_message.lower():
+                        # Connection lost during playback
+                        message = "Voice connection lost during playback"
+                        print(message)
+                        asyncio.run_coroutine_threadsafe(
+                            self.send_error_message(message), 
+                            self.bot.loop
+                        )
+                    elif retry_count < MAX_RETRIES:
+                        # Other errors, retry with delay
+                        asyncio.run_coroutine_threadsafe(
+                            self.send_error_message(f"Playback error: {error_message}. Retrying..."), 
+                            self.bot.loop
+                        )
+                        time.sleep(2)  # Increased delay
+                        # Pass all parameters to keep consistency
+                        asyncio.run_coroutine_threadsafe(
+                            self.play_audio(
+                                channel, audio_file, user, is_entrance, is_tts, 
+                                extra, original_message, send_controls, 
+                                retry_count + 1, effects, show_suggestions, num_suggestions
+                            ), 
+                            self.bot.loop
+                        )
+                else:
+                    
+                    # Add list selector after sound finishes playing successfully
+                    if sound_message:
+                        # Add a short delay to ensure suggestions have time to be added
+                        asyncio.run_coroutine_threadsafe(
+                            self.delayed_list_selector_update(sound_message, audio_file),
+                            self.bot.loop
+                        )
+                    
+                    # Set playback_done flag to signal completion
+                    self.bot.loop.call_soon_threadsafe(self.playback_done.set)
 
             # Check if FFmpeg path is set and valid
             if not self.ffmpeg_path or not os.path.exists(self.ffmpeg_path):
@@ -592,7 +719,24 @@ class BotBehavior:
             # Add this check before playing
             if not voice_client.is_connected():
                 await self.send_error_message("Voice client is not connected. Attempting to reconnect...")
-                await voice_client.connect(timeout=10, reconnect=True)
+                print("Voice client disconnected")
+                
+                # Try a full disconnect to clean up any zombie connections
+                try:
+                    await voice_client.disconnect(force=True)
+                except Exception:
+                    pass  # Ignore errors here
+                
+                await asyncio.sleep(2)
+                
+                # Reconnect with a fresh connection
+                try:
+                    voice_client = await self.ensure_voice_connected(channel)
+                    print("Voice client reconnected")
+                except Exception as e:
+                    await self.send_error_message(f"Failed to reconnect: {e}")
+                    print(f"Failed to reconnect: {e}")
+                    return False
 
             # Play the audio file
             try:
@@ -608,12 +752,41 @@ class BotBehavior:
                 # If volume seems off, consider removing this or adjusting ffmpeg volume.
                 audio_source = discord.PCMVolumeTransformer(audio_source)
 
+                # Double-check the voice connection is still active right before playing
+                # This is crucial for handling the race condition when switching channels
+                if not voice_client.is_connected():
+                    print("Voice client disconnected right before playing. Final reconnection attempt...")
+                    try:
+                        # One final reconnection attempt
+                        voice_client = await self.ensure_voice_connected(channel)
+                        if not voice_client.is_connected():
+                            await self.send_error_message("Voice connection unstable. Please try again.")
+                            return False
+                    except Exception as e:
+                        await self.send_error_message(f"Connection error: {e}")
+                        return False
+                
+                # Add a small delay right before playing to ensure connection stability
+                await asyncio.sleep(0.5)
+                
                 voice_client.play(audio_source, after=after_playing)
+                print(f"Successfully playing audio: {audio_file}")
+
+                 # Start finding similar sounds in a background task
+                if show_suggestions and not is_entrance and not is_tts and not is_slap_sound:
+                    # Pass all necessary parameters to the background task
+                    asyncio.create_task(self.find_and_update_similar_sounds(
+                        sound_message=sound_message,
+                        audio_file=audio_file,
+                        original_message=original_message,
+                        send_controls=False,
+                        num_suggestions=num_suggestions
+                    ))
                 
                 self.playback_done.clear()
                 if sound_message and not is_slap_sound and duration > 0:
                     # Start updating the progress bar
-                    await self.update_progress_bar(sound_message, duration)
+                    asyncio.create_task(self.update_progress_bar(sound_message, duration))
 
                 return True
             except Exception as e:
@@ -664,6 +837,7 @@ class BotBehavior:
                 updated_description.append(f"Progress: {progress_bar}")
                 
                 embed.description = "\n".join(updated_description)
+                # Only update the embed content without modifying the view
                 await sound_message.edit(embed=embed)
             
             await asyncio.sleep(1)  # Update every second
@@ -685,6 +859,7 @@ class BotBehavior:
                 updated_description.append(f"⏱️ Duration: {duration_str}")
                 
                 embed.description = "\n".join(updated_description)
+                # Only update the embed content
                 await sound_message.edit(embed=embed)
 
     async def update_bot_status(self):
@@ -746,19 +921,63 @@ class BotBehavior:
             temp_color = discord.Color.random()
         self.color = temp_color
     
-    async def play_request(self, id, user, request_number=5, exact=False, effects=None):
+    async def play_request(self, id, user, exact=False, effects=None):
+        filename_to_play = None
+        sound_id_to_log = None
+        show_suggestions_flag = False
+        filenames = [] # Initialize filenames
+
         if exact:
-            filenames = [id]
+            # If exact, assume `id` is the filename. Don't show suggestions.
+            # Attempt to get sound info to verify and get ID for logging
+            sound_info = Database().get_sound(id, True) 
+            if sound_info:
+                filename_to_play = sound_info[2] # Use the actual filename from DB
+                sound_id_to_log = sound_info[0]
+                # Could potentially still show suggestions even if exact filename matched? 
+                # For now, exact means no suggestions.
+                show_suggestions_flag = False 
+            else:
+                # Maybe it's a direct path already? Risky. Let's error for now if not found.
+                 await self.send_error_message(f"Exact sound '{id}' not found in database.")
+                 print(f"Exact sound '{id}' requested by {user} not found in database.")
+                 return
         else:
-            filenames = Database().get_sounds_by_similarity(id,request_number)
+            # Find the best match
+            filenames = Database().get_sounds_by_similarity(id, 1) # Find only the top match
+            #remove first element from list
+            if not filenames:
+                await self.send_error_message(f"No sounds found matching '{id}'.")
+                return
+            filename_to_play = filenames[0][1] # Get the filename of the best match
+            sound_id_to_log = filenames[0][0]  # Get the ID of the best match
+            show_suggestions_flag = True # Request suggestions
+
+        if not filename_to_play: # Should not happen if logic above is correct, but safety check
+             await self.send_error_message(f"Could not determine sound to play for '{id}'.")
+             return
+
         for guild in self.bot.guilds:
             channel = self.get_user_voice_channel(guild, user)
             if channel is not None:
-                asyncio.create_task(self.play_audio(channel, filenames[0][1], user, original_message=id, send_controls = False if filenames[1:] else True, effects=effects))
-                Database().insert_action(user, "play_request", filenames[0][0])
-                await asyncio.sleep(2)
-                if filenames[1:]:
-                    await self.send_message(view=SoundView(self, filenames[1:]))
+                asyncio.create_task(self.play_audio(
+                    channel, 
+                    filename_to_play, 
+                    user, 
+                    original_message=id, # Pass the original search term
+                    effects=effects, 
+                    show_suggestions=show_suggestions_flag # Control suggestion fetching
+                    # send_controls defaults to True, play_audio handles adjustment
+                ))
+                
+                # Log the action with the determined sound ID
+                if sound_id_to_log:
+                     Database().insert_action(user, "play_request", sound_id_to_log)
+                else:
+                     # Fallback if ID couldn't be determined (should be rare)
+                     Database().insert_action(user, "play_request_unknown_id", filename_to_play) 
+
+                break # Assume we only play in the first guild found
 
     async def change_filename(self, oldfilename, newfilename, user):
         Database().insert_action(user.name, "change_filename", oldfilename + " to " + newfilename)
@@ -912,7 +1131,7 @@ class BotBehavior:
         table += "-" * 55 + "\n"
         
         for row in data:
-            name = f"{row[0]}"[:14] 
+            name = f"{row[0]}"[:14]  # Limit name length
             total_hours = f"{row[2]:.1f}"
             hours_2024 = f"{row[3]:.1f}"
             games = str(row[4])
@@ -980,6 +1199,8 @@ class BotBehavior:
     async def is_channel_empty(self, channel):
         if len(channel.members) == 0 or (len(channel.members) == 1 and self.bot.user in channel.members):
             await self.bot.voice_clients[0].disconnect()
+            bot_channel = await self.get_bot_channel()
+            await bot_channel.send(f"Disconnected from {channel.name} because it was empty")
             return True
 
         return False
@@ -1273,6 +1494,129 @@ class BotBehavior:
             )
         
         return True
+
+    async def find_and_update_similar_sounds(self, sound_message, audio_file, original_message, send_controls, num_suggestions):
+        """Find similar sounds and update the original message with them."""
+        try:
+            # Check if the sound message still exists
+            try:
+                await sound_message.edit(content=sound_message.content)  # Small edit to verify message exists
+            except discord.NotFound:
+                print(f"Sound message was deleted before similar sounds could be added")
+                return
+            
+            # Get the sound name without .mp3 extension
+            sound_info = Database().get_sound(audio_file, True)
+            if not sound_info:
+                print(f"Could not find sound info for {audio_file}")
+                return
+                
+            sound_name = sound_info[2].replace('.mp3', '')
+            
+            # Skip if the sound name matches the original message exactly
+            if sound_name == original_message:
+                return
+            
+            # Use original_message for similarity search
+            # Fetch N+1 in case the top result is the one being played
+            all_similar = Database().get_sounds_by_similarity(sound_name, num_suggestions + 1)
+            
+            if not all_similar:
+                print(f"No similar sounds found for {sound_name}")
+                return
+            
+            # Filter out the exact audio_file being played from suggestions
+            similar_sounds_list = [s for s in all_similar if s[1] != audio_file]
+            
+            # Limit to the desired number of suggestions
+            similar_sounds_list = similar_sounds_list[:num_suggestions]
+            
+            print(f"Found {len(similar_sounds_list)} similar sounds for {sound_name}")
+            
+            if not similar_sounds_list:
+                print(f"No similar sounds left after filtering out current sound {audio_file}")
+                return  # No similar sounds found
+            
+            # Create a new combined view
+            combined_view = SoundBeingPlayedWithSuggestionsView(
+                self, audio_file, similar_sounds_list, include_add_to_list_select=False
+            )
+            
+            # Update the message with the combined view
+            await sound_message.edit(view=combined_view)
+            
+            # Send controls as a separate message if needed
+            if send_controls:
+                await self.send_controls()
+            
+        except Exception as e:
+            print(f"Error finding and updating similar sounds: {e}")
+            import traceback
+            traceback.print_exc()
+
+    # New method to update message with list selector after playing
+    async def update_sound_message_with_list_selector(self, sound_message, audio_file):
+        try:
+            # Check if message still exists
+            try:
+                await sound_message.edit(content=sound_message.content)
+            except discord.NotFound:
+                print("Sound message was deleted before list selector could be added")
+                return
+                
+            # Import UI classes to avoid circular imports
+            from Classes.UI import SoundBeingPlayedView, SoundBeingPlayedWithSuggestionsView
+            
+            # Get similar sounds from the database
+            sound_info = Database().get_sound(audio_file, True)
+            if not sound_info:
+                print(f"Could not find sound info for {audio_file}")
+                return
+                
+            sound_name = sound_info[2].replace('.mp3', '')
+            
+            # Get similar sounds (excluding the current one)
+            similar_sounds = Database().get_sounds_by_similarity(sound_name, 6)  # Get 6 to ensure we have enough after filtering
+            similar_sounds = [s for s in similar_sounds if s[1] != audio_file][:5]  # Limit to 5
+            
+            print(f"Found {len(similar_sounds)} similar sounds for updating message")
+            
+            # Create new view
+            if similar_sounds:
+                new_view = SoundBeingPlayedWithSuggestionsView(
+                    self, audio_file, similar_sounds, include_add_to_list_select=True
+                )
+            else:
+                new_view = SoundBeingPlayedView(
+                    self, audio_file, include_add_to_list_select=True
+                )
+            
+            # Update the message view
+            await sound_message.edit(view=new_view)
+            
+        except Exception as e:
+            print(f"Error updating sound message with list selector: {e}")
+            import traceback
+            traceback.print_exc()
+
+    async def delayed_list_selector_update(self, sound_message, audio_file):
+        """Wait a moment for suggestions to be added, then update with the list selector"""
+        # Wait 1.5 seconds to ensure suggestions have time to be added
+        await asyncio.sleep(1.5)
+        await self.update_sound_message_with_list_selector(sound_message, audio_file)
+
+    async def cleanup_all_voice_connections(self):
+        """Clean up all voice connections across all guilds"""
+        print("Cleaning up all voice connections...")
+        for vc in list(self.bot.voice_clients):
+            try:
+                print(f"Disconnecting from {vc.channel.name} in {vc.guild.name}")
+                await vc.disconnect(force=True)
+                await asyncio.sleep(0.5)
+            except Exception as e:
+                print(f"Error disconnecting from {vc.guild.name}: {e}")
+        
+        print("All voice connections cleaned up.")
 
 
 

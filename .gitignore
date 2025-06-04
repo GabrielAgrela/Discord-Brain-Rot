@@ -8,3 +8,6 @@
 /database.db
 /venv
 lol_database.db
+database copy.db
+/vosk-model-pt/
+/temp_audio

@@ -67,6 +67,7 @@ class TTS:
         
         if char == "ventura":
             self.voice_id = self.voice_id_pt
+            boost_volume = 15
         elif char == "costa":
             self.voice_id = self.voice_id_costa
             boost_volume = 15
@@ -81,9 +82,9 @@ class TTS:
             await cooldown_message.delete()
             return
         
-        if AudioSegment.from_file(audio_file_path).duration_seconds > 60:
-            print("Audio file is too long. Please provide a file that is less than 15 seconds.")
-            error_message = await self.behavior.send_message(view=None, title="Audio File Too Long", description="Please provide a file that is less than 15 seconds.")
+        if AudioSegment.from_file(audio_file_path).duration_seconds > 70:
+            print("Audio file is too long. Please provide a file that is less than 70 seconds.")
+            error_message = await self.behavior.send_message(view=None, title="Audio File Too Long", description="Please provide a file that is less than 70 seconds.")
             await asyncio.sleep(5)
             await error_message.delete()
             return
@@ -220,7 +221,7 @@ class TTS:
         self.filename = f"{text[:10]}-{time.strftime('%d-%m-%y-%H-%M-%S')}.mp3"
         if lang == "pt":
             self.voice_id = self.voice_id_pt
-            boost_volume = 10
+            boost_volume = 15
         elif lang == "costa":
             self.voice_id = self.voice_id_costa
             boost_volume = 15

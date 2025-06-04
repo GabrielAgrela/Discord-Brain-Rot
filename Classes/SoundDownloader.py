@@ -108,7 +108,7 @@ class SoundDownloader:
     async def move_sounds(self):   
         while True: 
             list_of_files = glob.glob(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Downloads","*.mp3")))
-            print(self.__class__.__name__," MOVER: ",str(len(list_of_files)) + " files found")
+          #  print(self.__class__.__name__," MOVER: ",str(len(list_of_files)) + " files found")
             for file in list_of_files:
                 try:
                     print(self.__class__.__name__," MOVER: ",file, " chosen")

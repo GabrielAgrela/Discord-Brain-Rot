@@ -8,7 +8,8 @@ class ManualSoundDownloader:
     def video_to_mp3(url, output_dir='.', custom_filename=None, time_limit=None):
         # Replace "photo" with "video" in the URL if present (for TikTok)
         if "photo" in url:
-            url = url.replace("photo", "video")
+            url = url.replace("photo", "video").replace("reels", "p").replace("stories", "p")
+        
 
         # Set up yt-dlp options
         def sanitize_title(title):
