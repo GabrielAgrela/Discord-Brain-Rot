@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 import time
 import discord
 import random
+import functools
 from mutagen.mp3 import MP3
 import math # Added for ceiling function
 
@@ -1522,7 +1523,11 @@ class BotBehavior:
             loop = asyncio.get_running_loop()
             all_similar = await loop.run_in_executor(
                 None,
-                lambda: Database().get_sounds_by_similarity(sound_name, num_suggestions + 1)
+                functools.partial(
+                    Database().get_sounds_by_similarity,
+                    sound_name,
+                    num_suggestions + 1,
+                ),
             )
             
             if not all_similar:
@@ -1579,8 +1584,12 @@ class BotBehavior:
                 
             sound_name = sound_info[2].replace('.mp3', '')
             
-            # Get similar sounds (excluding the current one)
-            similar_sounds = Database().get_sounds_by_similarity(sound_name, 6)  # Get 6 to ensure we have enough after filtering
+            # Get similar sounds (excluding the current one) without blocking the loop
+            loop = asyncio.get_running_loop()
+            similar_sounds = await loop.run_in_executor(
+                None,
+                functools.partial(Database().get_sounds_by_similarity, sound_name, 6),
+            )  # Get 6 to ensure we have enough after filtering
             similar_sounds = [s for s in similar_sounds if s[1] != audio_file][:5]  # Limit to 5
             
             print(f"Found {len(similar_sounds)} similar sounds for updating message")
