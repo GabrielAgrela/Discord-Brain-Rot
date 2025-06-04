@@ -3,7 +3,8 @@ import os
 import csv
 import json
 import datetime
-from fuzzywuzzy import fuzz
+# Use rapidfuzz instead of fuzzywuzzy for faster similarity scoring
+from rapidfuzz import fuzz
 
 class Database:
     _instance = None

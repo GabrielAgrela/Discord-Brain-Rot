@@ -3,7 +3,8 @@ import csv
 import random
 import os
 import discord
-from fuzzywuzzy import fuzz
+# RapidFuzz provides a much faster implementation of fuzzy matching
+from rapidfuzz import fuzz
 class AudioDatabase:
     def __init__(self, csv_filename, bot=""):
         self.csv_filename = csv_filename
