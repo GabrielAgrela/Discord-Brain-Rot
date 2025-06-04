@@ -2,16 +2,11 @@ name: Deploy and Restart Service
 
 on:
   push:
-    branches: [ master ]  # Triggers when PR is merged to master
-  pull_request:
-    types: [ closed ]
-    branches: [ master ]
+    branches: [ master ]  # Only trigger on push to master (when PR is merged)
 
 jobs:
   deploy:
-    # Only run when PR is merged (not just closed)
-    if: github.event_name == 'push' || github.event.pull_request.merged == true
-    runs-on: self-hosted  # This assumes you have a self-hosted runner on your server
+    runs-on: self-hosted
     
     steps:
     - name: Pull latest code and restart service
