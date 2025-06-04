@@ -12,3 +12,6 @@ database copy.db
 /vosk-model-pt/
 /temp_audio
 /actions-runner
+Data/Users.json
+Data/play_history.csv
+Data/soundsDB.csv
