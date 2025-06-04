@@ -20,7 +20,8 @@ class Database:
         self._initialized = True
         script_dir = os.path.dirname(os.path.abspath(__file__))
         self.db_path = os.path.join(script_dir, "../database.db")
-        self.conn = sqlite3.connect(self.db_path)
+        # Allow usage from background threads
+        self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self.cursor = self.conn.cursor()
         self.behavior = behavior
 
