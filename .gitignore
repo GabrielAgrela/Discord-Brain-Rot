@@ -11,3 +11,4 @@ lol_database.db
 database copy.db
 /vosk-model-pt/
 /temp_audio
+/actions-runner
