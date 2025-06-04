@@ -2,10 +2,10 @@ name: Deploy and Restart Service
 
 on:
   push:
-    branches: [ main, master ]  # Triggers when PR is merged to main/master
+    branches: [ master ]  # Triggers when PR is merged to master
   pull_request:
     types: [ closed ]
-    branches: [ main, master ]
+    branches: [ master ]
 
 jobs:
   deploy:
@@ -17,7 +17,7 @@ jobs:
     - name: Pull latest code and restart service
       run: |
         cd /home/gabi/github/Discord-Brain-Rot
-        git pull origin main
+        git pull origin master
         sudo systemctl restart personalgreeter.service
         
     - name: Verify service is running
