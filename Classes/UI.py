@@ -909,8 +909,7 @@ class ControlsView(View):
         self.add_item(ListFavoritesButton(bot_behavior, label="⭐Favorites⭐", style=discord.ButtonStyle.success))
         self.add_item(ListUserFavoritesButton(bot_behavior, label="💖My Favorites💖", style=discord.ButtonStyle.success))
         self.add_item(ListBlacklistButton(bot_behavior, label="🗑️Blacklisted🗑️", style=discord.ButtonStyle.success))
-        # Use a single slap emoji for the slap button label
-        self.add_item(PlaySlapButton(bot_behavior, label="👋", style=discord.ButtonStyle.success))
+        self.add_item(PlaySlapButton(bot_behavior, label="", emoji="👋", style=discord.ButtonStyle.success))
 
         self.add_item(BrainRotButton(bot_behavior, label="🧠Brain Rot🧠", style=discord.ButtonStyle.success))
         self.add_item(StatsButton(bot_behavior, label="📊Stats📊", style=discord.ButtonStyle.success))
