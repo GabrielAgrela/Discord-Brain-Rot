@@ -99,12 +99,19 @@ class MinecraftLogHandler(FileSystemEventHandler):
         # Censor IP addresses before processing
         log_line = self.censor_ip_addresses(log_line)
             
+        # Filter out stack trace lines to reduce noise
+        if re.match(r'^\s*at\b', log_line):
+            return None
+
         # Extract timestamp and message parts
         # Minecraft log format: [HH:MM:SS] [Thread/LEVEL]: Message
         timestamp_match = re.match(r'\[(\d{2}:\d{2}:\d{2})\] \[([^\]]+)\]: (.+)', log_line)
-        
+
         if not timestamp_match:
-            return f"🔧 `{log_line}`"
+            # Still report lines mentioning exceptions or errors
+            if re.search(r'exception|error|caused by', log_line, re.IGNORECASE):
+                return f"⚠️ `{log_line}`"
+            return None
             
         timestamp, thread_level, message = timestamp_match.groups()
         
