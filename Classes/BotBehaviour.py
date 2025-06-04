@@ -841,7 +841,10 @@ class BotBehavior:
                 # Only update the embed content without modifying the view
                 await sound_message.edit(embed=embed)
             
-            await asyncio.sleep(1)  # Update every second
+            # Increase the delay between updates to reduce the frequency of
+            # message edits. This helps determine if frequent updates are
+            # causing short freezes during audio playback.
+            await asyncio.sleep(5)  # Update every five seconds
         
         # Remove only the progress bar when done
         if sound_message and not self.stop_progress_update:
