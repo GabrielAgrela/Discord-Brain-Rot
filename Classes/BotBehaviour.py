@@ -1519,7 +1519,11 @@ class BotBehavior:
             
             # Use original_message for similarity search
             # Fetch N+1 in case the top result is the one being played
-            all_similar = Database().get_sounds_by_similarity(sound_name, num_suggestions + 1)
+            loop = asyncio.get_running_loop()
+            all_similar = await loop.run_in_executor(
+                None,
+                lambda: Database().get_sounds_by_similarity(sound_name, num_suggestions + 1)
+            )
             
             if not all_similar:
                 print(f"No similar sounds found for {sound_name}")
