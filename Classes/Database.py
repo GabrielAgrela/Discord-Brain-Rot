@@ -20,7 +20,8 @@ class Database:
         self._initialized = True
         script_dir = os.path.dirname(os.path.abspath(__file__))
         self.db_path = os.path.join(script_dir, "../database.db")
-        self.conn = sqlite3.connect(self.db_path)
+        # Allow usage from background threads
+        self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self.cursor = self.conn.cursor()
         self.behavior = behavior
 
@@ -178,8 +179,13 @@ class Database:
         # Normalize the requested sound to handle character substitutions
         normalized_req = self.normalize_text(req_sound)
         try:
-            self.cursor.execute("SELECT * FROM sounds")
-            all_sounds = self.cursor.fetchall()
+            # Use a separate connection for this potentially heavy query to
+            # avoid locking the main connection used by the bot.
+            conn = sqlite3.connect(self.db_path, check_same_thread=False)
+            cursor = conn.cursor()
+
+            cursor.execute("SELECT * FROM sounds")
+            all_sounds = cursor.fetchall()
             if not all_sounds:
                 print("No sounds available for similarity scoring.")
                 return []
@@ -209,6 +215,8 @@ class Database:
         except sqlite3.Error as e:
             print(f"An error occurred: {e}")
             return []
+        finally:
+            conn.close()
 
     def get_sounds_by_similarity_optimized(self, req_sound, num_results=5):
         # Normalize the requested sound
