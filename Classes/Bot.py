@@ -6,6 +6,7 @@ class Bot(commands.Bot):
         super().__init__(command_prefix=command_prefix, intents=intents)
         self.token = token
         self.ffmpeg_path = ffmpeg_path
+        self.startup_sound_played = False
 
     def run_bot(self):
         self.run(self.token)

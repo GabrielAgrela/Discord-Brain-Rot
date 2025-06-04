@@ -263,6 +263,13 @@ async def on_ready():
                 print(f"Attempting to connect to {channel_to_join.name} in {guild.name}...")
                 await channel_to_join.connect()
                 print(f"Successfully connected to {channel_to_join.name} in {guild.name}.")
+                if not bot.startup_sound_played:
+                    try:
+                        random_sound = Database().get_random_sounds()[0][2]
+                        await behavior.play_audio(channel_to_join, random_sound, "startup")
+                    except Exception as e:
+                        print(f"Error playing startup sound: {e}")
+                    bot.startup_sound_played = True
             except discord.ClientException as e:
                 print(f"Error connecting to {channel_to_join.name} in {guild.name}: {e}. Already connected elsewhere or connection issue.")
             except asyncio.TimeoutError:
