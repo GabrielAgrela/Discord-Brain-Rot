@@ -900,7 +900,7 @@ class ListUserFavoritesButton(Button):
             ListUserFavoritesButton.current_user_messages[interaction.user.name] = message
         else:
             await interaction.message.channel.send("No favorite sounds found.", delete_after=10)
-
+#
 class ControlsView(View):
     def __init__(self, bot_behavior):
         super().__init__(timeout=None)
