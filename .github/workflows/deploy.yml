@@ -1,0 +1,18 @@
+name: Deploy to Server
+
+on:
+  push:
+    branches: [ master ]
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    
+    steps:
+    - name: Pull latest code
+      run: |
+        cd /home/gabi/github/Discord-Brain-Rot
+        git pull origin master
+        
+    - name: Restart service
+      run: sudo systemctl restart personalgreeter.service 
