@@ -9,6 +9,13 @@ jobs:
     runs-on: self-hosted
     
     steps:
+    - name: Debug - Check current directory
+      run: |
+        echo "Current directory: $(pwd)"
+        echo "User: $(whoami)"
+        echo "Home: $HOME"
+        ls -la
+        
     - name: Pull latest code
       run: |
         cd /home/gabi/github/Discord-Brain-Rot
