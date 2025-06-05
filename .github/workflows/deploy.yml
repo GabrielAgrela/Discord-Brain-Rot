@@ -1,22 +1,22 @@
-name: Deploy and Restart Service
+name: Auto Deploy
 
 on:
   push:
-    branches: [ master ]  # Only trigger on push to master (when PR is merged)
-  workflow_dispatch:  # Allow manual triggering for testing
+    branches: [ master ]
 
 jobs:
   deploy:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     
     steps:
-    - name: Pull latest code and restart service
-      run: |
-        cd /home/gabi/github/Discord-Brain-Rot
-        git pull origin master
-        sudo systemctl restart personalgreeter.service
-        
-    - name: Verify service is running
-      run: |
-        sleep 5
-        sudo systemctl is-active --quiet personalgreeter.service && echo "Service is running" || exit 1 
+    - name: Deploy via SSH
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ secrets.HOST }}
+        username: ${{ secrets.USERNAME }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        script: |
+          cd /home/gabi/github/Discord-Brain-Rot
+          git pull origin master
+          sudo systemctl restart personalgreeter.service
+          echo "✅ Deployment complete!"
