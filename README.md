@@ -69,12 +69,10 @@ Interact with the bot using slash commands (`/`) in your Discord server.
 *   **Statistics:**
     *   `/top [option] [number] [numberdays]`: Show leaderboards for top played sounds or top users ('users' or 'sounds').
 
-*Note: Some features like LoL stats might be commented out in the source code (`PersonalGreeter.py`).*
-
 ## Contributing
 
 Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
 
 ## License
 
-[MIT](https://choosealicense.com/licenses/mit/)# Test comment
+[MIT](https://choosealicense.com/licenses/mit/)
