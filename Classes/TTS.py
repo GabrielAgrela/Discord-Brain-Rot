@@ -105,6 +105,11 @@ class TTS:
         }
         data = {
             "model_id": "eleven_multilingual_sts_v2",
+            # remove_background_noise leverages ElevenLabs' isolation model to
+            # strip background noise from the input audio. According to the
+            # official API specification this boolean enables vocal isolation
+            # during the speech-to-speech request.
+            "remove_background_noise": True,
             "voice_settings": json.dumps({
                 "stability": 0.3,
                 "similarity_boost": 0.85,
