@@ -7,7 +7,7 @@ on:
 
 jobs:
   deploy:
-    runs-on: gabi-ThinkPad-T495
+    runs-on: self-hosted
     
     steps:
     - name: Pull latest code and restart service
