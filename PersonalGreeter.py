@@ -844,6 +844,20 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
         channel = after.channel
     else:
         return  # No relevant change
+
+    # Handle AFK channel joins
+    if event == "join" and channel and channel == channel.guild.afk_channel:
+        if before.channel:
+            # Treat moving to AFK as leaving the previous channel
+            print(
+                f"User {member_str} moved to AFK channel {channel}; treating as leave from {before.channel}"
+            )
+            event = "leave"
+            channel = before.channel
+        else:
+            # Ignore when directly joining the AFK channel
+            print(f"Ignoring join event for {member_str} in AFK channel {channel}")
+            return
         
     # Log the voice state update
     print(f"Voice state update: {member_str} {event} channel {channel}")
