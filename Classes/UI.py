@@ -704,6 +704,7 @@ class SoundBeingPlayedView(View):
         # Add the STS character select button
         self.add_item(STSCharacterSelectButton(bot_behavior=bot_behavior, audio_file=audio_file, emoji="🗣️", style=discord.ButtonStyle.primary))
 
+
 class SoundBeingPlayedWithSuggestionsView(View):
     def __init__(self, bot_behavior, audio_file, similar_sounds, user_id=None, include_add_to_list_select: bool = False):
         super().__init__(timeout=None)
@@ -726,6 +727,8 @@ class SoundBeingPlayedWithSuggestionsView(View):
                 if len(self.children) < 25: # Basic check for component limit
                     # Pass the default_list_id to AddToListSelect
                     self.add_item(AddToListSelect(self.bot_behavior, self.audio_file, lists, default_list_id=default_list_id))
+                    if similar_sounds:
+                        self.add_item(SimilarSoundsSelect(self.bot_behavior, similar_sounds))
                 else:
                     print("Warning: Could not add AddToListSelect to SoundBeingPlayedView due to component limit.")
                     # Fallback to button maybe? Or just omit. For now, omit if limit reached.
@@ -752,11 +755,9 @@ class SoundBeingPlayedWithSuggestionsView(View):
 
         # Add the STS character select button
         self.add_item(STSCharacterSelectButton(bot_behavior=bot_behavior, audio_file=audio_file, emoji="🗣️", style=discord.ButtonStyle.primary))
-        
-        # Add a dropdown to pick similar sounds instead of multiple buttons
-        if similar_sounds:
-            self.add_item(SimilarSoundsSelect(bot_behavior, similar_sounds))
 
+        if not include_add_to_list_select and similar_sounds:
+            self.add_item(SimilarSoundsSelect(bot_behavior, similar_sounds))
 class PaginationButton(Button):
     def __init__(self, label, emoji, style, custom_id, row):
         super().__init__(label=label, emoji=emoji, style=style, custom_id=custom_id, row=row)
@@ -1246,7 +1247,7 @@ class SimilarSoundsSelect(discord.ui.Select):
             min_values=1,
             max_values=1,
             options=options,
-            row=3
+            row=0
         )
 
     async def callback(self, interaction):
@@ -1279,7 +1280,7 @@ class AddToListSelect(discord.ui.Select):
             options.append(option)
 
         super().__init__(
-            placeholder="Choose a list...",
+            placeholder="Choose a list for this sound...",
             min_values=1,
             max_values=1,
             options=options
