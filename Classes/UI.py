@@ -666,7 +666,7 @@ class SoundBeingPlayedView(View):
                 # Ensure AddToListSelect can fit, check component count if necessary
                 if len(self.children) < 25: # Basic check for component limit
                     # Pass the default_list_id to AddToListSelect
-                    self.add_item(AddToListSelect(self.bot_behavior, self.audio_file, lists, default_list_id=default_list_id))
+                    self.add_item(AddToListSelect(self.bot_behavior, self.audio_file, lists, default_list_id=default_list_id, row=3))
                 else:
                     print("Warning: Could not add AddToListSelect to SoundBeingPlayedView due to component limit.")
                     # Fallback to button maybe? Or just omit. For now, omit if limit reached.
@@ -725,7 +725,7 @@ class SoundBeingPlayedWithSuggestionsView(View):
                 # Ensure AddToListSelect can fit, check component count if necessary
                 if len(self.children) < 25: # Basic check for component limit
                     # Pass the default_list_id to AddToListSelect
-                    self.add_item(AddToListSelect(self.bot_behavior, self.audio_file, lists, default_list_id=default_list_id))
+                    self.add_item(AddToListSelect(self.bot_behavior, self.audio_file, lists, default_list_id=default_list_id, row=3))
                 else:
                     print("Warning: Could not add AddToListSelect to SoundBeingPlayedView due to component limit.")
                     # Fallback to button maybe? Or just omit. For now, omit if limit reached.
@@ -1260,7 +1260,7 @@ class SimilarSoundsSelect(discord.ui.Select):
             await interaction.followup.send("You need to be in a voice channel to play sounds! 😭", ephemeral=True)
 
 class AddToListSelect(discord.ui.Select):
-    def __init__(self, bot_behavior, sound_filename, lists, default_list_id: int = None):
+    def __init__(self, bot_behavior, sound_filename, lists, default_list_id: int = None, row: int | None = None):
         self.bot_behavior = bot_behavior
         self.sound_filename = sound_filename
 
@@ -1279,10 +1279,11 @@ class AddToListSelect(discord.ui.Select):
             options.append(option)
 
         super().__init__(
-            placeholder="Choose a list...",
+            placeholder="Choose a list for this sound...",
             min_values=1,
             max_values=1,
-            options=options
+            options=options,
+            row=row
         )
 
     async def callback(self, interaction):
