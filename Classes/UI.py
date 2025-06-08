@@ -753,19 +753,9 @@ class SoundBeingPlayedWithSuggestionsView(View):
         # Add the STS character select button
         self.add_item(STSCharacterSelectButton(bot_behavior=bot_behavior, audio_file=audio_file, emoji="🗣️", style=discord.ButtonStyle.primary))
         
-        # Now add the similar sound buttons in the third row (index 2)
-        # Limit to exactly 5 buttons (maximum per row in Discord)
-        limited_similar_sounds = similar_sounds[:5]
-        for i, sound in enumerate(limited_similar_sounds):
-            button = PlaySoundButton(
-                bot_behavior, 
-                sound[1], 
-                style=discord.ButtonStyle.danger,
-                label=sound[2].split('/')[-1].replace('.mp3', '')
-            )
-            # Force all similar sound buttons to be in row 2 (third row)
-            button.row = 3
-            self.add_item(button)
+        # Add a dropdown to pick similar sounds instead of multiple buttons
+        if similar_sounds:
+            self.add_item(SimilarSoundsSelect(bot_behavior, similar_sounds))
 
 class PaginationButton(Button):
     def __init__(self, label, emoji, style, custom_id, row):
@@ -1239,6 +1229,35 @@ class DeleteListButton(Button):
             )
         else:
             await interaction.followup.send("Failed to delete list.", ephemeral=True)
+
+class SimilarSoundsSelect(discord.ui.Select):
+    def __init__(self, bot_behavior, similar_sounds):
+        self.bot_behavior = bot_behavior
+        options = []
+        for sound in similar_sounds[:25]:
+            options.append(
+                discord.SelectOption(
+                    label=sound[2].split('/')[-1].replace('.mp3', ''),
+                    value=sound[1]
+                )
+            )
+        super().__init__(
+            placeholder="Play a similar sound...",
+            min_values=1,
+            max_values=1,
+            options=options,
+            row=3
+        )
+
+    async def callback(self, interaction):
+        await interaction.response.defer()
+        selected = self.values[0]
+        channel = self.bot_behavior.get_user_voice_channel(interaction.guild, interaction.user.name)
+        if channel:
+            asyncio.create_task(self.bot_behavior.play_audio(channel, selected, interaction.user.name))
+            Database().insert_action(interaction.user.name, "play_similar_sound", selected)
+        else:
+            await interaction.followup.send("You need to be in a voice channel to play sounds! 😭", ephemeral=True)
 
 class AddToListSelect(discord.ui.Select):
     def __init__(self, bot_behavior, sound_filename, lists, default_list_id: int = None):
