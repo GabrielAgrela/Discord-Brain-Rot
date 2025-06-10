@@ -345,7 +345,7 @@
         setupBackendSearch('searchAllSounds', fetchAllSounds);
         // --- End of Backend Search Trigger ---
 
-        // Auto-refresh every 5 seconds (adjust as needed)
+        // Auto-refresh every 1 second (adjust as needed)
         setInterval(() => {
             Promise.all([fetchActions(), fetchFavorites(), fetchAllSounds()])
                 .then(results => {
@@ -357,7 +357,7 @@
                         // console.log('No new entries, no table update needed.');
                     }
                 });
-        }, 5000); // Changed interval to 5000ms
+        }, 1000); // Changed interval to 1000ms
 
         // Initial data fetch
         fetchActions();
