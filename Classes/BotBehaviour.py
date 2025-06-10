@@ -15,7 +15,15 @@ from Classes.PlayHistoryDatabase import PlayHistoryDatabase
 from Classes.OtherActionsDatabase import OtherActionsDatabase
 from Classes.TTS import TTS
 import csv
-from Classes.UI import SoundBeingPlayedView, SoundBeingPlayedWithSuggestionsView, ControlsView, SoundView, EventView, PaginatedEventView
+from Classes.UI import (
+    SoundBeingPlayedView,
+    SoundBeingPlayedWithSuggestionsView,
+    LoadingSimilarSoundsSelect,
+    ControlsView,
+    SoundView,
+    EventView,
+    PaginatedEventView,
+)
 from Classes.ManualSoundDownloader import ManualSoundDownloader
 from moviepy.editor import VideoFileClip
 
@@ -606,14 +614,18 @@ class BotBehavior:
                     description.append(f"⏱️ Duration: {duration_str}")
                     description.append(f"Progress: Loading...")
                     description_text = "\n".join(description) if description else None
-                    
+
+                    view = SoundBeingPlayedView(self, audio_file, include_add_to_list_select=False)
+                    if show_suggestions and not is_entrance and not is_tts and not is_slap_sound:
+                        view.add_item(LoadingSimilarSoundsSelect())
+
                     sound_message = await self.send_message(
-                        view=SoundBeingPlayedView(self, audio_file, include_add_to_list_select=False),
+                        view=view,
                         title=f"🔊 **{sound_info[2].replace('.mp3', '') if sound_info and len(sound_info) > 2 else audio_file.replace('.mp3', '')}** 🔊",
                         description=description_text,
                         footer=f"{user} requested '{original_message}'" if original_message else f"Requested by {user}",
                         # Only send controls on the main message if no similar sounds are being shown
-                        send_controls=True   
+                        send_controls=True
                     )
 
                     
@@ -844,7 +856,7 @@ class BotBehavior:
             # Increase the delay between updates to reduce the frequency of
             # message edits. This helps determine if frequent updates are
             # causing short freezes during audio playback.
-            await asyncio.sleep(5)  # Update every five seconds
+            await asyncio.sleep(1)  # Update every second
         
         # Remove only the progress bar when done
         if sound_message and not self.stop_progress_update:

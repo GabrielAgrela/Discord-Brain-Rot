@@ -1259,6 +1259,17 @@ class SimilarSoundsSelect(discord.ui.Select):
         else:
             await interaction.followup.send("You need to be in a voice channel to play sounds! 😭", ephemeral=True)
 
+class LoadingSimilarSoundsSelect(discord.ui.Select):
+    def __init__(self):
+        super().__init__(
+            placeholder="Loading similar sounds...",
+            min_values=1,
+            max_values=1,
+            options=[discord.SelectOption(label="Loading...", value="loading")],
+            disabled=True,
+            row=3,
+        )
+
 class AddToListSelect(discord.ui.Select):
     def __init__(self, bot_behavior, sound_filename, lists, default_list_id: int = None):
         self.bot_behavior = bot_behavior
