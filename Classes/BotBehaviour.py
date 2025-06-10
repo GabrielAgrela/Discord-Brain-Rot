@@ -1542,7 +1542,7 @@ class BotBehavior:
                     Database().get_sounds_by_similarity,
                     sound_name,
                     num_suggestions + 1,
-                    0.001,
+                    0.00001,
                 ),
             )
             
