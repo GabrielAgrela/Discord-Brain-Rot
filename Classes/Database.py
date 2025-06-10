@@ -103,6 +103,7 @@ class Database:
             );
             '''
 
+
             # Execute the SQL commands
             #cursor.execute(create_actions_table)
             cursor.execute(create_sound_lists_table)
