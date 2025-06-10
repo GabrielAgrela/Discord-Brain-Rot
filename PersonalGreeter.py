@@ -101,115 +101,101 @@ voice_listener = DiscordVoiceListener(bot, speech_recognizer, handle_keyword_det
 # Initialize Minecraft log monitor
 minecraft_monitor = MinecraftLogMonitor(bot, "minecraft")
 
-class CooldownManager:
-    def __init__(self, cooldown_time):
-        self.cooldown = 0
-        self.cooldown_time = cooldown_time
-        self.latest_event = None
-
-    def is_on_cooldown(self):
-        return time.time() - self.cooldown < self.cooldown_time
-
-    def set_cooldown(self):
-        self.cooldown = time.time()
-
-    def set_latest_event(self, event):
-        self.latest_event = event
-
-    def get_and_clear_latest_event(self):
-        event = self.latest_event
-        self.latest_event = None
-        return event
-
-    def time_left(self):
-        return max(0, self.cooldown_time - (time.time() - self.cooldown))
-
-cooldown_manager = CooldownManager(5)  # 5 seconds cooldown
-
-# --- New Background Task --- 
-@tasks.loop(seconds=5.0) # Check every 5 seconds
+# --- Background Task to Handle Web Playback Requests ---
+@tasks.loop(seconds=5.0)
 async def check_playback_queue():
-    # Use a separate connection for the task to avoid potential threading issues with the main db connection
-    conn = None 
+    """Process queued playback requests from the web interface."""
+    conn = None
     try:
         conn = sqlite3.connect(db.db_path)
-        conn.row_factory = sqlite3.Row # Optional: Access columns by name
+        conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 
-        cursor.execute("""
-            SELECT id, guild_id, sound_filename 
-            FROM playback_queue 
-            WHERE played_at IS NULL 
+        cursor.execute(
+            """
+            SELECT id, guild_id, sound_filename
+            FROM playback_queue
+            WHERE played_at IS NULL
             ORDER BY requested_at ASC
-        """)
+        """
+        )
         pending_requests = cursor.fetchall()
 
         if not pending_requests:
-            return # No pending requests
+            return
 
         print(f"[Playback Queue] Found {len(pending_requests)} pending requests.")
 
         for request in pending_requests:
-            req_id = request['id']
-            guild_id = request['guild_id']
-            sound_filename = request['sound_filename']
-            
-            print(f"[Playback Queue] Processing request ID {req_id}: Play '{sound_filename}' in guild {guild_id}")
+            req_id = request["id"]
+            guild_id = request["guild_id"]
+            sound_filename = request["sound_filename"]
 
-            # Find the guild
+            print(
+                f"[Playback Queue] Processing request ID {req_id}: Play '{sound_filename}' in guild {guild_id}"
+            )
+
             guild = bot.get_guild(guild_id)
             if not guild:
-                print(f"[Playback Queue] Error: Bot is not in guild {guild_id}. Skipping request {req_id}.")
-                # Mark as played to prevent retrying indefinitely if bot left server
-                cursor.execute("UPDATE playback_queue SET played_at = ? WHERE id = ?", (datetime.datetime.now(), req_id))
+                print(
+                    f"[Playback Queue] Error: Bot is not in guild {guild_id}. Skipping request {req_id}."
+                )
+                cursor.execute(
+                    "UPDATE playback_queue SET played_at = ? WHERE id = ?",
+                    (datetime.datetime.now(), req_id),
+                )
                 conn.commit()
                 continue
-            
-            # Get sound details from DB (needed for path?)
-            # Assuming get_sound returns a tuple/row with filename at index 2
+
             sound_data = db.get_sound(sound_filename)
             if not sound_data:
-                 print(f"[Playback Queue] Error: Sound '{sound_filename}' not found in database. Skipping request {req_id}.")
-                 cursor.execute("UPDATE playback_queue SET played_at = ? WHERE id = ?", (datetime.datetime.now(), req_id)) # Mark as played
-                 conn.commit()
-                 continue
-
-            # --- Play the sound --- 
-            # Using behavior.play_sound directly might be simpler if it takes a path
-            # We need the actual sound file path. Let's assume it's in a specific folder
-            # TODO: Adjust this path based on where sounds are stored!
-            sound_folder = os.path.abspath(os.path.join(os.path.dirname(__file__), "Sounds"))
-            sound_path = os.path.join(sound_folder, sound_filename) 
-
-            if not os.path.exists(sound_path):
-                print(f"[Playback Queue] Error: Sound file not found at '{sound_path}'. Skipping request {req_id}.")
-                cursor.execute("UPDATE playback_queue SET played_at = ? WHERE id = ?", (datetime.datetime.now(), req_id)) # Mark as played
+                print(
+                    f"[Playback Queue] Error: Sound '{sound_filename}' not found in database. Skipping request {req_id}."
+                )
+                cursor.execute(
+                    "UPDATE playback_queue SET played_at = ? WHERE id = ?",
+                    (datetime.datetime.now(), req_id),
+                )
                 conn.commit()
                 continue
-            
+
+            sound_folder = os.path.abspath(
+                os.path.join(os.path.dirname(__file__), "Sounds")
+            )
+            sound_path = os.path.join(sound_folder, sound_filename)
+
+            if not os.path.exists(sound_path):
+                print(
+                    f"[Playback Queue] Error: Sound file not found at '{sound_path}'. Skipping request {req_id}."
+                )
+                cursor.execute(
+                    "UPDATE playback_queue SET played_at = ? WHERE id = ?",
+                    (datetime.datetime.now(), req_id),
+                )
+                conn.commit()
+                continue
+
             try:
-                # Use the core play_sound method from BotBehavior (assuming it exists and takes path + voice_client)
-                # Need to check BotBehavior for the correct method signature
-                # Let's assume it's behavior.play_sound(sound_path, voice_client)
                 channel = behavior.get_largest_voice_channel(guild)
                 if channel is not None:
                     await behavior.play_audio(channel, sound_filename, "webpage")
                     Database().insert_action("admin", "play_sound_periodically", sound_filename)
-                print(f"[Playback Queue] Successfully played '{sound_filename}' for request {req_id}.")
-                
-                # Mark as played in DB
-                cursor.execute("UPDATE playback_queue SET played_at = ? WHERE id = ?", (datetime.datetime.now(), req_id))
+
+                cursor.execute(
+                    "UPDATE playback_queue SET played_at = ? WHERE id = ?",
+                    (datetime.datetime.now(), req_id),
+                )
                 conn.commit()
 
-                # Optional: Small delay between sounds if processing multiple
-                await asyncio.sleep(1) 
+                await asyncio.sleep(1)
 
             except Exception as e:
                 print(f"[Playback Queue] Error playing sound for request {req_id}: {e}")
-                # Mark as played even on error to avoid retrying constantly
-                cursor.execute("UPDATE playback_queue SET played_at = ? WHERE id = ?", (datetime.datetime.now(), req_id))
+                cursor.execute(
+                    "UPDATE playback_queue SET played_at = ? WHERE id = ?",
+                    (datetime.datetime.now(), req_id),
+                )
                 conn.commit()
-        
     except sqlite3.Error as db_err:
         print(f"[Playback Queue] Database error: {db_err}")
     except Exception as e:
@@ -217,7 +203,7 @@ async def check_playback_queue():
     finally:
         if conn:
             conn.close()
-# --- End Background Task ---
+
 
 @default_permissions(manage_messages=True)
 @bot.event
@@ -232,7 +218,7 @@ async def on_ready():
     bot.loop.create_task(behavior.play_sound_periodically())
     bot.loop.create_task(behavior.update_bot_status())
     bot.loop.create_task(SoundDownloader(behavior, behavior.db, os.getenv("CHROMEDRIVER_PATH")).move_sounds())
-    check_playback_queue.start() # Start the new background task
+    check_playback_queue.start()
     bot.loop.create_task(voice_listener.listen_to_voice_channels())  # Start voice recognition
     
     # Start Minecraft log monitoring
@@ -862,27 +848,7 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
     # Log the voice state update
     print(f"Voice state update: {member_str} {event} channel {channel}")
 
-    if cooldown_manager.is_on_cooldown():
-        # Store the latest event while on cooldown
-        cooldown_manager.set_latest_event((member, member_str, event, channel))
-        return
-
-    # Play audio immediately
     await play_audio_for_event(member, member_str, event, channel)
-
-    # Set cooldown after playing
-    cooldown_manager.set_cooldown()
-
-    # Schedule checking for latest event after cooldown
-    bot.loop.create_task(check_latest_event_after_cooldown())
-
-async def check_latest_event_after_cooldown():
-    await asyncio.sleep(cooldown_manager.time_left())
-    latest_event = cooldown_manager.get_and_clear_latest_event()
-    if latest_event:
-        member, member_str, event, channel = latest_event
-        await play_audio_for_event(member, member_str, event, channel)
-        cooldown_manager.set_cooldown()  # Reset cooldown after playing the latest event
 
 async def play_audio_for_event(member, member_str, event, channel):
     try:
@@ -915,7 +881,6 @@ async def on_close():
     if minecraft_monitor.observer and minecraft_monitor.observer.is_alive():
         minecraft_monitor.stop_monitoring()
         print("Minecraft log monitoring stopped")
-    # Cancel the playback queue task
     check_playback_queue.cancel()
     print("Cleanup complete.")
 

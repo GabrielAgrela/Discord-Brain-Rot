@@ -201,10 +201,13 @@ def request_play_sound():
     try:
         conn = sqlite3.connect('/home/gabi/github/Discord-Brain-Rot/database.db')
         cursor = conn.cursor()
-        cursor.execute("""
+        cursor.execute(
+            """
             INSERT INTO playback_queue (guild_id, sound_filename)
             VALUES (?, ?)
-        """, (guild_id, sound_filename))
+        """,
+            (guild_id, sound_filename),
+        )
         conn.commit()
         conn.close()
         return jsonify({'message': 'Playback request queued'}), 200
