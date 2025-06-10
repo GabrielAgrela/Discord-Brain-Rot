@@ -3,6 +3,7 @@ import os
 import csv
 import json
 import datetime
+import time
 from fuzzywuzzy import fuzz
 
 class Database:
@@ -176,7 +177,9 @@ class Database:
             text = text.replace(key, value)
         return text.lower()
 
-    def get_sounds_by_similarity(self, req_sound, num_results=5):
+    def get_sounds_by_similarity(self, req_sound, num_results=5, sleep_interval=0.0):
+        """Return the most similar sounds. Optionally sleep between iterations
+        to reduce CPU spikes that can cause audio stutter."""
         # Normalize the requested sound to handle character substitutions
         normalized_req = self.normalize_text(req_sound)
         try:
@@ -204,6 +207,9 @@ class Database:
                 combined_score = (0.5 * token_set_score) + (0.3 * partial_ratio_score) + (0.2 * token_sort_score)
 
                 scored_matches.append((combined_score, sound))
+
+                if sleep_interval:
+                    time.sleep(sleep_interval)
             
             # Sort the matches by combined score in descending order
             scored_matches.sort(key=lambda x: x[0], reverse=True)

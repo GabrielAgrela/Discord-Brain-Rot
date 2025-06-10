@@ -1530,6 +1530,7 @@ class BotBehavior:
                     Database().get_sounds_by_similarity,
                     sound_name,
                     num_suggestions + 1,
+                    0.001,
                 ),
             )
             
@@ -1591,7 +1592,7 @@ class BotBehavior:
             loop = asyncio.get_running_loop()
             similar_sounds = await loop.run_in_executor(
                 None,
-                functools.partial(Database().get_sounds_by_similarity, sound_name, 6),
+                functools.partial(Database().get_sounds_by_similarity, sound_name, 6, 0.001),
             )  # Get 6 to ensure we have enough after filtering
             similar_sounds = [s for s in similar_sounds if s[1] != audio_file][:5]  # Limit to 5
             
