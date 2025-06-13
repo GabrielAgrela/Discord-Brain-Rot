@@ -5,6 +5,7 @@ import discord
 import asyncio
 import os
 from Classes.Database import Database
+import re
 
 
 
@@ -384,14 +385,112 @@ class AssignUserEventButton(Button):
 
 # New User Event Assignment Components End
 
+class UploadSoundModal(discord.ui.Modal):
+    def __init__(self, bot_behavior):
+        super().__init__(title="Upload Sound")
+        self.bot_behavior = bot_behavior
+        
+        self.url_input = discord.ui.InputText(
+            label="URL or File",
+            placeholder="Paste MP3/TikTok/YouTube/Instagram URL here",
+            style=discord.InputTextStyle.long,
+            min_length=1,
+            max_length=500,
+            required=True
+        )
+        self.add_item(self.url_input)
+        
+        self.custom_name_input = discord.ui.InputText(
+            label="Custom Name (Optional)",
+            placeholder="Enter a custom name for the sound",
+            min_length=0,
+            max_length=50,
+            required=False
+        )
+        self.add_item(self.custom_name_input)
+        
+        self.time_limit_input = discord.ui.InputText(
+            label="Time Limit (Optional, for videos)",
+            placeholder="Enter time limit in seconds (e.g., 30)",
+            min_length=0,
+            max_length=3,
+            required=False
+        )
+        self.add_item(self.time_limit_input)
+        
+    async def callback(self, interaction):
+        """Called when the modal is submitted"""
+        try:
+            # Check if upload is already in progress
+            if self.bot_behavior.upload_lock.locked():
+                await interaction.response.send_message("Another upload is in progress. Wait caralho 😤", ephemeral=True, delete_after=10)
+                return
+                
+            await interaction.response.defer()
+            
+            async with self.bot_behavior.upload_lock:
+                url_content = self.url_input.value.strip()
+                custom_filename = self.custom_name_input.value.strip() if self.custom_name_input.value else None
+                time_limit = None
+                
+                # Parse time limit if provided
+                if self.time_limit_input.value and self.time_limit_input.value.strip().isdigit():
+                    time_limit = int(self.time_limit_input.value.strip())
+                
+                # Validate URL format
+                is_mp3_url = re.match(r'^https?://.*\.mp3$', url_content)
+                is_tiktok_url = re.match(r'^https?://.*tiktok\.com/.*$', url_content)
+                is_youtube_url = re.match(r'^https?://(www\.)?(youtube\.com|youtu\.be)/.*$', url_content)
+                is_instagram_url = re.match(r'^https?://(www\.)?instagram\.com/(p|reels|reel|stories)/.*$', url_content)
+                
+                if not (is_mp3_url or is_tiktok_url or is_youtube_url or is_instagram_url):
+                    await interaction.followup.send("Please provide a valid MP3, TikTok, YouTube, or Instagram URL.", ephemeral=True)
+                    return
+                
+                try:
+                    # Handle different URL types
+                    if is_mp3_url:
+                        file_path = await self.bot_behavior.save_sound_from_url(url_content, custom_filename)
+                    elif is_tiktok_url or is_youtube_url or is_instagram_url:
+                        await interaction.followup.send("Downloading video... 🤓", ephemeral=True, delete_after=5)
+                        try:
+                            file_path = await self.bot_behavior.save_sound_from_video(url_content, custom_filename, time_limit=time_limit)
+                        except ValueError as e:
+                            await interaction.followup.send(f"Error: {str(e)}", ephemeral=True)
+                            return
+                    
+                    # Ensure the file path exists before logging
+                    if not os.path.exists(file_path):
+                        await interaction.followup.send("Upload completed but file verification failed. Please try again.", ephemeral=True)
+                        return
+                    
+                    # Log the action and send confirmation
+                    Database().insert_action(interaction.user.name, "upload_sound", file_path)
+                    await interaction.followup.send("Sound uploaded successfully! (may take up to 10s to be available)", ephemeral=True, delete_after=10)
+                    
+                except Exception as e:
+                    print(f"Upload error details: {e}")
+                    await interaction.followup.send(f"An error occurred during upload: {str(e)}", ephemeral=True)
+                    
+        except Exception as e:
+            print(f"Error in UploadSoundModal.callback: {e}")
+            try:
+                await interaction.followup.send("An error occurred while uploading the sound. Please try again.", ephemeral=True)
+            except:
+                try:
+                    await interaction.response.send_message("An error occurred while uploading the sound. Please try again.", ephemeral=True)
+                except:
+                    pass
+
 class UploadSoundButton(Button):
     def __init__(self, bot_behavior, **kwargs):
         super().__init__(**kwargs)
         self.bot_behavior = bot_behavior
 
     async def callback(self, interaction):
-        await interaction.response.defer()
-        await self.bot_behavior.prompt_upload_sound(interaction)
+        # Create and send the modal for uploading sound
+        modal = UploadSoundModal(self.bot_behavior)
+        await interaction.response.send_modal(modal)
 
 
 class PlayRandomButton(Button):
@@ -890,6 +989,7 @@ class ListUserFavoritesButton(Button):
             ListUserFavoritesButton.current_user_messages[interaction.user.name] = message
         else:
             await interaction.message.channel.send("No favorite sounds found.", delete_after=10)
+
 #
 class ControlsView(View):
     def __init__(self, bot_behavior):
@@ -969,7 +1069,7 @@ class DeleteEventButton(Button):
                 await self.bot_behavior.play_audio(channel, similar_sounds[0][1], interaction.user.name)
                 Database().insert_action(interaction.user.name, f"play_{self.event}_event_sound", self.sound)
             else:
-                await interaction.followup.send("You need to be in a voice channel to play sounds! ��", ephemeral=True)
+                await interaction.followup.send("You need to be in a voice channel to play sounds! 😭", ephemeral=True)
 
 class EventPaginationButton(Button):
     def __init__(self, label, emoji, style, custom_id, row):

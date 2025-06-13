@@ -920,26 +920,31 @@ async def on_message(message):
             try:
                 # Use BotBehavior to download and convert the video
                 # Extract potential custom filename or time limit (if user provides them after URL)
-                parts = message.content[match.end():].strip().split(maxsplit=1)
-                time_limit_str = None
+                remaining_content = message.content[match.end():].strip()
+                time_limit = None
                 custom_filename = None
 
-                if len(parts) > 0 and parts[0].isdigit():
-                    time_limit_str = parts[0]
-                    if len(parts) > 1:
-                        custom_filename = parts[1]
-                elif len(parts) > 0:
-                     custom_filename = " ".join(parts) # Assume rest is filename
+                if remaining_content:
+                    # Split the remaining content into parts
+                    parts = remaining_content.split(maxsplit=1)
+                    
+                    # Check if first part is a number (time limit)
+                    if len(parts) > 0 and parts[0].isdigit():
+                        time_limit = int(parts[0])
+                        # If there's more content after the time limit, it's the filename
+                        if len(parts) > 1:
+                            custom_filename = parts[1].strip()
+                    else:
+                        # No time limit, everything is the filename
+                        custom_filename = remaining_content.strip()
 
                 # Sanitize the custom filename
                 if custom_filename:
-                    custom_filename = custom_filename.strip() # Remove leading/trailing whitespace
-                    custom_filename = custom_filename.lstrip('/') # Remove leading slashes
-                    # Add any other necessary sanitization here (e.g., removing invalid characters)
-                    if not custom_filename: # If stripping leaves an empty string
+                    # Remove leading slashes and whitespace
+                    custom_filename = custom_filename.lstrip('/ \t')
+                    # If stripping leaves an empty string, set to None
+                    if not custom_filename:
                         custom_filename = None
-
-                time_limit = int(time_limit_str) if time_limit_str else None
 
                 file_path = await behavior.save_sound_from_video(url, custom_filename=custom_filename, time_limit=time_limit)
                 if file_path:
@@ -950,14 +955,7 @@ async def on_message(message):
             except Exception as e:
                 print(f"Error processing video link in DM: {e}")
                 await processing_msg.edit(content="Sorry, an error occurred while processing the video. " + str(e)) # Keep str(e)
-            finally:
-                # Clean up the downloaded file
-                if file_path and os.path.exists(file_path):
-                    try:
-                        os.remove(file_path)
-                        print(f"Cleaned up temporary file: {file_path}")
-                    except Exception as e:
-                        print(f"Error cleaning up file {file_path}: {e}")
+            # Note: Don't clean up the file here - SoundDownloader will handle moving it to the Sounds folder
 
     # Allow other on_message handlers or commands to process the message if needed
     # If you are using commands.Bot, you might need this:

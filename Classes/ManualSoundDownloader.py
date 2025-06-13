@@ -28,12 +28,12 @@ class ManualSoundDownloader:
                     raise ValueError("YouTube video is longer than 10 minutes. Please choose a shorter video.")
 
             title = sanitize_title(info_dict.get('title', ''))
-            mp3_filename = f"{custom_filename}" if custom_filename else f"{title}"
+            mp3_filename = f"{custom_filename}.mp3" if custom_filename else f"{title}.mp3"
             mp3_filepath = os.path.join(output_dir, mp3_filename)
 
         ydl_opts = {
             'format': 'bestaudio/best',
-            'outtmpl': mp3_filepath,
+            'outtmpl': mp3_filepath.replace('.mp3', ''),  # yt-dlp will add .mp3 extension
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': 'mp3',
