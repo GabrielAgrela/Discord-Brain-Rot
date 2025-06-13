@@ -111,12 +111,21 @@ class ChangeSoundNameButton(Button):
         self.sound_name = sound_name
 
     async def callback(self, interaction):
-        await interaction.response.defer()
-        new_name = await self.bot_behavior.get_new_name(interaction)
-        if new_name:
-            #get username
-            await self.bot_behavior.change_filename(self.sound_name, new_name,interaction.user)
-            #self.bot_behavior.other_actions_db.add_entry(interaction.user.name, "change_sound_name", self.sound_name)
+        try:
+            print(f"ChangeSoundNameButton: Creating modal for sound '{self.sound_name}'")
+            # Create and send the modal for changing the sound name
+            modal = ChangeSoundNameModal(self.bot_behavior, self.sound_name)
+            print(f"ChangeSoundNameButton: Modal created successfully")
+            await interaction.response.send_modal(modal)
+            print(f"ChangeSoundNameButton: Modal sent successfully")
+        except Exception as e:
+            print(f"ChangeSoundNameButton error: {e}")
+            import traceback
+            traceback.print_exc()
+            try:
+                await interaction.response.send_message("Failed to open rename dialog. Please try again.", ephemeral=True)
+            except:
+                pass
 
 # New User Event Assignment Components Start
 
@@ -391,7 +400,7 @@ class UploadSoundModal(discord.ui.Modal):
         self.bot_behavior = bot_behavior
         
         self.url_input = discord.ui.InputText(
-            label="URL or File",
+            label="URL",
             placeholder="Paste MP3/TikTok/YouTube/Instagram URL here",
             style=discord.InputTextStyle.long,
             min_length=1,
@@ -1222,7 +1231,7 @@ class CreateListButton(Button):
 
     async def callback(self, interaction):
         # Create a modal for the user to enter the list name
-        modal = CreateListModal(self.bot_behavior)
+        modal = CreateListModalWithSoundAdd(self.bot_behavior)
         await interaction.response.send_modal(modal)
 
 class AddToListButton(Button):
@@ -1377,7 +1386,16 @@ class AddToListSelect(discord.ui.Select):
 
         # Create options for each list, showing the creator's name
         options = []
-        for list_info in lists[:25]:  # Discord limits to 25 options
+        
+        # Add "Create New List" option as the first option
+        options.append(discord.SelectOption(
+            label="➕ Create New List",
+            value="create_new_list",
+            description="Create a new sound list",
+            emoji="➕"
+        ))
+
+        for list_info in lists[:24]:  # Limit to 24 since we added one option already
             list_id = list_info[0]
             option = discord.SelectOption(
                 label=f"{list_info[1]} (by {list_info[2]})",  # list_name (by creator)
@@ -1398,6 +1416,51 @@ class AddToListSelect(discord.ui.Select):
         )
 
     async def callback(self, interaction):
+        # Check if user selected "Create New List"
+        if self.values[0] == "create_new_list":
+            try:
+                print(f"AddToListSelect: User selected create new list, sound_filename={self.sound_filename}")
+                # Create and send the modal for creating a new list
+                modal = CreateListModalWithSoundAdd(self.bot_behavior, self.sound_filename)
+                print(f"AddToListSelect: Modal created successfully")
+                await interaction.response.send_modal(modal)
+                print(f"AddToListSelect: Modal sent successfully")
+                
+                # Reset the select menu by updating the message with a fresh view
+                # This removes the selection from "Create New List"
+                try:
+                    # Get the current view from the interaction message
+                    current_view = interaction.message.view
+                    if current_view:
+                        # Create a new select with the same options but no selection
+                        lists = Database().get_sound_lists()
+                        new_select = AddToListSelect(self.bot_behavior, self.sound_filename, lists, row=self.row)
+                        
+                        # Find the AddToListSelect in the view and replace it
+                        for i, item in enumerate(current_view.children):
+                            if isinstance(item, AddToListSelect):
+                                current_view.children[i] = new_select
+                                break
+                        
+                        # Update the message with the refreshed view
+                        await interaction.edit_original_response(view=current_view)
+                        print(f"AddToListSelect: Select menu reset successfully")
+                except Exception as e:
+                    print(f"AddToListSelect: Error resetting select menu: {e}")
+                    # Don't fail the whole operation if we can't reset the select
+                    pass
+                
+                return
+            except Exception as e:
+                print(f"AddToListSelect create modal error: {e}")
+                import traceback
+                traceback.print_exc()
+                try:
+                    await interaction.response.send_message("Failed to open create list dialog. Please try again.", ephemeral=True)
+                except:
+                    pass
+                return
+            
         await interaction.response.defer()
         list_id = int(self.values[0])
 
@@ -1413,41 +1476,162 @@ class AddToListSelect(discord.ui.Select):
         # Add the sound to the list
         success, message = Database().add_sound_to_list(list_id, self.sound_filename)
 
-class CreateListModal(discord.ui.Modal):
-    def __init__(self, bot_behavior):
-        super().__init__(title="Create Sound List")
-        self.bot_behavior = bot_behavior
-        
-        self.list_name = discord.ui.TextInput(
-            label="List Name",
-            placeholder="Enter a name for your sound list",
-            min_length=1,
-            max_length=100
-        )
-        self.add_item(self.list_name)
-        
-    async def on_submit(self, interaction):
-        await interaction.response.defer()
-        list_name = self.list_name.value
-        
-        # Check if the user already has a list with this name
-        existing_list = Database().get_list_by_name(list_name, interaction.user.name)
-        if existing_list:
-            await interaction.followup.send(f"You already have a list named '{list_name}'.", ephemeral=True)
-            return
+        if success:
+            # If the user adding the sound is not the creator, include that in the message
+            if list_creator != interaction.user.name:
+                await interaction.followup.send(f"Added sound to {list_creator}'s list '{list_name}'.", ephemeral=True)
+                
+                # Optionally notify in the channel about the addition
+                await self.bot_behavior.send_message(
+                    title=f"Sound Added to List",
+                    description=f"{interaction.user.name} added a sound to {list_creator}'s list '{list_name}'."
+                )
+            else:
+                await interaction.followup.send(f"Added sound to your list '{list_name}'.", ephemeral=True)
+        else:
+            await interaction.followup.send(f"Failed to add sound to list: {message}", ephemeral=True)
+
+class CreateListModalWithSoundAdd(discord.ui.Modal):
+    def __init__(self, bot_behavior, sound_filename=None):
+        try:
+            print(f"CreateListModalWithSoundAdd: Initializing modal with sound_filename={sound_filename}")
+            super().__init__(title="Create New Sound List")
+            self.bot_behavior = bot_behavior
+            self.sound_filename = sound_filename
             
-        # Create the list
-        list_id = Database().create_sound_list(list_name, interaction.user.name)
-        if list_id:
-            await interaction.followup.send(f"Created list '{list_name}'.", ephemeral=True)
+            self.list_name = discord.ui.InputText(
+                label="List Name",
+                placeholder="Enter a name for your sound list",
+                min_length=1,
+                max_length=100
+            )
+            self.add_item(self.list_name)
+            print(f"CreateListModalWithSoundAdd: Modal initialized successfully")
+        except Exception as e:
+            print(f"CreateListModalWithSoundAdd __init__ error: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
+        
+    async def callback(self, interaction):
+        try:
+            print(f"CreateListModalWithSoundAdd: callback called")
+            list_name = self.list_name.value
+            print(f"CreateListModalWithSoundAdd: Creating list '{list_name}' for user {interaction.user.name}")
             
-            # Send a message confirming the creation
+            # Check if the user already has a list with this name
+            existing_list = Database().get_list_by_name(list_name, interaction.user.name)
+            if existing_list:
+                await interaction.response.send_message(f"You already have a list named '{list_name}'.", ephemeral=True)
+                return
+                
+            # Create the list
+            list_id = Database().create_sound_list(list_name, interaction.user.name)
+            print(f"CreateListModalWithSoundAdd: Created list with ID {list_id}")
+            
+            if list_id:
+                success_message = f"Created list '{list_name}'."
+                
+                # If this modal was called from AddToListSelect, also add the sound to the new list
+                if self.sound_filename:
+                    print(f"CreateListModalWithSoundAdd: Adding sound {self.sound_filename} to list {list_id}")
+                    success, message = Database().add_sound_to_list(list_id, self.sound_filename)
+                    if success:
+                        success_message += f" Sound added to the list."
+                    else:
+                        success_message += f" However, failed to add sound: {message}"
+                        print(f"CreateListModalWithSoundAdd: Failed to add sound: {message}")
+                
+                await interaction.response.send_message(success_message, ephemeral=True)
+                print(f"CreateListModalWithSoundAdd: Success message sent")
+                
+                # Send a background message without blocking the modal response
+                import asyncio
+                asyncio.create_task(self._send_confirmation_message(list_name))
+            else:
+                await interaction.response.send_message("Failed to create list.", ephemeral=True)
+                
+        except Exception as e:
+            print(f"CreateListModalWithSoundAdd error: {e}")
+            import traceback
+            traceback.print_exc()
+            try:
+                await interaction.response.send_message("An error occurred while creating the list. Please try again.", ephemeral=True)
+            except:
+                pass
+    
+    async def _send_confirmation_message(self, list_name):
+        """Send confirmation message in background to avoid blocking modal response"""
+        try:
             await self.bot_behavior.send_message(
                 title="List Created",
-                description=f"Created a new sound list: '{list_name}'\nAdd sounds with `/addtolist`."
+                description=f"Created a new sound list: '{list_name}'" + (f"\nSound added to the list." if self.sound_filename else "\nAdd sounds with `/addtolist`.") 
             )
-        else:
-            await interaction.followup.send("Failed to create list.", ephemeral=True)
+        except Exception as e:
+            print(f"CreateListModalWithSoundAdd: Error sending confirmation message: {e}")
+
+class ChangeSoundNameModal(discord.ui.Modal):
+    def __init__(self, bot_behavior, sound_name):
+        try:
+            print(f"ChangeSoundNameModal: Initializing modal with sound_name={sound_name}")
+            super().__init__(title="Change Sound Name")
+            self.bot_behavior = bot_behavior
+            self.sound_name = sound_name
+            
+            self.new_name = discord.ui.InputText(
+                label="New Sound Name",
+                placeholder=f"Current: {sound_name.replace('.mp3', '') if sound_name.endswith('.mp3') else sound_name}",
+                min_length=1,
+                max_length=100
+            )
+            self.add_item(self.new_name)
+            print(f"ChangeSoundNameModal: Modal initialized successfully")
+        except Exception as e:
+            print(f"ChangeSoundNameModal __init__ error: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
+        
+    async def callback(self, interaction):
+        try:
+            print(f"ChangeSoundNameModal: callback called")
+            new_name = self.new_name.value
+            print(f"ChangeSoundNameModal: Changing '{self.sound_name}' to '{new_name}' for user {interaction.user.name}")
+            
+            if new_name:
+                # Send immediate response and then do the work
+                await interaction.response.defer(ephemeral=True)
+                
+                try:
+                    # Do the actual filename change
+                    await self.bot_behavior.change_filename(self.sound_name, new_name, interaction.user)
+                    
+                    # Send success message using the bot's standard message format
+                    await self.bot_behavior.send_message(
+                        title="Sound Name Changed",
+                        description=f"Successfully changed sound name from **{self.sound_name}** to **{new_name}**!"
+                    )
+                    
+                    print(f"ChangeSoundNameModal: Successfully changed filename from {self.sound_name} to {new_name}")
+                except Exception as e:
+                    # For errors, use both the standard message and private message
+                    await self.bot_behavior.send_message(
+                        title="Failed to Change Sound Name",
+                        description=f"Could not change sound name from **{self.sound_name}** to **{new_name}**\n\nError: {str(e)}"
+                    )
+                    await interaction.followup.send("Failed to change sound name. Check the main channel for details.", ephemeral=True)
+                    print(f"ChangeSoundNameModal: Error changing filename: {e}")
+            else:
+                await interaction.response.send_message("Invalid name provided.", ephemeral=True)
+                
+        except Exception as e:
+            print(f"ChangeSoundNameModal error: {e}")
+            import traceback
+            traceback.print_exc()
+            try:
+                await interaction.response.send_message("An error occurred while changing the sound name. Please try again.", ephemeral=True)
+            except:
+                pass
 
 class SoundListPaginationButton(Button):
     def __init__(self, label, emoji, style, custom_id, row):
