@@ -72,7 +72,17 @@ class BotBehavior:
         self.stop_progress_update = False  # Flag to control progress updates
         self.progress_already_updated = False  # Flag to track if progress has been updated with emoji
         self.volume = 1.0  # Default volume for sound playback
+        self.current_similar_sounds = None
+        self.admin_channel = None
+        self.mod_role = None
+        self.now_playing_messages = []
+        self.last_sound_played = {}
 
+        print("Connecting to the League of Legends database...")
+        try:
+            print("Connected to the League of Legends database!")
+        except Exception as e:
+            print(f"Error connecting to the League of Legends database: {e}")
 
     def is_admin_or_mod(self, member: discord.Member) -> bool:
         """Checks if a member has the DEVELOPER or MODERATOR role."""
@@ -490,6 +500,9 @@ class BotBehavior:
                 print(f"Error updating previous sound message: {e}")
 
         try:
+            # Clear any previously stored similar sounds when starting a new sound
+            self.current_similar_sounds = None
+            
             voice_client = await self.ensure_voice_connected(channel)
 
             # Get the absolute path of the audio file
@@ -1562,6 +1575,9 @@ class BotBehavior:
                 print(f"No similar sounds left after filtering out current sound {audio_file}")
                 return  # No similar sounds found
             
+            # Store the similar sounds for later use when the sound finishes
+            self.current_similar_sounds = similar_sounds_list
+            
             # Create a new combined view
             combined_view = SoundBeingPlayedWithSuggestionsView(
                 self, audio_file, similar_sounds_list, include_add_to_list_select=False
@@ -1592,23 +1608,29 @@ class BotBehavior:
             # Import UI classes to avoid circular imports
             from Classes.UI import SoundBeingPlayedView, SoundBeingPlayedWithSuggestionsView
             
-            # Get similar sounds from the database
-            sound_info = Database().get_sound(audio_file, True)
-            if not sound_info:
-                print(f"Could not find sound info for {audio_file}")
-                return
+            # Use the previously stored similar sounds instead of finding them again
+            similar_sounds = self.current_similar_sounds
+            
+            if similar_sounds is None:
+                # Fallback: if no similar sounds were stored, get them from database
+                # This should only happen if suggestions were disabled initially
+                sound_info = Database().get_sound(audio_file, True)
+                if not sound_info:
+                    print(f"Could not find sound info for {audio_file}")
+                    return
+                    
+                sound_name = sound_info[2].replace('.mp3', '')
                 
-            sound_name = sound_info[2].replace('.mp3', '')
-            
-            # Get similar sounds (excluding the current one) without blocking the loop
-            loop = asyncio.get_running_loop()
-            similar_sounds = await loop.run_in_executor(
-                None,
-                functools.partial(Database().get_sounds_by_similarity, sound_name, 6, 0.00001),
-            )  # Get 6 to ensure we have enough after filtering
-            similar_sounds = [s for s in similar_sounds if s[1] != audio_file][:5]  # Limit to 5
-            
-            print(f"Found {len(similar_sounds)} similar sounds for updating message")
+                # Get similar sounds (excluding the current one) without blocking the loop
+                loop = asyncio.get_running_loop()
+                similar_sounds = await loop.run_in_executor(
+                    None,
+                    functools.partial(Database().get_sounds_by_similarity, sound_name, 6, 0.00001),
+                )  # Get 6 to ensure we have enough after filtering
+                similar_sounds = [s for s in similar_sounds if s[1] != audio_file][:5]  # Limit to 5
+                print(f"Fallback: Found {len(similar_sounds)} similar sounds for updating message")
+            else:
+                print(f"Reusing {len(similar_sounds)} previously found similar sounds for updating message")
             
             # Create new view
             if similar_sounds:
@@ -1622,6 +1644,9 @@ class BotBehavior:
             
             # Update the message view
             await sound_message.edit(view=new_view)
+            
+            # Clear the stored similar sounds after use
+            self.current_similar_sounds = None
             
         except Exception as e:
             print(f"Error updating sound message with list selector: {e}")
