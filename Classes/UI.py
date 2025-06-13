@@ -1391,8 +1391,7 @@ class AddToListSelect(discord.ui.Select):
         options.append(discord.SelectOption(
             label="➕ Create New List",
             value="create_new_list",
-            description="Create a new sound list",
-            emoji="➕"
+            description="Create a new sound list"
         ))
 
         for list_info in lists[:24]:  # Limit to 24 since we added one option already
@@ -1425,30 +1424,6 @@ class AddToListSelect(discord.ui.Select):
                 print(f"AddToListSelect: Modal created successfully")
                 await interaction.response.send_modal(modal)
                 print(f"AddToListSelect: Modal sent successfully")
-                
-                # Reset the select menu by updating the message with a fresh view
-                # This removes the selection from "Create New List"
-                try:
-                    # Get the current view from the interaction message
-                    current_view = interaction.message.view
-                    if current_view:
-                        # Create a new select with the same options but no selection
-                        lists = Database().get_sound_lists()
-                        new_select = AddToListSelect(self.bot_behavior, self.sound_filename, lists, row=self.row)
-                        
-                        # Find the AddToListSelect in the view and replace it
-                        for i, item in enumerate(current_view.children):
-                            if isinstance(item, AddToListSelect):
-                                current_view.children[i] = new_select
-                                break
-                        
-                        # Update the message with the refreshed view
-                        await interaction.edit_original_response(view=current_view)
-                        print(f"AddToListSelect: Select menu reset successfully")
-                except Exception as e:
-                    print(f"AddToListSelect: Error resetting select menu: {e}")
-                    # Don't fail the whole operation if we can't reset the select
-                    pass
                 
                 return
             except Exception as e:
@@ -1569,6 +1544,8 @@ class CreateListModalWithSoundAdd(discord.ui.Modal):
             )
         except Exception as e:
             print(f"CreateListModalWithSoundAdd: Error sending confirmation message: {e}")
+    
+
 
 class ChangeSoundNameModal(discord.ui.Modal):
     def __init__(self, bot_behavior, sound_name):
