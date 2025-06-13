@@ -1275,9 +1275,13 @@ class AddToListSelect(discord.ui.Select):
         self.bot_behavior = bot_behavior
         self.sound_filename = sound_filename
 
+        # First option allows creating a new list via modal
+        options = [
+            discord.SelectOption(label="Create a new list", value="create_new_list")
+        ]
+
         # Create options for each list, showing the creator's name
-        options = []
-        for list_info in lists[:25]:  # Discord limits to 25 options
+        for list_info in lists[:24]:  # Discord limits to 25 options total
             list_id = list_info[0]
             option = discord.SelectOption(
                 label=f"{list_info[1]} (by {list_info[2]})",  # list_name (by creator)
@@ -1290,7 +1294,7 @@ class AddToListSelect(discord.ui.Select):
             options.append(option)
 
         super().__init__(
-            placeholder="Choose a list...",
+            placeholder="Add this sound to a list...",
             min_values=1,
             max_values=1,
             options=options,
@@ -1298,8 +1302,14 @@ class AddToListSelect(discord.ui.Select):
         )
 
     async def callback(self, interaction):
+        selected = self.values[0]
+        if selected == "create_new_list":
+            modal = CreateListModal(self.bot_behavior)
+            await interaction.response.send_modal(modal)
+            return
+
         await interaction.response.defer()
-        list_id = int(self.values[0])
+        list_id = int(selected)
 
         # Get the list name and creator
         list_info = Database().get_sound_list(list_id)
