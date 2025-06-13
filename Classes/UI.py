@@ -1342,7 +1342,7 @@ class SimilarSoundsSelect(discord.ui.Select):
                 )
             )
         super().__init__(
-            placeholder="Play a similar sound...",
+            placeholder="Play a similar sound",
             min_values=1,
             max_values=1,
             options=options,
@@ -1390,7 +1390,7 @@ class AddToListSelect(discord.ui.Select):
             options.append(option)
 
         super().__init__(
-            placeholder="Choose a list...",
+            placeholder="Add this sound to a list",
             min_values=1,
             max_values=1,
             options=options,
