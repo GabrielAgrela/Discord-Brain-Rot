@@ -1322,26 +1322,6 @@ class AddToListSelect(discord.ui.Select):
 
         # Add the sound to the list
         success, message = Database().add_sound_to_list(list_id, self.sound_filename)
-        if success:
-            if list_creator != interaction.user.name:
-                await interaction.followup.send(
-                    f"Added sound '{self.sound_filename}' to {list_creator}'s list '{list_name}'.",
-                    ephemeral=True,
-                )
-                await self.bot_behavior.send_message(
-                    title="Sound Added to List",
-                    description=f"{interaction.user.name} added '{self.sound_filename}' to {list_creator}'s list '{list_name}'.",
-                )
-            else:
-                await interaction.followup.send(
-                    f"Added sound '{self.sound_filename}' to your list '{list_name}'.",
-                    ephemeral=True,
-                )
-        else:
-            await interaction.followup.send(
-                f"Failed to add sound to list: {message}",
-                ephemeral=True,
-            )
 
 class CreateListModal(discord.ui.Modal):
     def __init__(self, bot_behavior):
