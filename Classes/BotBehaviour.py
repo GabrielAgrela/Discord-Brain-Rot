@@ -938,11 +938,26 @@ class BotBehavior:
         except Exception as e:
             print(f"3An error occurred: {e}")
 
-    async def play_random_favorite_sound(self, username): 
+    async def play_random_favorite_sound(self, username):
         channel = self.get_user_voice_channel(self.bot.guilds[0], username)
         favorite_sound = Database().get_random_sounds(favorite=True)
         Database().insert_action(username, "play_random_favorite_sound", favorite_sound[0][0])
         await self.play_audio(channel,favorite_sound[0][1], username)
+
+    async def play_random_sound_from_list(self, list_name, username):
+        """Play a random sound from a specific list"""
+        try:
+            channel = self.get_user_voice_channel(self.bot.guilds[0], username)
+            if channel is None:
+                return
+            random_sound = Database().get_random_sound_from_list(list_name)
+            if not random_sound:
+                await self.send_error_message(f"No sounds found in list '{list_name}'.")
+                return
+            Database().insert_action(username, f"play_random_from_{list_name}", random_sound[0])
+            await self.play_audio(channel, random_sound[1], username)
+        except Exception as e:
+            print(f"Error playing random sound from list {list_name}: {e}")
 
     def randomize_color(self):
         temp_color = discord.Color.random()
