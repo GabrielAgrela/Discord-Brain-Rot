@@ -739,6 +739,26 @@ class Database:
         except Exception as e:
             print(f"Error getting sounds in list: {e}")
             return []
+
+    def get_random_sound_from_list(self, list_name):
+        """Return a random sound from a given list name"""
+        try:
+            self.cursor.execute(
+                """
+                SELECT s.id, s.filename, s.originalfilename
+                FROM sound_list_items sli
+                JOIN sound_lists sl ON sli.list_id = sl.id
+                JOIN sounds s ON sli.sound_filename = s.filename
+                WHERE sl.list_name = ?
+                ORDER BY RANDOM()
+                LIMIT 1
+                """,
+                (list_name,)
+            )
+            return self.cursor.fetchone()
+        except Exception as e:
+            print(f"Error getting random sound from list: {e}")
+            return None
             
     def get_list_by_name(self, list_name, creator=None):
         """Get a list by name and optionally creator"""
