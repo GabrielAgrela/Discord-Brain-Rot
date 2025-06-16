@@ -1014,7 +1014,7 @@ class ControlsView(View):
         super().__init__(timeout=None)
         self.add_item(PlayRandomButton(bot_behavior, label="🎲Play Random🎲", style=discord.ButtonStyle.success))
         self.add_item(PlayRandomFavoriteButton(bot_behavior, label="🎲Play Random Favorite⭐", style=discord.ButtonStyle.success))
-        self.add_item(PlayGoalButton(bot_behavior, label="⚽Random Goal", style=discord.ButtonStyle.success))
+        self.add_item(PlayGoalButton(bot_behavior, label="⚽Random Goal⚽", style=discord.ButtonStyle.success))
         self.add_item(ListFavoritesButton(bot_behavior, label="⭐Favorites⭐", style=discord.ButtonStyle.success))
         self.add_item(ListUserFavoritesButton(bot_behavior, label="💖My Favorites💖", style=discord.ButtonStyle.success))
         self.add_item(ListBlacklistButton(bot_behavior, label="🗑️Blacklisted🗑️", style=discord.ButtonStyle.success))
