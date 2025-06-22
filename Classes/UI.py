@@ -156,13 +156,15 @@ class UserSelect(discord.ui.Select):
     def __init__(self, bot_behavior, guild_members):
         self.bot_behavior = bot_behavior
         options = []
-        for member in guild_members[:25]: # Discord limits to 25 options
-            if not member.bot: # Exclude bots
-                options.append(discord.SelectOption(
-                    label=member.display_name,
-                    value=f"{member.name}#{member.discriminator}",
-                    description=f"ID: {member.id}"
-                ))
+        for member in guild_members[:25]:  # Discord limits to 25 options
+            if not member.bot:
+                options.append(
+                    discord.SelectOption(
+                        label=member.display_name,
+                        value=f"{member.name}#{member.discriminator}",
+                        description=f"ID: {member.id}"
+                    )
+                )
         
         if not options: # Handle case where no non-bot members are found (e.g. only bots in a small server)
              options.append(discord.SelectOption(label="No users available", value="no_users", disabled=True))
@@ -371,7 +373,11 @@ class AssignUserEventButton(Button):
 
     async def callback(self, interaction: discord.Interaction):
         # Fetch non-bot members from the current guild
-        guild_members = [m for m in interaction.guild.members if not m.bot]
+        # Filter members to those with the 'ACTIVE' role and exclude bots
+        guild_members = [
+            m for m in interaction.guild.members
+            if not m.bot and any(r.name.upper() == "ACTIVE" for r in m.roles)
+        ]
         
         if not guild_members:
             await interaction.response.send_message("No users available in this server to assign an event to.", ephemeral=True)
