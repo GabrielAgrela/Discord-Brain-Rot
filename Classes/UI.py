@@ -1823,7 +1823,7 @@ class STSCharacterSelect(discord.ui.Select):
         ]
 
         super().__init__(
-            placeholder="Speech-To-Speech voice",
+            placeholder="Change sound voice",
             min_values=1,
             max_values=1,
             options=options,
