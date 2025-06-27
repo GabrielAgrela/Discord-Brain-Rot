@@ -824,8 +824,8 @@ class SoundBeingPlayedView(View):
         # Add the new AssignUserEventButton
         self.add_item(AssignUserEventButton(bot_behavior=bot_behavior, audio_file=audio_file, emoji="📢", style=discord.ButtonStyle.primary))
 
-        # Add the STS character select button
-        self.add_item(STSCharacterSelectButton(bot_behavior=bot_behavior, audio_file=audio_file, emoji="🗣️", style=discord.ButtonStyle.primary))
+        # Add the STS character select dropdown
+        self.add_item(STSCharacterSelect(bot_behavior=bot_behavior, audio_file=audio_file, row=3))
 
 class SoundBeingPlayedWithSuggestionsView(View):
     def __init__(self, bot_behavior, audio_file, similar_sounds, user_id=None, include_add_to_list_select: bool = False):
@@ -873,8 +873,8 @@ class SoundBeingPlayedWithSuggestionsView(View):
         # Add the new AssignUserEventButton
         self.add_item(AssignUserEventButton(bot_behavior=bot_behavior, audio_file=audio_file, emoji="📢", style=discord.ButtonStyle.primary))
 
-        # Add the STS character select button
-        self.add_item(STSCharacterSelectButton(bot_behavior=bot_behavior, audio_file=audio_file, emoji="🗣️", style=discord.ButtonStyle.primary))
+        # Add the STS character select dropdown
+        self.add_item(STSCharacterSelect(bot_behavior=bot_behavior, audio_file=audio_file, row=3))
         
         # Add a dropdown to pick similar sounds instead of multiple buttons
         if similar_sounds:
@@ -1810,3 +1810,28 @@ class STSCharacterSelectButton(Button):
             delete_after=10
         )
         Database().insert_action(interaction.user.name, "sts_character_select", Database().get_sound(self.audio_file, True)[0])
+
+class STSCharacterSelect(discord.ui.Select):
+    def __init__(self, bot_behavior, audio_file, row: int = 0):
+        self.bot_behavior = bot_behavior
+        self.audio_file = audio_file
+
+        options = [
+            discord.SelectOption(label="Ventura 🐷", value="ventura"),
+            discord.SelectOption(label="Tyson 🐵", value="tyson"),
+            discord.SelectOption(label="Costa 🐗", value="costa"),
+        ]
+
+        super().__init__(
+            placeholder="Speech-To-Speech voice",
+            min_values=1,
+            max_values=1,
+            options=options,
+            row=row
+        )
+
+    async def callback(self, interaction):
+        await interaction.response.defer()
+        char = self.values[0]
+        asyncio.create_task(self.bot_behavior.sts_EL(interaction.message.channel, self.audio_file, char))
+        Database().insert_action(interaction.user.name, "sts_EL", Database().get_sound(self.audio_file, True)[0])
