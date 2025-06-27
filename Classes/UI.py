@@ -825,7 +825,7 @@ class SoundBeingPlayedView(View):
         self.add_item(AssignUserEventButton(bot_behavior=bot_behavior, audio_file=audio_file, emoji="📢", style=discord.ButtonStyle.primary))
 
         # Add the STS character select dropdown
-        self.add_item(STSCharacterSelect(bot_behavior=bot_behavior, audio_file=audio_file, row=3))
+        self.add_item(STSCharacterSelect(bot_behavior=bot_behavior, audio_file=audio_file, row=2))
 
 class SoundBeingPlayedWithSuggestionsView(View):
     def __init__(self, bot_behavior, audio_file, similar_sounds, user_id=None, include_add_to_list_select: bool = False):
@@ -874,7 +874,7 @@ class SoundBeingPlayedWithSuggestionsView(View):
         self.add_item(AssignUserEventButton(bot_behavior=bot_behavior, audio_file=audio_file, emoji="📢", style=discord.ButtonStyle.primary))
 
         # Add the STS character select dropdown
-        self.add_item(STSCharacterSelect(bot_behavior=bot_behavior, audio_file=audio_file, row=3))
+        self.add_item(STSCharacterSelect(bot_behavior=bot_behavior, audio_file=audio_file, row=2))
         
         # Add a dropdown to pick similar sounds instead of multiple buttons
         if similar_sounds:
