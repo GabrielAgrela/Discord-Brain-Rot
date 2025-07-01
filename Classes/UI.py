@@ -526,15 +526,6 @@ class PlayRandomFavoriteButton(Button):
         await interaction.response.defer()
         asyncio.create_task(self.bot_behavior.play_random_favorite_sound(interaction.user.name))
 
-class PlayGoalButton(Button):
-    def __init__(self, bot_behavior, **kwargs):
-        super().__init__(**kwargs)
-        self.bot_behavior = bot_behavior
-
-    async def callback(self, interaction):
-        await interaction.response.defer()
-        asyncio.create_task(self.bot_behavior.play_random_sound_from_list('goal', interaction.user.name))
-
 class ListFavoritesButton(Button):
     # Class variable to track the current all favorites message
     current_favorites_message = None
@@ -1020,7 +1011,6 @@ class ControlsView(View):
         super().__init__(timeout=None)
         self.add_item(PlayRandomButton(bot_behavior, label="🎲Play Random🎲", style=discord.ButtonStyle.success))
         self.add_item(PlayRandomFavoriteButton(bot_behavior, label="🎲Play Random Favorite⭐", style=discord.ButtonStyle.success))
-        self.add_item(PlayGoalButton(bot_behavior, label="⚽Random Goal⚽", style=discord.ButtonStyle.success))
         self.add_item(ListFavoritesButton(bot_behavior, label="⭐Favorites⭐", style=discord.ButtonStyle.success))
         self.add_item(ListUserFavoritesButton(bot_behavior, label="💖My Favorites💖", style=discord.ButtonStyle.success))
         self.add_item(ListBlacklistButton(bot_behavior, label="🗑️Blacklisted🗑️", style=discord.ButtonStyle.success))
