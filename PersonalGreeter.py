@@ -905,7 +905,7 @@ async def on_message(message):
             r'https?://(?:www\.)?(?:youtube\.com/watch\?v=|youtu\.be/)' # YouTube (youtube.com/watch?v= or youtu.be/)
             r'[\w-]+'                                           # Matches the video ID
             r'(?:[?#][^\s]*)?'                                   # Optional query/fragment
-            r')\b'                                            # Word boundary to prevent partial matches
+            r')(?=\s|$)'                                       # Positive lookahead for space or end of string (instead of word boundary)
         )
         match = url_pattern.search(message.content)
 
