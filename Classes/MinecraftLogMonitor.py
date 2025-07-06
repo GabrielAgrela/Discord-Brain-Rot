@@ -174,20 +174,32 @@ class MinecraftLogHandler(FileSystemEventHandler):
         else:
             return discord.Color.blue()
 
-    def get_last_logs(self, lines=10):
-        """Return the last `lines` entries from the log file formatted"""
+    def get_last_logs(self, lines=10, raw=False):
+        """Return the last `lines` entries from the log file formatted or raw"""
         if not os.path.exists(self.log_file_path):
             return []
 
         try:
             with open(self.log_file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 log_lines = f.readlines()[-lines:]
-            formatted = []
-            for line in log_lines:
-                msg = self.format_log_message(line.strip())
-                if msg:
-                    formatted.append(msg)
-            return formatted
+            
+            if raw:
+                # Return raw log lines with IP addresses censored
+                result = []
+                for line in log_lines:
+                    clean_line = line.strip()
+                    if clean_line:  # Skip empty lines
+                        censored_line = self.censor_ip_addresses(clean_line)
+                        result.append(censored_line)
+                return result
+            else:
+                # Return formatted log lines (original behavior)
+                formatted = []
+                for line in log_lines:
+                    msg = self.format_log_message(line.strip())
+                    if msg:
+                        formatted.append(msg)
+                return formatted
         except Exception as e:
             print(f"Error getting last logs: {e}")
             return []
@@ -249,8 +261,8 @@ class MinecraftLogMonitor:
             print(f"Could not find channel '#{self.channel_name}'")
             return False
 
-    def get_last_logs(self, lines=10):
-        """Get the last formatted log lines"""
+    def get_last_logs(self, lines=10, raw=False):
+        """Get the last formatted or raw log lines"""
         if not self.handler:
             return []
-        return self.handler.get_last_logs(lines)
+        return self.handler.get_last_logs(lines, raw)

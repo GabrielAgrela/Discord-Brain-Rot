@@ -1056,7 +1056,7 @@ async def minecraft_logs(ctx,
 @bot.slash_command(name="lastlogs", description="Show the last Minecraft logs")
 async def last_logs(ctx, lines: Option(int, "Number of log lines", required=False, default=10)):
     if minecraft_monitor.observer and minecraft_monitor.observer.is_alive():
-        logs = minecraft_monitor.get_last_logs(lines)
+        logs = minecraft_monitor.get_last_logs(lines, raw=True)
         if not logs:
             await ctx.respond("No log entries found.")
             return
