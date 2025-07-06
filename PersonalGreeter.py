@@ -1,5 +1,6 @@
 import asyncio
 import os
+import subprocess
 import discord
 from discord.ext import tasks
 import sqlite3
@@ -38,6 +39,23 @@ bot = Bot(command_prefix="*", intents=intents, token=env.bot_token, ffmpeg_path=
 behavior = BotBehavior(bot, env.ffmpeg_path)
 db = Database(behavior=behavior)
 file_name = 'play_requests.csv'
+
+# Path to the bot's log file for command history
+COMMAND_LOG_FILE = '/var/log/personalgreeter.log'
+
+
+def tail_command_logs(lines=10, log_path=COMMAND_LOG_FILE):
+    """Return the last `lines` lines from the bot's log file."""
+    try:
+        output = subprocess.check_output(
+            ['tail', '-n', str(lines), log_path],
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        return output.strip().splitlines()
+    except Exception as e:
+        print(f"Error reading command log: {e}")
+        return None
 
 # Flag to enable/disable voice recognition
 voice_recognition_enabled = True
@@ -1048,6 +1066,20 @@ async def last_logs(ctx, lines: Option(int, "Number of log lines", required=Fals
         await ctx.respond(f"```{formatted}```")
     else:
         await ctx.respond("⚠️ Minecraft log monitoring is not running.")
+
+@bot.slash_command(name="commands", description="Show recent bot commands from the log")
+async def show_commands(ctx, count: Option(int, "Number of entries", required=False, default=10)):
+    await ctx.respond("Fetching logs...", delete_after=0)
+    lines = tail_command_logs(count)
+
+    if not lines:
+        await ctx.followup.send("No command logs found or log file unavailable.", ephemeral=True)
+        return
+
+    formatted = "\n".join(lines)
+    if len(formatted) > 1900:
+        formatted = formatted[-1900:]
+    await ctx.followup.send(f"```{formatted}```", ephemeral=True)
 
 @bot.slash_command(name="reboot", description="Reboots the host machine (Admin only).")
 async def reboot_command(ctx):
