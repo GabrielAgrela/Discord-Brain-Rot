@@ -57,6 +57,45 @@ def tail_command_logs(lines=10, log_path=COMMAND_LOG_FILE):
         print(f"Error reading command log: {e}")
         return None
 
+def get_service_logs(lines=10, service_name=None):
+    """Return the last `lines` lines from service logs using journalctl."""
+    try:
+        # First try to get logs for a specific service if provided
+        if service_name:
+            output = subprocess.check_output(
+                ['journalctl', '-u', service_name, '-n', str(lines), '--no-pager'],
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+            return output.strip().splitlines()
+        
+        # If no service name, try to get logs for current user or system
+        commands_to_try = [
+            ['journalctl', '--user', '-n', str(lines), '--no-pager'],  # User logs
+            ['journalctl', '-n', str(lines), '--no-pager'],  # System logs
+        ]
+        
+        for cmd in commands_to_try:
+            try:
+                output = subprocess.check_output(
+                    cmd,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                )
+                return output.strip().splitlines()
+            except subprocess.CalledProcessError:
+                continue
+                
+        # If journalctl fails, try to read from the bot's log file
+        if os.path.exists(COMMAND_LOG_FILE):
+            return tail_command_logs(lines, COMMAND_LOG_FILE)
+        
+        return None
+        
+    except Exception as e:
+        print(f"Error reading service logs: {e}")
+        return None
+
 # Flag to enable/disable voice recognition
 voice_recognition_enabled = True
 
@@ -1053,19 +1092,19 @@ async def minecraft_logs(ctx,
         else:
             await ctx.respond("⚠️ Minecraft log monitoring is not running. Start it first with `/minecraft start`")
 
-@bot.slash_command(name="lastlogs", description="Show the last Minecraft logs")
-async def last_logs(ctx, lines: Option(int, "Number of log lines", required=False, default=10)):
-    if minecraft_monitor.observer and minecraft_monitor.observer.is_alive():
-        logs = minecraft_monitor.get_last_logs(lines)
-        if not logs:
-            await ctx.respond("No log entries found.")
-            return
-        formatted = "\n".join(logs)
-        if len(formatted) > 1900:
-            formatted = formatted[-1900:]
-        await ctx.respond(f"```{formatted}```")
-    else:
-        await ctx.respond("⚠️ Minecraft log monitoring is not running.")
+@bot.slash_command(name="lastlogs", description="Show the last service logs")
+async def last_logs(ctx, lines: Option(int, "Number of log lines", required=False, default=10), service: Option(str, "Service name (optional)", required=False)):
+    await ctx.respond("Fetching service logs...", delete_after=0)
+    
+    logs = get_service_logs(lines, service)
+    if not logs:
+        await ctx.followup.send("No log entries found or unable to access logs.", ephemeral=True)
+        return
+    
+    formatted = "\n".join(logs)
+    if len(formatted) > 1900:
+        formatted = formatted[-1900:]
+    await ctx.followup.send(f"```{formatted}```", ephemeral=True)
 
 @bot.slash_command(name="commands", description="Show recent bot commands from the log")
 async def show_commands(ctx, count: Option(int, "Number of entries", required=False, default=10)):
