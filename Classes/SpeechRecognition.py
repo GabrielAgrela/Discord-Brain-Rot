@@ -588,10 +588,18 @@ class DiscordVoiceListener:
                         voice_client.listening_sink = sink
                         
                         # Required callback format for Discord's recording system
-                        def recording_callback(sink, user_id, audio_data):
-                            # Discord expects this signature: sink, user_id, audio_data
-                            # Our sink's write method handles everything
-                            pass
+                        def recording_callback(sink, *args):
+                            """Callback required by `start_recording`.
+
+                            The library invokes this function once the recording
+                            session ends and only provides the sink along with
+                            any optional positional arguments supplied to
+                            :meth:`start_recording`.  Our implementation does
+                            not rely on this callback, so we simply accept the
+                            sink (and ignore any additional arguments) to avoid
+                            `TypeError` exceptions when the thread finishes.
+                            """
+                            return
                         
                         voice_client.start_recording(sink, recording_callback)
                         print(f"Started recording in {voice_channel.name}")
