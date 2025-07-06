@@ -133,6 +133,7 @@ class Database:
         except sqlite3.Error as e:
             print(f"An error occurred: {e}")
 
+
     def insert_sound(self, originalfilename, filename, favorite=0, blacklist=0, date=datetime.datetime.now()):
         try:
             self.cursor.execute("INSERT INTO sounds (originalfilename, Filename, favorite, blacklist, timestamp) VALUES (?, ?, ?, ?, ?);", (originalfilename, filename, favorite, blacklist, date))
