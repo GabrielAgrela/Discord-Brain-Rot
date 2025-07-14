@@ -1221,14 +1221,19 @@ class SoundListItemButton(Button):
 
     async def callback(self, interaction):
         await interaction.response.defer()
-        # Play the sound
-        asyncio.create_task(self.bot_behavior.play_audio(
-            interaction.channel, 
-            self.sound_filename, 
-            interaction.user.name
-        ))
-        # Record the action
-        Database().insert_action(interaction.user.name, "play_from_list", self.sound_filename)
+        # Determine the user's voice channel
+        channel = self.bot_behavior.get_user_voice_channel(interaction.guild, interaction.user.name)
+        if channel:
+            # Play the sound in the user's voice channel
+            asyncio.create_task(self.bot_behavior.play_audio(
+                channel,
+                self.sound_filename,
+                interaction.user.name
+            ))
+            # Record the action
+            Database().insert_action(interaction.user.name, "play_from_list", self.sound_filename)
+        else:
+            await interaction.followup.send("You need to be in a voice channel to play sounds! 😭", ephemeral=True)
 
 class CreateListButton(Button):
     def __init__(self, bot_behavior, **kwargs):
