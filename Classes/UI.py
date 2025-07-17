@@ -127,6 +127,25 @@ class ChangeSoundNameButton(Button):
             except:
                 pass
 
+class DownloadSoundButton(Button):
+    def __init__(self, bot_behavior, audio_file, **kwargs):
+        super().__init__(label="", emoji="⬇️", style=discord.ButtonStyle.primary, **kwargs)
+        self.bot_behavior = bot_behavior
+        self.audio_file = audio_file
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        try:
+            sound_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", self.audio_file))
+            if os.path.exists(sound_path):
+                await interaction.followup.send(file=discord.File(sound_path), ephemeral=True)
+                Database().insert_action(interaction.user.name, "download_sound", self.audio_file)
+            else:
+                await interaction.followup.send("Sound file not found.", ephemeral=True)
+        except Exception as e:
+            print(f"DownloadSoundButton error: {e}")
+            await interaction.followup.send("Error sending file.", ephemeral=True)
+
 # New User Event Assignment Components Start
 
 class EventTypeSelect(discord.ui.Select):
@@ -806,6 +825,9 @@ class SoundBeingPlayedView(View):
         # Add the slap button
         self.add_item(SlapButton(bot_behavior=bot_behavior, audio_file=audio_file))
 
+        # Add the download button
+        self.add_item(DownloadSoundButton(bot_behavior=bot_behavior, audio_file=audio_file))
+
         # Add the isolate button
         #self.add_item(IsolateButton(bot_behavior=bot_behavior, audio_file=audio_file, label="Isolate", style=discord.ButtonStyle.secondary))
 
@@ -857,6 +879,9 @@ class SoundBeingPlayedWithSuggestionsView(View):
 
         # Add the slap button
         self.add_item(SlapButton(bot_behavior=bot_behavior, audio_file=audio_file))
+
+        # Add the download button
+        self.add_item(DownloadSoundButton(bot_behavior=bot_behavior, audio_file=audio_file))
 
         # Add the change sound name button
         self.add_item(ChangeSoundNameButton(bot_behavior=bot_behavior, sound_name=audio_file, emoji="📝", style=discord.ButtonStyle.primary))
