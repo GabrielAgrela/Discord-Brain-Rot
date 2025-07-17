@@ -917,10 +917,10 @@ async def play_audio_for_event(member, member_str, event, channel):
             behavior.last_channel[member_str] = channel
             if channel:
                 print(f"Playing {sound} for {member_str} on {event}")
-                await behavior.play_audio(channel, db.get_sounds_by_similarity(sound)[0][1], member_str, is_entrance=True)
+                await behavior.play_audio(channel, db.get_sounds_by_similarity(sound)[0][1], member_str)
                 db.insert_action(member_str, event, db.get_sounds_by_similarity(sound)[0][0])
         elif event == "join":
-            await behavior.play_audio(channel, "gay-echo.mp3", "admin", is_entrance=True)
+            await behavior.play_audio(channel, "gay-echo.mp3", "admin")
             db.insert_action(member_str, event, db.get_sounds_by_similarity("gay-echo.mp3")[0][0])
         elif event == "leave":
             db.insert_action(member_str, event, "-")
