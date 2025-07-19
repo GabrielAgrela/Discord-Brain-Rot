@@ -588,7 +588,7 @@ class DiscordVoiceListener:
                         voice_client.listening_sink = sink
                         
                         # Required callback format for Discord's recording system
-                        def recording_callback(sink, *args):
+                        async def recording_callback(sink, *args):
                             """Callback required by `start_recording`.
 
                             The library invokes this function once the recording
