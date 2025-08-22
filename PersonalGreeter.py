@@ -1198,4 +1198,472 @@ async def fix_voice_command(ctx):
         )
         print(f"Error during voice cleanup: {e}")
 
+@bot.slash_command(name="backup", description="Backup Discord-Brain-Rot project to USB drive (Admin only)")
+async def backup_command(ctx):
+    """Backup the entire Discord-Brain-Rot project to USB drive with logging."""
+    # Check for admin permissions
+    if not behavior.is_admin_or_mod(ctx.author):
+        await ctx.respond("You don't have permission to use this command.", ephemeral=True)
+        return
+
+    await ctx.respond("🔄 Starting backup process...", ephemeral=False)
+    print(f"Backup initiated by {ctx.author.name} ({ctx.author.id})")
+
+    try:
+        # Step 1: Check if USB drive is mounted
+        usb_path = "/media/usb"
+        backup_dir = "/media/usb/brainrotbup"
+        source_dir = "/home/gabi/github/Discord-Brain-Rot"
+
+        print(f"DEBUG: USB path: {usb_path}")
+        print(f"DEBUG: Backup dir: {backup_dir}")
+        print(f"DEBUG: Source dir: {source_dir}")
+
+        # Create empty directory for rsync method if it doesn't exist
+        empty_dir = "/tmp/empty_dir"
+        if not os.path.exists(empty_dir):
+            os.makedirs(empty_dir, exist_ok=True)
+            print(f"DEBUG: Created empty dir: {empty_dir}")
+
+        print("DEBUG: Starting Step 1 - USB drive check")
+        await behavior.send_message(
+            title="📋 Backup Step 1",
+            description="Checking USB drive connection...",
+            delete_time=5
+        )
+
+        if not os.path.exists(usb_path):
+            print("DEBUG: USB path does not exist!")
+            await behavior.send_message(
+                title="❌ Backup Failed",
+                description="USB drive not found at /media/usb. Please ensure the USB drive is connected and mounted.",
+                delete_time=10
+            )
+            return
+
+        print("DEBUG: USB path exists, proceeding to Step 2")
+        await behavior.send_message(
+            title="✅ Step 1 Complete",
+            description="USB drive is connected and mounted.",
+            delete_time=5
+        )
+
+        # Step 2: Clean the backup directory
+        print("DEBUG: Starting Step 2 - Directory cleanup")
+        await behavior.send_message(
+            title="🧹 Backup Step 2",
+            description="Cleaning existing backup directory...",
+            delete_time=5
+        )
+
+        if os.path.exists(backup_dir):
+            print(f"DEBUG: Backup directory exists: {backup_dir}")
+            try:
+                # Show directory size before cleanup
+                print("DEBUG: Checking directory size")
+                await behavior.send_message(
+                    title="📊 Directory Size Check",
+                    description="Checking backup directory size...",
+                    delete_time=5
+                )
+                size_result = subprocess.run(['sudo', 'du', '-sh', backup_dir], capture_output=True, text=True, timeout=30)
+                print(f"DEBUG: Size check result - Return code: {size_result.returncode}")
+                print(f"DEBUG: Size check stdout: {size_result.stdout}")
+                print(f"DEBUG: Size check stderr: {size_result.stderr}")
+                if size_result.returncode == 0 and size_result.stdout.strip():
+                    dir_size = size_result.stdout.split()[0]
+                    print(f"DEBUG: Directory size: {dir_size}")
+                    await behavior.send_message(
+                        title="📊 Directory Size",
+                        description=f"Backup directory size: {dir_size} - This may take a while to remove...",
+                        delete_time=10
+                    )
+                else:
+                    print("DEBUG: Size check failed or empty output")
+                    await behavior.send_message(
+                        title="⚠️ Size Check Warning",
+                        description="Could not determine directory size, proceeding with cleanup...",
+                        delete_time=5
+                    )
+            except subprocess.TimeoutExpired:
+                print("DEBUG: Size check timed out")
+                await behavior.send_message(
+                    title="⚠️ Size Check Timeout",
+                    description="Size check timed out, proceeding with cleanup...",
+                    delete_time=5
+                )
+            except Exception as e:
+                print(f"DEBUG: Size check error: {str(e)}")
+                await behavior.send_message(
+                    title="⚠️ Size Check Error",
+                    description=f"Size check failed: {str(e)}, proceeding with cleanup...",
+                    delete_time=5
+                )
+
+            # Try normal removal first with timeout
+            try:
+                print("DEBUG: Starting primary cleanup method (rm -rfv)")
+                await behavior.send_message(
+                    title="🧹 Step 2 Progress",
+                    description="Starting directory cleanup (timeout: 5 minutes)...",
+                    delete_time=10
+                )
+
+                # First check if we can list the directory contents
+                print("DEBUG: Checking directory access with ls -la")
+                ls_result = subprocess.run(['sudo', 'ls', '-la', backup_dir], capture_output=True, text=True, timeout=30)
+                print(f"DEBUG: ls result - Return code: {ls_result.returncode}")
+                print(f"DEBUG: ls stdout: {ls_result.stdout}")
+                print(f"DEBUG: ls stderr: {ls_result.stderr}")
+                if ls_result.returncode != 0:
+                    print("DEBUG: Directory access failed")
+                    await behavior.send_message(
+                        title="⚠️ Directory Access Warning",
+                        description="Cannot access directory contents. It may be corrupted or have permission issues.",
+                        delete_time=10
+                    )
+
+                print("DEBUG: Executing rm -rfv command")
+                clean_result = subprocess.run(['sudo', 'rm', '-rfv', backup_dir], capture_output=True, text=True, timeout=300)
+                print(f"DEBUG: rm result - Return code: {clean_result.returncode}")
+                print(f"DEBUG: rm stdout length: {len(clean_result.stdout) if clean_result.stdout else 0}")
+                print(f"DEBUG: rm stderr length: {len(clean_result.stderr) if clean_result.stderr else 0}")
+                if clean_result.returncode == 0:
+                    await behavior.send_message(
+                        title="✅ Step 2 Complete",
+                        description="Old backup directory cleaned successfully.",
+                        delete_time=5
+                    )
+                else:
+                    # Check if directory still exists after the rm command
+                    if not os.path.exists(backup_dir):
+                        print("DEBUG: Directory successfully removed despite non-zero exit code")
+                        await behavior.send_message(
+                            title="✅ Step 2 Complete",
+                            description="Old backup directory cleaned (some warnings but successful).",
+                            delete_time=5
+                        )
+                    else:
+                        # Directory still exists, but some files may have been removed
+                        # Let's check what's left and decide whether to continue or fail
+                        print("DEBUG: Directory still exists after rm command")
+
+                        # Get directory size to see if most files were removed
+                        try:
+                            size_check = subprocess.run(['sudo', 'du', '-sb', backup_dir], capture_output=True, text=True, timeout=30)
+                            if size_check.returncode == 0:
+                                remaining_size = int(size_check.stdout.split()[0])
+                                print(f"DEBUG: Remaining directory size: {remaining_size} bytes")
+
+                                # If less than 100MB remains, consider it mostly cleaned
+                                if remaining_size < 100000000:  # 100MB
+                                    print("DEBUG: Most files removed, continuing with backup")
+                                    await behavior.send_message(
+                                        title="⚠️ Partial Cleanup",
+                                        description=f"Most files cleaned, but {remaining_size/1000000:.1f}MB remains. Continuing with backup...",
+                                        delete_time=10
+                                    )
+                                    # Continue to Step 3 (create directory)
+                                else:
+                                    # Too much data remains, try alternative methods
+                                    print("DEBUG: Too much data remains, trying alternative cleanup")
+                                    raise subprocess.CalledProcessError(clean_result.returncode, clean_result.args, "Too much data remains after cleanup")
+                            else:
+                                raise subprocess.CalledProcessError(clean_result.returncode, clean_result.args, "Could not determine remaining size")
+                        except subprocess.TimeoutExpired:
+                            print("DEBUG: Size check timed out, assuming partial cleanup")
+                            await behavior.send_message(
+                                title="⚠️ Cleanup Check Timeout",
+                                description="Could not verify cleanup progress. Continuing with backup...",
+                                delete_time=10
+                            )
+                            # Continue to Step 3
+            except subprocess.TimeoutExpired:
+                # If normal removal times out, try alternative methods
+                print("DEBUG: Primary cleanup timed out, trying alternative methods")
+                await behavior.send_message(
+                    title="⚠️ Step 2 Timeout",
+                    description="Normal cleanup timed out, trying alternative methods...",
+                    delete_time=10
+                )
+
+                # Method 1: Try find -delete (good for large directories)
+                try:
+                    print("DEBUG: Starting alternative method 1 (find -delete)")
+                    await behavior.send_message(
+                        title="🔄 Alternative Method 1",
+                        description="Trying find -delete approach...",
+                        delete_time=5
+                    )
+                    alt_clean = subprocess.run(['sudo', 'find', backup_dir, '-delete'], capture_output=True, text=True, timeout=240)
+                    print(f"DEBUG: find -delete result - Return code: {alt_clean.returncode}")
+                    print(f"DEBUG: find -delete stdout length: {len(alt_clean.stdout) if alt_clean.stdout else 0}")
+                    print(f"DEBUG: find -delete stderr length: {len(alt_clean.stderr) if alt_clean.stderr else 0}")
+                    if alt_clean.returncode == 0:
+                        # Check if directory still exists and remove if empty
+                        if os.path.exists(backup_dir):
+                            rmdir_result = subprocess.run(['sudo', 'rmdir', backup_dir], capture_output=True, text=True, timeout=30)
+                            if rmdir_result.returncode != 0:
+                                await behavior.send_message(
+                                    title="⚠️ Directory Not Empty",
+                                    description="Files removed but directory not empty. This is normal.",
+                                    delete_time=10
+                                )
+                        await behavior.send_message(
+                            title="✅ Step 2 Complete",
+                            description="Old backup directory cleaned using find -delete method.",
+                            delete_time=5
+                        )
+                        return  # Success, exit the cleanup section
+                    else:
+                        error_msg = alt_clean.stderr.strip() if alt_clean.stderr else "Find command failed"
+                        await behavior.send_message(
+                            title="⚠️ Method 1 Failed",
+                            description=f"Find -delete failed: {error_msg}",
+                            delete_time=10
+                        )
+                except subprocess.TimeoutExpired:
+                    await behavior.send_message(
+                        title="⚠️ Method 1 Timeout",
+                        description="Find -delete also timed out, trying method 2...",
+                        delete_time=10
+                    )
+                except Exception as e:
+                    await behavior.send_message(
+                        title="⚠️ Method 1 Failed",
+                        description=f"Find -delete failed: {str(e)}",
+                        delete_time=10
+                    )
+
+                # Method 2: Try rsync with delete (sometimes more reliable)
+                try:
+                    await behavior.send_message(
+                        title="🔄 Alternative Method 2",
+                        description="Trying rsync delete approach...",
+                        delete_time=5
+                    )
+                    rsync_clean = subprocess.run(['sudo', 'rsync', '-a', '--delete', '/tmp/empty_dir/', backup_dir], capture_output=True, text=True, timeout=180)
+                    if rsync_clean.returncode == 0:
+                        await behavior.send_message(
+                            title="✅ Step 2 Complete",
+                            description="Old backup directory cleaned using rsync method.",
+                            delete_time=5
+                        )
+                        return  # Success
+                    else:
+                        await behavior.send_message(
+                            title="⚠️ Method 2 Failed",
+                            description=f"Rsync method failed (exit code: {rsync_clean.returncode})",
+                            delete_time=10
+                        )
+                except subprocess.TimeoutExpired:
+                    await behavior.send_message(
+                        title="❌ All Methods Failed",
+                        description="All cleanup methods timed out. The directory may be too large or have filesystem issues.",
+                        delete_time=15
+                    )
+                    return
+                except Exception as e:
+                    await behavior.send_message(
+                        title="⚠️ Method 2 Failed",
+                        description=f"Rsync method failed: {str(e)}",
+                        delete_time=10
+                    )
+
+                # Method 3: Try chmod + rm as final attempt
+                try:
+                    print("DEBUG: Starting final method (chmod + rm)")
+                    await behavior.send_message(
+                        title="🔄 Final Method",
+                        description="Trying chmod + rm approach for stubborn files...",
+                        delete_time=5
+                    )
+
+                    # First try to change permissions on all files
+                    chmod_result = subprocess.run(['sudo', 'chmod', '-R', '777', backup_dir], capture_output=True, text=True, timeout=60)
+                    print(f"DEBUG: chmod result - Return code: {chmod_result.returncode}")
+
+                    # Then try to remove again
+                    final_rm = subprocess.run(['sudo', 'rm', '-rf', backup_dir], capture_output=True, text=True, timeout=180)
+                    print(f"DEBUG: final rm result - Return code: {final_rm.returncode}")
+
+                    if final_rm.returncode == 0 or not os.path.exists(backup_dir):
+                        await behavior.send_message(
+                            title="✅ Step 2 Complete",
+                            description="Old backup directory cleaned using final method.",
+                            delete_time=5
+                        )
+                        return  # Success, exit the cleanup section
+                    else:
+                        await behavior.send_message(
+                            title="❌ All Cleanup Methods Failed",
+                            description="Could not clean backup directory. Please manually remove /media/usb/brainrotbup and try again.",
+                            delete_time=20
+                        )
+                        return  # Give up
+                except Exception as e:
+                    await behavior.send_message(
+                        title="❌ Final Method Failed",
+                        description=f"Final cleanup attempt failed: {str(e)}",
+                        delete_time=10
+                    )
+
+                # Final failure
+                await behavior.send_message(
+                    title="❌ Step 2 Failed",
+                    description="All cleanup methods failed. You may need to manually remove the directory.",
+                    delete_time=15
+                )
+                return
+            except subprocess.CalledProcessError as e:
+                error_msg = e.stderr if e.stderr else "Unknown error"
+                await behavior.send_message(
+                    title="❌ Step 2 Failed",
+                    description=f"Failed to clean directory: {error_msg}",
+                    delete_time=10
+                )
+                return
+        else:
+            await behavior.send_message(
+                title="ℹ️ Step 2 Skipped",
+                description="No existing backup directory found.",
+                delete_time=5
+            )
+
+        # Step 3: Create backup directory
+        await behavior.send_message(
+            title="📁 Backup Step 3",
+            description="Creating backup directory...",
+            delete_time=5
+        )
+
+        mkdir_result = subprocess.run(['sudo', 'mkdir', '-p', backup_dir], capture_output=True, text=True)
+        if mkdir_result.returncode == 0:
+            await behavior.send_message(
+                title="✅ Step 3 Complete",
+                description="Backup directory created successfully.",
+                delete_time=5
+            )
+        else:
+            await behavior.send_message(
+                title="❌ Step 3 Failed",
+                description=f"Failed to create directory: {mkdir_result.stderr}",
+                delete_time=10
+            )
+            return
+
+        # Step 4: Copy files with progress logging
+        await behavior.send_message(
+            title="📂 Backup Step 4",
+            description="Copying Discord-Brain-Rot project files... This may take a while.",
+            delete_time=10
+        )
+
+        # Get source directory size for progress estimation
+        size_result = subprocess.run(['du', '-sh', source_dir], capture_output=True, text=True)
+        if size_result.returncode == 0:
+            source_size = size_result.stdout.split()[0]
+            await behavior.send_message(
+                title="📊 Backup Info",
+                description=f"Source directory size: {source_size}",
+                delete_time=5
+            )
+
+        # Perform the copy operation using rsync (better for special characters and large files)
+        print("DEBUG: Starting file copy with rsync")
+        await behavior.send_message(
+            title="📂 Step 4 Progress",
+            description="Copying files using rsync (better for special characters and large files)...",
+            delete_time=10
+        )
+
+        # Use rsync instead of cp - it's better for:
+        # - Special characters in filenames
+        # - Large files
+        # - Resuming interrupted transfers
+        # - Excluding problematic files
+        rsync_cmd = [
+            'sudo', 'rsync', '-av',
+            '--ignore-existing',  # Skip files that already exist
+            '--safe-links',       # Ignore symlinks that point outside the tree
+            '--copy-links',       # Copy symlinks as regular files
+            '--exclude=.git',
+            '--exclude=__pycache__',
+            '--exclude=*.pyc',
+            '--exclude=venv',     # Exclude Python virtual environment
+            '--exclude=actions-runner',  # Exclude GitHub actions runner
+            '--exclude=temp_audio',      # Exclude temporary audio files
+            '--exclude=.DS_Store',       # Exclude macOS system files
+            '--exclude=Thumbs.db',       # Exclude Windows system files
+            source_dir + '/',
+            os.path.join(backup_dir, "Discord-Brain-Rot")
+        ]
+
+        print(f"DEBUG: Running rsync command: {' '.join(rsync_cmd)}")
+        await behavior.send_message(
+            title="📂 Copy Progress",
+            description="Starting file copy (this may take several minutes for large backups)...",
+            delete_time=30
+        )
+        copy_result = subprocess.run(rsync_cmd, capture_output=True, text=True, timeout=1800)  # 30 minute timeout
+
+        print(f"DEBUG: rsync result - Return code: {copy_result.returncode}")
+        print(f"DEBUG: rsync stdout length: {len(copy_result.stdout) if copy_result.stdout else 0}")
+        print(f"DEBUG: rsync stderr length: {len(copy_result.stderr) if copy_result.stderr else 0}")
+
+        if copy_result.returncode != 0:
+            # Check if it's a partial success (rsync returns 23 for some files failing but others succeeding)
+            if copy_result.returncode == 23:
+                print("DEBUG: rsync completed with some files skipped (exit code 23) - this is usually OK")
+                await behavior.send_message(
+                    title="⚠️ Copy Completed with Warnings",
+                    description="Some files had issues (special characters, symlinks) but most were copied successfully.",
+                    delete_time=15
+                )
+            else:
+                error_msg = copy_result.stderr.strip() if copy_result.stderr else "Unknown copy error"
+                print(f"DEBUG: Copy failed with error: {error_msg}")
+                await behavior.send_message(
+                    title="❌ Copy Failed",
+                    description=f"Failed to copy files: {error_msg[:500]}",
+                    delete_time=15
+                )
+                return
+
+        # Step 5: Verify backup
+        await behavior.send_message(
+            title="🔍 Backup Step 5",
+            description="Verifying backup integrity...",
+            delete_time=5
+        )
+
+        if os.path.exists(os.path.join(backup_dir, "Discord-Brain-Rot")):
+            # Get backup size
+            backup_size_result = subprocess.run(['du', '-sh', backup_dir], capture_output=True, text=True)
+            if backup_size_result.returncode == 0:
+                backup_size = backup_size_result.stdout.split()[0]
+                await behavior.send_message(
+                    title="✅ Backup Complete",
+                    description=f"Backup created successfully!\n📦 Backup size: {backup_size}\n📍 Location: {backup_dir}",
+                    delete_time=15
+                )
+            else:
+                await behavior.send_message(
+                    title="✅ Backup Complete",
+                    description=f"Backup created successfully!\n📍 Location: {backup_dir}",
+                    delete_time=10
+                )
+        else:
+            raise Exception("Backup verification failed - directory not found")
+
+        print("Backup completed successfully")
+
+    except Exception as e:
+        await behavior.send_message(
+            title="❌ Backup Failed",
+            description=f"Backup failed with error: {e}",
+            delete_time=15
+        )
+        print(f"Error during backup: {e}")
+
 bot.run_bot()

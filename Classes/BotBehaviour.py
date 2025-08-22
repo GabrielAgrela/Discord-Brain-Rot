@@ -390,7 +390,7 @@ class BotBehavior:
                     print(f"Error disconnecting voice client: {e}")
             
             # Now attempt to connect fresh
-            max_retries = 5
+            max_retries = 2
             for attempt in range(max_retries):
                 try:
                     print(f"Connecting to voice channel: {channel.name} (attempt {attempt+1}/{max_retries})")
@@ -417,6 +417,8 @@ class BotBehavior:
                             except:
                                 pass
                     else:
+                        await voice_client.disconnect(force=True)
+                        await asyncio.sleep(1)
                         print(f"Connection failed verification on attempt {attempt+1}")
                         
                 except discord.ClientException as e:
