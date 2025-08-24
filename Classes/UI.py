@@ -794,31 +794,8 @@ class SoundBeingPlayedView(View):
         self.audio_file = audio_file
         self.user_id = user_id
 
-        # Conditionally add AddToList button or select menu FIRST - only if explicitly requested
-        if include_add_to_list_select:
-            lists = Database().get_sound_lists()
-            if lists: # Only add select if there are lists
-                # Check which list(s) the sound is already in
-                lists_containing_sound = Database().get_lists_containing_sound(self.audio_file)
-                default_list_id = lists_containing_sound[0][0] if lists_containing_sound else None
-
-                # Ensure AddToListSelect can fit, check component count if necessary
-                if len(self.children) < 25: # Basic check for component limit
-                    # Pass the default_list_id to AddToListSelect
-                    self.add_item(AddToListSelect(self.bot_behavior, self.audio_file, lists, default_list_id=default_list_id, row=4))
-                else:
-                    print("Warning: Could not add AddToListSelect to SoundBeingPlayedView due to component limit.")
-                    # Fallback to button maybe? Or just omit. For now, omit if limit reached.
-                    pass
-            # If no lists, don't add the select or the button
-        else:
-            # Add the Add to List button only if explicitly requested
-            if False:  # Removed - don't add button by default either
-                if len(self.children) < 25:
-                    self.add_item(AddToListButton(bot_behavior=bot_behavior, sound_filename=audio_file, emoji="📃", style=discord.ButtonStyle.success))
-                else:
-                    print("Warning: Could not add AddToListButton to SoundBeingPlayedView due to component limit.")
-
+        # IMPORTANT: Add core buttons first to avoid triggering Components V2
+        # when later placing the optional row-4 select (see discord.py View weights logic).
         # Add the replay button
         self.add_item(ReplayButton(bot_behavior=bot_behavior, audio_file=audio_file, emoji="🔁", style=discord.ButtonStyle.primary))
 
@@ -846,6 +823,23 @@ class SoundBeingPlayedView(View):
         # Add the STS character select dropdown
         self.add_item(STSCharacterSelect(bot_behavior=bot_behavior, audio_file=audio_file, row=2))
 
+        # Conditionally add AddToList select LAST to keep within 5 legacy rows
+        if include_add_to_list_select:
+            lists = Database().get_sound_lists()
+            if lists:  # Only add select if there are lists
+                # Check which list(s) the sound is already in
+                lists_containing_sound = Database().get_lists_containing_sound(self.audio_file)
+                default_list_id = lists_containing_sound[0][0] if lists_containing_sound else None
+
+                # Ensure AddToListSelect can fit, check component count if necessary
+                if len(self.children) < 25:  # Basic check for component limit
+                    # Pass the default_list_id to AddToListSelect and pin to row 4
+                    self.add_item(AddToListSelect(self.bot_behavior, self.audio_file, lists, default_list_id=default_list_id, row=4))
+                else:
+                    print("Warning: Could not add AddToListSelect to SoundBeingPlayedView due to component limit.")
+                    # Omit if limit reached.
+            # If no lists, don't add the select
+
 class SoundBeingPlayedWithSuggestionsView(View):
     def __init__(self, bot_behavior, audio_file, similar_sounds, user_id=None, include_add_to_list_select: bool = False):
         super().__init__(timeout=None)
@@ -855,25 +849,8 @@ class SoundBeingPlayedWithSuggestionsView(View):
         # Store similar sounds as an instance variable for later access
         self.similar_sounds = similar_sounds
 
-        # First add all the buttons from SoundBeingPlayedView
-        # Conditionally add AddToList button or select menu FIRST
-        if include_add_to_list_select:
-            lists = Database().get_sound_lists()
-            if lists: # Only add select if there are lists
-                # Check which list(s) the sound is already in
-                lists_containing_sound = Database().get_lists_containing_sound(self.audio_file)
-                default_list_id = lists_containing_sound[0][0] if lists_containing_sound else None
-
-                # Ensure AddToListSelect can fit, check component count if necessary
-                if len(self.children) < 25: # Basic check for component limit
-                    # Pass the default_list_id to AddToListSelect
-                    self.add_item(AddToListSelect(self.bot_behavior, self.audio_file, lists, default_list_id=default_list_id, row=4))
-                else:
-                    print("Warning: Could not add AddToListSelect to SoundBeingPlayedView due to component limit.")
-                    # Fallback to button maybe? Or just omit. For now, omit if limit reached.
-                    pass
-            # If no lists, don't add the select or the button
-
+        # IMPORTANT: Add core buttons first to avoid triggering Components V2
+        # when later placing the optional row-4 select.
         # Add the replay button
         self.add_item(ReplayButton(bot_behavior=bot_behavior, audio_file=audio_file, emoji="🔁", style=discord.ButtonStyle.primary))
 
@@ -897,10 +874,26 @@ class SoundBeingPlayedWithSuggestionsView(View):
 
         # Add the STS character select dropdown
         self.add_item(STSCharacterSelect(bot_behavior=bot_behavior, audio_file=audio_file, row=2))
-        
+
         # Add a dropdown to pick similar sounds instead of multiple buttons
         if similar_sounds:
             self.add_item(SimilarSoundsSelect(bot_behavior, similar_sounds))
+
+        # Conditionally add AddToList select LAST to keep within 5 legacy rows
+        if include_add_to_list_select:
+            lists = Database().get_sound_lists()
+            if lists:  # Only add select if there are lists
+                # Check which list(s) the sound is already in
+                lists_containing_sound = Database().get_lists_containing_sound(self.audio_file)
+                default_list_id = lists_containing_sound[0][0] if lists_containing_sound else None
+
+                # Ensure AddToListSelect can fit, check component count if necessary
+                if len(self.children) < 25:  # Basic check for component limit
+                    # Pass the default_list_id to AddToListSelect and pin to row 4
+                    self.add_item(AddToListSelect(self.bot_behavior, self.audio_file, lists, default_list_id=default_list_id, row=4))
+                else:
+                    print("Warning: Could not add AddToListSelect to SoundBeingPlayedWithSuggestionsView due to component limit.")
+                    # Omit if limit reached.
 
 class PaginationButton(Button):
     def __init__(self, label, emoji, style, custom_id, row):
