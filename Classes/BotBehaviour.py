@@ -362,92 +362,25 @@ class BotBehavior:
         #await self.cooldown_message.delete()
 
     async def ensure_voice_connected(self, channel):
-        """Ensures a stable voice connection with improved cleanup and race condition handling"""
-        guild_id = channel.guild.id
-        
-        # Use a connection lock to prevent race conditions
-        if not hasattr(self, 'connection_locks'):
-            self.connection_locks = {}
-        if guild_id not in self.connection_locks:
-            self.connection_locks[guild_id] = asyncio.Lock()
-            
-        async with self.connection_locks[guild_id]:
-            # Check for existing voice client in this guild
-            voice_client = discord.utils.get(self.bot.voice_clients, guild=channel.guild)
-            
-            if voice_client and voice_client.is_connected():
-                # If already in the target channel, just return it
-                if voice_client.channel == channel:
-                    print(f"Already connected to {channel.name}, reusing connection")
+        try:
+            voice_client = None
+
+            #check channel members for bot
+            for member in channel.members:
+                if member.name == self.bot.user.name:
+                    voice_client = member.voice.channel.guild.voice_client
                     return voice_client
-                
-                # Different channel - need to disconnect and reconnect
-                print(f"Switching from {voice_client.channel.name} to {channel.name} - disconnecting first")
-                try:
-                    await voice_client.disconnect(force=True)
-                    await asyncio.sleep(1)
-                except Exception as e:
-                    print(f"Error disconnecting voice client: {e}")
-            
-            # Now attempt to connect fresh
-            max_retries = 2
-            for attempt in range(max_retries):
-                try:
-                    print(f"Connecting to voice channel: {channel.name} (attempt {attempt+1}/{max_retries})")
-                    
-                    # Try to connect
-                    voice_client = await channel.connect(timeout=10.0)
-                    
-                    # Wait for connection to stabilize
-                    await asyncio.sleep(1)
-                    
-                    # Verify the connection is good and responsive
-                    if voice_client.is_connected():
-                        # Try a quick test to ensure the connection is responsive
-                        try:
-                            # Check if we can access basic properties
-                            _ = voice_client.latency
-                            print(f"Successfully connected to {channel.name} (latency: {voice_client.latency:.2f}ms)")
-                            return voice_client
-                        except Exception as e:
-                            print(f"Connection verification failed: {e}")
-                            # Disconnect and try again
-                            try:
-                                await voice_client.disconnect(force=True)
-                            except:
-                                pass
-                    else:
-                        await voice_client.disconnect(force=True)
-                        await asyncio.sleep(1)
-                        print(f"Connection failed verification on attempt {attempt+1}")
-                        
-                except discord.ClientException as e:
-                    error_msg = str(e).lower()
-                    if "already connected" in error_msg:
-                        print(f"Already connected error detected, forcing cleanup...")
-                        # More aggressive cleanup
-                        for vc in list(self.bot.voice_clients):
-                            if vc.guild.id == guild_id:
-                                try:
-                                    await vc.disconnect(force=True)
-                                except:
-                                    pass
-                        await asyncio.sleep(2)
-                    else:
-                        print(f"Connection error on attempt {attempt+1}: {e}")
-                        
-                except asyncio.TimeoutError:
-                    print(f"Connection timeout on attempt {attempt+1}")
-                    
-                except Exception as e:
-                    print(f"Unexpected error connecting to voice channel on attempt {attempt+1}: {e}")
-                
-                # Wait before retry, with exponential backoff
-                wait_time = min(2 ** attempt, 8)
-                await asyncio.sleep(wait_time)
-            
-            # If we get here, all connection attempts failed
-            raise discord.ClientException("Failed to establish a stable voice connection after multiple attempts")
+
+            voice_client = await channel.connect(timeout=10.0)
+
+            return voice_client
+
+        except Exception as e:
+            print(f"Error connecting to voice channel: {e}")
+            # get current voice client
+            voice_client = self.bot.voice_clients[0]
+            return voice_client
+       
 
     async def play_audio(self, channel, audio_file, user, 
                         is_entrance=False, is_tts=False, extra="", 
@@ -744,28 +677,6 @@ class BotBehavior:
                 print(f"Invalid FFmpeg path: {self.ffmpeg_path}")
                 return
 
-            # Add this check before playing
-            if not voice_client.is_connected():
-                await self.send_error_message("Voice client is not connected. Attempting to reconnect...")
-                print("Voice client disconnected")
-                
-                # Try a full disconnect to clean up any zombie connections
-                try:
-                    await voice_client.disconnect(force=True)
-                except Exception:
-                    pass  # Ignore errors here
-                
-                await asyncio.sleep(2)
-                
-                # Reconnect with a fresh connection
-                try:
-                    voice_client = await self.ensure_voice_connected(channel)
-                    print("Voice client reconnected")
-                except Exception as e:
-                    await self.send_error_message(f"Failed to reconnect: {e}")
-                    print(f"Failed to reconnect: {e}")
-                    return False
-
             # Play the audio file
             try:
                 audio_source = discord.FFmpegPCMAudio(
@@ -779,20 +690,6 @@ class BotBehavior:
                 # but is often needed for smoother playback. Test if it causes issues.
                 # If volume seems off, consider removing this or adjusting ffmpeg volume.
                 audio_source = discord.PCMVolumeTransformer(audio_source)
-
-                # Double-check the voice connection is still active right before playing
-                # This is crucial for handling the race condition when switching channels
-                if not voice_client.is_connected():
-                    print("Voice client disconnected right before playing. Final reconnection attempt...")
-                    try:
-                        # One final reconnection attempt
-                        voice_client = await self.ensure_voice_connected(channel)
-                        if not voice_client.is_connected():
-                            await self.send_error_message("Voice connection unstable. Please try again.")
-                            return False
-                    except Exception as e:
-                        await self.send_error_message(f"Connection error: {e}")
-                        return False
                 
                 # Add a small delay right before playing to ensure connection stability
                 await asyncio.sleep(0.5)

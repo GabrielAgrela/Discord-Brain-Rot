@@ -8,7 +8,6 @@ import datetime
 from Classes.Environment import Environment
 from Classes.Bot import Bot
 from Classes.BotBehaviour import BotBehavior
-import interactions
 from discord.commands import Option
 from discord import default_permissions
 from Classes.UsersUtils import UsersUtils
