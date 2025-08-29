@@ -265,6 +265,19 @@ async def check_playback_queue():
 @bot.event
 async def on_ready():
     print(f"We have logged in as {bot.user}")
+    # Debug: print voice stack versions (opus / sodium) to help diagnose decode errors
+    try:
+        import discord.opus as _opus
+        v = _opus._OpusStruct.get_opus_version()
+        print(f"Opus loaded: {_opus.is_loaded()} - version: {v}")
+    except Exception as e:
+        print(f"Opus not loaded or version unknown: {e}")
+    try:
+        import nacl, nacl.bindings
+        sv = getattr(nacl.bindings, 'sodium_version_string', lambda: b'unknown')()
+        print(f"PyNaCl: {getattr(nacl, '__version__', 'unknown')} - libsodium: {sv.decode() if isinstance(sv, (bytes, bytearray)) else sv}")
+    except Exception as e:
+        print(f"PyNaCl/libsodium check failed: {e}")
     #bot.loop.create_task(behavior.check_if_in_game())
     await behavior.delete_controls_message()
     await behavior.clean_buttons()
@@ -275,7 +288,7 @@ async def on_ready():
     bot.loop.create_task(behavior.update_bot_status())
     bot.loop.create_task(SoundDownloader(behavior, behavior.db, os.getenv("CHROMEDRIVER_PATH")).move_sounds())
     check_playback_queue.start()
-    bot.loop.create_task(voice_listener.listen_to_voice_channels())  # Start voice recognition
+    #bot.loop.create_task(voice_listener.listen_to_voice_channels())  # Start voice recognition
     
     # Start Minecraft log monitoring
     if minecraft_monitor.start_monitoring():
@@ -305,6 +318,12 @@ async def on_ready():
                 print(f"Attempting to connect to {channel_to_join.name} in {guild.name}...")
                 await channel_to_join.connect()
                 print(f"Successfully connected to {channel_to_join.name} in {guild.name}.")
+                try:
+                    vc = guild.voice_client
+                    if vc is not None:
+                        print(f"Voice encryption mode: {getattr(vc, 'mode', 'unknown')}")
+                except Exception as e:
+                    print(f"Could not read voice mode: {e}")
                 if not bot.startup_sound_played:
                     try:
                         random_sound = Database().get_random_sounds()[0][2]

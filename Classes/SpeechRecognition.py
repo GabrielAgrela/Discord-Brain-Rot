@@ -309,8 +309,9 @@ class VoiceRecognitionSink(Sink):
             event_handler: Callback function to handle keyword detection events.
             loop: The asyncio event loop to use for scheduling coroutines.
         """
-        # Call Sink.__init__, passing encoding explicitly
-        super().__init__(*args, **kwargs)
+        # Initialise base Sink without forwarding unknown args
+        # (Sink only accepts keyword-only 'filters')
+        super().__init__()
         self.speech_recognizer = speech_recognizer
         self.event_handler = event_handler
         self.loop = loop or asyncio.get_event_loop()  # Store the event loop
@@ -601,6 +602,8 @@ class DiscordVoiceListener:
                             """
                             return
                         
+                        # Keep callback accessible for resume after playback
+                        voice_client.listening_cb = recording_callback
                         voice_client.start_recording(sink, recording_callback)
                         print(f"Started recording in {voice_channel.name}")
                         

@@ -440,6 +440,15 @@ class BotBehavior:
             
             voice_client = await self.ensure_voice_connected(channel)
 
+            # If we're recording the channel for STT, pause it during playback
+            was_recording = False
+            try:
+                was_recording = bool(getattr(voice_client, "recording", False))
+                if was_recording:
+                    voice_client.stop_recording()
+            except Exception as e:
+                print(f"Warning: could not pause recording before playback: {e}")
+
             # Get the absolute path of the audio file
             audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", audio_file))
 
@@ -667,6 +676,13 @@ class BotBehavior:
                             self.delayed_list_selector_update(sound_message, audio_file),
                             self.bot.loop
                         )
+
+                    # Resume recording if it was active before playback
+                    if was_recording and hasattr(voice_client, "listening_sink") and hasattr(voice_client, "listening_cb"):
+                        try:
+                            voice_client.start_recording(voice_client.listening_sink, voice_client.listening_cb)
+                        except Exception as re:
+                            print(f"Warning: failed to resume voice recording after playback: {re}")
                     
                     # Set playback_done flag to signal completion
                     self.bot.loop.call_soon_threadsafe(self.playback_done.set)
@@ -1585,7 +1601,6 @@ class BotBehavior:
                 print(f"Error disconnecting from {vc.guild.name}: {e}")
         
         print("All voice connections cleaned up.")
-
 
 
 

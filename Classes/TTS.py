@@ -54,26 +54,20 @@ class TTS:
 
         tmp_filename = f"{filename}-{char}.mp3"
          # Check if the file already exists
-        if Database().get_sound(tmp_filename, True):
-            # If the file exists, play it and return
-            for guild in self.bot.guilds:
-                channel = self.behavior.get_largest_voice_channel(guild)
-            await self.behavior.play_audio(channel, self.filename, "admin", is_tts=True)
-            return
 
         audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", filename))
 
-        self.filename = f"{filename}-{char}.mp3"
+        self.filename = f"{filename}-{char}-{time.strftime('%d-%m-%y-%H-%M-%S')}.mp3"
         
         if char == "ventura":
             self.voice_id = self.voice_id_pt
-            boost_volume = 15
+            boost_volume = 5
         elif char == "costa":
             self.voice_id = self.voice_id_costa
-            boost_volume = 15
+            boost_volume = 5
         elif char == "tyson":
             self.voice_id = self.voice_id_en
-            boost_volume = 15
+            boost_volume = 10
 
         if self.is_on_cooldown():
             print("Cooldown active. Please wait before making another request.")
@@ -104,16 +98,15 @@ class TTS:
             "xi-api-key": self.api_key
         }
         data = {
-            "model_id": "eleven_multilingual_sts_v2",
+            "model_id": "eleven_v3",
             # remove_background_noise leverages ElevenLabs' isolation model to
             # strip background noise from the input audio. According to the
             # official API specification this boolean enables vocal isolation
             # during the speech-to-speech request.
-            "remove_background_noise": True,
             "voice_settings": json.dumps({
-                "stability": 0.3,
-                "similarity_boost": 0.85,
-                "style": 0.5,
+                "stability": 0.5,
+                "similarity_boost": 0.9,
+                "style": 1,
                 "use_speaker_boost": True
             })
         }
@@ -184,11 +177,11 @@ class TTS:
             "xi-api-key": self.api_key
         }
         data = {
-            "model_id": "eleven_multilingual_v2",
+            "model_id": "eleven_v3",
             "voice_settings": {
-                "stability": 0.7,
+                "stability": 0.5,
                 "similarity_boost": 0.9,
-                "style": 0.7,
+                "style": 1,
                 "use_speaker_boost": True
             }
         }
@@ -223,16 +216,16 @@ class TTS:
 
     async def save_as_mp3_EL(self, text, lang="pt", region=""):
         boost_volume = 0
-        self.filename = f"{text[:10]}-{time.strftime('%d-%m-%y-%H-%M-%S')}.mp3"
+        self.filename = f"{time.strftime('%d-%m-%y-%H-%M-%S')}-{text[:10]}.mp3"
         if lang == "pt":
             self.voice_id = self.voice_id_pt
-            boost_volume = 15
+            boost_volume = 0
         elif lang == "costa":
             self.voice_id = self.voice_id_costa
-            boost_volume = 15
+            boost_volume = 0
         elif lang == "en":
             self.voice_id = self.voice_id_en
-            boost_volume = 15
+            boost_volume = 0
 
         if self.is_on_cooldown():
             print("Cooldown active. Please wait before making another request.")
@@ -250,15 +243,16 @@ class TTS:
         }
         data = {
             "text": text,
-            "model_id": "eleven_multilingual_v2",
+            "model_id": "eleven_v3",
             "output_format": "mp3_44100_128",
             "voice_settings": {
-                "speed": 0.8,
-                "stability": 0.35,
+                "speed": 0.65,
+                "stability": 0,
                 "similarity_boost": 1.0,
-                "style": 0.5,
+                "style":1,
                 "use_speaker_boost": True
-            }
+            },
+            "use_enhanced": True
         }
 
         async with aiohttp.ClientSession() as session:
