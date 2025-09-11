@@ -522,9 +522,53 @@ class UploadSoundButton(Button):
         self.bot_behavior = bot_behavior
 
     async def callback(self, interaction):
-        # Create and send the modal for uploading sound
+        # Show a small chooser so users can pick URL vs MP3 file
+        try:
+            view = UploadChoiceView(self.bot_behavior)
+            await interaction.response.send_message(
+                content="Choose how you want to upload:",
+                view=view,
+                ephemeral=True,
+                delete_after=60
+            )
+        except Exception:
+            # Fallback to URL modal if ephemeral message fails
+            modal = UploadSoundModal(self.bot_behavior)
+            await interaction.response.send_modal(modal)
+
+class UploadURLChoiceButton(Button):
+    def __init__(self, bot_behavior):
+        super().__init__(label="Upload via URL", style=discord.ButtonStyle.primary)
+        self.bot_behavior = bot_behavior
+
+    async def callback(self, interaction: discord.Interaction):
         modal = UploadSoundModal(self.bot_behavior)
         await interaction.response.send_modal(modal)
+
+class UploadMP3ChoiceButton(Button):
+    def __init__(self, bot_behavior):
+        super().__init__(label="Upload MP3 File", style=discord.ButtonStyle.success)
+        self.bot_behavior = bot_behavior
+
+    async def callback(self, interaction: discord.Interaction):
+        # Defer the component interaction and start the secure attachment flow
+        await interaction.response.defer(ephemeral=True)
+        await self.bot_behavior.prompt_upload_mp3(interaction)
+
+class UploadChoiceView(View):
+    def __init__(self, bot_behavior):
+        super().__init__(timeout=60)
+        self.add_item(UploadURLChoiceButton(bot_behavior))
+        self.add_item(UploadMP3ChoiceButton(bot_behavior))
+
+class UploadMP3FileButton(Button):
+    def __init__(self, bot_behavior, **kwargs):
+        super().__init__(**kwargs)
+        self.bot_behavior = bot_behavior
+
+    async def callback(self, interaction):
+        # Dedicated flow for MP3 attachments only with safety checks
+        await self.bot_behavior.prompt_upload_mp3(interaction)
 
 
 class PlayRandomButton(Button):
@@ -1042,7 +1086,7 @@ class ControlsView(View):
 
         self.add_item(BrainRotButton(bot_behavior, label="🧠Brain Rot🧠", style=discord.ButtonStyle.success))
         self.add_item(StatsButton(bot_behavior, label="📊Stats📊", style=discord.ButtonStyle.success))
-        self.add_item(UploadSoundButton(bot_behavior, label="⬆️Upload Sound⬆️", style=discord.ButtonStyle.success))
+        self.add_item(UploadSoundButton(bot_behavior, label="⬆️Upload⬆️", style=discord.ButtonStyle.success))
         self.add_item(ListLastScrapedSoundsButton(bot_behavior, label="🔽Last Downloaded Sounds🔽", style=discord.ButtonStyle.success))
 
 class DownloadedSoundView(View):

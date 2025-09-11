@@ -10,6 +10,7 @@ import math # Added for ceiling function
 from requests import HTTPError
 from Classes.SoundDownloader import SoundDownloader
 import os
+import uuid
 from Classes.AudioDatabase import AudioDatabase
 from Classes.PlayHistoryDatabase import PlayHistoryDatabase
 from Classes.OtherActionsDatabase import OtherActionsDatabase
@@ -201,7 +202,8 @@ class BotBehavior:
                             custom_filename = parts[2]
                 
                 if len(response.attachments) > 0:
-                    file_path = await self.save_uploaded_sound(response.attachments[0], custom_filename)
+                    # Use secure save for attachments
+                    file_path = await self.save_uploaded_sound_secure(response.attachments[0], custom_filename)
                 elif re.match(r'^https?://.*tiktok\.com/.*$', response.content) or \
                      re.match(r'^https?://(www\.)?(youtube\.com|youtu\.be)/.*$', response.content) or \
                      re.match(r'^https?://(www\.)?instagram\.com/(p|reels|reel|stories)/.*$', response.content):
@@ -240,6 +242,133 @@ class BotBehavior:
         file_path = os.path.join(self.dwdir, filename)
         await attachment.save(file_path)
         return file_path
+
+    async def prompt_upload_mp3(self, interaction):
+        """Prompt user to upload a single MP3 attachment with strong validation."""
+        if self.upload_lock.locked():
+            message = await interaction.channel.send(embed=discord.Embed(title="Another upload is in progress. Wait caralho 😤", color=self.color))
+            await asyncio.sleep(10)
+            await message.delete()
+            return
+
+        async with self.upload_lock:
+            message = await interaction.channel.send(embed=discord.Embed(title="Attach an MP3 file (optional message = custom name). You can also DM me.", color=self.color))
+
+            def check(m):
+                return (
+                    m.author == interaction.user
+                    and m.channel == interaction.channel
+                    and len(m.attachments) > 0
+                    and m.attachments[0].filename.lower().endswith('.mp3')
+                )
+
+            try:
+                response = await self.bot.wait_for('message', check=check, timeout=60.0)
+                await message.delete()
+
+                custom_filename = response.content.strip()[:50] if response.content else None
+                file_path = await self.save_uploaded_sound_secure(response.attachments[0], custom_filename)
+
+                Database().insert_action(interaction.user.name, "upload_sound", file_path)
+                await response.delete()
+                confirmation_message = await interaction.channel.send(embed=discord.Embed(title="Sound uploaded successfully! (may take up to 10s to be available)", color=self.color))
+                await asyncio.sleep(10)
+                await confirmation_message.delete()
+            except asyncio.TimeoutError:
+                await message.delete()
+                timeout_message = await interaction.channel.send(embed=discord.Embed(title="Upload timed out 🤬", color=self.color))
+                await asyncio.sleep(10)
+                await timeout_message.delete()
+            except Exception as e:
+                error_message = await interaction.channel.send(embed=discord.Embed(title="An error occurred.", description=str(e), color=self.color))
+                await asyncio.sleep(10)
+                await error_message.delete()
+
+    async def save_uploaded_sound_secure(self, attachment, custom_filename=None, max_mb: int = 20):
+        """Save an uploaded attachment safely after validation.
+
+        - Enforces `.mp3` extension
+        - Sanitizes filename
+        - Enforces size limit
+        - Validates MP3 header / structure
+        """
+        os.makedirs(self.dwdir, exist_ok=True)
+
+        # Enforce size limit using Discord-provided metadata first
+        size_bytes = getattr(attachment, 'size', None)
+        if size_bytes is not None and size_bytes > max_mb * 1024 * 1024:
+            raise ValueError(f"File too large. Max allowed is {max_mb} MB.")
+
+        # Determine safe filename base
+        if custom_filename:
+            base = custom_filename
+        else:
+            # strip extension from original
+            base = os.path.splitext(attachment.filename)[0]
+
+        # Sanitize filename
+        base = re.sub(r'[^A-Za-z0-9_\-\. ]+', '', base).strip()
+        base = re.sub(r'\s+', '_', base)
+        if not base:
+            base = 'sound'
+        base = base[:50]
+
+        # Always enforce .mp3 extension
+        filename = f"{base}.mp3"
+
+        # Avoid collisions
+        final_path = os.path.join(self.dwdir, filename)
+        counter = 1
+        while os.path.exists(final_path):
+            final_path = os.path.join(self.dwdir, f"{base}_{counter}.mp3")
+            counter += 1
+
+        # Save to a temporary file first
+        tmp_path = os.path.join(self.dwdir, f"upload_{uuid.uuid4().hex}.part")
+        await attachment.save(tmp_path)
+
+        try:
+            # Re-check size on disk
+            actual_size = os.path.getsize(tmp_path)
+            if actual_size > max_mb * 1024 * 1024:
+                raise ValueError(f"File too large. Max allowed is {max_mb} MB.")
+
+            # Basic MP3 validation: ID3 header or common frame sync bytes
+            with open(tmp_path, 'rb') as f:
+                head = f.read(4096)
+            if not self._looks_like_mp3(head):
+                raise ValueError("Uploaded file does not look like a valid MP3.")
+
+            # Try parsing with mutagen for extra validation
+            try:
+                _ = MP3(tmp_path)
+            except Exception:
+                raise ValueError("Unable to parse MP3 metadata; file may be corrupt.")
+
+            # Move into place
+            os.replace(tmp_path, final_path)
+        finally:
+            # Clean up temp file on error
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
+
+        return final_path
+
+    def _looks_like_mp3(self, head: bytes) -> bool:
+        if not head or len(head) < 2:
+            return False
+        # ID3v2 tag
+        if head[:3] == b'ID3':
+            return True
+        # Look for common MP3 frame sync patterns within the first 4KB
+        for i in range(0, min(len(head) - 1, 4095)):
+            b0, b1 = head[i], head[i + 1]
+            if b0 == 0xFF and b1 in (0xFB, 0xF3, 0xF2) or (b0 == 0xFF and (b1 & 0xE0) == 0xE0):
+                return True
+        return False
     
     async def save_sound_from_tiktok(self, url, custom_filename=None, time_limit=None):
         os.makedirs(self.dwdir, exist_ok=True)
@@ -250,22 +379,71 @@ class BotBehavior:
 
         return file_path
 
-    async def save_sound_from_url(self, url, custom_filename=None):
+    async def save_sound_from_url(self, url, custom_filename=None, max_mb: int = 20):
         os.makedirs(self.dwdir, exist_ok=True)
-        if custom_filename:
-            filename = f"{custom_filename}.mp3"
-        else:
-            filename = url.split("/")[-1]
-        file_path = os.path.join(self.dwdir, filename)
 
+        # Sanitize target filename
+        if custom_filename:
+            base = custom_filename
+        else:
+            base = os.path.basename(url.split('?')[0])
+            base = os.path.splitext(base)[0]
+        base = re.sub(r'[^A-Za-z0-9_\-\. ]+', '', base).strip()
+        base = re.sub(r'\s+', '_', base)
+        if not base:
+            base = 'sound'
+        base = base[:50]
+
+        final_path = os.path.join(self.dwdir, f"{base}.mp3")
+        counter = 1
+        while os.path.exists(final_path):
+            final_path = os.path.join(self.dwdir, f"{base}_{counter}.mp3")
+            counter += 1
+
+        tmp_path = os.path.join(self.dwdir, f"download_{uuid.uuid4().hex}.part")
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as response:
-                if response.status == 200:
-                    with open(file_path, 'wb') as f:
-                        f.write(await response.read())
-                else:
+                if response.status != 200:
                     raise Exception("Failed to download the MP3 file.")
-        return file_path
+
+                # Pre-check content length if provided
+                try:
+                    cl = response.headers.get('Content-Length')
+                    if cl and int(cl) > max_mb * 1024 * 1024:
+                        raise Exception(f"File too large. Max allowed is {max_mb} MB.")
+                except Exception:
+                    pass
+
+                with open(tmp_path, 'wb') as f:
+                    async for chunk in response.content.iter_chunked(64 * 1024):
+                        f.write(chunk)
+
+        try:
+            # Enforce size on disk
+            actual_size = os.path.getsize(tmp_path)
+            if actual_size > max_mb * 1024 * 1024:
+                raise Exception(f"File too large. Max allowed is {max_mb} MB.")
+
+            # Validate content looks like MP3
+            with open(tmp_path, 'rb') as f:
+                head = f.read(4096)
+            if not self._looks_like_mp3(head):
+                raise Exception("Downloaded file does not look like a valid MP3.")
+
+            try:
+                _ = MP3(tmp_path)
+            except Exception:
+                raise Exception("Unable to parse MP3 metadata; file may be corrupt.")
+
+            os.replace(tmp_path, final_path)
+        finally:
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
+
+        return final_path
 
     async def save_sound_from_video(self, url, custom_filename=None, time_limit=None):
         os.makedirs(self.dwdir, exist_ok=True)
@@ -301,11 +479,24 @@ class BotBehavior:
             bot_channel = await self.get_bot_channel()
             if delete_all:
                 async for message in bot_channel.history(limit=100):
-                    if message.components and len(message.components[0].children) == 5 and len(message.components[1].children) == 5 and not message.embeds and "Play Random" in message.components[0].children[0].label:
-                        await message.delete()
+                    if message.components and not message.embeds:
+                        try:
+                            first_label = message.components[0].children[0].label or ""
+                        except Exception:
+                            first_label = ""
+                        if "Play Random" in first_label:
+                            await message.delete()
             else:
                 messages = await bot_channel.history(limit=100).flatten()
-                control_messages = [message for message in messages if message.components and len(message.components[0].children) == 5 and len(message.components[1].children) == 5 and not message.embeds and "Play Random" in message.components[0].children[0].label]
+                control_messages = []
+                for m in messages:
+                    if m.components and not m.embeds:
+                        try:
+                            first_label = m.components[0].children[0].label or ""
+                        except Exception:
+                            first_label = ""
+                        if "Play Random" in first_label:
+                            control_messages.append(m)
                 for message in control_messages[1:]:  # Skip the last message
                     await message.delete()
         except Exception as e:
@@ -1601,7 +1792,4 @@ class BotBehavior:
                 print(f"Error disconnecting from {vc.guild.name}: {e}")
         
         print("All voice connections cleaned up.")
-
-
-
 

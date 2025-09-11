@@ -7,6 +7,9 @@ from dotenv import load_dotenv
 from pydub import AudioSegment
 import io
 import json
+import subprocess
+import tempfile
+import re
 import aiohttp
 from Classes.Database import Database
 
@@ -25,6 +28,118 @@ class TTS:
         self.last_request_time = 0
         self.cooldown_seconds = cooldown_seconds
         self.locked = False
+        # Loudness normalization targets (configurable via env if desired)
+        try:
+            self.lufs_target = float(os.getenv('TTS_LUFS_TARGET', '-16'))  # Integrated LUFS target
+        except Exception:
+            self.lufs_target = -16.0
+        try:
+            self.loudnorm_tp = float(os.getenv('TTS_TP_LIMIT', '-1.5'))   # True peak limit dBTP
+        except Exception:
+            self.loudnorm_tp = -1.5
+        try:
+            self.loudnorm_lra = float(os.getenv('TTS_LRA_TARGET', '11'))  # Loudness range target
+        except Exception:
+            self.loudnorm_lra = 11.0
+
+    def _normalize_audio(self, audio: AudioSegment, target_dbfs: float = -20.0) -> AudioSegment:
+        """Normalize an AudioSegment to a target dBFS for consistent loudness."""
+        try:
+            if audio.dBFS == float('-inf'):
+                return audio
+            change_in_dBFS = target_dbfs - audio.dBFS
+            return audio.apply_gain(change_in_dBFS)
+        except Exception as e:
+            print(f"TTS normalization warning (segment): {e}")
+            return audio
+
+    def _normalize_file_inplace(self, file_path: str, target_dbfs: float = -20.0) -> None:
+        """Normalize an audio file in-place to the target dBFS."""
+        try:
+            audio = AudioSegment.from_file(file_path)
+            normalized = self._normalize_audio(audio, target_dbfs)
+            normalized.export(file_path, format="mp3")
+        except Exception as e:
+            print(f"TTS normalization warning for {file_path}: {e}")
+
+    def _extract_loudnorm_stats(self, text: str):
+        """Extract JSON stats from ffmpeg loudnorm pass-1 output."""
+        try:
+            start = text.find('{')
+            end = text.rfind('}')
+            if start != -1 and end != -1 and end > start:
+                payload = text[start:end+1]
+                data = json.loads(payload)
+                return {
+                    'input_i': data.get('input_i'),
+                    'input_tp': data.get('input_tp'),
+                    'input_lra': data.get('input_lra'),
+                    'input_thresh': data.get('input_thresh'),
+                    'target_offset': data.get('target_offset')
+                }
+        except Exception as e:
+            print(f"TTS loudnorm stats parse failed: {e}")
+        return None
+
+    def _loudnorm_inplace(self, file_path: str):
+        """Run ffmpeg EBU R128 loudness normalization in-place (two-pass if possible)."""
+        try:
+            ffmpeg = getattr(self.behavior, 'ffmpeg_path', None) or 'ffmpeg'
+            base_dir = os.path.dirname(file_path)
+            tmp_out = os.path.join(base_dir, f".{os.path.basename(file_path)}.loudnorm.tmp.mp3")
+
+            # Pass 1: analyze
+            cmd1 = [
+                ffmpeg, '-hide_banner', '-nostats', '-y',
+                '-i', file_path,
+                '-af', f"loudnorm=I={self.lufs_target}:TP={self.loudnorm_tp}:LRA={self.loudnorm_lra}:print_format=json",
+                '-f', 'null', '-'
+            ]
+            p1 = subprocess.run(cmd1, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            stats = self._extract_loudnorm_stats(p1.stderr.decode('utf-8', errors='ignore'))
+
+            if stats and all(stats.get(k) is not None for k in ['input_i','input_tp','input_lra','input_thresh','target_offset']):
+                # Pass 2: apply with measured values
+                filter2 = (
+                    f"loudnorm=I={self.lufs_target}:TP={self.loudnorm_tp}:LRA={self.loudnorm_lra}:"
+                    f"measured_I={stats['input_i']}:measured_TP={stats['input_tp']}:"
+                    f"measured_LRA={stats['input_lra']}:measured_thresh={stats['input_thresh']}:"
+                    f"offset={stats['target_offset']}:linear=true:print_format=summary"
+                )
+                cmd2 = [
+                    ffmpeg, '-hide_banner', '-nostats', '-y',
+                    '-i', file_path,
+                    '-af', filter2,
+                    '-ar', '44100', '-b:a', '128k',
+                    tmp_out
+                ]
+            else:
+                # Fallback: single-pass loudnorm
+                cmd2 = [
+                    ffmpeg, '-hide_banner', '-nostats', '-y',
+                    '-i', file_path,
+                    '-af', f"loudnorm=I={self.lufs_target}:TP={self.loudnorm_tp}:LRA={self.loudnorm_lra}",
+                    '-ar', '44100', '-b:a', '128k',
+                    tmp_out
+                ]
+
+            p2 = subprocess.run(cmd2, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if p2.returncode == 0 and os.path.exists(tmp_out):
+                os.replace(tmp_out, file_path)
+            else:
+                # Leave original file untouched on failure
+                if os.path.exists(tmp_out):
+                    try:
+                        os.remove(tmp_out)
+                    except Exception:
+                        pass
+                print(f"TTS loudnorm warning: normalization failed for {file_path}; falling back to RMS dBFS normalization")
+                try:
+                    self._normalize_file_inplace(file_path, -20.0)
+                except Exception:
+                    pass
+        except Exception as e:
+            print(f"TTS loudnorm error: {e}")
 
     def is_on_cooldown(self):
         current_time = time.time()
@@ -40,6 +155,8 @@ class TTS:
             tts = gTTS(text=text, lang=lang, tld=region)
         path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", self.filename))
         tts.save(path)
+        # Apply integrated loudness normalization for consistent perceived volume
+        self._loudnorm_inplace(path)
         for guild in self.bot.guilds:
             channel = self.behavior.get_largest_voice_channel(guild)
         await self.behavior.play_audio(channel, self.filename, "admin", is_tts=True)
@@ -123,11 +240,13 @@ class TTS:
                 if response.status == 200:
                     audio_data = await response.read()
                     audio = AudioSegment.from_mp3(io.BytesIO(audio_data))
-                    louder_audio = audio + boost_volume
+                    final_audio = audio
 
                     path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", self.filename))
                     Database().insert_sound(os.path.basename(self.filename), os.path.basename(self.filename))
-                    louder_audio.export(path, format="mp3")
+                    final_audio.export(path, format="mp3")
+                    # Integrated loudness normalization (EBU R128)
+                    self._loudnorm_inplace(path)
 
                     for guild in self.bot.guilds:
                         channel = self.behavior.get_largest_voice_channel(guild)
@@ -198,11 +317,14 @@ class TTS:
                     audio_data = await response.read()
                     audio = AudioSegment.from_mp3(io.BytesIO(audio_data))
                     louder_audio = audio + boost_volume
+                    final_audio = louder_audio
 
                     path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", self.filename))
                     self.db.add_entry(os.path.basename(self.filename))
 
-                    louder_audio.export(path, format="mp3")
+                    final_audio.export(path, format="mp3")
+                    # Integrated loudness normalization (EBU R128)
+                    self._loudnorm_inplace(path)
 
                     for guild in self.bot.guilds:
                         channel = self.behavior.get_largest_voice_channel(guild)
@@ -261,12 +383,15 @@ class TTS:
                     audio_data = await response.read()
                     audio = AudioSegment.from_mp3(io.BytesIO(audio_data))
                     louder_audio = audio + boost_volume
+                    final_audio = louder_audio
 
                     path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", self.filename))
                     Database().insert_sound(os.path.basename(self.filename), os.path.basename(self.filename))
                     #self.db.add_entry(os.path.basename(self.filename))
 
-                    louder_audio.export(path, format="mp3")
+                    final_audio.export(path, format="mp3")
+                    # Integrated loudness normalization (EBU R128)
+                    self._loudnorm_inplace(path)
 
                     for guild in self.bot.guilds:
                         channel = self.behavior.get_largest_voice_channel(guild)
