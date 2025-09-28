@@ -380,7 +380,14 @@ class VoiceRecognitionSink(Sink):
             
         # Add data to main buffer
         self.audio_data[user].append(data)
-        print(f"[VoiceRecognitionSink] Buffered chunk ({len(data)} bytes) for {user}; total chunks: {len(self.audio_data[user])}")
+        total_chunks = len(self.audio_data[user])
+        total_bytes = sum(len(chunk) for chunk in self.audio_data[user])
+        if total_chunks == 1:
+            print(f"[VoiceRecognitionSink] First audio chunk captured for {user} ({len(data)} bytes)")
+        print(
+            f"[VoiceRecognitionSink] Buffered chunk ({len(data)} bytes) for {user}; "
+            f"total chunks: {total_chunks}, approx bytes buffered: {total_bytes}"
+        )
         
         # Schedule a timeout to process whatever audio we have if user stops talking
         # Use a longer timeout to avoid cutting off speech too early 
@@ -464,13 +471,28 @@ class VoiceRecognitionSink(Sink):
         try:
             # Join all audio chunks into a single byte array
             audio_data = b''.join(audio_chunks)
-            print(f"[VoiceRecognitionSink] Built audio payload of {len(audio_data)} bytes for {user}")
+            payload_size = len(audio_data)
+            print(f"[VoiceRecognitionSink] Built audio payload of {payload_size} bytes for {user}")
 
             # Before processing, ensure there's enough data to work with
-            if len(audio_data) < 1000:  # Skip very short audio samples
-                print(f"[VoiceRecognitionSink] Skipping processing for {user} - payload too small ({len(audio_data)} bytes)")
+            if payload_size < 1000:  # Skip very short audio samples
+                print(f"[VoiceRecognitionSink] Skipping processing for {user} - payload too small ({payload_size} bytes)")
                 return
-            
+
+            try:
+                audio_array = np.frombuffer(audio_data, dtype=np.int16)
+                if audio_array.size > 0:
+                    peak = int(np.max(np.abs(audio_array)))
+                    rms = float(np.sqrt(np.mean(audio_array.astype(np.float32) ** 2)))
+                    print(
+                        f"[VoiceRecognitionSink] Audio stats for {user}: "
+                        f"frames={audio_array.size}, peak={peak}, rms={rms:.2f}"
+                    )
+                else:
+                    print(f"[VoiceRecognitionSink] Audio stats for {user}: empty sample array")
+            except Exception as stats_error:
+                print(f"[VoiceRecognitionSink] Failed to compute audio stats for {user}: {stats_error}")
+
             # Get a better member name placeholder from the cache if available
             if hasattr(self, 'member_cache') and user in self.member_cache:
                 member_name = self.member_cache[user]
