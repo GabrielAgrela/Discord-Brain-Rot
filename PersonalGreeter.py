@@ -153,6 +153,7 @@ async def handle_keyword_detection(guild, voice_channel, member, text, keywords)
 
 # Initialize voice listener
 voice_listener = DiscordVoiceListener(bot, speech_recognizer, handle_keyword_detection)
+behavior.register_voice_listener(voice_listener)
 
 # Initialize Minecraft log monitor
 minecraft_monitor = MinecraftLogMonitor(bot, "minecraft")
@@ -324,6 +325,13 @@ async def on_ready():
                         print(f"Voice encryption mode: {getattr(vc, 'mode', 'unknown')}")
                 except Exception as e:
                     print(f"Could not read voice mode: {e}")
+                if voice_recognition_enabled:
+                    try:
+                        await voice_listener.start_listening(channel_to_join)
+                    except Exception as listener_error:
+                        print(f"Failed to start voice recognition in {channel_to_join.name}: {listener_error}")
+                else:
+                    print("Voice recognition disabled; not starting listener on connect.")
                 if not bot.startup_sound_played:
                     try:
                         random_sound = Database().get_random_sounds()[0][2]
@@ -333,6 +341,11 @@ async def on_ready():
                     bot.startup_sound_played = True
             except discord.ClientException as e:
                 print(f"Error connecting to {channel_to_join.name} in {guild.name}: {e}. Already connected elsewhere or connection issue.")
+                if voice_recognition_enabled and guild.voice_client and guild.voice_client.is_connected():
+                    try:
+                        await voice_listener.start_listening(guild.voice_client.channel)
+                    except Exception as listener_error:
+                        print(f"Failed to start voice recognition after connection error in {guild.name}: {listener_error}")
             except asyncio.TimeoutError:
                 print(f"Timeout trying to connect to {channel_to_join.name} in {guild.name}.")
             except Exception as e:

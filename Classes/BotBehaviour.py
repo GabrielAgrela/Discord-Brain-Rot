@@ -30,10 +30,14 @@ from moviepy.editor import VideoFileClip
 
 import aiohttp
 import re
+from typing import Optional, TYPE_CHECKING
 from Classes.LoLDatabase import LoLDatabase
 from Classes.LoL import RiotAPI
 
 from Classes.Database import Database
+
+if TYPE_CHECKING:
+    from Classes.SpeechRecognition import DiscordVoiceListener
 
 
 
@@ -78,6 +82,7 @@ class BotBehavior:
         self.mod_role = None
         self.now_playing_messages = []
         self.last_sound_played = {}
+        self.voice_listener: Optional["DiscordVoiceListener"] = None
 
         print("Connecting to the League of Legends database...")
         try:
@@ -546,6 +551,10 @@ class BotBehavior:
                     if user in member.name:
                         return channel
         return None
+
+    def register_voice_listener(self, voice_listener: "DiscordVoiceListener"):
+        """Attach the shared DiscordVoiceListener so new connections can start recording automatically."""
+        self.voice_listener = voice_listener
     
     async def send_error_message(self, message):
         self.error_message = await self.send_message(view=None, title="🤬 Error 🤬", description=message)
@@ -560,9 +569,20 @@ class BotBehavior:
             for member in channel.members:
                 if member.name == self.bot.user.name:
                     voice_client = member.voice.channel.guild.voice_client
+                    if voice_client and self.voice_listener and self.voice_listener.enabled:
+                        try:
+                            await self.voice_listener.start_listening(channel)
+                        except Exception as e:
+                            print(f"Error starting voice listener for existing connection in {channel}: {e}")
                     return voice_client
 
             voice_client = await channel.connect(timeout=10.0)
+
+            if self.voice_listener and self.voice_listener.enabled:
+                try:
+                    await self.voice_listener.start_listening(channel)
+                except Exception as e:
+                    print(f"Error starting voice listener after connecting to {channel}: {e}")
 
             return voice_client
 
@@ -570,6 +590,11 @@ class BotBehavior:
             print(f"Error connecting to voice channel: {e}")
             # get current voice client
             voice_client = self.bot.voice_clients[0]
+            if voice_client and self.voice_listener and self.voice_listener.enabled:
+                try:
+                    await self.voice_listener.start_listening(voice_client.channel)
+                except Exception as listener_error:
+                    print(f"Error starting voice listener on fallback connection {voice_client.channel}: {listener_error}")
             return voice_client
        
 
@@ -633,12 +658,23 @@ class BotBehavior:
 
             # If we're recording the channel for STT, pause it during playback
             was_recording = False
-            try:
-                was_recording = bool(getattr(voice_client, "recording", False))
-                if was_recording:
-                    voice_client.stop_recording()
-            except Exception as e:
-                print(f"Warning: could not pause recording before playback: {e}")
+            if self.voice_listener:
+                try:
+                    was_recording = await self.voice_listener.pause_recording(
+                        voice_client,
+                        "before playback",
+                    )
+                except Exception as pause_error:
+                    print(
+                        f"Warning: voice listener pause before playback failed: {pause_error}"
+                    )
+            else:
+                try:
+                    if bool(getattr(voice_client, "recording", False)):
+                        voice_client.stop_recording()
+                        was_recording = True
+                except Exception as e:
+                    print(f"Warning: could not pause recording before playback: {e}")
 
             # Get the absolute path of the audio file
             audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", audio_file))
@@ -869,12 +905,40 @@ class BotBehavior:
                         )
 
                     # Resume recording if it was active before playback
-                    if was_recording and hasattr(voice_client, "listening_sink") and hasattr(voice_client, "listening_cb"):
-                        try:
-                            voice_client.start_recording(voice_client.listening_sink, voice_client.listening_cb)
-                        except Exception as re:
-                            print(f"Warning: failed to resume voice recording after playback: {re}")
-                    
+                    if was_recording:
+                        if self.voice_listener and hasattr(voice_client, "listening_sink") and hasattr(voice_client, "listening_cb"):
+                            def _log_resume_result(fut):
+                                try:
+                                    fut.result()
+                                except Exception as resume_error:
+                                    print(
+                                        "Warning: failed to resume voice recording after playback: "
+                                        f"{resume_error}"
+                                    )
+
+                            future = asyncio.run_coroutine_threadsafe(
+                                self.voice_listener.ensure_recording_active(
+                                    voice_client,
+                                    "after playback",
+                                ),
+                                self.bot.loop,
+                            )
+                            future.add_done_callback(_log_resume_result)
+                        else:
+                            sink = getattr(voice_client, "listening_sink", None)
+                            callback = getattr(voice_client, "listening_cb", None)
+                            if sink and callback:
+                                try:
+                                    voice_client.start_recording(sink, callback)
+                                except Exception as re:
+                                    print(
+                                        f"Warning: failed to resume voice recording after playback: {re}"
+                                    )
+                            else:
+                                print(
+                                    "Warning: no sink/callback available to resume voice recording after playback"
+                                )
+
                     # Set playback_done flag to signal completion
                     self.bot.loop.call_soon_threadsafe(self.playback_done.set)
 
