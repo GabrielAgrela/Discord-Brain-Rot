@@ -568,6 +568,7 @@ class DiscordVoiceListener:
         self.member_cache = {}  # Cache to store member names
         self.active_sinks = {}
         self.active_listeners = {}
+        self.listener_states = {}  # Track listen state when voice client lacks helpers
     
     def set_enabled(self, enabled):
         """Enable or disable voice recognition."""
@@ -720,9 +721,9 @@ class DiscordVoiceListener:
                     print(f"Moving to voice channel: {voice_channel.name}")
                     await vc.move_to(voice_channel)
                     # Ensure listener stopped on old channel if move doesn't trigger events cleanly
-                    if guild_id in self.active_listeners and self.active_listeners[guild_id].is_listening():
+                    if guild_id in self.active_listeners and self._is_voice_client_listening(guild_id, self.active_listeners[guild_id]):
                          print(f"Stopping listener on old channel {vc.channel.name} after move...")
-                         self._stop_voice_client(self.active_listeners[guild_id], vc.channel.name)
+                         self._stop_voice_client(self.active_listeners[guild_id], vc.channel.name, guild_id=guild_id)
                          # We might need to clean up the old sink associated with the listener
                          if guild_id in self.active_sinks:
                             self.active_sinks[guild_id].cleanup()
@@ -731,7 +732,7 @@ class DiscordVoiceListener:
                 else:
                     print(f"Already connected to {voice_channel.name}.")
                     # If somehow connected but not listening, start it
-                    if not vc.is_listening():
+                    if not self._is_voice_client_listening(guild_id, vc):
                         print(f"Starting listener because not currently listening in {voice_channel.name}.")
                         # Pass
                     else:
@@ -743,10 +744,11 @@ class DiscordVoiceListener:
                 # Ensure cleanup if there was a previous zombie connection
                 if guild_id in self.active_listeners:
                      try:
-                        self._stop_voice_client(self.active_listeners[guild_id], voice_channel.name)
+                        self._stop_voice_client(self.active_listeners[guild_id], voice_channel.name, guild_id=guild_id)
                      except Exception:
                         pass # Ignore errors stopping non-existent listener
                      del self.active_listeners[guild_id]
+                     self.listener_states.pop(guild_id, None)
                 if guild_id in self.active_sinks:
                     self.active_sinks[guild_id].cleanup()
                     del self.active_sinks[guild_id]
@@ -787,6 +789,7 @@ class DiscordVoiceListener:
             await asyncio.sleep(0.5)
             vc.listen(sink, after=lambda e: self.handle_listen_error(e, voice_channel.guild.id))
             self.active_listeners[guild_id] = vc # Store the voice client itself as the listener reference
+            self.listener_states[guild_id] = True
             print(f"Listening started in {voice_channel.name}")
 
         except discord.ClientException as e:
@@ -798,11 +801,12 @@ class DiscordVoiceListener:
             if guild_id in self.active_listeners:
                  # Attempt to stop listener if it exists
                 try:
-                    if self.active_listeners[guild_id].is_listening():
-                        self._stop_voice_client(self.active_listeners[guild_id], voice_channel.name)
+                    if self._is_voice_client_listening(guild_id, self.active_listeners[guild_id]):
+                        self._stop_voice_client(self.active_listeners[guild_id], voice_channel.name, guild_id=guild_id)
                 except Exception as stop_err:
                      print(f"Error stopping listener during connection failure handling: {stop_err}")
                 del self.active_listeners[guild_id]
+                self.listener_states.pop(guild_id, None)
         except asyncio.TimeoutError:
             print(f"Timeout trying to connect/move to {voice_channel.name}.")
             # Cleanup on timeout
@@ -811,11 +815,12 @@ class DiscordVoiceListener:
                 del self.active_sinks[guild_id]
             if guild_id in self.active_listeners:
                 try:
-                    if self.active_listeners[guild_id].is_listening():
-                        self._stop_voice_client(self.active_listeners[guild_id], voice_channel.name)
+                    if self._is_voice_client_listening(guild_id, self.active_listeners[guild_id]):
+                        self._stop_voice_client(self.active_listeners[guild_id], voice_channel.name, guild_id=guild_id)
                 except Exception as stop_err:
                      print(f"Error stopping listener during timeout handling: {stop_err}")
                 del self.active_listeners[guild_id]
+                self.listener_states.pop(guild_id, None)
         except Exception as e:
             print(f"An unexpected error occurred in start_listening for {voice_channel.name}: {e}")
             # General cleanup
@@ -824,23 +829,52 @@ class DiscordVoiceListener:
                 del self.active_sinks[guild_id]
             if guild_id in self.active_listeners:
                 try:
-                    if self.active_listeners[guild_id].is_listening():
-                        self._stop_voice_client(self.active_listeners[guild_id], voice_channel.name)
+                    if self._is_voice_client_listening(guild_id, self.active_listeners[guild_id]):
+                        self._stop_voice_client(self.active_listeners[guild_id], voice_channel.name, guild_id=guild_id)
                 except Exception as stop_err:
                     print(f"Error stopping listener during general error handling: {stop_err}")
                 del self.active_listeners[guild_id]
+                self.listener_states.pop(guild_id, None)
 
-    def _stop_voice_client(self, voice_client, context=""):
+    def _is_voice_client_listening(self, guild_id, voice_client=None):
+        """Best-effort detection of whether a voice client is actively recording."""
+        if guild_id is None:
+            return False
+
+        voice_client = voice_client or self.active_listeners.get(guild_id)
+        if not voice_client:
+            return self.listener_states.get(guild_id, False)
+
+        is_listening = getattr(voice_client, "is_listening", None)
+        if callable(is_listening):
+            try:
+                return bool(is_listening())
+            except Exception:
+                pass
+
+        recording = getattr(voice_client, "recording", None)
+        if isinstance(recording, bool):
+            return recording
+        if recording is not None:
+            try:
+                return bool(recording)
+            except Exception:
+                pass
+
+        return self.listener_states.get(guild_id, False)
+
+    def _stop_voice_client(self, voice_client, context="", guild_id=None):
         """Safely stop listening on a voice client if possible."""
         if not voice_client:
             return
 
+        if guild_id is None:
+            guild = getattr(voice_client, "guild", None)
+            if guild:
+                guild_id = guild.id
+
         stop_listening = getattr(voice_client, "stop_listening", None)
-        is_listening = getattr(voice_client, "is_listening", None)
-        try:
-            listening = is_listening() if callable(is_listening) else False
-        except Exception:
-            listening = False
+        listening = self._is_voice_client_listening(guild_id, voice_client) if guild_id is not None else False
 
         if callable(stop_listening) and listening:
             try:
@@ -848,6 +882,9 @@ class DiscordVoiceListener:
             except Exception as error:
                 context_info = f" ({context})" if context else ""
                 print(f"Error stopping voice client listener{context_info}: {error}")
+
+        if guild_id is not None:
+            self.listener_states[guild_id] = False
 
     def handle_listen_error(self, error, guild_id):
         """Handle errors raised by the voice client's listen callback."""
@@ -863,8 +900,9 @@ class DiscordVoiceListener:
 
         listener = self.active_listeners.get(guild_id)
         if listener:
-            self._stop_voice_client(listener, f"guild {guild_id}")
+            self._stop_voice_client(listener, f"guild {guild_id}", guild_id=guild_id)
             self.active_listeners.pop(guild_id, None)
+            self.listener_states.pop(guild_id, None)
 
     async def stop_listening(self, voice_channel):
         """Stop listening to a specific voice channel."""
@@ -872,7 +910,7 @@ class DiscordVoiceListener:
         voice_client = discord.utils.get(self.bot.voice_clients, guild=voice_channel.guild)
 
         if voice_client:
-            self._stop_voice_client(voice_client, voice_channel.name)
+            self._stop_voice_client(voice_client, voice_channel.name, guild_id=guild_id)
 
         if guild_id in self.active_sinks:
             try:
@@ -883,11 +921,12 @@ class DiscordVoiceListener:
 
         if guild_id in self.active_listeners:
             del self.active_listeners[guild_id]
+        self.listener_states.pop(guild_id, None)
 
     async def stop_all_listeners(self):
         """Stop all active voice listeners across guilds."""
         for guild_id, voice_client in list(self.active_listeners.items()):
-            self._stop_voice_client(voice_client, f"guild {guild_id}")
+            self._stop_voice_client(voice_client, f"guild {guild_id}", guild_id=guild_id)
 
             sink = self.active_sinks.pop(guild_id, None)
             if sink:
@@ -897,3 +936,4 @@ class DiscordVoiceListener:
                     print(f"Error cleaning up sink for guild {guild_id}: {cleanup_error}")
 
         self.active_listeners.clear()
+        self.listener_states.clear()
