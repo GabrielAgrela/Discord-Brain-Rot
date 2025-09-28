@@ -30,10 +30,14 @@ from moviepy.editor import VideoFileClip
 
 import aiohttp
 import re
+from typing import Optional, TYPE_CHECKING
 from Classes.LoLDatabase import LoLDatabase
 from Classes.LoL import RiotAPI
 
 from Classes.Database import Database
+
+if TYPE_CHECKING:
+    from Classes.SpeechRecognition import DiscordVoiceListener
 
 
 
@@ -78,6 +82,7 @@ class BotBehavior:
         self.mod_role = None
         self.now_playing_messages = []
         self.last_sound_played = {}
+        self.voice_listener: Optional["DiscordVoiceListener"] = None
 
         print("Connecting to the League of Legends database...")
         try:
@@ -546,6 +551,10 @@ class BotBehavior:
                     if user in member.name:
                         return channel
         return None
+
+    def register_voice_listener(self, voice_listener: "DiscordVoiceListener"):
+        """Attach the shared DiscordVoiceListener so new connections can start recording automatically."""
+        self.voice_listener = voice_listener
     
     async def send_error_message(self, message):
         self.error_message = await self.send_message(view=None, title="🤬 Error 🤬", description=message)
@@ -560,9 +569,20 @@ class BotBehavior:
             for member in channel.members:
                 if member.name == self.bot.user.name:
                     voice_client = member.voice.channel.guild.voice_client
+                    if voice_client and self.voice_listener and self.voice_listener.enabled:
+                        try:
+                            await self.voice_listener.start_listening(channel)
+                        except Exception as e:
+                            print(f"Error starting voice listener for existing connection in {channel}: {e}")
                     return voice_client
 
             voice_client = await channel.connect(timeout=10.0)
+
+            if self.voice_listener and self.voice_listener.enabled:
+                try:
+                    await self.voice_listener.start_listening(channel)
+                except Exception as e:
+                    print(f"Error starting voice listener after connecting to {channel}: {e}")
 
             return voice_client
 
@@ -570,6 +590,11 @@ class BotBehavior:
             print(f"Error connecting to voice channel: {e}")
             # get current voice client
             voice_client = self.bot.voice_clients[0]
+            if voice_client and self.voice_listener and self.voice_listener.enabled:
+                try:
+                    await self.voice_listener.start_listening(voice_client.channel)
+                except Exception as listener_error:
+                    print(f"Error starting voice listener on fallback connection {voice_client.channel}: {listener_error}")
             return voice_client
        
 
