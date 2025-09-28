@@ -87,12 +87,14 @@ class SpeechRecognizer:
         loop = asyncio.get_running_loop()
         
         try:
+            print(f"[SpeechRecognizer] Received {len(audio_data)} bytes from {member_name or 'unknown member'}")
             # Write audio data to file (keep this synchronous for quick I/O)
             with wave.open(temp_file, 'wb') as wf:
                 wf.setnchannels(2)
                 wf.setsampwidth(2)  # 16-bit
                 wf.setframerate(48000)
                 wf.writeframes(audio_data)
+            print(f"[SpeechRecognizer] Wrote temp file {temp_file}")
                 
             # Process the audio file in a separate thread to avoid blocking
             # Pass necessary arguments to the executor function
@@ -210,11 +212,14 @@ class SpeechRecognizer:
                 
                 # Read audio in chunks and process
                 # Using larger chunk size for better context
+                frames_processed = 0
                 while True:
                     data = wf.readframes(8000)  # Larger chunks for better context
                     if len(data) == 0:
                         break
                     rec.AcceptWaveform(data)
+                    frames_processed += 1
+                print(f"[SpeechRecognizer] Processed {frames_processed} waveform chunks for {member_name or 'unknown member'}")
                 
                 # Get the final result
                 result = json.loads(rec.FinalResult())
@@ -235,6 +240,8 @@ class SpeechRecognizer:
                     detected_text = result["text"].lower()
                     if member_name:
                         print(f"[{member_name}]: {detected_text}")
+                if not detected_text:
+                    print(f"[SpeechRecognizer] No text detected for {member_name or 'unknown member'}")
             
             # Remove the mono temp file after processing
             if os.path.exists(mono_temp_file):
@@ -339,8 +346,9 @@ class VoiceRecognitionSink(Sink):
         
         # Skip if we're already processing audio for this user
         if user in self.processing:
+            print(f"[VoiceRecognitionSink] Skipping write for {user} - already processing")
             return
-            
+
         # Skip if we just processed audio for this user (prevent overlap)
         if user in self.last_processed and current_time - self.last_processed[user] < self.min_process_gap:
             # Still collect the data, but don't process yet
@@ -350,6 +358,7 @@ class VoiceRecognitionSink(Sink):
                 self.speaking[user] = False
             self.audio_data[user].append(data)
             self.last_activity[user] = current_time
+            print(f"[VoiceRecognitionSink] Buffered {len(data)} bytes for {user} during cooldown")
             return
             
         # Initialize user data structures if needed
@@ -365,11 +374,13 @@ class VoiceRecognitionSink(Sink):
         if user in self.timeout_tasks and self.timeout_tasks[user]:
             try:
                 self.timeout_tasks[user].cancel()
+                print(f"[VoiceRecognitionSink] Cancelled existing timeout for {user}")
             except:
                 pass
             
         # Add data to main buffer
         self.audio_data[user].append(data)
+        print(f"[VoiceRecognitionSink] Buffered chunk ({len(data)} bytes) for {user}; total chunks: {len(self.audio_data[user])}")
         
         # Schedule a timeout to process whatever audio we have if user stops talking
         # Use a longer timeout to avoid cutting off speech too early 
@@ -378,6 +389,7 @@ class VoiceRecognitionSink(Sink):
             self.loop
         )
         self.timeout_tasks[user] = timeout_task
+        print(f"[VoiceRecognitionSink] Scheduled silence timeout for {user}")
     
     async def _process_after_silence(self, user, timeout):
         """
@@ -392,31 +404,35 @@ class VoiceRecognitionSink(Sink):
         current_time = time.time()
         
         # Only process if we have some audio and no new audio has arrived during the timeout
-        if (user in self.audio_data and 
-            len(self.audio_data[user]) > 0 and 
+        if (user in self.audio_data and
+            len(self.audio_data[user]) > 0 and
             time.time() - self.last_activity[user] >= timeout and
             user not in self.processing):  # Don't process if already processing
-            
+
             # Skip if we just processed audio for this user (prevent overlap)
             if user in self.last_processed and current_time - self.last_processed[user] < self.min_process_gap:
+                print(f"[VoiceRecognitionSink] Timeout fired but still in cooldown for {user}")
                 return
-                
+
             # Make copies of buffers to prevent modification during processing
             audio_chunk = []
             audio_chunk.extend(list(self.audio_data[user].copy()))
-            
+
             # Reset the main buffer and clear the prebuffer immediately after copying
             self.audio_data[user] = []
-            
+
             if len(audio_chunk) >= 15:  # Minimum size
                 # Mark this user as being processed
                 self.processing.add(user)
-                
+                print(f"[VoiceRecognitionSink] Processing {len(audio_chunk)} chunks for {user}")
+
                 # Record when we last processed audio for this user
                 self.last_processed[user] = current_time
-                
+
                 # Process the audio
                 await self.process_audio(user, audio_chunk)
+            else:
+                print(f"[VoiceRecognitionSink] Discarded {len(audio_chunk)} chunks for {user} (below threshold)")
                 
         # Clear the timeout task
         self.timeout_tasks[user] = None
@@ -448,9 +464,11 @@ class VoiceRecognitionSink(Sink):
         try:
             # Join all audio chunks into a single byte array
             audio_data = b''.join(audio_chunks)
-            
+            print(f"[VoiceRecognitionSink] Built audio payload of {len(audio_data)} bytes for {user}")
+
             # Before processing, ensure there's enough data to work with
             if len(audio_data) < 1000:  # Skip very short audio samples
+                print(f"[VoiceRecognitionSink] Skipping processing for {user} - payload too small ({len(audio_data)} bytes)")
                 return
             
             # Get a better member name placeholder from the cache if available
@@ -464,10 +482,13 @@ class VoiceRecognitionSink(Sink):
                 audio_data,
                 member_name=member_name
             )
-            
+            print(f"[VoiceRecognitionSink] Recognition result for {member_name}: {detected_text} | Keywords: {found_keywords}")
+
             # If we found keywords, notify the event handler
             if found_keywords:
                 await self.event_handler(user, detected_text, found_keywords)
+            else:
+                print(f"[VoiceRecognitionSink] No keywords detected for {member_name}")
                 
         except Exception as e:
             print(f"Error processing audio: {e}")
@@ -638,6 +659,7 @@ class DiscordVoiceListener:
     async def start_listening(self, voice_channel):
         """Connect to a voice channel and start listening."""
         guild_id = voice_channel.guild.id
+        print(f"[DiscordVoiceListener] start_listening invoked for guild {guild_id} channel {voice_channel.name}")
         if not self.enabled:
             print(f"Voice recognition is disabled, not joining {voice_channel.name}.")
             return
@@ -669,6 +691,8 @@ class DiscordVoiceListener:
         # Attempt to connect or move
         vc = discord.utils.get(self.bot.voice_clients, guild=voice_channel.guild)
         try:
+            print(f"[DiscordVoiceListener] Active listeners: {list(self.active_listeners.keys())}")
+            print(f"[DiscordVoiceListener] Active sinks: {list(self.active_sinks.keys())}")
             if vc and vc.is_connected():
                 if vc.channel != voice_channel:
                     print(f"Moving to voice channel: {voice_channel.name}")
@@ -690,6 +714,7 @@ class DiscordVoiceListener:
                         # Pass
                     else:
                          # Already connected and listening, do nothing else
+                         print(f"[DiscordVoiceListener] Already listening in {voice_channel.name}, no action taken")
                          return
             else:
                 print(f"Connecting to voice channel: {voice_channel.name}")
@@ -705,6 +730,7 @@ class DiscordVoiceListener:
                     del self.active_sinks[guild_id]
                 
                 vc = await voice_channel.connect()
+                print(f"[DiscordVoiceListener] Connected to {voice_channel.name}")
             
             async def keyword_event_handler(user_id, text, keywords):
                 member = voice_channel.guild.get_member(user_id)
