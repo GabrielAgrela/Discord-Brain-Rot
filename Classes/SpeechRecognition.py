@@ -344,32 +344,50 @@ class VoiceRecognitionSink(Sink):
         """
         current_time = time.time()
         
+        # Ensure user state containers exist before we branch into processing logic
+        if user not in self.audio_data:
+            self.audio_data[user] = []
+            self.silence_count[user] = 0
+            self.speaking[user] = False
+
         # Skip if we're already processing audio for this user
         if user in self.processing:
-            print(f"[VoiceRecognitionSink] Skipping write for {user} - already processing")
+            # Keep buffering while the recognizer is still working so we don't
+            # lose any speech that arrives during a long transcription job.
+            self.audio_data[user].append(data)
+            self.last_activity[user] = current_time
+
+            total_chunks = len(self.audio_data[user])
+            total_bytes = sum(len(chunk) for chunk in self.audio_data[user])
+            print(
+                f"[VoiceRecognitionSink] Queued chunk ({len(data)} bytes) for {user} "
+                f"while processing; total pending chunks: {total_chunks}, "
+                f"approx bytes buffered: {total_bytes}"
+            )
+
+            # Make sure a follow-up timeout exists so the new audio is processed
+            # once the current run finishes.
+            timeout_future = self.timeout_tasks.get(user)
+            if not timeout_future or timeout_future.cancelled() or timeout_future.done():
+                timeout_task = asyncio.run_coroutine_threadsafe(
+                    self._process_after_silence(user, 0.4),
+                    self.loop,
+                )
+                self.timeout_tasks[user] = timeout_task
+                print(f"[VoiceRecognitionSink] Scheduled catch-up timeout for {user}")
             return
 
         # Skip if we just processed audio for this user (prevent overlap)
         if user in self.last_processed and current_time - self.last_processed[user] < self.min_process_gap:
             # Still collect the data, but don't process yet
-            if user not in self.audio_data:
-                self.audio_data[user] = []
-                self.silence_count[user] = 0
-                self.speaking[user] = False
             self.audio_data[user].append(data)
             self.last_activity[user] = current_time
             print(f"[VoiceRecognitionSink] Buffered {len(data)} bytes for {user} during cooldown")
             return
-            
-        # Initialize user data structures if needed
-        if user not in self.audio_data:
-            self.audio_data[user] = []
-            self.silence_count[user] = 0
-            self.speaking[user] = False
-            
+
         # Update last activity time for this user
         self.last_activity[user] = current_time
-        
+
         # If user has an existing timeout task, cancel it
         if user in self.timeout_tasks and self.timeout_tasks[user]:
             try:
@@ -520,6 +538,21 @@ class VoiceRecognitionSink(Sink):
             # Remove the user from the processing set when done
             if user in self.processing:
                 self.processing.remove(user)
+
+            # If new audio arrived while we were processing, schedule another
+            # round immediately so the backlog is handled without waiting for
+            # an additional silence window.
+            pending_audio = self.audio_data.get(user)
+            if pending_audio:
+                timeout_task = asyncio.run_coroutine_threadsafe(
+                    self._process_after_silence(user, 0),
+                    self.loop,
+                )
+                self.timeout_tasks[user] = timeout_task
+                print(
+                    f"[VoiceRecognitionSink] Pending audio detected after processing for {user}; "
+                    "triggering immediate follow-up"
+                )
 
     def cleanup(self):
         """Clean up resources associated with the sink."""
