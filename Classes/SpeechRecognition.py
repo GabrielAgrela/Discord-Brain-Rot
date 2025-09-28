@@ -6,6 +6,8 @@ import time
 import asyncio
 import numpy as np
 import concurrent.futures
+
+import discord
 from pydub import AudioSegment
 from pydub.effects import normalize
 from pydub.silence import detect_nonsilent
@@ -521,6 +523,8 @@ class DiscordVoiceListener:
         self.sink_tasks = {}
         self.loop = bot.loop  # Store reference to the bot's event loop
         self.member_cache = {}  # Cache to store member names
+        self.active_sinks = {}
+        self.active_listeners = {}
     
     def set_enabled(self, enabled):
         """Enable or disable voice recognition."""
@@ -672,7 +676,7 @@ class DiscordVoiceListener:
                     # Ensure listener stopped on old channel if move doesn't trigger events cleanly
                     if guild_id in self.active_listeners and self.active_listeners[guild_id].is_listening():
                          print(f"Stopping listener on old channel {vc.channel.name} after move...")
-                         self.active_listeners[guild_id].stop()
+                         self._stop_voice_client(self.active_listeners[guild_id], vc.channel.name)
                          # We might need to clean up the old sink associated with the listener
                          if guild_id in self.active_sinks:
                             self.active_sinks[guild_id].cleanup()
@@ -692,7 +696,7 @@ class DiscordVoiceListener:
                 # Ensure cleanup if there was a previous zombie connection
                 if guild_id in self.active_listeners:
                      try:
-                        self.active_listeners[guild_id].stop()
+                        self._stop_voice_client(self.active_listeners[guild_id], voice_channel.name)
                      except Exception:
                         pass # Ignore errors stopping non-existent listener
                      del self.active_listeners[guild_id]
@@ -702,15 +706,37 @@ class DiscordVoiceListener:
                 
                 vc = await voice_channel.connect()
             
-            # --- Always create a NEW sink instance for the connection --- 
+            async def keyword_event_handler(user_id, text, keywords):
+                member = voice_channel.guild.get_member(user_id)
+                if not member or member == self.bot.user:
+                    return
+
+                # Cache the member name for future lookups inside the sink
+                self.member_cache[user_id] = member.name
+
+                if self.keyword_action_handler:
+                    await self.keyword_action_handler(
+                        voice_channel.guild,
+                        voice_channel,
+                        member,
+                        text,
+                        keywords,
+                    )
+
+            # --- Always create a NEW sink instance for the connection ---
             print(f"Creating a new VoiceRecognitionSink for {voice_channel.name}.")
-            sink = VoiceRecognitionSink(self.recognizer, self.keyword_callback, voice_channel.guild, voice_channel)
-            self.active_sinks[guild_id] = sink 
+            sink = VoiceRecognitionSink(
+                self.speech_recognizer,
+                keyword_event_handler,
+                loop=self.loop,
+            )
+            sink.member_cache = self.member_cache
+            self.active_sinks[guild_id] = sink
             # --------------------------------------------------------------
 
             # Start listening with the new sink
             # Add a small delay before listening? Sometimes helps connection fully establish.
-            await asyncio.sleep(0.5) 
+            await asyncio.sleep(0.5)
             vc.listen(sink, after=lambda e: self.handle_listen_error(e, voice_channel.guild.id))
             self.active_listeners[guild_id] = vc # Store the voice client itself as the listener reference
             print(f"Listening started in {voice_channel.name}")
@@ -725,7 +751,7 @@ class DiscordVoiceListener:
                  # Attempt to stop listener if it exists
                 try:
                     if self.active_listeners[guild_id].is_listening():
-                        self.active_listeners[guild_id].stop()
+                        self._stop_voice_client(self.active_listeners[guild_id], voice_channel.name)
                 except Exception as stop_err:
                      print(f"Error stopping listener during connection failure handling: {stop_err}")
                 del self.active_listeners[guild_id]
@@ -738,7 +764,7 @@ class DiscordVoiceListener:
             if guild_id in self.active_listeners:
                 try:
                     if self.active_listeners[guild_id].is_listening():
-                        self.active_listeners[guild_id].stop()
+                        self._stop_voice_client(self.active_listeners[guild_id], voice_channel.name)
                 except Exception as stop_err:
                      print(f"Error stopping listener during timeout handling: {stop_err}")
                 del self.active_listeners[guild_id]
@@ -751,7 +777,75 @@ class DiscordVoiceListener:
             if guild_id in self.active_listeners:
                 try:
                     if self.active_listeners[guild_id].is_listening():
-                        self.active_listeners[guild_id].stop()
+                        self._stop_voice_client(self.active_listeners[guild_id], voice_channel.name)
                 except Exception as stop_err:
                     print(f"Error stopping listener during general error handling: {stop_err}")
-                del self.active_listeners[guild_id] 
+                del self.active_listeners[guild_id]
+
+    def _stop_voice_client(self, voice_client, context=""):
+        """Safely stop listening on a voice client if possible."""
+        if not voice_client:
+            return
+
+        stop_listening = getattr(voice_client, "stop_listening", None)
+        is_listening = getattr(voice_client, "is_listening", None)
+        try:
+            listening = is_listening() if callable(is_listening) else False
+        except Exception:
+            listening = False
+
+        if callable(stop_listening) and listening:
+            try:
+                stop_listening()
+            except Exception as error:
+                context_info = f" ({context})" if context else ""
+                print(f"Error stopping voice client listener{context_info}: {error}")
+
+    def handle_listen_error(self, error, guild_id):
+        """Handle errors raised by the voice client's listen callback."""
+        if error:
+            print(f"Error while listening for guild {guild_id}: {error}")
+
+        sink = self.active_sinks.pop(guild_id, None)
+        if sink:
+            try:
+                sink.cleanup()
+            except Exception as cleanup_error:
+                print(f"Error cleaning up sink for guild {guild_id}: {cleanup_error}")
+
+        listener = self.active_listeners.get(guild_id)
+        if listener:
+            self._stop_voice_client(listener, f"guild {guild_id}")
+            self.active_listeners.pop(guild_id, None)
+
+    async def stop_listening(self, voice_channel):
+        """Stop listening to a specific voice channel."""
+        guild_id = voice_channel.guild.id
+        voice_client = discord.utils.get(self.bot.voice_clients, guild=voice_channel.guild)
+
+        if voice_client:
+            self._stop_voice_client(voice_client, voice_channel.name)
+
+        if guild_id in self.active_sinks:
+            try:
+                self.active_sinks[guild_id].cleanup()
+            except Exception as e:
+                print(f"Error cleaning up sink for {voice_channel.name}: {e}")
+            del self.active_sinks[guild_id]
+
+        if guild_id in self.active_listeners:
+            del self.active_listeners[guild_id]
+
+    async def stop_all_listeners(self):
+        """Stop all active voice listeners across guilds."""
+        for guild_id, voice_client in list(self.active_listeners.items()):
+            self._stop_voice_client(voice_client, f"guild {guild_id}")
+
+            sink = self.active_sinks.pop(guild_id, None)
+            if sink:
+                try:
+                    sink.cleanup()
+                except Exception as cleanup_error:
+                    print(f"Error cleaning up sink for guild {guild_id}: {cleanup_error}")
+
+        self.active_listeners.clear()
