@@ -658,12 +658,23 @@ class BotBehavior:
 
             # If we're recording the channel for STT, pause it during playback
             was_recording = False
-            try:
-                was_recording = bool(getattr(voice_client, "recording", False))
-                if was_recording:
-                    voice_client.stop_recording()
-            except Exception as e:
-                print(f"Warning: could not pause recording before playback: {e}")
+            if self.voice_listener:
+                try:
+                    was_recording = await self.voice_listener.pause_recording(
+                        voice_client,
+                        "before playback",
+                    )
+                except Exception as pause_error:
+                    print(
+                        f"Warning: voice listener pause before playback failed: {pause_error}"
+                    )
+            else:
+                try:
+                    if bool(getattr(voice_client, "recording", False)):
+                        voice_client.stop_recording()
+                        was_recording = True
+                except Exception as e:
+                    print(f"Warning: could not pause recording before playback: {e}")
 
             # Get the absolute path of the audio file
             audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", audio_file))
@@ -894,12 +905,40 @@ class BotBehavior:
                         )
 
                     # Resume recording if it was active before playback
-                    if was_recording and hasattr(voice_client, "listening_sink") and hasattr(voice_client, "listening_cb"):
-                        try:
-                            voice_client.start_recording(voice_client.listening_sink, voice_client.listening_cb)
-                        except Exception as re:
-                            print(f"Warning: failed to resume voice recording after playback: {re}")
-                    
+                    if was_recording:
+                        if self.voice_listener and hasattr(voice_client, "listening_sink") and hasattr(voice_client, "listening_cb"):
+                            def _log_resume_result(fut):
+                                try:
+                                    fut.result()
+                                except Exception as resume_error:
+                                    print(
+                                        "Warning: failed to resume voice recording after playback: "
+                                        f"{resume_error}"
+                                    )
+
+                            future = asyncio.run_coroutine_threadsafe(
+                                self.voice_listener.ensure_recording_active(
+                                    voice_client,
+                                    "after playback",
+                                ),
+                                self.bot.loop,
+                            )
+                            future.add_done_callback(_log_resume_result)
+                        else:
+                            sink = getattr(voice_client, "listening_sink", None)
+                            callback = getattr(voice_client, "listening_cb", None)
+                            if sink and callback:
+                                try:
+                                    voice_client.start_recording(sink, callback)
+                                except Exception as re:
+                                    print(
+                                        f"Warning: failed to resume voice recording after playback: {re}"
+                                    )
+                            else:
+                                print(
+                                    "Warning: no sink/callback available to resume voice recording after playback"
+                                )
+
                     # Set playback_done flag to signal completion
                     self.bot.loop.call_soon_threadsafe(self.playback_done.set)
 
