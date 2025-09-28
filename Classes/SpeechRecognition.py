@@ -12,7 +12,7 @@ from pydub import AudioSegment
 from pydub.effects import normalize
 from pydub.silence import detect_nonsilent
 from vosk import Model, KaldiRecognizer, SetLogLevel
-from discord.sinks import WaveSink, Sink
+from discord.sinks import WaveSink, Sink, RecordingException
 
 # Set Vosk logging level to reduce output
 SetLogLevel(-1)
@@ -787,8 +787,35 @@ class DiscordVoiceListener:
             # Start listening with the new sink
             # Add a small delay before listening? Sometimes helps connection fully establish.
             await asyncio.sleep(0.5)
-            vc.listen(sink, after=lambda e: self.handle_listen_error(e, voice_channel.guild.id))
-            self.active_listeners[guild_id] = vc # Store the voice client itself as the listener reference
+
+            async def recording_finished_callback(*callback_args):
+                """Handle completion of a recording session for diagnostics."""
+                # ``discord.VoiceClient`` invokes the callback with the sink as the
+                # first positional argument followed by any ``*args`` provided to
+                # ``start_recording``.  We only care about unexpected errors and
+                # therefore inspect the sink for an ``error`` attribute, which is
+                # set by Pycord when the recording thread exits due to an
+                # exception.  Any failure is routed through the legacy handler so
+                # existing cleanup continues to work.
+                sink_obj = callback_args[0] if callback_args else None
+                error = getattr(sink_obj, "error", None)
+                if error:
+                    self.handle_listen_error(error, voice_channel.guild.id)
+
+            try:
+                vc.listening_sink = sink
+                vc.listening_cb = recording_finished_callback
+                vc.start_recording(sink, recording_finished_callback)
+            except RecordingException as record_error:
+                # If we're already recording, reuse the existing session instead
+                # of crashing so that downstream logic can attempt a restart.
+                print(
+                    f"Failed to start recording in {voice_channel.name}: {record_error}"
+                )
+                sink.cleanup()
+                raise
+
+            self.active_listeners[guild_id] = vc  # Store the voice client itself
             self.listener_states[guild_id] = True
             print(f"Listening started in {voice_channel.name}")
 
@@ -873,15 +900,18 @@ class DiscordVoiceListener:
             if guild:
                 guild_id = guild.id
 
-        stop_listening = getattr(voice_client, "stop_listening", None)
+        stop_recording = getattr(voice_client, "stop_recording", None)
         listening = self._is_voice_client_listening(guild_id, voice_client) if guild_id is not None else False
 
-        if callable(stop_listening) and listening:
+        if callable(stop_recording) and listening:
             try:
-                stop_listening()
-            except Exception as error:
+                stop_recording()
+            except RecordingException as error:
                 context_info = f" ({context})" if context else ""
                 print(f"Error stopping voice client listener{context_info}: {error}")
+            except Exception as error:
+                context_info = f" ({context})" if context else ""
+                print(f"Unexpected error stopping voice client listener{context_info}: {error}")
 
         if guild_id is not None:
             self.listener_states[guild_id] = False
