@@ -78,6 +78,7 @@ class BotBehavior:
         self.mod_role = None
         self.now_playing_messages = []
         self.last_sound_played = {}
+        self.mute_until = None
 
         print("Connecting to the League of Legends database...")
         try:
@@ -527,7 +528,65 @@ class BotBehavior:
         else:
             bot_channel = discord.utils.get(self.bot.guilds[0].text_channels, name='bot')
             return bot_channel
-        
+
+    def get_mute_remaining(self):
+        if not self.mute_until:
+            return 0
+
+        remaining = (self.mute_until - datetime.now()).total_seconds()
+        if remaining <= 0:
+            self.mute_until = None
+            return 0
+
+        return remaining
+
+    async def activate_mute(self, duration_seconds=300, requested_by=None):
+        self.mute_until = datetime.now() + timedelta(seconds=duration_seconds)
+
+        requester_text = ""
+        if requested_by:
+            requester_text = f" by {requested_by.mention}" if hasattr(requested_by, "mention") else f" by {requested_by.name}"
+
+        minutes, seconds = divmod(duration_seconds, 60)
+        parts = []
+        if minutes:
+            parts.append(f"{minutes} minute{'s' if minutes != 1 else ''}")
+        if seconds or not parts:
+            parts.append(f"{seconds} second{'s' if seconds != 1 else ''}")
+        duration_text = " ".join(parts)
+
+        description = (
+            f"🔇 The bot is muted{requester_text} for the next {duration_text}.\n"
+            f"Mute ends at <t:{int(self.mute_until.timestamp())}:t>."
+        )
+
+        await self.send_message(
+            title="🔕 5-Minute Mute Activated",
+            description=description,
+            delete_time=duration_seconds,
+            send_controls=False,
+        )
+
+    async def notify_mute_status(self):
+        remaining_seconds = int(self.get_mute_remaining())
+        if remaining_seconds <= 0:
+            return
+
+        minutes, seconds = divmod(remaining_seconds, 60)
+        parts = []
+        if minutes:
+            parts.append(f"{minutes} minute{'s' if minutes != 1 else ''}")
+        if seconds or not parts:
+            parts.append(f"{seconds} second{'s' if seconds != 1 else ''}")
+        remaining_text = " ".join(parts)
+
+        await self.send_message(
+            title="🔕 Mute Active",
+            description=f"The bot is muted for another {remaining_text}.",
+            delete_time=10,
+            send_controls=False,
+        )
+
     def get_largest_voice_channel(self, guild):
         largest_channel = None
         largest_size = 0
@@ -580,6 +639,11 @@ class BotBehavior:
                         show_suggestions: bool = True, # New flag
                         num_suggestions: int = 5): # Control how many suggestions to fetch
         MAX_RETRIES = 3
+
+        remaining_mute = self.get_mute_remaining()
+        if remaining_mute:
+            await self.notify_mute_status()
+            return
 
         # Check cooldown first
         if self.last_played_time and (datetime.now() - self.last_played_time).total_seconds() < 2:

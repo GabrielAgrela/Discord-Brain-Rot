@@ -812,6 +812,16 @@ class ListLastScrapedSoundsButton(Button):
         asyncio.create_task(self.bot_behavior.list_sounds(interaction.user, 25))
         self.bot_behavior.other_actions_db.add_entry(interaction.user.name, "list_last_scraped_sounds")
 
+class FiveMinuteMuteButton(Button):
+    def __init__(self, bot_behavior, **kwargs):
+        super().__init__(**kwargs)
+        self.bot_behavior = bot_behavior
+
+    async def callback(self, interaction):
+        await interaction.response.defer()
+        await self.bot_behavior.activate_mute(duration_seconds=300, requested_by=interaction.user)
+        Database().insert_action(interaction.user.name, "mute_5_minutes", "")
+
 class PlaySoundButton(Button):
     def __init__(self, bot_behavior, sound_name, **kwargs):
         row = kwargs.pop('row', None)  # Extract row from kwargs
@@ -1088,6 +1098,7 @@ class ControlsView(View):
         self.add_item(StatsButton(bot_behavior, label="📊Stats📊", style=discord.ButtonStyle.success))
         self.add_item(UploadSoundButton(bot_behavior, label="⬆️Upload⬆️", style=discord.ButtonStyle.success))
         self.add_item(ListLastScrapedSoundsButton(bot_behavior, label="🔽Last Downloaded Sounds🔽", style=discord.ButtonStyle.success))
+        self.add_item(FiveMinuteMuteButton(bot_behavior, label="🔇5m Mute🔇", style=discord.ButtonStyle.danger))
 
 class DownloadedSoundView(View):
     def __init__(self, bot_behavior, sound):
