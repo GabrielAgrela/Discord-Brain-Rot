@@ -812,15 +812,38 @@ class ListLastScrapedSoundsButton(Button):
         asyncio.create_task(self.bot_behavior.list_sounds(interaction.user, 25))
         self.bot_behavior.other_actions_db.add_entry(interaction.user.name, "list_last_scraped_sounds")
 
-class FiveMinuteMuteButton(Button):
+class MuteToggleButton(Button):
     def __init__(self, bot_behavior, **kwargs):
+        kwargs.setdefault("style", discord.ButtonStyle.success)
+        kwargs.setdefault("label", "🔇30m Mute🔇")
         super().__init__(**kwargs)
         self.bot_behavior = bot_behavior
+        self._refresh_state()
+
+    def _refresh_state(self):
+        if self.bot_behavior.get_mute_remaining() > 0:
+            self.label = "🔊Unmute🔊"
+        else:
+            self.label = "🔇30m Mute🔇"
 
     async def callback(self, interaction):
         await interaction.response.defer()
-        await self.bot_behavior.activate_mute(duration_seconds=300, requested_by=interaction.user)
-        Database().insert_action(interaction.user.name, "mute_5_minutes", "")
+
+        is_muted = self.bot_behavior.get_mute_remaining() > 0
+
+        if is_muted:
+            await self.bot_behavior.deactivate_mute(requested_by=interaction.user)
+            Database().insert_action(interaction.user.name, "unmute", "")
+        else:
+            await self.bot_behavior.activate_mute(duration_seconds=1800, requested_by=interaction.user)
+            Database().insert_action(interaction.user.name, "mute_30_minutes", "")
+
+        self._refresh_state()
+        if interaction.message and self.view:
+            try:
+                await interaction.message.edit(view=self.view)
+            except discord.NotFound:
+                pass
 
 class PlaySoundButton(Button):
     def __init__(self, bot_behavior, sound_name, **kwargs):
@@ -1098,7 +1121,7 @@ class ControlsView(View):
         self.add_item(StatsButton(bot_behavior, label="📊Stats📊", style=discord.ButtonStyle.success))
         self.add_item(UploadSoundButton(bot_behavior, label="⬆️Upload⬆️", style=discord.ButtonStyle.success))
         self.add_item(ListLastScrapedSoundsButton(bot_behavior, label="🔽Last Downloaded Sounds🔽", style=discord.ButtonStyle.success))
-        self.add_item(FiveMinuteMuteButton(bot_behavior, label="🔇5m Mute🔇", style=discord.ButtonStyle.danger))
+        self.add_item(MuteToggleButton(bot_behavior))
 
 class DownloadedSoundView(View):
     def __init__(self, bot_behavior, sound):
