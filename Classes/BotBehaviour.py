@@ -540,7 +540,7 @@ class BotBehavior:
 
         return remaining
 
-    async def activate_mute(self, duration_seconds=300, requested_by=None):
+    async def activate_mute(self, duration_seconds=1800, requested_by=None):
         self.mute_until = datetime.now() + timedelta(seconds=duration_seconds)
 
         requester_text = ""
@@ -561,9 +561,26 @@ class BotBehavior:
         )
 
         await self.send_message(
-            title="🔕 5-Minute Mute Activated",
+            title="🔕 30-Minute Mute Activated",
             description=description,
             delete_time=duration_seconds,
+            send_controls=False,
+        )
+
+    async def deactivate_mute(self, requested_by=None):
+        if not self.mute_until:
+            return
+
+        self.mute_until = None
+
+        requester_text = ""
+        if requested_by:
+            requester_text = f" by {requested_by.mention}" if hasattr(requested_by, "mention") else f" by {requested_by.name}"
+
+        await self.send_message(
+            title="🔔 Mute Disabled",
+            description=f"The bot has been unmuted{requester_text}.",
+            delete_time=10,
             send_controls=False,
         )
 
