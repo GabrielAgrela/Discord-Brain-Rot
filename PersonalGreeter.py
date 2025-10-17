@@ -43,21 +43,21 @@ TTS_PROFILES = {
     "ventura": {
         "display": "Ventura (PT-PT)",
         "flag": ":flag_pt:",
-        "thumbnail": "https://upload.wikimedia.org/wikipedia/commons/5/5e/Andr%C3%A9_Ventura_2022.jpg",
+        "thumbnail": "https://cdn-icons-png.flaticon.com/512/197/197463.png",
         "provider": "elevenlabs",
         "voice": "pt",
     },
     "costa": {
         "display": "Costa (PT-PT)",
         "flag": ":flag_pt:",
-        "thumbnail": "https://upload.wikimedia.org/wikipedia/commons/8/83/Ant%C3%B3nio_Costa_2023_%28cropped%29.jpg",
+        "thumbnail": "https://cdn-icons-png.flaticon.com/512/197/197374.png",
         "provider": "elevenlabs",
         "voice": "costa",
     },
     "tyson": {
         "display": "Tyson (EN)",
         "flag": ":flag_us:",
-        "thumbnail": "https://upload.wikimedia.org/wikipedia/commons/2/2d/Mike_Tyson_Portrait_cropped.jpg",
+        "thumbnail": "https://cdn-icons-png.flaticon.com/512/197/197484.png",
         "provider": "elevenlabs",
         "voice": "en",
     },
@@ -124,6 +124,8 @@ TTS_PROFILES = {
         "region": "ie",
     },
 }
+
+DEFAULT_TTS_THUMBNAIL = "https://cdn-icons-png.flaticon.com/512/4470/4470312.png"
 
 CHARACTER_CHOICES = [choice for choice, profile in TTS_PROFILES.items() if profile.get("provider") == "elevenlabs"]
 
@@ -622,12 +624,17 @@ async def tts(ctx, message: Option(str, "What you want to say", required=True), 
     await ctx.respond("Processing your request...", delete_after=0)
     profile = TTS_PROFILES.get(language, TTS_PROFILES["en"])
     flag = profile.get("flag", ":speech_balloon:")
-    user = discord.utils.get(bot.get_all_members(), name=ctx.user.name)
+    discord_user = ctx.author if isinstance(ctx.author, (discord.Member, discord.User)) else ctx.user
+    user = discord_user
 
     behavior.color = discord.Color.dark_blue()
     url = profile.get("thumbnail")
     if not url:
-        url = user.avatar.url if user and user.avatar else user.default_avatar.url
+        avatar = getattr(discord_user, "display_avatar", None)
+        if avatar:
+            url = avatar.url
+        else:
+            url = DEFAULT_TTS_THUMBNAIL
 
     await behavior.send_message(
         title=f"TTS • {profile.get('display', language.title())} {flag}",
@@ -649,13 +656,18 @@ async def tts(ctx, message: Option(str, "What you want to say", required=True), 
 async def tts(ctx, sound: Option(str, "Base sound you want to convert", required=True), char: Option(str, "Voice to convert into", choices=CHARACTER_CHOICES, required=True)):
     await ctx.respond("Processing your request...", delete_after=0)
 
-    user = discord.utils.get(bot.get_all_members(), name=ctx.user.name)
+    discord_user = ctx.author if isinstance(ctx.author, (discord.Member, discord.User)) else ctx.user
+    user = discord_user
 
     behavior.color = discord.Color.dark_blue()
     profile = TTS_PROFILES.get(char, TTS_PROFILES["tyson"])
     url = profile.get("thumbnail")
     if not url:
-        url = user.avatar.url if user and user.avatar else user.default_avatar.url
+        avatar = getattr(discord_user, "display_avatar", None)
+        if avatar:
+            url = avatar.url
+        else:
+            url = DEFAULT_TTS_THUMBNAIL
 
     await behavior.send_message(
         title=f"{sound} to {profile.get('display', char.title())}",
