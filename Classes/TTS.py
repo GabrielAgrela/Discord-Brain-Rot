@@ -42,6 +42,29 @@ class TTS:
         except Exception:
             self.loudnorm_lra = 11.0
 
+    def _get_default_voice_channel(self):
+        """Return the preferred voice channel for playback.
+
+        Preference order:
+          1. Any channel the bot is already connected to.
+          2. The most recently discovered populated channel across guilds
+             (matches the legacy behaviour while still allowing us to detect
+             when *no* channel is available).
+        """
+        for voice_client in getattr(self.bot, "voice_clients", []):
+            try:
+                if voice_client and voice_client.is_connected() and voice_client.channel:
+                    return voice_client.channel
+            except Exception:
+                continue
+
+        last_channel = None
+        for guild in self.bot.guilds:
+            channel = self.behavior.get_largest_voice_channel(guild)
+            if channel is not None:
+                last_channel = channel
+        return last_channel
+
     def _normalize_audio(self, audio: AudioSegment, target_dbfs: float = -20.0) -> AudioSegment:
         """Normalize an AudioSegment to a target dBFS for consistent loudness."""
         try:
@@ -157,8 +180,10 @@ class TTS:
         tts.save(path)
         # Apply integrated loudness normalization for consistent perceived volume
         self._loudnorm_inplace(path)
-        for guild in self.bot.guilds:
-            channel = self.behavior.get_largest_voice_channel(guild)
+        channel = self._get_default_voice_channel()
+        if channel is None:
+            await self.behavior.send_error_message("No available voice channel for TTS playback.")
+            return
         await self.behavior.play_audio(channel, self.filename, "admin", is_tts=True)
         self.update_last_request_time()
 
@@ -248,8 +273,10 @@ class TTS:
                     # Integrated loudness normalization (EBU R128)
                     self._loudnorm_inplace(path)
 
-                    for guild in self.bot.guilds:
-                        channel = self.behavior.get_largest_voice_channel(guild)
+                    channel = self._get_default_voice_channel()
+                    if channel is None:
+                        await self.behavior.send_error_message("No available voice channel for TTS playback.")
+                        return
                     await self.behavior.play_audio(channel, self.filename, "admin", is_tts=True)
                     self.update_last_request_time()
                     print("Audio stream saved and played successfully.")
@@ -326,8 +353,10 @@ class TTS:
                     # Integrated loudness normalization (EBU R128)
                     self._loudnorm_inplace(path)
 
-                    for guild in self.bot.guilds:
-                        channel = self.behavior.get_largest_voice_channel(guild)
+                    channel = self._get_default_voice_channel()
+                    if channel is None:
+                        await self.behavior.send_error_message("No available voice channel for TTS playback.")
+                        return
                     await self.behavior.play_audio(channel, self.filename, "admin", is_tts=True)
                     self.update_last_request_time()
                     print("Audio stream saved and played successfully.")
@@ -393,8 +422,10 @@ class TTS:
                     # Integrated loudness normalization (EBU R128)
                     self._loudnorm_inplace(path)
 
-                    for guild in self.bot.guilds:
-                        channel = self.behavior.get_largest_voice_channel(guild)
+                    channel = self._get_default_voice_channel()
+                    if channel is None:
+                        await self.behavior.send_error_message("No available voice channel for TTS playback.")
+                        return
                     await self.behavior.play_audio(channel, self.filename, "admin", is_tts=True)
                     self.update_last_request_time()
                     print("Audio stream saved and played successfully.")
