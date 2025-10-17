@@ -47,7 +47,7 @@ Interact with the bot using slash commands (`/`) in your Discord server.
     *   `/toca [message]` : Play a sound by name. Use the autocomplete suggestions or type 'random'. Supports finding similar sounds.
     *   `/subwaysurfers`, `/familyguy`: Play specific themed sounds/videos.
 *   **Text-to-Speech (TTS):**
-    *   `/tts [message] [language]`: Generate TTS using Google Translate or ElevenLabs (depending on language/setup). Supports languages like `en`, `pt`, `br`, `es`, `fr`, `de`, `ar`, `ru`, `ch`.
+    *   `/tts [message] [language]`: Generate TTS using Google Translate or ElevenLabs voices (Ventura, Costa, Tyson) along with standard languages like `en`, `pt`, `br`, `es`, `fr`, `de`, `ar`, `ru`, `ch`.
 *   **Speech-to-Speech (STS):** (Requires ElevenLabs API Key)
     *   `/sts [sound] [char]`: Convert an existing sound to a different voice (e.g., 'tyson', 'ventura', 'costa').
 *   **Voice Isolation:** (Requires ElevenLabs API Key)
