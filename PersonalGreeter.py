@@ -39,6 +39,94 @@ behavior = BotBehavior(bot, env.ffmpeg_path)
 db = Database(behavior=behavior)
 file_name = 'play_requests.csv'
 
+TTS_PROFILES = {
+    "ventura": {
+        "display": "Ventura (PT-PT)",
+        "flag": ":flag_pt:",
+        "thumbnail": "https://upload.wikimedia.org/wikipedia/commons/5/5e/Andr%C3%A9_Ventura_2022.jpg",
+        "provider": "elevenlabs",
+        "voice": "pt",
+    },
+    "costa": {
+        "display": "Costa (PT-PT)",
+        "flag": ":flag_pt:",
+        "thumbnail": "https://upload.wikimedia.org/wikipedia/commons/8/83/Ant%C3%B3nio_Costa_2023_%28cropped%29.jpg",
+        "provider": "elevenlabs",
+        "voice": "costa",
+    },
+    "tyson": {
+        "display": "Tyson (EN)",
+        "flag": ":flag_us:",
+        "thumbnail": "https://upload.wikimedia.org/wikipedia/commons/2/2d/Mike_Tyson_Portrait_cropped.jpg",
+        "provider": "elevenlabs",
+        "voice": "en",
+    },
+    "en": {
+        "display": "English (Google)",
+        "flag": ":flag_gb:",
+        "provider": "gtts",
+        "lang": "en",
+    },
+    "pt": {
+        "display": "Portuguese (PT - Google)",
+        "flag": ":flag_pt:",
+        "provider": "gtts",
+        "lang": "pt",
+    },
+    "br": {
+        "display": "Portuguese (BR - Google)",
+        "flag": ":flag_br:",
+        "provider": "gtts",
+        "lang": "pt",
+        "region": "com.br",
+    },
+    "es": {
+        "display": "Spanish",
+        "flag": ":flag_es:",
+        "provider": "gtts",
+        "lang": "es",
+    },
+    "fr": {
+        "display": "French",
+        "flag": ":flag_fr:",
+        "provider": "gtts",
+        "lang": "fr",
+    },
+    "de": {
+        "display": "German",
+        "flag": ":flag_de:",
+        "provider": "gtts",
+        "lang": "de",
+    },
+    "ru": {
+        "display": "Russian",
+        "flag": ":flag_ru:",
+        "provider": "gtts",
+        "lang": "ru",
+    },
+    "ar": {
+        "display": "Arabic",
+        "flag": ":flag_sa:",
+        "provider": "gtts",
+        "lang": "ar",
+    },
+    "ch": {
+        "display": "Chinese (Mandarin)",
+        "flag": ":flag_cn:",
+        "provider": "gtts",
+        "lang": "zh-CN",
+    },
+    "ir": {
+        "display": "Irish English",
+        "flag": ":flag_ie:",
+        "provider": "gtts",
+        "lang": "en",
+        "region": "ie",
+    },
+}
+
+CHARACTER_CHOICES = [choice for choice, profile in TTS_PROFILES.items() if profile.get("provider") == "elevenlabs"]
+
 # Path to the bot's log file for command history
 COMMAND_LOG_FILE = '/var/log/personalgreeter.log'
 
@@ -529,67 +617,49 @@ async def play_requested(ctx, message: str, speed: float = 1.0, volume: float = 
         await ctx.followup.send(f"An error occurred while processing your request. Please try again later.", ephemeral=True, delete_after=10)
         return
     
-@bot.slash_command(name='tts', description='TTS with google translate. Press tab and enter to select message and write')
-async def tts(ctx, message: Option(str, "What you want to say", required=True), language: Option(str, "en, pt, br, es, fr, de, ar, ru and ch", required=True)):
+@bot.slash_command(name='tts', description='Generate TTS with Google or ElevenLabs voices.')
+async def tts(ctx, message: Option(str, "What you want to say", required=True), language: Option(str, "Select a voice or language", choices=list(TTS_PROFILES.keys()), required=True)):
     await ctx.respond("Processing your request...", delete_after=0)
-    flag_emojis = {"pt": ":flag_pt:", "br": ":flag_br:", "es": ":flag_es:", "fr": ":flag_fr:", "de": ":flag_de:", "ru": ":flag_ru:", "ar": ":flag_sa:", "ch": ":flag_cn:", "ir": ":flag_ie:", "en": ":flag_gb:"}
-    flag = flag_emojis.get(language, ":flag_gb:")
+    profile = TTS_PROFILES.get(language, TTS_PROFILES["en"])
+    flag = profile.get("flag", ":speech_balloon:")
     user = discord.utils.get(bot.get_all_members(), name=ctx.user.name)
 
     behavior.color = discord.Color.dark_blue()
-    if language in ["pt", "en"]:
-        url = "https://play-lh.googleusercontent.com/cyy3sqDw73x3LRwLbqMmWVHtCFp36RHaMO7Hh_YGqD6NRiLa8B5X8x-OLjAnnXbhYaw=w240-h480-rw" if language == "pt" else "https://www.famousbirthdays.com/headshots/mike-tyson-7.jpg"
-    else:
+    url = profile.get("thumbnail")
+    if not url:
         url = user.avatar.url if user and user.avatar else user.default_avatar.url
 
     await behavior.send_message(
-        title=f"TTS in {flag}",
+        title=f"TTS • {profile.get('display', language.title())} {flag}",
         description=f"'{message}'",
         thumbnail=url
     )
     try:
-        if language == "pt":
-            await behavior.tts_EL(user, message, "pt")
-        elif language == "costa":
-            await behavior.tts_EL(user, message, "costa")
-        elif language == "br":
-            await behavior.tts(user, message, "pt", "com.br")
-        elif language == "es":
-            await behavior.tts(user, message, "es")
-        elif language == "fr":
-            await behavior.tts(user, message, "fr")
-        elif language == "de":
-            await behavior.tts(user, message, "de")
-        elif language == "ru":
-            await behavior.tts(user, message, "ru")
-        elif language == "ar":
-            await behavior.tts(user, message, "ar")
-        elif language == "ch":
-            await behavior.tts(user, message, "zh-CN")
-        elif language == "ir":
-            await behavior.tts(user, message, "en", "ie")
+        if profile.get("provider") == "elevenlabs":
+            await behavior.tts_EL(user, message, profile.get("voice", "en"))
         else:
-            await behavior.tts_EL(user, message)
+            lang = profile.get("lang", "en")
+            region = profile.get("region", "")
+            await behavior.tts(user, message, lang, region)
     except Exception as e:
         await behavior.send_message(title=e)
         return
     
 @bot.slash_command(name='sts', description='Speech-To-Speech. Press tab and enter to select message and write')
-async def tts(ctx, sound: Option(str, "Base sound you want to convert", required=True), char: Option(str, "tyson, ventura, costa", required=True)):
+async def tts(ctx, sound: Option(str, "Base sound you want to convert", required=True), char: Option(str, "Voice to convert into", choices=CHARACTER_CHOICES, required=True)):
     await ctx.respond("Processing your request...", delete_after=0)
 
     user = discord.utils.get(bot.get_all_members(), name=ctx.user.name)
 
     behavior.color = discord.Color.dark_blue()
-    if char in ["tyson", "ventura", "costa"]:
-        url = "https://play-lh.googleusercontent.com/cyy3sqDw73x3LRwLbqMmWVHtCFp36RHaMO7Hh_YGqD6NRiLa8B5X8x-OLjAnnXbhYaw=w240-h480-rw" if char == "ventura" else "https://www.famousbirthdays.com/headshots/mike-tyson-7.jpg"
-    else:
-        char = "tyson"
-        url = "https://play-lh.googleusercontent.com/cyy3sqDw73x3LRwLbqMmWVHtCFp36RHaMO7Hh_YGqD6NRiLa8B5X8x-OLjAnnXbhYaw=w240-h480-rw"
+    profile = TTS_PROFILES.get(char, TTS_PROFILES["tyson"])
+    url = profile.get("thumbnail")
+    if not url:
+        url = user.avatar.url if user and user.avatar else user.default_avatar.url
 
     await behavior.send_message(
-        title=f"{sound} to {char}",
-        description=f"'{char}'",
+        title=f"{sound} to {profile.get('display', char.title())}",
+        description=f"'{profile.get('display', char.title())}'",
         thumbnail=url
     )
     try:
