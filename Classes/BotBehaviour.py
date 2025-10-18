@@ -43,6 +43,7 @@ class BotBehavior:
         self.ffmpeg_path = ffmpeg_path
         self.last_channel = {}
         self.playback_done = asyncio.Event()
+        self.playback_done.set()  # Ensure the event starts in a ready state
         self.script_dir = os.path.dirname(__file__)  # Get the directory of the current script
         self.db_path = os.path.join(self.script_dir, "../Data/soundsDB.csv")
         self.ph_path = os.path.join(self.script_dir, "../Data/play_history.csv")
@@ -867,6 +868,11 @@ class BotBehavior:
             # Stop the audio if it is already playing
             if voice_client.is_playing():
                 voice_client.stop()
+                try:
+                    await asyncio.wait_for(self.playback_done.wait(), timeout=5.0)
+                except asyncio.TimeoutError:
+                    print("Timeout waiting for previous playback to stop; continuing anyway.")
+                    self.playback_done.set()
 
             # --- FFmpeg Options Setup ---
             ffmpeg_options = '-af "'
@@ -911,52 +917,53 @@ class BotBehavior:
             # ---------------------------
 
             def after_playing(error):
-                if error:
-                    error_message = str(error)
-                    print(f'Error in playback: {error_message}')
-                    
-                    if "not connected" in error_message.lower():
-                        # Connection lost during playback
-                        message = "Voice connection lost during playback"
-                        print(message)
-                        asyncio.run_coroutine_threadsafe(
-                            self.send_error_message(message), 
-                            self.bot.loop
-                        )
-                    elif retry_count < MAX_RETRIES:
-                        # Other errors, retry with delay
-                        asyncio.run_coroutine_threadsafe(
-                            self.send_error_message(f"Playback error: {error_message}. Retrying..."), 
-                            self.bot.loop
-                        )
-                        time.sleep(2)  # Increased delay
-                        # Pass all parameters to keep consistency
-                        asyncio.run_coroutine_threadsafe(
-                            self.play_audio(
-                                channel, audio_file, user, is_entrance, is_tts, 
-                                extra, original_message, send_controls, 
-                                retry_count + 1, effects, show_suggestions, num_suggestions
-                            ), 
-                            self.bot.loop
-                        )
-                else:
-                    
-                    # Add list selector after sound finishes playing successfully
-                    if sound_message:
-                        # Add a short delay to ensure suggestions have time to be added
-                        asyncio.run_coroutine_threadsafe(
-                            self.delayed_list_selector_update(sound_message, audio_file),
-                            self.bot.loop
-                        )
+                try:
+                    if error:
+                        error_message = str(error)
+                        print(f'Error in playback: {error_message}')
 
-                    # Resume recording if it was active before playback
-                    if was_recording and hasattr(voice_client, "listening_sink") and hasattr(voice_client, "listening_cb"):
-                        try:
-                            voice_client.start_recording(voice_client.listening_sink, voice_client.listening_cb)
-                        except Exception as re:
-                            print(f"Warning: failed to resume voice recording after playback: {re}")
-                    
-                    # Set playback_done flag to signal completion
+                        if "not connected" in error_message.lower():
+                            # Connection lost during playback
+                            message = "Voice connection lost during playback"
+                            print(message)
+                            asyncio.run_coroutine_threadsafe(
+                                self.send_error_message(message),
+                                self.bot.loop
+                            )
+                        elif retry_count < MAX_RETRIES:
+                            # Other errors, retry with delay
+                            asyncio.run_coroutine_threadsafe(
+                                self.send_error_message(f"Playback error: {error_message}. Retrying..."),
+                                self.bot.loop
+                            )
+                            time.sleep(2)  # Increased delay
+                            # Pass all parameters to keep consistency
+                            asyncio.run_coroutine_threadsafe(
+                                self.play_audio(
+                                    channel, audio_file, user, is_entrance, is_tts,
+                                    extra, original_message, send_controls,
+                                    retry_count + 1, effects, show_suggestions, num_suggestions
+                                ),
+                                self.bot.loop
+                            )
+                    else:
+
+                        # Add list selector after sound finishes playing successfully
+                        if sound_message:
+                            # Add a short delay to ensure suggestions have time to be added
+                            asyncio.run_coroutine_threadsafe(
+                                self.delayed_list_selector_update(sound_message, audio_file),
+                                self.bot.loop
+                            )
+
+                        # Resume recording if it was active before playback
+                        if was_recording and hasattr(voice_client, "listening_sink") and hasattr(voice_client, "listening_cb"):
+                            try:
+                                voice_client.start_recording(voice_client.listening_sink, voice_client.listening_cb)
+                            except Exception as re:
+                                print(f"Warning: failed to resume voice recording after playback: {re}")
+                finally:
+                    # Set playback_done flag to signal completion regardless of outcome
                     self.bot.loop.call_soon_threadsafe(self.playback_done.set)
 
             # Check if FFmpeg path is set and valid
@@ -1007,12 +1014,14 @@ class BotBehavior:
                 print(f"Error playing audio: {e}")
                 import traceback
                 traceback.print_exc()
+                self.playback_done.set()
                 return False
         except Exception as e:
             await self.send_error_message(f"Error in play_audio: {e}")
             print(f"Error in play_audio: {e}")
             import traceback
             traceback.print_exc()
+            self.playback_done.set()
             return False
 
     async def update_progress_bar(self, sound_message, duration):
