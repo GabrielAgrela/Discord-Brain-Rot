@@ -631,16 +631,14 @@ class BotBehavior:
 
     async def ensure_voice_connected(self, channel):
         try:
-            voice_client = None
+            voice_client = channel.guild.voice_client
 
-            #check channel members for bot
-            for member in channel.members:
-                if member.name == self.bot.user.name:
-                    voice_client = member.voice.channel.guild.voice_client
-                    return voice_client
-
+            if voice_client:
+                if voice_client.channel.id != channel.id:
+                    await voice_client.move_to(channel)
+                return voice_client
+            
             voice_client = await channel.connect(timeout=10.0)
-
             return voice_client
 
         except Exception as e:
