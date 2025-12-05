@@ -23,5 +23,3 @@ download_thread.start()
 #while True:
     #sound_downloader_instance.move_sounds()
     #time.sleep(10)
-
-

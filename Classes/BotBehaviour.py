@@ -30,8 +30,7 @@ from moviepy.editor import VideoFileClip
 
 import aiohttp
 import re
-from Classes.LoLDatabase import LoLDatabase
-from Classes.LoL import RiotAPI
+
 
 from Classes.Database import Database
 
@@ -51,12 +50,12 @@ class BotBehavior:
         self.users_json = os.path.join(self.script_dir, "../Data/Users.json")
         self.dwdir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Downloads"))
         self.db = AudioDatabase(self.db_path, self)
-        self.lol_db = LoLDatabase()
+
         self.player_history_db = PlayHistoryDatabase(self.ph_path,self.db,self.users_json, self.bot, self)
         self.other_actions_db = OtherActionsDatabase(self.oa_path, self)
         self.TTS = TTS(self,bot)
         self.ManualSoundDownloader = ManualSoundDownloader()
-        self.riotAPI = RiotAPI(os.getenv("RIOT_API_KEY"), db=self.lol_db, bot=self)
+
         self.view = None
         self.embed = None
         self.controls_message = None
@@ -81,11 +80,7 @@ class BotBehavior:
         self.last_sound_played = {}
         self.mute_until = None
 
-        print("Connecting to the League of Legends database...")
-        try:
-            print("Connected to the League of Legends database!")
-        except Exception as e:
-            print(f"Error connecting to the League of Legends database: {e}")
+
 
     def is_admin_or_mod(self, member: discord.Member) -> bool:
         """Checks if a member has the DEVELOPER or MODERATOR role."""
@@ -1232,12 +1227,7 @@ class BotBehavior:
     async def sts_EL(self, user, sound, char="ventura", region=""):
         await self.TTS.speech_to_speech(sound, char, region)  
 
-    async def isolate_voice(self, user, sound):
-        Database().insert_action(user.name, "isolate_voice", sound)
-        await self.TTS.isolate_voice(sound)
 
-    async def stt(self, user, audio_files):
-        return await self.TTS.speech_to_text(audio_files)
     
     async def list_sounds(self, user, count=0):
         try:
@@ -1259,136 +1249,11 @@ class BotBehavior:
         except Exception as e:
             print(f"An error occurred: {e}")
 
-    async def user_vs_userlolstats(self, username1, username2, gamemode, champion):
-        data = await self.lol_db.get_player_stats(username1, gamemode, champion)
-        if not data:
-            await self.send_message(title="No stats found", description=f"No {gamemode} stats found for {username1} (or less than 4 games per champion)")
-            return
-        data2 = await self.lol_db.get_player_stats(username2, gamemode, champion)
-        if not data2:
-            await self.send_message(title="No stats found", description=f"No {gamemode} stats found for {username2} (or less than 4 games per champion)")
-            return
 
-        # Get overall stats from the first row for both players
-        total_games1, total_hours1 = data[0][5], data[0][9]
-        total_games2, total_hours2 = data2[0][5], data2[0][9]
 
-        # Create dictionaries of champion stats
-        champ_dict1 = {row[0]: row[1:] for row in data}
-        champ_dict2 = {row[0]: row[1:] for row in data2}
-        all_champs = sorted(set(list(champ_dict1.keys()) + list(champ_dict2.keys())))
 
-        # Create the table header
-        table = "```\n"
-        table += f"{'Stat':<20} {username1:<15} {username2:<15}\n"
-        table += "-" * 50 + "\n"
 
-        # Add champion stats
-        for champ in all_champs:            
-            # Get stats for both players
-            stats1 = champ_dict1.get(champ, [0] * 13)  # Updated to match new column count
-            stats2 = champ_dict2.get(champ, [0] * 13)  # Updated to match new column count
-            
-            if stats1[0] > 0 or stats2[0] > 0:  # Only show if either player has games
-                table += f"{'Games':<20} {stats1[0]:<15} {stats2[0]:<15}\n"
-                table += f"{'Total Hours':<20} {total_hours1:<15.1f} {total_hours2:<15.1f}\n"
-                table += f"{'Win Rate %':<20} {stats1[1]:<15.1f} {stats2[1]:<15.1f}\n"
-                table += f"{'DPM':<20} {int(stats1[2]):<15} {int(stats2[2]):<15}\n"
-                table += f"{'KDA':<20} {stats1[3]:<15.2f} {stats2[3]:<15.2f}\n"
-                table += f"{'Triple Kills':<20} {stats1[9]:<15} {stats2[9]:<15}\n"
-                table += f"{'Quadra Kills':<20} {stats1[10]:<15} {stats2[10]:<15}\n"
-                table += f"{'Penta Kills':<20} {stats1[11]:<15} {stats2[11]:<15}\n"
-                table += "\n"
 
-        table += "```"
-
-        await self.send_message(
-            title=f"🎮 {gamemode} Stats Comparison on {champion}",
-            description=table,
-            bot_channel="botlol"
-        )
-
-    async def userlolstats(self, username, gamemode, champion=None):
-        data = await self.lol_db.get_player_stats(username, gamemode, champion)
-        if not data:
-            await self.send_message(title="No stats found", description=f"No {gamemode} stats found for {username} (or less than 4 games per champion)")
-            return
-
-        # Get overall stats from the first row
-        total_games = data[0][5]
-        unique_champs = data[0][6]
-        unique_ratio = data[0][7]
-        oldest_game = datetime.strptime(data[0][8], '%Y-%m-%d %H:%M:%S.%f').strftime('%Y-%m-%d')
-        total_hours = data[0][9]
-        total_pentas = data[0][13]
-
-        # Create the stats table with wider columns
-        table = "```\nChampion Stats:\n"
-        table += f"{'Champion':<15} {'Games':<8} {'Win%':<8} {'DPM':<8} {'KDA':<5} {'x4':<2} {'x5':<2}\n"
-        table += "-" * 55 + "\n"  # Increased separator length
-        
-        for row in data:
-            champ = row[0][:14] if "Strawberry_" not in row[0] else row[0].replace("Strawberry_", "")[:14]
-            games = str(row[1])
-            winrate = f"{row[2]:.1f}"
-            dpm = str(int(row[3]))
-            kda = f"{row[4]:.2f}"
-            quadras = str(row[11])
-            pentas = str(row[12])
-
-            
-            table += f"{champ:<15} {games:<8} {winrate:<8} {dpm:<8} {kda:<5} {quadras:2} {pentas:2}\n"
-        
-        table += "```"
-
-        # Create overall stats description
-        description = f"**Overall Stats in the last ~1 or 2 years:**\n"
-        description += f"• Total Games: {total_games}\n"
-        description += f"• Unique Champions: {unique_champs}\n"
-        description += f"• Champion Variety: {unique_ratio:.1f}%\n"
-        description += f"• Total Hours: {total_hours}\n"
-        description += f"• Total Pentas: {total_pentas}\n"
-        description += f"• Latest Game Fetched: {oldest_game}\n\n"
-        description += table
-
-        await self.send_message(
-            title=f"🎮 {username}'s {gamemode} Stats",
-            description=description,
-            bot_channel="botlol"
-        )
-
-    async def userloltime(self):
-        data = await self.lol_db.get_player_time_stats()
-        if not data:
-            await self.send_message(title="No stats found", description="No time stats found")
-            return
-
-        # Create the stats table
-        table = "```\nPlayer Time Stats:\n"
-        table += f"{'Player':<15} {'Hours':<6} {'2024h':<6} {'Games':<5} {' WR':<4} {'Avg(m)':<8} {'Pentas':<5}\n"
-        table += "-" * 55 + "\n"
-        
-        for row in data:
-            name = f"{row[0]}"[:14]  # Limit name length
-            total_hours = f"{row[2]:.1f}"
-            hours_2024 = f"{row[3]:.1f}"
-            games = str(row[4])
-            avg_minutes = f"{row[5]:.1f}"
-            pentas = str(row[7])  # New field for pentakills
-            winrate = f"{row[8]:.1f}"
-            table += f"{name:<15} {total_hours:<6} {hours_2024:<6} {games:<5} {winrate:<4} {avg_minutes:<8} {pentas:5}\n"
-        
-        table += "```"
-
-        # Create description with the table
-        description = f"**League of Legends Time Stats**\n"
-        description += table
-
-        await self.send_message(
-            title="⌛ LoL Time Statistics",
-            description=description,
-            bot_channel="botlol"
-        )
 
     async def subway_surfers(self, user):
         folder = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Data", "SubwaySurfers"))
@@ -1459,197 +1324,13 @@ class BotBehavior:
                 return True
         return False
 
-    async def userlolfriends(self, username):
-        data = await self.lol_db.get_player_friend_stats(username)
-        if not data:
-            await self.send_message(
-                title="No friend stats found", 
-                description=f"No duo stats found for {username} (minimum 5 games together required)"
-            )
-            return
 
-        # Create the stats table
-        table = "```\nDuo Queue Stats:\n"
-        table += f"{'Friend':<15} {'Games':<8} {'Wins':<8} {'Win%':<8}\n"
-        table += "-" * 42 + "\n"
-        
-        total_games = 0
-        weighted_winrate = 0
-        
-        for row in data:
-            name = row[0][:14]  # Limit name length
-            games = str(row[1])
-            wins = str(row[2])
-            winrate = f"{row[3]:.1f}"
-            
-            total_games += row[1]
-            weighted_winrate += row[1] * row[3]
-            
-            table += f"{name:<15} {games:<8} {wins:<8} {winrate:<8}\n"
-        
-        avg_winrate = weighted_winrate / total_games if total_games > 0 else 0
-        table += "-" * 42 + "\n"
-        table += f"Average Win Rate: {avg_winrate:.1f}%\n"
-        table += "```"
-
-        # Create description with the table
-        description = f"**Showing duo stats for {username}**\n"
-        description += f"Total duo games analyzed: {total_games}\n\n"
-        description += table
-
-        await self.send_message(
-            title=f"👥 Duo Queue Statistics",
-            description=description,
-            bot_channel="botlol"
-        )
     
-    async def insertLoLUser(self, username):
-        # Parse username and tagline
-        if '#' in username:
-            game_name, tag_line = username.split('#')
-        else:
-            game_name = username
-            tag_line = 'EUW1'  # Default to EUW1 if no tagline provided
-        
-        try:
-            # Get account info from Riot API
-            account_info = await self.riotAPI.get_acc_from_riot_id(game_name, tag_line)
-            
-            # Insert user into database
-            await self.lol_db.insert_user(
-                username=username,
-                puuid=account_info['puuid'],
-                riot_id_game_name=account_info['gameName'],
-                riot_id_tagline=account_info['tagLine']
-            )
-            await self.send_message(
-                title="User added",
-                description=f"User {username} added to the database",
-                bot_channel="botlol"
-            )
-            return True
-            
-        except HTTPError as e:
-            print(f"Error fetching user data from Riot API: {e}")
-            await self.send_message(
-                title="Error",
-                description=f"Error fetching user data from Riot API: {e}",
-                bot_channel="botlol"
-            )
-            return False
-        except Exception as e:
-            print(f"Error inserting user into database: {e}")
-            await self.send_message(
-                title="Error",
-                description=f"Error inserting user into database: {e}",
-                bot_channel="botlol"
-            )
-            return False
+
         
     #every 10 seconds check if the user is in a game
-    async def check_if_in_game(self):
-        while True:
-            users = await self.lol_db.get_users()
-            active_players = []
-            processed_users = set()  # Keep track of processed users
 
-            # Collect data for all users in games
-            for user in users:
-                if user[1] in processed_users:  # Skip if user was already processed
-                    continue
 
-                try:
-                    game_data = await self.riotAPI.get_current_game(user[2])
-                    if game_data:
-                        # Process all tracked users in this game
-                        for participant in game_data['participants']:
-                            # Find if this participant is one of our tracked users
-                            tracked_user = next((u for u in users if u[2] == participant['puuid']), None)
-                            if tracked_user and str(tracked_user[5]) != str(game_data['gameId']):
-                                champion = await self.lol_db.get_champion(participant['championId'])
-                                
-                                # Get player stats for this champion/gamemode
-                                stats = await self.lol_db.get_player_stats(tracked_user[3], game_data['gameMode'], champion.replace(" ", "").replace("'", ""))
-                                
-                                # Extract relevant stats or use defaults if no stats available
-                                if stats:
-                                    games = stats[0][1]
-                                    winrate = f"{stats[0][2]:.1f}"
-                                    kda = f"{stats[0][4]:.2f}"
-                                    pentas = stats[0][12] if len(stats[0]) > 12 else 0
-                                else:
-                                    games = 0
-                                    winrate = "N/A"
-                                    kda = "N/A"
-                                    pentas = 0
-
-                                active_players.append({
-                                    'name': tracked_user[3],
-                                    'champion': champion,
-                                    'gameMode': game_data['gameMode'],
-                                    'games': games,
-                                    'winrate': winrate,
-                                    'kda': kda,
-                                    'pentas': pentas
-                                })
-
-                                await self.lol_db.update_user(tracked_user[1], last_game_played=game_data['gameId'])
-                                processed_users.add(tracked_user[1])  # Mark this user as processed
-
-                except Exception as e:
-                    print(f"Error checking if {user[3]} is in a game: {e}")
-                await asyncio.sleep(0.1)
-
-            # If there are active players, create and send the table
-            if active_players:
-                # Sort players by winrate (handling N/A cases)
-                def get_winrate_value(player):
-                    # Convert "N/A" to -1 for sorting purposes
-                    # Convert "XX.X%" to float
-                    wr = player['winrate']
-                    return -1 if wr == "N/A" else float(wr.rstrip('%'))
-                
-                active_players.sort(key=get_winrate_value, reverse=True)
-                
-                table = "```"
-                table += f"{'Player':<15} {'Champion':<10} {'Mode':<5} {'Games':<6} {'Win%':<6} {'KDA':<5} {'x5':<3}\n"
-                table += "-" * 56 + "\n"
-                
-                for player in active_players:
-                    name = player['name'][:14]
-                    champ = player['champion'][:10]
-                    mode = player['gameMode'][:5]
-                    games = str(player['games'])
-                    winrate = player['winrate']
-                    kda = player['kda']
-                    pentas = str(player['pentas'])
-                    
-                    table += f"{name:<15} {champ:<10} {mode:<5} {games:<6} {winrate:<6} {kda:<5} {pentas:<3}\n"
-                
-                table += "```"
-                
-                await self.send_message(
-                    title="🎮 Live Game(s)",
-                    description=table,
-                    bot_channel="botlol"
-                )
-                num_matches_updated = await self.riotAPI.update_database()
-
-                if num_matches_updated > 0:
-                    await self.send_message(
-                        title="🎮 Database Updated",
-                        description=f"Added {num_matches_updated} matches to the database ({await self.lol_db.get_match_count()} total)",
-                        bot_channel="botlol"
-                    )
-                else:
-                    await self.send_message(
-                        title="🎮 Database Updated",
-                        description=f"No new matches found",
-                        bot_channel="botlol"
-                    )
-                await asyncio.sleep(200)
-
-            await asyncio.sleep(10)
     
     async def add_user_event(self, username, event, sound_name):
         """Add a join/leave event sound for a user"""
@@ -1674,17 +1355,9 @@ class BotBehavior:
             print(f"Error adding user event: {e}")
             return False
 
-    async def update_database_loop(self):
-        await self.riotAPI.update_database()
-        await asyncio.sleep(200)
 
-    async def refreshgames(self):
-        num_matches_updated = await self.riotAPI.update_database()
-        await self.send_message(
-            title="🎮 Database Updated",
-            description=f"Added {num_matches_updated} matches to the database ({await self.lol_db.get_match_count()} total)",
-            bot_channel="botlol"
-        )
+
+
 
     async def list_user_events(self, user, user_full_name, requesting_user=None):
         """List all join/leave events for a user with delete buttons"""

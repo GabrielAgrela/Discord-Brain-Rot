@@ -16,15 +16,8 @@ from Classes.Database import Database
 from Classes.MinecraftLogMonitor import MinecraftLogMonitor
 import random
 import time
-import wave
-import io
-import numpy as np
-from pydub import AudioSegment
-from pydub.effects import normalize
-from pydub.silence import detect_nonsilent
-from discord.sinks import WaveSink
-import json
-from Classes.SpeechRecognition import SpeechRecognizer, DiscordVoiceListener
+
+
 import platform # Added for OS detection
 import re # Add import for regex
 
@@ -185,67 +178,7 @@ def get_service_logs(lines=10, service_name=None):
         print(f"Error reading service logs: {e}")
         return None
 
-# Flag to enable/disable voice recognition
-voice_recognition_enabled = True
 
-# Keywords to detect in voice chat
-voice_keywords = [ "chapada", "diogo"]
-
-# Initialize speech recognizer
-vosk_model_path = os.path.join(os.path.dirname(__file__), "vosk-model-pt/vosk-model-small-pt-0.3")
-speech_recognizer = SpeechRecognizer(
-    model_path=vosk_model_path,
-    keywords=voice_keywords,
-    temp_dir=os.path.join(os.path.dirname(__file__), "temp_audio")
-)
-
-# Keyword detection callback
-async def handle_keyword_detection(guild, voice_channel, member, text, keywords):
-    """Handle keyword detection events from the voice listener"""
-    try:
-        # Special action for "chapada" keyword
-        if "chapada" in keywords:
-            # Get a random slap sound from the database
-            slap_sounds = Database().get_sounds(slap=True)
-            if slap_sounds:
-                random_slap = random.choice(slap_sounds)
-                # Play the sound in the voice channel
-                await behavior.play_audio(voice_channel, random_slap[2], member.name, is_entrance=False)
-                # Send notification message
-                await behavior.send_message(title=f"👋 {member.name} requested slap 👋", delete_time=5, send_controls=False)
-                # Log the action
-                Database().insert_action(member.name, "voice_activated_slap", random_slap[0])
-            else:
-                print("No slap sounds found in the database!")
-                
-        # Action for "black" keyword
-        elif "diogo" in keywords:
-            await behavior.send_message(title=f"🧑🏿 {member.name} requested black sound 🧑🏿", delete_time=5, send_controls=False)
-            # Get top 25 sounds similar to "black"
-            similar_sounds = Database().get_sounds_by_similarity_optimized("nigga", 25)
-            if similar_sounds:
-                # Choose one randomly
-                chosen_sound = random.choice(similar_sounds)
-                sound_id = chosen_sound[0]
-                sound_filename = chosen_sound[1] # Assuming index 1 is filename based on play_request
-                
-                # Play the sound
-                await behavior.play_audio(voice_channel, sound_filename, member.name, is_entrance=False)
-                # Send notification message
-                # Log the action
-                Database().insert_action(member.name, "voice_activated_black", sound_id)
-            else:
-                print("No sounds similar to 'black' found in the database!")
-                await behavior.send_message(title=f"Couldn't find sounds similar to 'black' for {member.name}", delete_time=10, send_controls=False)
-                
-    except Exception as e:
-        print(f"Error handling keyword detection: {e}")
-
-# Initialize voice listener
-voice_listener = DiscordVoiceListener(bot, speech_recognizer, handle_keyword_detection)
-
-# Initialize Minecraft log monitor
-minecraft_monitor = MinecraftLogMonitor(bot, "minecraft")
 
 # --- Background Task to Handle Web Playback Requests ---
 @tasks.loop(seconds=5.0)
@@ -378,7 +311,7 @@ async def on_ready():
     bot.loop.create_task(behavior.update_bot_status())
     bot.loop.create_task(SoundDownloader(behavior, behavior.db, os.getenv("CHROMEDRIVER_PATH")).move_sounds())
     check_playback_queue.start()
-    #bot.loop.create_task(voice_listener.listen_to_voice_channels())  # Start voice recognition
+
     
     # Start Minecraft log monitoring
     if minecraft_monitor.start_monitoring():
@@ -432,72 +365,7 @@ async def on_ready():
     print("Finished auto-join process.")
     # --- End Auto-join ---
 
-@bot.slash_command(name="voicerecognition", description="Enable or disable real-time voice conversation logging")
-async def voice_recognition_cmd(ctx, enabled: Option(bool, "Enable or disable voice recognition", required=True)):
-    global voice_recognition_enabled
-    
-    # Check if user has admin permission
-    if not behavior.is_admin_or_mod(ctx.author):
-        await ctx.respond("You don't have permission to use this command.", ephemeral=True)
-        return
-    
-    voice_recognition_enabled = enabled
-    voice_listener.set_enabled(enabled)
-    
-    if enabled:
-        await ctx.respond("Real-time voice conversation logging has been **enabled**. The bot will now print conversations it hears to the console.", ephemeral=False)
-        print("Voice recognition ENABLED by", ctx.author.name)
-    else:
-        await ctx.respond("Real-time voice conversation logging has been **disabled**.", ephemeral=False)
-        print("Voice recognition DISABLED by", ctx.author.name)
-    
-    Database().insert_action(ctx.author.name, "voice_recognition", "enabled" if enabled else "disabled")
 
-@bot.slash_command(name="keywords", description="Manage keywords for voice recognition")
-async def manage_keywords(ctx, 
-                         action: Option(str, "Action to perform", choices=["add", "remove", "list"], required=True),
-                         keyword: Option(str, "Keyword to add or remove", required=False)):
-    global voice_keywords, speech_recognizer
-    
-    # Check if user has admin permission
-    if not behavior.is_admin_or_mod(ctx.author):
-        await ctx.respond("You don't have permission to use this command.", ephemeral=True)
-        return
-                                
-    if action == "list":
-        if not voice_keywords:
-            await ctx.respond("No keywords are currently being monitored.", ephemeral=False)
-        else:
-            formatted_keywords = ", ".join(f"`{kw}`" for kw in voice_keywords)
-            await ctx.respond(f"**Currently monitoring these keywords:**\n{formatted_keywords}", ephemeral=False)
-    
-    elif action == "add" and keyword:
-        if keyword.lower() in [k.lower() for k in voice_keywords]:
-            await ctx.respond(f"Keyword `{keyword}` is already being monitored.", ephemeral=False)
-        else:
-            voice_keywords.append(keyword.lower())
-            # Update the speech recognizer with the new keywords
-            speech_recognizer.keywords = voice_keywords
-            await ctx.respond(f"Added keyword `{keyword}` to monitoring list.", ephemeral=False)
-            print(f"Keyword '{keyword}' added by {ctx.author.name}")
-    
-    elif action == "remove" and keyword:
-        # Case insensitive removal
-        lower_keywords = [k.lower() for k in voice_keywords]
-        if keyword.lower() in lower_keywords:
-            index = lower_keywords.index(keyword.lower())
-            removed = voice_keywords.pop(index)
-            # Update the speech recognizer with the updated keywords
-            speech_recognizer.keywords = voice_keywords
-            await ctx.respond(f"Removed keyword `{removed}` from monitoring list.", ephemeral=False)
-            print(f"Keyword '{removed}' removed by {ctx.author.name}")
-        else:
-            await ctx.respond(f"Keyword `{keyword}` is not in the monitoring list.", ephemeral=False)
-    
-    else:
-        await ctx.respond("Please provide a valid keyword to add or remove.", ephemeral=True)
-    
-    Database().insert_action(ctx.author.name, f"keyword_{action}", keyword if keyword else "list")
 
 async def get_sound_autocomplete(ctx):
     try:
@@ -730,35 +598,11 @@ async def change(ctx):
 async def change(ctx, number: Option(str, "number of sounds", default=10)):
     await behavior.list_sounds(ctx, int(number))
 
-# @bot.slash_command(name="userlolstats", description="get your lol stats", channel_ids=["1321095299367833723"])
-# async def userlolstats(ctx, username: Option(str, "username", required=True), gamemode: Option(str, "ARAM, CHERRY, CLASSIC, NEXUSBLITZ, ONEFORALL, STRAWBERRY, ULTBOOK, URF", required=True), champion: Option(str, "champion (ignore if you want all)", required=False)):
-#     await ctx.respond("Processing your request...", delete_after=0)
-#     await behavior.userlolstats(username, gamemode, champion)
 
-# @bot.slash_command(name="user_vs_userlolstats", description="get your lol stats vs another user", channel_ids=["1321095299367833723"])
-# async def user_vs_userlolstats(ctx, username1: Option(str, "username1", required=True), username2: Option(str, "username2", required=True), gamemode: Option(str, "ARAM, CHERRY, CLASSIC, NEXUSBLITZ, ONEFORALL, STRAWBERRY, ULTBOOK, URF", required=True), champion: Option(str, "champion name", required=True)):
-#     await ctx.respond("Processing your request...", delete_after=0)
-#     await behavior.user_vs_userlolstats(username1, username2, gamemode, champion)
 
-# @bot.slash_command(name="loltime", description="get this servers users lol time played this year(ish)", channel_ids=["1321095299367833723"])
-# async def loltime(ctx):
-#     await ctx.respond("Processing your request...", delete_after=0)
-#     await behavior.userloltime()
 
-# @bot.slash_command(name="lolfriends", description="stats of your friends in league of legends when you play with them", channel_ids=["1321095299367833723"])
-# async def lolfriends(ctx, username: Option(str, "username", required=True)):
-#     await ctx.respond("Processing your request...", delete_after=0)
-#     await behavior.userlolfriends(username)
 
-# @bot.slash_command(name="addloluser", description="username#tagline", channel_ids=["1321095299367833723"])
-# async def addloluser(ctx, username: Option(str, "username", required=True)):
-#     await ctx.respond("Processing your request...", delete_after=0)
-#     await behavior.insertLoLUser(username)
 
-# @bot.slash_command(name="refreshgames", description="refresh games")
-# async def refreshgames(ctx):
-#     await ctx.respond("Processing your request...", delete_after=0)
-#     await behavior.refreshgames()
 
 @bot.slash_command(name="addevent", description="Add a join/leave event sound for a user")
 async def add_event(ctx, 
