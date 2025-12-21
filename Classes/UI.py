@@ -835,11 +835,11 @@ class MuteToggleButton(Button):
             await self.bot_behavior.deactivate_mute(requested_by=interaction.user)
             Database().insert_action(interaction.user.name, "unmute", "")
         else:
-            # Play a slap sound first before muting
+            # Play a slap sound first before muting (await so it plays before mute activates)
             slap_sounds = Database().get_sounds(slap=True, num_sounds=100)
             if slap_sounds:
                 random_slap = random.choice(slap_sounds)
-                asyncio.create_task(self.bot_behavior.play_request(random_slap[1], interaction.user.name, exact=True))
+                await self.bot_behavior.play_request(random_slap[1], interaction.user.name, exact=True)
             
             await self.bot_behavior.activate_mute(duration_seconds=1800, requested_by=interaction.user)
             Database().insert_action(interaction.user.name, "mute_30_minutes", "")
