@@ -598,9 +598,298 @@ async def change(ctx):
 async def change(ctx, number: Option(str, "number of sounds", default=10)):
     await behavior.list_sounds(ctx, int(number))
 
+@bot.slash_command(name="yearreview", description="Show yearly stats wrapped!")
+async def year_review(ctx, 
+    user: Option(discord.Member, "User to view (defaults to yourself)", required=False, default=None),
+    year: Option(int, "Year to review (defaults to current year)", required=False, default=None)):
+    
+    # Default to command author if no user specified
+    target_user = user if user else ctx.author
+    await ctx.respond(f"Generating year review for {target_user.display_name}... 🎉", delete_after=0)
+    
+    # Default to current year
+    import datetime
+    if year is None:
+        year = datetime.datetime.now().year
+    
+    # Get the user's stats
+    username = target_user.name
+    stats = db.get_user_year_stats(username, year)
+    
+    # Check if user has any activity
+    total_activity = (stats['total_plays'] + stats['sounds_favorited'] + 
+                      stats['sounds_uploaded'] + stats['tts_messages'] + 
+                      stats['voice_joins'] + stats['mute_actions'])
+    
+    if total_activity == 0:
+        await behavior.send_message(
+            title=f"📊 {username}'s {year} Review",
+            description=f"No activity found for {year}! 😢\nMaybe try a different year?"
+        )
+        return
+    
+    # Build the embed description
+    lines = []
+    
+    # Leaderboard rank (if available)
+    if stats.get('user_rank') and stats.get('total_users'):
+        rank_emoji = "🏆" if stats['user_rank'] == 1 else "🎖️" if stats['user_rank'] <= 3 else "📊"
+        lines.append(f"{rank_emoji} **Rank #{stats['user_rank']}** of {stats['total_users']} users")
+        lines.append("")
+    
+    # Sound plays section
+    lines.append(f"## 🎵 Sounds Played: **{stats['total_plays']}**")
+    if stats['total_plays'] > 0:
+        breakdown = []
+        if stats['requested_plays'] > 0:
+            breakdown.append(f"🎯 Requested: {stats['requested_plays']}")
+        if stats['random_plays'] > 0:
+            breakdown.append(f"🎲 Random: {stats['random_plays']}")
+        if stats['favorite_plays'] > 0:
+            breakdown.append(f"⭐ Favorites: {stats['favorite_plays']}")
+        if breakdown:
+            lines.append("  " + " • ".join(breakdown))
+        
+        # Unique sounds variety
+        if stats.get('unique_sounds', 0) > 0:
+            variety_pct = round((stats['unique_sounds'] / stats['total_plays']) * 100)
+            lines.append(f"  🎨 Variety: **{stats['unique_sounds']}** unique sounds ({variety_pct}% variety)")
+    
+    # Top sounds
+    if stats['top_sounds']:
+        lines.append("")
+        lines.append("## 🔥 Your Top Sounds")
+        for i, (filename, count) in enumerate(stats['top_sounds'], 1):
+            emoji = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"][i-1]
+            clean_name = filename.replace('.mp3', '')
+            lines.append(f"{emoji} **{clean_name}** ({count} plays)")
+    
+    # Fun time stats
+    if stats.get('most_active_day') or stats.get('most_active_hour') is not None:
+        lines.append("")
+        lines.append("## ⏰ When You're Most Active")
+        if stats.get('most_active_day'):
+            lines.append(f"📅 Favorite day: **{stats['most_active_day']}** ({stats['most_active_day_count']} plays)")
+        if stats.get('most_active_hour') is not None:
+            hour = stats['most_active_hour']
+            hour_str = f"{hour}:00" if hour >= 10 else f"0{hour}:00"
+            time_emoji = "🌙" if hour < 6 or hour >= 22 else "🌅" if hour < 12 else "☀️" if hour < 18 else "🌆"
+            lines.append(f"{time_emoji} Peak hour: **{hour_str}** ({stats['most_active_hour_count']} plays)")
+    
+    # First and last sounds
+    if stats.get('first_sound') or stats.get('last_sound'):
+        lines.append("")
+        lines.append("## 📖 Your Sound Journey")
+        if stats.get('first_sound'):
+            first_name = stats['first_sound'].replace('.mp3', '')
+            first_date = stats['first_sound_date'][:10] if stats.get('first_sound_date') else ""
+            lines.append(f"🎬 First sound: **{first_name}** ({first_date})")
+        if stats.get('last_sound'):
+            last_name = stats['last_sound'].replace('.mp3', '')
+            last_date = stats['last_sound_date'][:10] if stats.get('last_sound_date') else ""
+            lines.append(f"🎞️ Latest sound: **{last_name}** ({last_date})")
+    
+    # Brain rot section (if any)
+    brain_rot = stats.get('brain_rot', {})
+    if brain_rot:
+        lines.append("")
+        lines.append("## 🧠 Brain Rot Activities")
+        if brain_rot.get('subway_surfers', 0) > 0:
+            lines.append(f"🛹 Subway Surfers: **{brain_rot['subway_surfers']}** times")
+        if brain_rot.get('family_guy', 0) > 0:
+            lines.append(f"👨‍👩‍👧 Family Guy: **{brain_rot['family_guy']}** times")
+        if brain_rot.get('slice_all', 0) > 0:
+            lines.append(f"🔪 Slice All: **{brain_rot['slice_all']}** times")
+    
+    # Voice & Activity Stats section
+    has_time_stats = (stats.get('total_voice_hours', 0) > 0 or 
+                      stats.get('longest_streak', 0) > 0 or 
+                      stats.get('total_active_days', 0) > 0)
+    if has_time_stats:
+        lines.append("")
+        lines.append("## 🎮 Voice & Activity Stats")
+        
+        if stats.get('total_voice_hours', 0) > 0:
+            hours = stats['total_voice_hours']
+            if hours >= 24:
+                days = round(hours / 24, 1)
+                lines.append(f"⏱️ Time in Voice: **{hours}h** ({days} days!)")
+            else:
+                lines.append(f"⏱️ Time in Voice: **{hours} hours**")
+        
+        if stats.get('longest_session_minutes', 0) > 0:
+            mins = stats['longest_session_minutes']
+            if mins >= 60:
+                hrs = stats.get('longest_session_hours', 0)
+                lines.append(f"🏃 Longest Session: **{hrs}h** ({mins} minutes)")
+            else:
+                lines.append(f"🏃 Longest Session: **{mins} minutes**")
+        
+        if stats.get('longest_streak', 0) > 0:
+            streak = stats['longest_streak']
+            streak_emoji = "🔥" if streak >= 7 else "📆"
+            lines.append(f"{streak_emoji} Longest Streak: **{streak} days** in a row!")
+        
+        if stats.get('total_active_days', 0) > 0:
+            lines.append(f"📅 Total Active Days: **{stats['total_active_days']}** days")
+    
+    # Other stats
+    lines.append("")
+    lines.append("## 📈 Other Activity")
+    
+    other_stats = []
+    if stats['sounds_favorited'] > 0:
+        other_stats.append(f"❤️ Favorited: **{stats['sounds_favorited']}** sounds")
+    if stats['sounds_uploaded'] > 0:
+        other_stats.append(f"📤 Uploaded: **{stats['sounds_uploaded']}** sounds")
+    if stats['tts_messages'] > 0:
+        other_stats.append(f"🗣️ TTS Messages: **{stats['tts_messages']}**")
+    if stats['voice_joins'] > 0:
+        other_stats.append(f"🚪 Voice Joins: **{stats['voice_joins']}**")
+    if stats['mute_actions'] > 0:
+        other_stats.append(f"🔇 Muted the Bot: **{stats['mute_actions']}** times 😤")
+    
+    if other_stats:
+        lines.extend(other_stats)
+    else:
+        lines.append("No other activity recorded!")
+    
+    # Send the embed
+    behavior.color = discord.Color.gold()
+    await behavior.send_message(
+        title=f"🎊 {username}'s {year} Year Review 🎊",
+        description="\n".join(lines),
+        thumbnail=target_user.display_avatar.url if target_user.display_avatar else None
+    )
 
-
-
+@bot.slash_command(name="sendyearreview", description="[Admin] Send year review as DM to a user")
+async def send_year_review(ctx, 
+    user: Option(discord.Member, "User to send the review to", required=True),
+    year: Option(int, "Year to review (defaults to current year)", required=False, default=None)):
+    
+    # Check admin permissions
+    if not behavior.is_admin_or_mod(ctx.author):
+        await ctx.respond("You don't have permission to use this command.", ephemeral=True)
+        return
+    
+    await ctx.respond(f"Generating year review for {user.display_name}... 📬", ephemeral=True)
+    
+    # Default to current year
+    import datetime
+    if year is None:
+        year = datetime.datetime.now().year
+    
+    # Get the user's stats
+    target_username = user.name
+    stats = db.get_user_year_stats(target_username, year)
+    
+    # Check if user has any activity
+    total_activity = (stats['total_plays'] + stats['sounds_favorited'] + 
+                      stats['sounds_uploaded'] + stats['tts_messages'] + 
+                      stats['voice_joins'] + stats['mute_actions'])
+    
+    if total_activity == 0:
+        await ctx.followup.send(f"No activity found for {user.display_name} in {year}.", ephemeral=True)
+        return
+    
+    # Build the embed (same as yearreview command)
+    lines = []
+    
+    if stats.get('user_rank') and stats.get('total_users'):
+        rank_emoji = "🏆" if stats['user_rank'] == 1 else "🎖️" if stats['user_rank'] <= 3 else "📊"
+        lines.append(f"{rank_emoji} **Rank #{stats['user_rank']}** of {stats['total_users']} users")
+        lines.append("")
+    
+    lines.append(f"## 🎵 Sounds Played: **{stats['total_plays']}**")
+    if stats['total_plays'] > 0:
+        breakdown = []
+        if stats['requested_plays'] > 0:
+            breakdown.append(f"🎯 Requested: {stats['requested_plays']}")
+        if stats['random_plays'] > 0:
+            breakdown.append(f"🎲 Random: {stats['random_plays']}")
+        if stats['favorite_plays'] > 0:
+            breakdown.append(f"⭐ Favorites: {stats['favorite_plays']}")
+        if breakdown:
+            lines.append("  " + " • ".join(breakdown))
+        if stats.get('unique_sounds', 0) > 0:
+            variety_pct = round((stats['unique_sounds'] / stats['total_plays']) * 100)
+            lines.append(f"  🎨 Variety: **{stats['unique_sounds']}** unique sounds ({variety_pct}% variety)")
+    
+    if stats['top_sounds']:
+        lines.append("")
+        lines.append("## 🔥 Your Top Sounds")
+        for i, (filename, count) in enumerate(stats['top_sounds'], 1):
+            emoji = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"][i-1]
+            clean_name = filename.replace('.mp3', '')
+            lines.append(f"{emoji} **{clean_name}** ({count} plays)")
+    
+    if stats.get('most_active_day') or stats.get('most_active_hour') is not None:
+        lines.append("")
+        lines.append("## ⏰ When You're Most Active")
+        if stats.get('most_active_day'):
+            lines.append(f"📅 Favorite day: **{stats['most_active_day']}** ({stats['most_active_day_count']} plays)")
+        if stats.get('most_active_hour') is not None:
+            hour = stats['most_active_hour']
+            hour_str = f"{hour}:00" if hour >= 10 else f"0{hour}:00"
+            time_emoji = "🌙" if hour < 6 or hour >= 22 else "🌅" if hour < 12 else "☀️" if hour < 18 else "🌆"
+            lines.append(f"{time_emoji} Peak hour: **{hour_str}** ({stats['most_active_hour_count']} plays)")
+    
+    if stats.get('first_sound') or stats.get('last_sound'):
+        lines.append("")
+        lines.append("## 📖 Your Sound Journey")
+        if stats.get('first_sound'):
+            first_name = stats['first_sound'].replace('.mp3', '')
+            first_date = stats['first_sound_date'][:10] if stats.get('first_sound_date') else ""
+            lines.append(f"🎬 First sound: **{first_name}** ({first_date})")
+        if stats.get('last_sound'):
+            last_name = stats['last_sound'].replace('.mp3', '')
+            last_date = stats['last_sound_date'][:10] if stats.get('last_sound_date') else ""
+            lines.append(f"🎞️ Latest sound: **{last_name}** ({last_date})")
+    
+    has_time_stats = (stats.get('total_voice_hours', 0) > 0 or 
+                      stats.get('longest_streak', 0) > 0 or 
+                      stats.get('total_active_days', 0) > 0)
+    if has_time_stats:
+        lines.append("")
+        lines.append("## 🎮 Voice & Activity Stats")
+        if stats.get('total_voice_hours', 0) > 0:
+            hours = stats['total_voice_hours']
+            if hours >= 24:
+                days = round(hours / 24, 1)
+                lines.append(f"⏱️ Time in Voice: **{hours}h** ({days} days!)")
+            else:
+                lines.append(f"⏱️ Time in Voice: **{hours} hours**")
+        if stats.get('longest_session_minutes', 0) > 0:
+            mins = stats['longest_session_minutes']
+            if mins >= 60:
+                hrs = stats.get('longest_session_hours', 0)
+                lines.append(f"🏃 Longest Session: **{hrs}h** ({mins} minutes)")
+            else:
+                lines.append(f"🏃 Longest Session: **{mins} minutes**")
+        if stats.get('longest_streak', 0) > 0:
+            streak = stats['longest_streak']
+            streak_emoji = "🔥" if streak >= 7 else "📆"
+            lines.append(f"{streak_emoji} Longest Streak: **{streak} days** in a row!")
+        if stats.get('total_active_days', 0) > 0:
+            lines.append(f"📅 Total Active Days: **{stats['total_active_days']}** days")
+    
+    # Create the embed
+    embed = discord.Embed(
+        title=f"🎊 {target_username}'s {year} Year Review 🎊",
+        description="\n".join(lines),
+        color=discord.Color.gold()
+    )
+    if user.display_avatar:
+        embed.set_thumbnail(url=user.display_avatar.url)
+    
+    # Send as DM
+    try:
+        await user.send(embed=embed)
+        await ctx.followup.send(f"✅ Year review sent to {user.display_name} via DM!", ephemeral=True)
+    except discord.Forbidden:
+        await ctx.followup.send(f"❌ Could not send DM to {user.display_name}. They may have DMs disabled.", ephemeral=True)
+    except Exception as e:
+        await ctx.followup.send(f"❌ Error sending DM: {e}", ephemeral=True)
 
 
 

@@ -854,6 +854,314 @@ class Database:
             print(f"Error getting sound download date: {e}")
             return "Unknown date"
 
+    def get_user_year_stats(self, username, year):
+        """Get comprehensive yearly stats for a user for the /yearreview command"""
+        stats = {
+            'total_plays': 0,
+            'random_plays': 0,
+            'requested_plays': 0,
+            'favorite_plays': 0,
+            'top_sounds': [],
+            'sounds_favorited': 0,
+            'sounds_uploaded': 0,
+            'tts_messages': 0,
+            'voice_joins': 0,
+            'voice_leaves': 0,
+            'mute_actions': 0,
+        }
+        
+        try:
+            year_start = f"{year}-01-01 00:00:00"
+            year_end = f"{year}-12-31 23:59:59"
+            
+            # Total plays and breakdown
+            play_actions = ['play_random_sound', 'replay_sound', 'play_random_favorite_sound', 
+                           'play_request', 'play_from_list', 'play_similar_sound']
+            
+            self.cursor.execute("""
+                SELECT action, COUNT(*) as count
+                FROM actions
+                WHERE username = ? 
+                AND timestamp BETWEEN ? AND ?
+                AND action IN ('play_random_sound', 'replay_sound', 'play_random_favorite_sound', 
+                              'play_request', 'play_from_list', 'play_similar_sound')
+                GROUP BY action
+            """, (username, year_start, year_end))
+            
+            for action, count in self.cursor.fetchall():
+                stats['total_plays'] += count
+                if action in ['play_random_sound']:
+                    stats['random_plays'] += count
+                elif action in ['play_request', 'replay_sound', 'play_from_list', 'play_similar_sound']:
+                    stats['requested_plays'] += count
+                elif action == 'play_random_favorite_sound':
+                    stats['favorite_plays'] += count
+            
+            # Top 5 sounds played
+            self.cursor.execute("""
+                SELECT s.Filename, COUNT(*) as play_count
+                FROM actions a
+                JOIN sounds s ON a.target = s.id
+                WHERE a.username = ?
+                AND a.timestamp BETWEEN ? AND ?
+                AND a.action IN ('play_random_sound', 'replay_sound', 'play_random_favorite_sound', 
+                                'play_request', 'play_from_list', 'play_similar_sound')
+                AND s.slap = 0
+                GROUP BY s.Filename
+                ORDER BY play_count DESC
+                LIMIT 5
+            """, (username, year_start, year_end))
+            stats['top_sounds'] = self.cursor.fetchall()
+            
+            # Sounds favorited
+            self.cursor.execute("""
+                SELECT COUNT(*) FROM actions
+                WHERE username = ? AND action = 'favorite_sound'
+                AND timestamp BETWEEN ? AND ?
+            """, (username, year_start, year_end))
+            stats['sounds_favorited'] = self.cursor.fetchone()[0]
+            
+            # Sounds uploaded
+            self.cursor.execute("""
+                SELECT COUNT(*) FROM actions
+                WHERE username = ? AND action = 'upload_sound'
+                AND timestamp BETWEEN ? AND ?
+            """, (username, year_start, year_end))
+            stats['sounds_uploaded'] = self.cursor.fetchone()[0]
+            
+            # TTS messages
+            self.cursor.execute("""
+                SELECT COUNT(*) FROM actions
+                WHERE username = ? AND action IN ('tts', 'tts_EL', 'sts_EL')
+                AND timestamp BETWEEN ? AND ?
+            """, (username, year_start, year_end))
+            stats['tts_messages'] = self.cursor.fetchone()[0]
+            
+            # Voice joins/leaves
+            self.cursor.execute("""
+                SELECT action, COUNT(*) FROM actions
+                WHERE username = ? AND action IN ('join', 'leave')
+                AND timestamp BETWEEN ? AND ?
+                GROUP BY action
+            """, (username, year_start, year_end))
+            for action, count in self.cursor.fetchall():
+                if action == 'join':
+                    stats['voice_joins'] = count
+                elif action == 'leave':
+                    stats['voice_leaves'] = count
+            
+            # Mute actions
+            self.cursor.execute("""
+                SELECT COUNT(*) FROM actions
+                WHERE username = ? AND action = 'mute_30_minutes'
+                AND timestamp BETWEEN ? AND ?
+            """, (username, year_start, year_end))
+            stats['mute_actions'] = self.cursor.fetchone()[0]
+            
+            # === NEW FUN STATS ===
+            
+            # Unique sounds played
+            self.cursor.execute("""
+                SELECT COUNT(DISTINCT a.target)
+                FROM actions a
+                JOIN sounds s ON a.target = s.id
+                WHERE a.username = ?
+                AND a.timestamp BETWEEN ? AND ?
+                AND a.action IN ('play_random_sound', 'replay_sound', 'play_random_favorite_sound', 
+                                'play_request', 'play_from_list', 'play_similar_sound')
+                AND s.slap = 0
+            """, (username, year_start, year_end))
+            stats['unique_sounds'] = self.cursor.fetchone()[0]
+            
+            # Most active day of week (0=Sunday, 1=Monday, etc in SQLite strftime %w)
+            self.cursor.execute("""
+                SELECT strftime('%w', timestamp) as day_of_week, COUNT(*) as count
+                FROM actions
+                WHERE username = ?
+                AND timestamp BETWEEN ? AND ?
+                AND action IN ('play_random_sound', 'replay_sound', 'play_random_favorite_sound', 
+                              'play_request', 'play_from_list', 'play_similar_sound')
+                GROUP BY day_of_week
+                ORDER BY count DESC
+                LIMIT 1
+            """, (username, year_start, year_end))
+            result = self.cursor.fetchone()
+            if result:
+                day_names = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+                stats['most_active_day'] = day_names[int(result[0])]
+                stats['most_active_day_count'] = result[1]
+            else:
+                stats['most_active_day'] = None
+                stats['most_active_day_count'] = 0
+            
+            # Most active hour
+            self.cursor.execute("""
+                SELECT strftime('%H', timestamp) as hour, COUNT(*) as count
+                FROM actions
+                WHERE username = ?
+                AND timestamp BETWEEN ? AND ?
+                AND action IN ('play_random_sound', 'replay_sound', 'play_random_favorite_sound', 
+                              'play_request', 'play_from_list', 'play_similar_sound')
+                GROUP BY hour
+                ORDER BY count DESC
+                LIMIT 1
+            """, (username, year_start, year_end))
+            result = self.cursor.fetchone()
+            if result:
+                hour = int(result[0])
+                stats['most_active_hour'] = hour
+                stats['most_active_hour_count'] = result[1]
+            else:
+                stats['most_active_hour'] = None
+                stats['most_active_hour_count'] = 0
+            
+            # First sound of the year
+            self.cursor.execute("""
+                SELECT s.Filename, a.timestamp
+                FROM actions a
+                JOIN sounds s ON a.target = s.id
+                WHERE a.username = ?
+                AND a.timestamp BETWEEN ? AND ?
+                AND a.action IN ('play_random_sound', 'replay_sound', 'play_random_favorite_sound', 
+                                'play_request', 'play_from_list', 'play_similar_sound')
+                AND s.slap = 0
+                ORDER BY a.timestamp ASC
+                LIMIT 1
+            """, (username, year_start, year_end))
+            result = self.cursor.fetchone()
+            stats['first_sound'] = result[0] if result else None
+            stats['first_sound_date'] = result[1] if result else None
+            
+            # Last sound of the year (most recent)
+            self.cursor.execute("""
+                SELECT s.Filename, a.timestamp
+                FROM actions a
+                JOIN sounds s ON a.target = s.id
+                WHERE a.username = ?
+                AND a.timestamp BETWEEN ? AND ?
+                AND a.action IN ('play_random_sound', 'replay_sound', 'play_random_favorite_sound', 
+                                'play_request', 'play_from_list', 'play_similar_sound')
+                AND s.slap = 0
+                ORDER BY a.timestamp DESC
+                LIMIT 1
+            """, (username, year_start, year_end))
+            result = self.cursor.fetchone()
+            stats['last_sound'] = result[0] if result else None
+            stats['last_sound_date'] = result[1] if result else None
+            
+            # Brain rot activities (subway surfers, family guy, etc.)
+            self.cursor.execute("""
+                SELECT action, COUNT(*) as count
+                FROM actions
+                WHERE username = ?
+                AND timestamp BETWEEN ? AND ?
+                AND action IN ('subway_surfers', 'family_guy', 'slice_all')
+                GROUP BY action
+            """, (username, year_start, year_end))
+            brain_rot = {}
+            for action, count in self.cursor.fetchall():
+                brain_rot[action] = count
+            stats['brain_rot'] = brain_rot
+            
+            # Leaderboard rank (compare to other users)
+            self.cursor.execute("""
+                SELECT username, COUNT(*) as play_count
+                FROM actions
+                WHERE timestamp BETWEEN ? AND ?
+                AND action IN ('play_random_sound', 'replay_sound', 'play_random_favorite_sound', 
+                              'play_request', 'play_from_list', 'play_similar_sound')
+                GROUP BY username
+                ORDER BY play_count DESC
+            """, (year_start, year_end))
+            all_users = self.cursor.fetchall()
+            stats['total_users'] = len(all_users)
+            stats['user_rank'] = None
+            for i, (user, count) in enumerate(all_users, 1):
+                if user == username:
+                    stats['user_rank'] = i
+                    break
+            
+            # === SESSION & TIME STATS ===
+            
+            # Get all join/leave events to calculate time spent in voice
+            self.cursor.execute("""
+                SELECT action, timestamp
+                FROM actions
+                WHERE username = ?
+                AND timestamp BETWEEN ? AND ?
+                AND action IN ('join', 'leave')
+                ORDER BY timestamp ASC
+            """, (username, year_start, year_end))
+            voice_events = self.cursor.fetchall()
+            
+            total_seconds = 0
+            longest_session_seconds = 0
+            current_join_time = None
+            
+            for action, timestamp in voice_events:
+                if action == 'join':
+                    current_join_time = timestamp
+                elif action == 'leave' and current_join_time:
+                    try:
+                        # Parse timestamps
+                        from datetime import datetime
+                        join_dt = datetime.strptime(current_join_time, '%Y-%m-%d %H:%M:%S')
+                        leave_dt = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S')
+                        session_seconds = (leave_dt - join_dt).total_seconds()
+                        
+                        # Cap individual sessions at 12 hours to filter outliers
+                        if 0 < session_seconds <= 43200:
+                            total_seconds += session_seconds
+                            if session_seconds > longest_session_seconds:
+                                longest_session_seconds = session_seconds
+                    except:
+                        pass
+                    current_join_time = None
+            
+            stats['total_voice_hours'] = round(total_seconds / 3600, 1)
+            stats['longest_session_hours'] = round(longest_session_seconds / 3600, 1)
+            stats['longest_session_minutes'] = round(longest_session_seconds / 60)
+            
+            # Activity streak (consecutive days with any play action)
+            self.cursor.execute("""
+                SELECT DISTINCT date(timestamp) as play_date
+                FROM actions
+                WHERE username = ?
+                AND timestamp BETWEEN ? AND ?
+                AND action IN ('play_random_sound', 'replay_sound', 'play_random_favorite_sound', 
+                              'play_request', 'play_from_list', 'play_similar_sound')
+                ORDER BY play_date ASC
+            """, (username, year_start, year_end))
+            active_dates = [row[0] for row in self.cursor.fetchall()]
+            
+            stats['total_active_days'] = len(active_dates)
+            
+            # Calculate longest streak
+            longest_streak = 0
+            current_streak = 0
+            prev_date = None
+            
+            from datetime import datetime, timedelta
+            for date_str in active_dates:
+                current_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+                if prev_date is None:
+                    current_streak = 1
+                elif (current_date - prev_date).days == 1:
+                    current_streak += 1
+                else:
+                    current_streak = 1
+                
+                if current_streak > longest_streak:
+                    longest_streak = current_streak
+                prev_date = current_date
+            
+            stats['longest_streak'] = longest_streak
+            
+            return stats
+        except Exception as e:
+            print(f"Error getting user year stats: {e}")
+            return stats
+
 class Migrate:
     # function that migrates sounds.csv to the database table 'sounds'
     @staticmethod
