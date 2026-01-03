@@ -1,133 +1,91 @@
 """
 UI subpackage - Discord UI components (buttons, views, modals).
-
-This package contains all Discord UI components used by the bot,
-including buttons, views, and modals for sound controls, user events,
-and various interactive features.
 """
 
-# Import all components from the unified components file
-# This maintains backwards compatibility while allowing future splitting
-from bot.ui.components import (
-    # Buttons
-    ReplayButton,
-    STSButton,
-    IsolateButton,
-    FavoriteButton,
-    BlacklistButton,
-    ChangeSoundNameButton,
-    DownloadSoundButton,
-    UploadSoundButton,
-    PlayRandomButton,
-    PlayRandomFavoriteButton,
-    ListFavoritesButton,
-    ListBlacklistButton,
-    SlapButton,
-    PlaySlapButton,
-    ListSoundsButton,
-    SubwaySurfersButton,
-    SliceAllButton,
-    FamilyGuyButton,
-    BrainRotButton,
-    StatsButton,
-    ListLastScrapedSoundsButton,
-    MuteToggleButton,
-    PlaySoundButton,
-    AssignUserEventButton,
-    PaginationButton,
-    ListUserFavoritesButton,
-    DeleteEventButton,
-    EventPaginationButton,
-    SoundListButton,
-    SoundListItemButton,
-    CreateListButton,
-    AddToListButton,
-    RemoveFromListButton,
-    DeleteListButton,
-    SoundListPaginationButton,
-    # Views
-    ControlsView,
-    SoundView,
-    EventView,
-    PaginatedEventView,
-    DownloadedSoundView,
-    SoundBeingPlayedView,
-    SoundBeingPlayedWithSuggestionsView,
-    UserEventSelectView,
-    UploadChoiceView,
-    PaginatedFavoritesView,
-    PaginatedSoundListView,
-    UserSoundListsView,
-    # Selects
-    EventTypeSelect,
-    UserSelect,
-    SimilarSoundsSelect,
-    LoadingSimilarSoundsSelect,
-    AddToListSelect,
-    # Modals
-    UploadSoundModal,
-    ChangeSoundNameModal,
-    CreateListModalWithSoundAdd,
+from bot.ui.buttons.sounds import (
+    ReplayButton, STSButton, IsolateButton, FavoriteButton, 
+    BlacklistButton, ChangeSoundNameButton, DownloadSoundButton,
+    PlaySoundButton, SlapButton, PlaySlapButton, AssignUserEventButton,
+    STSCharacterSelectButton
+)
+from bot.ui.buttons.upload import (
+    UploadSoundButton, UploadMP3FileButton, UploadChoiceView
+)
+from bot.ui.buttons.list_buttons import (
+    ListSoundsButton, ListLastScrapedSoundsButton, SoundListButton,
+    CreateListButton, AddToListButton, SoundListItemButton, 
+    RemoveFromListButton, DeleteListButton
+)
+from bot.ui.buttons.navigation import (
+    PaginationButton, SoundListPaginationButton, EventPaginationButton
+)
+from bot.ui.buttons.misc import (
+    SubwaySurfersButton, SliceAllButton, FamilyGuyButton, 
+    BrainRotButton, StatsButton, PlayRandomButton, 
+    PlayRandomFavoriteButton, ListFavoritesButton, ListUserFavoritesButton
+)
+from bot.ui.buttons.admin import (
+    MuteToggleButton, ListBlacklistButton
+)
+from bot.ui.buttons.events import (
+    ConfirmUserEventButton, CancelButton, DeleteEventButton
+)
+from bot.ui.views.sounds import (
+    SoundBeingPlayedView, SoundBeingPlayedWithSuggestionsView
+)
+from bot.ui.views.lists import (
+    PaginatedSoundListView, UserSoundListsView
+)
+from bot.ui.views.controls import (
+    ControlsView, DownloadedSoundView, SoundView
+)
+from bot.ui.views.events import (
+    UserEventSelectView, EventView, PaginatedEventView
+)
+from bot.ui.views.favorites import (
+    PaginatedFavoritesView
+)
+from bot.ui.selects import (
+    EventTypeSelect, UserSelect, SoundSelect, AddToListSelect,
+    STSCharacterSelect, SimilarSoundsSelect, LoadingSimilarSoundsSelect
+)
+from bot.ui.modals import (
+    UploadSoundModal, ChangeSoundNameModal, CreateListModalWithSoundAdd
 )
 
 __all__ = [
-    # Buttons
-    'ReplayButton',
-    'STSButton',
-    'IsolateButton',
-    'FavoriteButton',
-    'BlacklistButton',
-    'ChangeSoundNameButton',
-    'DownloadSoundButton',
-    'UploadSoundButton',
-    'PlayRandomButton',
-    'PlayRandomFavoriteButton',
-    'ListFavoritesButton',
-    'ListBlacklistButton',
-    'SlapButton',
-    'PlaySlapButton',
-    'ListSoundsButton',
-    'SubwaySurfersButton',
-    'SliceAllButton',
-    'FamilyGuyButton',
-    'BrainRotButton',
-    'StatsButton',
-    'ListLastScrapedSoundsButton',
-    'MuteToggleButton',
-    'PlaySoundButton',
-    'AssignUserEventButton',
-    'PaginationButton',
-    'ListUserFavoritesButton',
-    'DeleteEventButton',
-    'EventPaginationButton',
-    'SoundListButton',
-    'SoundListItemButton',
-    'CreateListButton',
-    'AddToListButton',
-    'RemoveFromListButton',
-    'DeleteListButton',
-    'SoundListPaginationButton',
+    # Buttons - Sounds
+    'ReplayButton', 'STSButton', 'IsolateButton', 'FavoriteButton', 
+    'BlacklistButton', 'ChangeSoundNameButton', 'DownloadSoundButton',
+    'PlaySoundButton', 'SlapButton', 'PlaySlapButton', 'AssignUserEventButton',
+    'STSCharacterSelectButton', 'UploadSoundButton', 'UploadMP3FileButton',
+    
+    # Buttons - Lists
+    'ListSoundsButton', 'ListLastScrapedSoundsButton', 'SoundListButton',
+    'CreateListButton', 'AddToListButton', 'SoundListItemButton', 
+    'RemoveFromListButton', 'DeleteListButton',
+    
+    # Buttons - Navigation & Misc
+    'PaginationButton', 'EventPaginationButton', 'SoundListPaginationButton',
+    'SubwaySurfersButton', 'SliceAllButton', 'FamilyGuyButton', 
+    'BrainRotButton', 'StatsButton', 'PlayRandomButton', 
+    'PlayRandomFavoriteButton', 'ListFavoritesButton', 'ListUserFavoritesButton',
+    
+    # Buttons - Admin & Events
+    'MuteToggleButton', 'ListBlacklistButton',
+    'ConfirmUserEventButton', 'CancelButton', 'DeleteEventButton',
+    
     # Views
-    'ControlsView',
-    'SoundView',
-    'EventView',
-    'PaginatedEventView',
-    'DownloadedSoundView',
-    'SoundBeingPlayedView',
-    'SoundBeingPlayedWithSuggestionsView',
-    'UserEventSelectView',
-    'UploadChoiceView',
-    'PaginatedFavoritesView',
-    'PaginatedSoundListView',
-    'UserSoundListsView',
+    'SoundBeingPlayedView', 'SoundBeingPlayedWithSuggestionsView',
+    'PaginatedSoundListView', 'UserSoundListsView',
+    'ControlsView', 'DownloadedSoundView', 'SoundView',
+    'UserEventSelectView', 'EventView', 'PaginatedEventView',
+    'PaginatedFavoritesView', 'UploadChoiceView',
+    
     # Selects
-    'EventTypeSelect',
-    'UserSelect',
-    'SimilarSoundsSelect',
-    'LoadingSimilarSoundsSelect',
-    'AddToListSelect',
+    'EventTypeSelect', 'UserSelect', 'SoundSelect', 'AddToListSelect',
+    'STSCharacterSelect', 'SimilarSoundsSelect', 'LoadingSimilarSoundsSelect',
+    
     # Modals
-    'UploadSoundModal',
-    'ChangeSoundNameModal',
-    'CreateListModalWithSoundAdd',
+    'UploadSoundModal', 'ChangeSoundNameModal', 'CreateListModalWithSoundAdd',
 ]

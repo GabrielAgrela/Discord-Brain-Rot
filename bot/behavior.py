@@ -16,7 +16,7 @@ import uuid
 
 from bot.tts import TTS
 import csv
-from bot.ui.components import (
+from bot.ui import (
     SoundBeingPlayedView,
     SoundBeingPlayedWithSuggestionsView,
     LoadingSimilarSoundsSelect,
@@ -1166,7 +1166,8 @@ class BotBehavior:
                  return
         else:
             # Find the best match
-            filenames = Database().get_sounds_by_similarity(id, 1) # Find only the top match
+            results = Database().get_sounds_by_similarity(id, 1) # Find only the top match
+            filenames = [r[0] for r in results] # Extract sound tuples
             #remove first element from list
             if not filenames:
                 await self.send_error_message(f"No sounds found matching '{id}'.")
@@ -1230,7 +1231,7 @@ class BotBehavior:
                     message = await self.send_message(title="Last "+ str(count)+" Sounds Downloaded", view=sound_view)
                 else:
                     Database().insert_action(user.name, "list_all_sounds", "all")
-                    message = await self.send_message(description="Total sounds downloaded: "+str(len(sounds)), file=discord.File(self.db_path, 'Data/soundsDB.csv'))
+                    message = await self.send_message(description="Total sounds downloaded: "+str(len(sounds)))
                 print(f"Message sent to the chat.")
                 await asyncio.sleep(120)
                 await message.delete()
@@ -1327,7 +1328,8 @@ class BotBehavior:
         """Add a join/leave event sound for a user"""
         try:
             # Find the most similar sound in the database
-            similar_sounds = Database().get_sounds_by_similarity(sound_name)
+            results = Database().get_sounds_by_similarity(sound_name)
+            similar_sounds = [r[0] for r in results] # Extract sound tuples
             if not similar_sounds:
                 return False
             
@@ -1437,7 +1439,7 @@ class BotBehavior:
                 return
             
             # Filter out the exact audio_file being played from suggestions
-            similar_sounds_list = [s for s in all_similar if s[1] != audio_file]
+            similar_sounds_list = [s for s in all_similar if s[0][1] != audio_file] # s is (sound_tuple, score), s[0][1] is originalfilename
             
             # Limit to the desired number of suggestions
             similar_sounds_list = similar_sounds_list[:num_suggestions]
@@ -1479,7 +1481,7 @@ class BotBehavior:
                 return
                 
             # Import UI classes to avoid circular imports
-            from bot.ui.components import SoundBeingPlayedView, SoundBeingPlayedWithSuggestionsView
+            from bot.ui import SoundBeingPlayedView, SoundBeingPlayedWithSuggestionsView
             
             # Use the previously stored similar sounds instead of finding them again
             similar_sounds = self.current_similar_sounds
@@ -1500,7 +1502,7 @@ class BotBehavior:
                     None,
                     functools.partial(Database().get_sounds_by_similarity, sound_name, 6, 0.00001),
                 )  # Get 6 to ensure we have enough after filtering
-                similar_sounds = [s for s in similar_sounds if s[1] != audio_file][:5]  # Limit to 5
+                similar_sounds = [s for s in similar_sounds if s[0][1] != audio_file][:5]  # Limit to 5
                 print(f"Fallback: Found {len(similar_sounds)} similar sounds for updating message")
             else:
                 print(f"Reusing {len(similar_sounds)} previously found similar sounds for updating message")

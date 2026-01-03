@@ -16,7 +16,7 @@ from discord.commands import Option
 import re
 
 from bot.database import Database
-from bot.ui.components import PaginatedSoundListView, UserSoundListsView
+from bot.ui import PaginatedSoundListView, UserSoundListsView
 
 
 class ListCog(commands.Cog):

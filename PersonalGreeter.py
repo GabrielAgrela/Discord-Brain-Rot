@@ -29,8 +29,8 @@ env = Environment()
 intents = discord.Intents(guilds=True, voice_states=True, messages=True, message_content=True, members=True)
 bot = Bot(command_prefix="*", intents=intents, token=env.bot_token, ffmpeg_path=env.ffmpeg_path)
 
-# Usage
-#userUtils = UsersUtils(os.path.abspath(os.path.join(os.path.dirname(__file__), "Data", "Users.json")))
+
+
 
 behavior = BotBehavior(bot, env.ffmpeg_path)
 
@@ -42,10 +42,6 @@ bot.add_cog(ListCog(bot, behavior))
 bot.add_cog(EventCog(bot, behavior))
 bot.add_cog(StatsCog(bot, behavior))
 db = Database(behavior=behavior)
-file_name = 'play_requests.csv'
-
-
-
 
 
 # --- Background Task to Handle Web Playback Requests ---
