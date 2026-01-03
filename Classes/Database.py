@@ -630,24 +630,31 @@ class Database:
     def add_sound_to_list(self, list_id, sound_filename):
         """Add a sound to a list"""
         try:
-            # Check if the sound exists
+            # Check if the sound exists - try both filename and originalfilename
             self.cursor.execute("SELECT filename FROM sounds WHERE originalfilename = ?", (sound_filename,))
             sound = self.cursor.fetchone()
             if not sound:
+                # Try matching against the actual filename as well
+                self.cursor.execute("SELECT filename FROM sounds WHERE filename = ?", (sound_filename,))
+                sound = self.cursor.fetchone()
+            if not sound:
                 return False, "Sound not found"
+            
+            # Use the actual filename from the sounds table for storage
+            actual_filename = sound[0]
                 
             # Check if the sound is already in the list
             self.cursor.execute(
                 "SELECT id FROM sound_list_items WHERE list_id = ? AND sound_filename = ?",
-                (list_id, sound_filename)
+                (list_id, actual_filename)
             )
             if self.cursor.fetchone():
                 return False, "Sound already in list"
                 
-            # Add the sound to the list
+            # Add the sound to the list using the actual filename
             self.cursor.execute(
                 "INSERT INTO sound_list_items (list_id, sound_filename) VALUES (?, ?)",
-                (list_id, sound_filename)
+                (list_id, actual_filename)
             )
             self.conn.commit()
             return True, "Sound added to list"
@@ -732,7 +739,7 @@ class Database:
                 FROM sound_list_items sli
                 JOIN sounds s ON sli.sound_filename = s.filename
                 WHERE sli.list_id = ?
-                ORDER BY sli.added_at
+                ORDER BY sli.added_at DESC
                 """,
                 (list_id,)
             )

@@ -13,7 +13,6 @@ from discord import default_permissions
 from Classes.UsersUtils import UsersUtils
 from Classes.SoundDownloader import SoundDownloader
 from Classes.Database import Database
-from Classes.MinecraftLogMonitor import MinecraftLogMonitor
 import random
 import time
 
@@ -312,14 +311,6 @@ async def on_ready():
     bot.loop.create_task(SoundDownloader(behavior, behavior.db, os.getenv("CHROMEDRIVER_PATH")).move_sounds())
     check_playback_queue.start()
 
-    
-    # Start Minecraft log monitoring
-    if minecraft_monitor.start_monitoring():
-        print("Minecraft log monitoring started successfully")
-        # Test channel access and send initial message
-       # await minecraft_monitor.test_channel_access()
-    else:
-        print("Failed to start Minecraft log monitoring - check if /opt/minecraft/logs exists")
 
     # --- Auto-join most populated voice channel --- 
     print("Attempting to join the most populated voice channel in each guild...")
@@ -395,16 +386,20 @@ async def get_list_autocomplete(ctx):
         # Get all lists
         all_lists = db.get_sound_lists()
         
+        # Format as "list_name (by creator)"
+        def format_list(list_name, creator):
+            return f"{list_name} (by {creator})"
+        
         # If no input, return all lists (up to 25)
         if not current:
-            return [list_name for _, list_name, _, _, _ in all_lists][:25]
+            return [format_list(list_name, creator) for _, list_name, creator, _, _ in all_lists][:25]
         
         # Filter lists based on input
         matching_lists = []
         for list_id, list_name, creator, created_at, sound_count in all_lists:
-            if current in list_name.lower():
-                # Format as "list_name"
-                matching_lists.append(f"{list_name}")
+            formatted = format_list(list_name, creator)
+            if current in list_name.lower() or current in creator.lower():
+                matching_lists.append(formatted)
         
         # Sort by relevance (exact matches first, then starts with, then contains)
         exact_matches = [name for name in matching_lists if name.lower() == current]
@@ -1030,33 +1025,45 @@ async def delete_list(ctx, list_name: Option(str, "Name of your list", autocompl
 
 @bot.slash_command(name="showlist", description="Display a sound list with buttons")
 async def show_list(ctx, list_name: Option(str, "Name of the list to display", autocomplete=get_list_autocomplete, required=True)):
+    # Defer immediately to acknowledge the interaction
+    await ctx.defer()
+    
+    # Parse the list name - it might be in "name (by creator)" format from autocomplete
+    import re
+    match = re.match(r'^(.+?) \(by (.+)\)$', list_name)
+    if match:
+        actual_list_name = match.group(1)
+    else:
+        actual_list_name = list_name
+    
     # Get the list
-    sound_list = db.get_list_by_name(list_name)
+    sound_list = db.get_list_by_name(actual_list_name)
     if not sound_list:
-        await ctx.respond(f"List '{list_name}' not found.", ephemeral=True)
+        await ctx.followup.send(f"List '{actual_list_name}' not found.", ephemeral=True)
         return
         
     list_id = sound_list[0]
+    display_name = sound_list[1]  # Use the actual list name from DB
     
     # Get the sounds in the list
     sounds = db.get_sounds_in_list(list_id)
     if not sounds:
-        await ctx.respond(f"List '{list_name}' is empty.", ephemeral=True)
+        await ctx.followup.send(f"List '{display_name}' is empty.", ephemeral=True)
         return
         
     # Create a paginated view with buttons for each sound
     from Classes.UI import PaginatedSoundListView
-    view = PaginatedSoundListView(behavior, list_id, list_name, sounds, ctx.author.name)
+    view = PaginatedSoundListView(behavior, list_id, display_name, sounds, ctx.author.name)
     
     # Send a message with the view
     await behavior.send_message(
-        title=f"Sound List: {list_name} (Page 1/{len(view.pages)})",
-        description=f"Contains {len(sounds)} sounds. Showing sounds 1-{min(8, len(sounds))} of {len(sounds)}",
+        title=f"Sound List: {display_name} (Page 1/{len(view.pages)})",
+        description=f"Contains {len(sounds)} sounds. Showing sounds 1-{min(4, len(sounds))} of {len(sounds)}",
         view=view
     )
     
-    # Remove the redundant confirmation message
-    await ctx.respond(delete_after=0)
+    # Delete the deferred "thinking..." message
+    await ctx.delete()
 
 @bot.slash_command(name="mylists", description="Show your sound lists")
 async def my_lists(ctx):
@@ -1080,26 +1087,6 @@ async def my_lists(ctx):
     # Remove the redundant confirmation message
     await ctx.respond(delete_after=0)
 
-@bot.slash_command(name="showlists", description="Show all available sound lists")
-async def show_lists(ctx):
-    # Get all sound lists
-    lists = db.get_sound_lists()
-    if not lists:
-        await ctx.respond("There are no sound lists available yet. Create one with `/createlist`.", ephemeral=True)
-        return
-    
-    # Create a view with buttons for each list
-    from Classes.UI import UserSoundListsView
-    view = UserSoundListsView(behavior, lists, None)  # Pass None as creator to indicate showing all lists
-    
-    # Send a message with the view
-    await behavior.send_message(
-        title="All Sound Lists",
-        description=f"There are {len(lists)} sound lists available. Click a list to view its sounds.",
-        view=view
-    )
-    
-    await ctx.respond(delete_after=0)
 
 @bot.event
 async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
@@ -1167,10 +1154,6 @@ async def on_close():
     print("Bot is closing, cleaning up resources...")
     # Stop voice listeners and shut down the executor
     await voice_listener.stop_all_listeners()
-    # Stop Minecraft log monitoring
-    if minecraft_monitor.observer and minecraft_monitor.observer.is_alive():
-        minecraft_monitor.stop_monitoring()
-        print("Minecraft log monitoring stopped")
     check_playback_queue.cancel()
     print("Cleanup complete.")
 
@@ -1253,77 +1236,6 @@ async def on_message(message):
 
 # --- End DM Video Link Handler ---
 
-@bot.slash_command(name="minecraft", description="Control Minecraft server log monitoring")
-async def minecraft_logs(ctx, 
-                        action: Option(str, "Action to perform", choices=["start", "stop", "status", "test"], required=True),
-                        channel: Option(str, "Channel name for monitoring (default: minecraft)", required=False, default="minecraft")):
-    """Control Minecraft server log monitoring"""
-    global minecraft_monitor
-    
-    # Check for admin permissions
-    if not behavior.is_admin_or_mod(ctx.author):
-        await ctx.respond("You don't have permission to use this command.", ephemeral=True)
-        return
-    
-    if action == "start":
-        # Stop existing monitor if running
-        if minecraft_monitor.observer and minecraft_monitor.observer.is_alive():
-            minecraft_monitor.stop_monitoring()
-        
-        # Create new monitor with specified channel
-        minecraft_monitor = MinecraftLogMonitor(bot, channel)
-        
-        if minecraft_monitor.start_monitoring():
-            await ctx.respond(f"✅ Minecraft log monitoring started for channel `#{channel}`")
-            # Test channel access
-            success = await minecraft_monitor.test_channel_access()
-            if not success:
-                await ctx.followup.send(f"⚠️ Warning: Could not find or access channel `#{channel}`. Make sure the channel exists and the bot has permissions.")
-        else:
-            await ctx.respond("❌ Failed to start Minecraft log monitoring. Check if `/opt/minecraft/logs/latest.log` exists.")
-    
-    elif action == "stop":
-        if minecraft_monitor.observer and minecraft_monitor.observer.is_alive():
-            minecraft_monitor.stop_monitoring()
-            await ctx.respond("✅ Minecraft log monitoring stopped")
-        else:
-            await ctx.respond("⚠️ Minecraft log monitoring is not currently running")
-    
-    elif action == "status":
-        if minecraft_monitor.observer and minecraft_monitor.observer.is_alive():
-            channel_name = minecraft_monitor.channel_name
-            log_path = "/opt/minecraft/logs/latest.log"
-            log_exists = os.path.exists(log_path)
-            
-            embed = discord.Embed(
-                title="🎮 Minecraft Log Monitor Status",
-                color=discord.Color.green(),
-                timestamp=datetime.datetime.now()
-            )
-            embed.add_field(name="Status", value="✅ Running", inline=True)
-            embed.add_field(name="Channel", value=f"#{channel_name}", inline=True)
-            embed.add_field(name="Log File", value="✅ Exists" if log_exists else "❌ Missing", inline=True)
-            
-            await ctx.respond(embed=embed)
-        else:
-            embed = discord.Embed(
-                title="🎮 Minecraft Log Monitor Status",
-                color=discord.Color.red(),
-                timestamp=datetime.datetime.now()
-            )
-            embed.add_field(name="Status", value="❌ Stopped", inline=True)
-            
-            await ctx.respond(embed=embed)
-    
-    elif action == "test":
-        if minecraft_monitor.observer and minecraft_monitor.observer.is_alive():
-            success = await minecraft_monitor.test_channel_access()
-            if success:
-                await ctx.respond("✅ Test message sent successfully to minecraft channel")
-            else:
-                await ctx.respond("❌ Failed to send test message. Check channel permissions.")
-        else:
-            await ctx.respond("⚠️ Minecraft log monitoring is not running. Start it first with `/minecraft start`")
 
 @bot.slash_command(name="lastlogs", description="Show the last service logs")
 async def last_logs(ctx, lines: Option(int, "Number of log lines", required=False, default=10), service: Option(str, "Service name (optional)", required=False)):

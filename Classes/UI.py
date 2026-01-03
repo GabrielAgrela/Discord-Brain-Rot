@@ -1764,8 +1764,8 @@ class SoundListPaginationButton(Button):
         
         # Update both the content and description
         total_sounds = sum(len(page) for page in view.pages)
-        current_page_start = (view.current_page * 8) + 1
-        current_page_end = min((view.current_page + 1) * 8, total_sounds)
+        current_page_start = (view.current_page * 4) + 1
+        current_page_end = min((view.current_page + 1) * 4, total_sounds)
         
         await interaction.message.edit(
             content=None,
@@ -1787,9 +1787,9 @@ class PaginatedSoundListView(View):
         self.owner = owner  # Store the user who created the view
         
         # We can have 4 rows of sound buttons (row 1-4, as row 0 is for navigation)
-        # Each row can have 2 pairs of buttons (sound + remove)
-        # So we can show 8 sounds per page (2 pairs * 4 rows)
-        chunk_size = 8
+        # Each row has 1 sound (sound button + remove button)
+        # So we can show 4 sounds per page
+        chunk_size = 4
         self.pages = [sounds[i:i + chunk_size] for i in range(0, len(sounds), chunk_size)]
         
         # Add navigation buttons
@@ -1845,8 +1845,8 @@ class PaginatedSoundListView(View):
                 display_name = display_name[:77] + "..."
             
             # Calculate row (starting from row 1, as row 0 is for navigation)
-            # We can fit 2 pairs (sound + remove) per row
-            row = (i // 2) + 1  # This will give us rows 1, 2, 3, 4 for up to 8 items
+            # Each sound gets its own row (1 sound per row)
+            row = i + 1  # This will give us rows 1, 2, 3, 4 for up to 4 items
             
             # Add sound button
             self.add_item(SoundListItemButton(
@@ -1873,7 +1873,7 @@ class UserSoundListsView(discord.ui.View):
         self.bot_behavior = bot_behavior
         
         # Add buttons for each list (up to 25 due to Discord's limit)
-        for i, (list_id, list_name, creator, created_at) in enumerate(lists[:25]):
+        for i, (list_id, list_name, creator, created_at, sound_count) in enumerate(lists[:25]):
             button_label = list_name
             # If showing all lists (username is None), include creator name in button label
             if username is None:
