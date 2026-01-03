@@ -11,7 +11,7 @@ import subprocess
 import tempfile
 import re
 import aiohttp
-from Classes.Database import Database
+from bot.database import Database
 
 class TTS:
     def __init__(self, behavior, bot, filename="tts.mp3", cooldown_seconds=10):
@@ -24,7 +24,6 @@ class TTS:
         self.filename = filename
         self.behavior = behavior
         self.bot = bot
-        self.db = behavior.db
         self.last_request_time = 0
         self.cooldown_seconds = cooldown_seconds
         self.locked = False
@@ -288,8 +287,8 @@ class TTS:
     async def isolate_voice(self, input_audio_name):
         boost_volume = 0
         
-        filenames = self.db.get_most_similar_filenames(input_audio_name)
-        filename = filenames[0][1] if filenames else None
+        filenames = Database().get_sounds_by_similarity(input_audio_name)
+        filename = filenames[0][2] if filenames else None  # Index 2 is Filename
         audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", filename))
 
         self.filename = f"{filename}-isolated-{time.strftime('%d-%m-%y-%H-%M-%S')}.mp3"
@@ -347,7 +346,7 @@ class TTS:
                     final_audio = louder_audio
 
                     path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", self.filename))
-                    self.db.add_entry(os.path.basename(self.filename))
+                    Database().insert_sound(os.path.basename(self.filename), os.path.basename(self.filename))
 
                     final_audio.export(path, format="mp3")
                     # Integrated loudness normalization (EBU R128)

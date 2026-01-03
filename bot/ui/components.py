@@ -4,7 +4,7 @@ from discord.ui import Button, View
 import discord
 import asyncio
 import os
-from Classes.Database import Database
+from bot.database import Database
 import re
 
 
@@ -20,7 +20,7 @@ class ReplayButton(Button):
         await interaction.response.defer()
         asyncio.create_task(self.bot_behavior.play_audio(interaction.user.voice.channel, self.audio_file, interaction.user.name))
         Database().insert_action(interaction.user.name, "replay_sound", Database().get_sounds_by_similarity(self.audio_file)[0][0])
-
+ 
 class STSButton(Button):
     def __init__(self, bot_behavior, audio_file, char, **kwargs):
         super().__init__(**kwargs)
@@ -810,7 +810,7 @@ class ListLastScrapedSoundsButton(Button):
     async def callback(self, interaction):
         await interaction.response.defer()
         asyncio.create_task(self.bot_behavior.list_sounds(interaction.user, 25))
-        self.bot_behavior.other_actions_db.add_entry(interaction.user.name, "list_last_scraped_sounds")
+        Database().insert_action(interaction.user.name, "list_last_scraped_sounds", "")
 
 class MuteToggleButton(Button):
     def __init__(self, bot_behavior, **kwargs):

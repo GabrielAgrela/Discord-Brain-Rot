@@ -1,18 +1,48 @@
-import yt_dlp
-from pydub import AudioSegment
+"""
+Manual sound downloader using yt-dlp.
+
+This module provides functionality to download audio from various
+video platforms (YouTube, TikTok, Instagram, etc.) and convert to MP3.
+"""
+
 import os
 import uuid
+import yt_dlp
+from pydub import AudioSegment
+
 
 class ManualSoundDownloader:
+    """
+    Utility class for downloading audio from video URLs.
+    
+    Supports various platforms including YouTube, TikTok, and Instagram.
+    Audio is automatically converted to MP3 format.
+    """
+    
     @staticmethod
-    def video_to_mp3(url, output_dir='.', custom_filename=None, time_limit=None):
+    def video_to_mp3(url: str, output_dir: str = '.', 
+                     custom_filename: str = None, 
+                     time_limit: int = None) -> str:
+        """
+        Download audio from a video URL and convert to MP3.
+        
+        Args:
+            url: Video URL to download audio from.
+            output_dir: Directory to save the output file.
+            custom_filename: Custom name for the output file (without extension).
+            time_limit: Maximum duration in seconds (trims longer audio).
+            
+        Returns:
+            Filename of the saved MP3 file.
+            
+        Raises:
+            ValueError: If YouTube video exceeds 10 minutes.
+        """
         # Replace "photo" with "video" in the URL if present (for TikTok)
         if "photo" in url:
             url = url.replace("photo", "video").replace("reels", "p").replace("stories", "p")
-        
 
-        # Set up yt-dlp options
-        def sanitize_title(title):
+        def sanitize_title(title: str) -> str:
             if len(title) > 30:
                 return title[:27] + '...' + str(uuid.uuid4())[:3]
             return title
@@ -52,7 +82,22 @@ class ManualSoundDownloader:
         
         return mp3_filename
 
-    # For backwards compatibility, keep the tiktok_to_mp3 method
     @staticmethod
-    def tiktok_to_mp3(url, output_dir='.', custom_filename=None, time_limit=None):
+    def tiktok_to_mp3(url: str, output_dir: str = '.', 
+                      custom_filename: str = None, 
+                      time_limit: int = None) -> str:
+        """
+        Download audio from a TikTok URL.
+        
+        Backwards compatible alias for video_to_mp3.
+        
+        Args:
+            url: TikTok video URL.
+            output_dir: Directory to save the output file.
+            custom_filename: Custom name for the output file.
+            time_limit: Maximum duration in seconds.
+            
+        Returns:
+            Filename of the saved MP3 file.
+        """
         return ManualSoundDownloader.video_to_mp3(url, output_dir, custom_filename, time_limit)

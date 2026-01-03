@@ -20,7 +20,7 @@ class Database:
             return
         self._initialized = True
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        self.db_path = os.path.join(script_dir, "../database.db")
+        self.db_path = os.path.join(script_dir, "..", "database.db")
         # Allow usage from background threads
         self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self.cursor = self.conn.cursor()
@@ -32,7 +32,7 @@ class Database:
         try:
             # Get the current directory of the script
             script_dir = os.path.dirname(os.path.abspath(__file__))
-            db_path = os.path.join(script_dir, "../database.db")
+            db_path = os.path.join(script_dir, "..", "database.db")
 
             # Connect to SQLite database (or create it if it doesn't exist)
             conn = sqlite3.connect(db_path)

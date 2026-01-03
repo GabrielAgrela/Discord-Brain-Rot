@@ -1,10 +1,8 @@
 /.env
-/__pycache__
+**/__pycache__/
 /Data
-/Classes/__pycache__
 /Downloads
 /Sounds
-/Classes/lucas.webp
 /database.db
 /venv
 lol_database.db
@@ -12,6 +10,14 @@ database copy.db
 /vosk-model-pt/
 /temp_audio
 /actions-runner
-Data/Users.json
-Data/play_history.csv
-Data/soundsDB.csv
+
+# IDEs and local tools
+.vscode/
+.idea/
+*.swp
+*.log
+.DS_Store
+
+# Static and downloaded assets
+/static/
+/templates/

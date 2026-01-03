@@ -8,15 +8,15 @@ from mutagen.mp3 import MP3
 import math # Added for ceiling function
 
 from requests import HTTPError
-from Classes.SoundDownloader import SoundDownloader
+from bot.downloaders.sound import SoundDownloader
 import os
 import uuid
-from Classes.AudioDatabase import AudioDatabase
-from Classes.PlayHistoryDatabase import PlayHistoryDatabase
-from Classes.OtherActionsDatabase import OtherActionsDatabase
-from Classes.TTS import TTS
+
+
+
+from bot.tts import TTS
 import csv
-from Classes.UI import (
+from bot.ui.components import (
     SoundBeingPlayedView,
     SoundBeingPlayedWithSuggestionsView,
     LoadingSimilarSoundsSelect,
@@ -25,14 +25,16 @@ from Classes.UI import (
     EventView,
     PaginatedEventView,
 )
-from Classes.ManualSoundDownloader import ManualSoundDownloader
+from bot.downloaders.manual import ManualSoundDownloader
 from moviepy.editor import VideoFileClip
 
 import aiohttp
 import re
 
 
-from Classes.Database import Database
+from bot.database import Database
+from bot.services.mute import MuteService
+from bot.services.message import MessageService
 
 
 
@@ -44,16 +46,10 @@ class BotBehavior:
         self.playback_done = asyncio.Event()
         self.playback_done.set()  # Ensure the event starts in a ready state
         self.script_dir = os.path.dirname(__file__)  # Get the directory of the current script
-        self.db_path = os.path.join(self.script_dir, "../Data/soundsDB.csv")
-        self.ph_path = os.path.join(self.script_dir, "../Data/play_history.csv")
-        self.oa_path = os.path.join(self.script_dir, "../Data/other_actions.csv")
-        self.users_json = os.path.join(self.script_dir, "../Data/Users.json")
         self.dwdir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Downloads"))
-        self.db = AudioDatabase(self.db_path, self)
-
-        self.player_history_db = PlayHistoryDatabase(self.ph_path,self.db,self.users_json, self.bot, self)
-        self.other_actions_db = OtherActionsDatabase(self.oa_path, self)
-        self.TTS = TTS(self,bot)
+        
+        # Initialize TTS and ManualSoundDownloader
+        self.TTS = TTS(self, bot)
         self.ManualSoundDownloader = ManualSoundDownloader()
 
         self.view = None
@@ -79,6 +75,13 @@ class BotBehavior:
         self.now_playing_messages = []
         self.last_sound_played = {}
         self.mute_until = None
+        
+        # New SOLID-compliant services
+        # These are instantiated here but will gradually replace inline logic
+        self._mute_service = MuteService()
+        self._message_service = None  # Will be set after bot is ready
+        self.player_history_db = Database()
+        self.db = self.player_history_db
 
 
 
@@ -706,14 +709,7 @@ class BotBehavior:
             
             voice_client = await self.ensure_voice_connected(channel)
 
-            # If we're recording the channel for STT, pause it during playback
-            was_recording = False
-            try:
-                was_recording = bool(getattr(voice_client, "recording", False))
-                if was_recording:
-                    voice_client.stop_recording()
-            except Exception as e:
-                print(f"Warning: could not pause recording before playback: {e}")
+            voice_client = await self.ensure_voice_connected(channel)
 
             # Get the absolute path of the audio file
             audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", audio_file))
@@ -948,13 +944,6 @@ class BotBehavior:
                                 self.delayed_list_selector_update(sound_message, audio_file),
                                 self.bot.loop
                             )
-
-                        # Resume recording if it was active before playback
-                        if was_recording and hasattr(voice_client, "listening_sink") and hasattr(voice_client, "listening_cb"):
-                            try:
-                                voice_client.start_recording(voice_client.listening_sink, voice_client.listening_cb)
-                            except Exception as re:
-                                print(f"Warning: failed to resume voice recording after playback: {re}")
                 finally:
                     # Set playback_done flag to signal completion regardless of outcome
                     self.bot.loop.call_soon_threadsafe(self.playback_done.set)
@@ -1308,15 +1297,17 @@ class BotBehavior:
 
         return False
 
-    async def send_controls(self, force = False):
+    async def send_controls(self, force=False):
         bot_channel = await self.get_bot_channel()
         try:
-            await self.controls_message.delete()
+            if self.controls_message:
+                try:
+                    await self.controls_message.delete()
+                except:
+                    pass
             self.controls_message = await bot_channel.send(view=ControlsView(self))
         except Exception as e:
             print("error sending controls ", e)
-        if force:
-            self.controls_message = await bot_channel.send(view=ControlsView(self))
         
     async def is_playing_sound(self):
         for vc in self.bot.voice_clients:
@@ -1488,7 +1479,7 @@ class BotBehavior:
                 return
                 
             # Import UI classes to avoid circular imports
-            from Classes.UI import SoundBeingPlayedView, SoundBeingPlayedWithSuggestionsView
+            from bot.ui.components import SoundBeingPlayedView, SoundBeingPlayedWithSuggestionsView
             
             # Use the previously stored similar sounds instead of finding them again
             similar_sounds = self.current_similar_sounds
