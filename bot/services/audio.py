@@ -58,12 +58,30 @@ class AudioService:
             voice_client = channel.guild.voice_client
 
             if voice_client:
-                if voice_client.channel.id != channel.id:
+                if not voice_client.is_connected():
+                    print(f"[AudioService] Voice client in {channel.guild.name} exists but is not connected. Reconnecting...")
+                    try:
+                        await voice_client.disconnect(force=True)
+                        await asyncio.sleep(1)
+                    except Exception as e:
+                         print(f"[AudioService] Error forcing disconnect: {e}")
+                elif voice_client.channel.id != channel.id:
                     await voice_client.move_to(channel)
-                return voice_client
+                    return voice_client
+                else:
+                    return voice_client
             
-            voice_client = await channel.connect(timeout=10.0)
-            return voice_client
+            for attempt in range(3):
+                try:
+                    voice_client = await channel.connect(timeout=10.0)
+                    return voice_client
+                except Exception as e:
+                    print(f"[AudioService] Connection attempt {attempt + 1} failed: {e}")
+                    if attempt < 2:
+                        await asyncio.sleep(1)
+            
+            print("[AudioService] Failed to connect after 3 attempts.")
+            return None
 
         except Exception as e:
             print(f"[AudioService] Error connecting to voice channel: {e}")
@@ -225,6 +243,10 @@ class AudioService:
             # Stop any currently playing audio to allow instant skip
             if voice_client.is_playing():
                 voice_client.stop()
+
+            if not isinstance(audio_file, str):
+                print(f"[AudioService] WARNING: audio_file is not a string! Type: {type(audio_file)}, Value: {audio_file}")
+                audio_file = str(audio_file)
 
             audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Sounds", audio_file))
 
@@ -449,6 +471,13 @@ class AudioService:
                 return True
             except Exception as e:
                 print(f"[AudioService] Error playing sound: {e}")
+                if "Not connected to voice" in str(e):
+                    try:
+                        print("[AudioService] Detected zombie connection in play loop, forcing disconnect.")
+                        await voice_client.disconnect(force=True)
+                        await asyncio.sleep(1)
+                    except:
+                        pass
                 self.playback_done.set()
                 return False
 
@@ -465,6 +494,7 @@ class AudioService:
 
         start_time = time.time()
         bar_length = 10
+        duration_int = int(duration)
         
         try:
             while time.time() - start_time < duration:
@@ -472,10 +502,10 @@ class AudioService:
                     break
                     
                 elapsed = time.time() - start_time
+                elapsed_int = int(elapsed)
                 progress = elapsed / duration
                 filled_length = int(bar_length * progress)
                 bar = "█" * filled_length + "░" * (bar_length - filled_length)
-                percent = int(progress * 100)
                 
                 if sound_message.embeds:
                     embed = sound_message.embeds[0]
@@ -483,7 +513,7 @@ class AudioService:
                     new_lines = []
                     for line in lines:
                         if line.startswith("Progress:"):
-                            new_lines.append(f"Progress: {bar} {percent}%")
+                            new_lines.append(f"Progress: {bar} {elapsed_int}s / {duration_int}s")
                         else:
                             new_lines.append(line)
                     
@@ -506,7 +536,7 @@ class AudioService:
                     bar = "█" * bar_length
                     for line in lines:
                         if line.startswith("Progress:"):
-                            new_lines.append(f"Progress: {bar} 100% ✅")
+                            new_lines.append(f"Progress: {bar} {duration_int}s / {duration_int}s ✅")
                         else:
                             new_lines.append(line)
                     embed.description = "\n".join(new_lines)

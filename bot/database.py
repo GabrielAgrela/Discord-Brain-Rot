@@ -21,8 +21,23 @@ class Database:
         self._initialized = True
         script_dir = os.path.dirname(os.path.abspath(__file__))
         self.db_path = os.path.join(script_dir, "..", "database.db")
-        # Allow usage from background threads
-        self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        # Allow usage from background threads with reasonable timeout
+        # Reduced from 30.0s to 5.0s to prevent long startup hangs if DB is locked
+        self.conn = sqlite3.connect(self.db_path, check_same_thread=False, timeout=5.0)
+        
+        # Retry enabling WAL mode
+        for attempt in range(3):
+            try:
+                self.conn.execute("PRAGMA journal_mode=WAL;")
+                break
+            except sqlite3.OperationalError as e:
+                if attempt < 2:
+                    print(f"[Database] Warning: Could not set journal_mode=WAL (attempt {attempt+1}): {e}. Retrying...")
+                    import time
+                    time.sleep(1)
+                else:
+                    print(f"[Database] Warning: Could not set journal_mode=WAL after 3 attempts: {e}")
+        
         self.cursor = self.conn.cursor()
         self.behavior = behavior
 

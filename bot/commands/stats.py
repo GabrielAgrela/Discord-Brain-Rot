@@ -105,39 +105,98 @@ class StatsCog(commands.Cog):
              await self.behavior.send_message(title="Error", description="Year review stats not available directly.")
 
     async def _send_year_review_embed(self, ctx, target_user, stats, year):
-         # ... implementation similar to PersonalGreeter's logic ...
-         # For brevity, I will output a simplified version or delegate if possible.
-         # Since I shouldn't copy-paste 200 lines if I can avoid it, let's try to extract it to a helper
-         # But for now, I'll assume the complex logic needs to be here.
-         
-         # Logic copied/adapted from PersonalGreeter.py
-         if not stats: 
-             return
-             
-         total_activity = (stats.get('total_plays', 0) + stats.get('sounds_favorited', 0) + 
-                          stats.get('sounds_uploaded', 0) + stats.get('tts_messages', 0))
-         
-         if total_activity == 0:
+        """Generate a Spotify-wrapped style embed with year stats matching original format."""
+        if not stats:
+            await self.behavior.send_message(
+                title=f"📊 {target_user.name}'s {year} Review",
+                description=f"No data found for {year}! 😢"
+            )
+            return
+        
+        total_plays = stats.get('total_plays', 0)
+        if total_plays == 0:
             await self.behavior.send_message(
                 title=f"📊 {target_user.name}'s {year} Review",
                 description=f"No activity found for {year}! 😢"
             )
             return
 
-         lines = []
-         lines.append(f"## 🎵 Sounds Played: **{stats.get('total_plays', 0)}**")
-         # ... (rest of the formatting logic would go here)
-         # For this specific refactor, I will prioritize making it work with minimal code duplication
-         # If I had the full DB method source I'd know what it returns. Assuming dictionary matching PersonalGreeter usage.
-         
-         # Simplified display for now to save space, assuming full logic can be ported later if needed
-         # or we can rely on what I saw in PersonalGreeter.py
-         
-         await self.behavior.send_message(
-             title=f"🎊 {target_user.name}'s {year} Year Review 🎊",
-             description=f"Total Plays: {stats.get('total_plays', 0)}\n(Full stats coming soon in refactor)",
-             thumbnail=target_user.display_avatar.url if target_user.display_avatar else None
-         )
+        lines = []
+        
+        # Rank (if available)
+        rank = stats.get('user_rank', None)
+        total_users = stats.get('total_users', None)
+        if rank and total_users:
+            lines.append(f"🏆 **Rank #{rank}** of {total_users} users")
+            lines.append("")
+        
+        # Sounds Played section
+        lines.append(f"## 🎵 Sounds Played: {total_plays}")
+        requested = stats.get('requested_plays', 0)
+        random_plays = stats.get('random_plays', 0)
+        favorites = stats.get('favorite_plays', 0)
+        lines.append(f"🎯 Requested: {requested} • 🎲 Random: {random_plays} • ⭐ Favorites: {favorites}")
+        
+        unique_sounds = stats.get('unique_sounds', 0)
+        if unique_sounds > 0 and total_plays > 0:
+            variety_pct = int((unique_sounds / total_plays) * 100)
+            lines.append(f"🎨 Variety: **{unique_sounds}** unique sounds ({variety_pct}% variety)")
+        
+        # Top Sounds section
+        top_sounds = stats.get('top_sounds', [])
+        if top_sounds:
+            lines.append("")
+            lines.append("## 🔥 Your Top Sounds")
+            emojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣']
+            for i, (filename, count) in enumerate(top_sounds[:5], 0):
+                clean_name = filename.replace('.mp3', '') if filename else 'Unknown'
+                lines.append(f"{emojis[i]} **{clean_name}** ({count} plays)")
+        
+        # When You're Most Active
+        lines.append("")
+        lines.append("## ⏰ When You're Most Active")
+        if stats.get('most_active_day'):
+            lines.append(f"📅 Favorite day: **{stats.get('most_active_day')}** ({stats.get('most_active_day_count', 0)} plays)")
+        if stats.get('most_active_hour') is not None:
+            hour = stats.get('most_active_hour')
+            hour_str = f"{hour:02d}:00"
+            lines.append(f"🕐 Peak hour: **{hour_str}** ({stats.get('most_active_hour_count', 0)} plays)")
+        
+        # Your Sound Journey
+        lines.append("")
+        lines.append("## 📜 Your Sound Journey")
+        if stats.get('first_sound'):
+            first_sound = stats.get('first_sound', '').replace('.mp3', '')
+            first_date = stats.get('first_sound_date', '')[:10] if stats.get('first_sound_date') else ''
+            lines.append(f"🌅 First sound: **{first_sound}** ({first_date})")
+        if stats.get('last_sound'):
+            last_sound = stats.get('last_sound', '').replace('.mp3', '')
+            last_date = stats.get('last_sound_date', '')[:10] if stats.get('last_sound_date') else ''
+            lines.append(f"🌙 Latest sound: **{last_sound}** ({last_date})")
+        
+        # Voice & Activity Stats
+        lines.append("")
+        lines.append("## 🎤 Voice & Activity Stats")
+        voice_time_hours = stats.get('total_voice_hours', 0)
+        if voice_time_hours > 0:
+            voice_days = round(voice_time_hours / 24, 1)
+            lines.append(f"⏱️ Time in Voice: **{voice_time_hours}h** ({voice_days} days!)")
+        longest_session = stats.get('longest_session_minutes', 0)
+        if longest_session > 0:
+            session_hours = round(longest_session / 60, 1)
+            lines.append(f"📊 Longest Session: **{session_hours}h** ({longest_session} minutes)")
+        if stats.get('longest_streak', 0) > 0:
+            lines.append(f"🔥 Longest Streak: **{stats.get('longest_streak')}** days in a row!")
+        if stats.get('total_active_days', 0) > 0:
+            lines.append(f"📅 Total Active Days: **{stats.get('total_active_days')}** days")
+        
+        description = "\n".join(lines)
+        
+        await self.behavior.send_message(
+            title=f"🎊 {target_user.name}'s {year} Year Review 🎊",
+            description=description,
+            thumbnail=target_user.display_avatar.url if target_user.display_avatar else None
+        )
 
     @commands.slash_command(name="sendyearreview", description="[Admin] Send year review as DM to a user")
     async def send_year_review(

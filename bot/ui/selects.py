@@ -51,8 +51,8 @@ class SoundSelect(discord.ui.Select):
         options = []
         for sound in sounds[:25]:
             options.append(discord.SelectOption(
-                label=sound[2].replace('.mp3', '') if sound[2] else sound[0],
-                value=sound[0]
+                label=sound[2].replace('.mp3', '') if sound[2] else str(sound[0]),
+                value=sound[2]  # Use Filename
             ))
         super().__init__(
             placeholder="Select a sound to play...",
@@ -62,15 +62,15 @@ class SoundSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction):
         await interaction.response.defer()
-        sound_id = self.values[0]
-        sound = Database().get_sound(sound_id)
-        if sound:
-            channel = self.bot_behavior._audio_service.get_user_voice_channel(interaction.guild, interaction.user.name)
-            if not channel:
-                channel = self.bot_behavior._audio_service.get_largest_voice_channel(interaction.guild)
-            if channel:
-                asyncio.create_task(self.bot_behavior._audio_service.play_audio(channel, sound[0], interaction.user.name))
-                Database().insert_action(interaction.user.name, "select_play_sound", sound[0])
+        sound_filename = self.values[0]
+        # We don't strictly need to fetch from DB if we trust the value, but let's verify exists?
+        # Actually play_audio handles validation.
+        channel = self.bot_behavior._audio_service.get_user_voice_channel(interaction.guild, interaction.user.name)
+        if not channel:
+            channel = self.bot_behavior._audio_service.get_largest_voice_channel(interaction.guild)
+        if channel:
+            asyncio.create_task(self.bot_behavior._audio_service.play_audio(channel, sound_filename, interaction.user.name))
+            Database().insert_action(interaction.user.name, "select_play_sound", sound_filename)
 
 class AddToListSelect(discord.ui.Select):
     def __init__(self, bot_behavior, sound_filename, lists, default_list_id: int = None, row: int = 0):

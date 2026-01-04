@@ -4,6 +4,8 @@
 /Downloads
 /Sounds
 /database.db
+database.db-shm
+database.db-wal
 /venv
 lol_database.db
 database copy.db

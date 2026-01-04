@@ -48,12 +48,14 @@ db = Database(behavior=behavior)
 @tasks.loop(seconds=5.0)
 async def check_playback_queue():
     """Process queued playback requests from the web interface."""
-    conn = None
+    # Use the shared database connection to avoid "database is locked"
+    # The commands are executed, but commit is handled carefully or rely on autocommit if set
+    # Using the shared connection means we need to be careful about threading if this task runs in a diff thread
+    # discord.py tasks run in the main event loop, so it is safe to use the same sqlite3 connection
     try:
-        conn = sqlite3.connect(db.db_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-
+        # We can actully just use db.cursor directly since we are on the same thread
+        cursor = db.cursor
+        
         cursor.execute(
             """
             SELECT id, guild_id, sound_filename
@@ -70,9 +72,10 @@ async def check_playback_queue():
         print(f"[Playback Queue] Found {len(pending_requests)} pending requests.")
 
         for request in pending_requests:
-            req_id = request["id"]
-            guild_id = request["guild_id"]
-            sound_filename = request["sound_filename"]
+            # Results are tuples: (id, guild_id, sound_filename)
+            req_id = request[0]
+            guild_id = request[1]
+            sound_filename = request[2]
 
             print(
                 f"[Playback Queue] Processing request ID {req_id}: Play '{sound_filename}' in guild {guild_id}"
@@ -87,7 +90,7 @@ async def check_playback_queue():
                     "UPDATE playback_queue SET played_at = ? WHERE id = ?",
                     (datetime.datetime.now(), req_id),
                 )
-                conn.commit()
+                db.conn.commit()
                 continue
 
             sound_data = db.get_sound(sound_filename)
@@ -99,7 +102,7 @@ async def check_playback_queue():
                     "UPDATE playback_queue SET played_at = ? WHERE id = ?",
                     (datetime.datetime.now(), req_id),
                 )
-                conn.commit()
+                db.conn.commit()
                 continue
 
             sound_folder = os.path.abspath(
@@ -115,7 +118,7 @@ async def check_playback_queue():
                     "UPDATE playback_queue SET played_at = ? WHERE id = ?",
                     (datetime.datetime.now(), req_id),
                 )
-                conn.commit()
+                db.conn.commit()
                 continue
 
             try:
@@ -128,7 +131,7 @@ async def check_playback_queue():
                     "UPDATE playback_queue SET played_at = ? WHERE id = ?",
                     (datetime.datetime.now(), req_id),
                 )
-                conn.commit()
+                db.conn.commit()
 
                 await asyncio.sleep(1)
 
@@ -138,14 +141,11 @@ async def check_playback_queue():
                     "UPDATE playback_queue SET played_at = ? WHERE id = ?",
                     (datetime.datetime.now(), req_id),
                 )
-                conn.commit()
+                db.conn.commit()
     except sqlite3.Error as db_err:
         print(f"[Playback Queue] Database error: {db_err}")
     except Exception as e:
         print(f"[Playback Queue] Unexpected error in background task: {e}")
-    finally:
-        if conn:
-            conn.close()
 
 
 @default_permissions(manage_messages=True)
@@ -272,20 +272,36 @@ async def play_audio_for_event(member, member_str, event, channel):
         if user_events:
             if await behavior.is_channel_empty(channel):
                 return
-            sound = random.choice(user_events)[2]
+            sound_name = random.choice(user_events)[2]
             behavior.last_channel[member_str] = channel
             if channel:
-                print(f"Playing {sound} for {member_str} on {event}")
-                await behavior.play_audio(channel, db.get_sounds_by_similarity(sound)[0][1], member_str)
-                db.insert_action(member_str, event, db.get_sounds_by_similarity(sound)[0][0])
+                print(f"Playing {sound_name} for {member_str} on {event}")
+                # Get sound info only once
+                similar_sounds = db.get_sounds_by_similarity(sound_name, 1)
+                if similar_sounds:
+                    sound_row = similar_sounds[0][0] # (row, score) -> row
+                    filename = sound_row[2]
+                    sound_id = sound_row[0]
+                    await behavior.play_audio(channel, filename, member_str)
+                    db.insert_action(member_str, event, sound_id)
+                else:
+                    print(f"Sound {sound_name} not found for user event")
+                    
         elif event == "join":
             await behavior.play_audio(channel, "gay-echo.mp3", "admin")
-            db.insert_action(member_str, event, db.get_sounds_by_similarity("gay-echo.mp3")[0][0])
+            # Log action for default join sound
+            similar_sounds = db.get_sounds_by_similarity("gay-echo.mp3", 1)
+            if similar_sounds:
+                 db.insert_action(member_str, event, similar_sounds[0][0][0])
+            else:
+                 # Fallback if gay-echo not found in DB but exists on disk?
+                 db.insert_action(member_str, event, "gay-echo.mp3")
+
         elif event == "leave":
             db.insert_action(member_str, event, "-")
             await behavior.is_channel_empty(channel)
     except Exception as e:
-        print(f"An error occurred: {e}")
+        print(f"An error occurred in play_audio_for_event: {e}")
 
 # Add an event handler for bot shutdown
 @bot.event

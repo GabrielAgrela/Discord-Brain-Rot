@@ -166,7 +166,7 @@ class SoundDownloader:
                         os.path.join(os.path.dirname(__file__), "..", "..", "Sounds")
                     )
                     
-                    if not Database().get_sound(os.path.basename(file), original_filename=True):
+                    if not self.db.get_sound(os.path.basename(file), original_filename=True):
                         print(self.__class__.__name__, " MOVER: Moving file to " + destination_folder)
                         sound_view = DownloadedSoundView(self.bot, os.path.basename(file))
                         await self.bot.send_message(
@@ -174,8 +174,8 @@ class SoundDownloader:
                             view=sound_view
                         )
                         shutil.move(file, os.path.join(destination_folder, os.path.basename(file)))
-                        Database().insert_sound(os.path.basename(file), os.path.basename(file))
-                        Database().insert_action("admin", "scrape_sound", os.path.basename(file))
+                        self.db.insert_sound(os.path.basename(file), os.path.basename(file))
+                        self.db.insert_action("admin", "scrape_sound", os.path.basename(file))
                     else:
                         print(self.__class__.__name__, " MOVER: Sound already exists ", os.path.basename(file))
                         print(self.__class__.__name__, " MOVER: Removing file")
