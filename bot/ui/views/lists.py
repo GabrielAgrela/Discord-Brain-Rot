@@ -60,28 +60,3 @@ class PaginatedSoundListView(View):
                 row=row
             ))
 
-class UserSoundListsView(discord.ui.View):
-    def __init__(self, bot_behavior, lists, username):
-        super().__init__(timeout=None)
-        self.bot_behavior = bot_behavior
-        
-        from bot.ui.buttons.list_buttons import SoundListButton, CreateListButton
-
-        for i, (list_id, list_name, creator, created_at, sound_count) in enumerate(lists[:25]):
-            button_label = list_name
-            if username is None:
-                button_label = f"{list_name} (by {creator})"
-                
-            self.add_item(SoundListButton(
-                bot_behavior=bot_behavior,
-                list_id=list_id,
-                list_name=list_name,
-                label=button_label,
-                row=i // 5
-            ))
-            
-        if username is not None:
-            self.add_item(CreateListButton(
-                bot_behavior=bot_behavior,
-                row=5
-            ))

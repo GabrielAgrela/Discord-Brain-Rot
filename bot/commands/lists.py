@@ -16,8 +16,56 @@ from discord.commands import Option
 import re
 
 from bot.database import Database
-from bot.ui import PaginatedSoundListView, UserSoundListsView
+from bot.ui import PaginatedSoundListView
 
+
+
+async def _get_sound_autocomplete(ctx: discord.AutocompleteContext):
+    """Autocomplete for sound names."""
+    try:
+        db = Database()
+        current = ctx.value.lower() if ctx.value else ""
+        if not current or len(current) < 2:
+            return []
+        
+        similar_sounds = db.get_sounds_by_similarity_optimized(current, 15)
+        # Return just the filenames without .mp3 extension
+        return [sound[2].split('/')[-1].replace('.mp3', '') for sound in similar_sounds]
+    except Exception as e:
+        print(f"Autocomplete error: {e}")
+        return []
+
+async def _get_list_autocomplete(ctx: discord.AutocompleteContext):
+    """Autocomplete for sound lists."""
+    try:
+        db = Database()
+        current = ctx.value.lower() if ctx.value else ""
+        
+        # get all lists
+        lists = db.get_sound_lists()
+        
+        matching_lists = []
+        for lst in lists:
+            list_name = lst[1]
+            creator = lst[2]
+            
+            # Format: "list_name (by creator)"
+            formatted = f"{list_name} (by {creator})"
+            
+            if current in list_name.lower() or current in creator.lower():
+                matching_lists.append(formatted)
+        
+        # Sort by relevance (exact matches first, then starts with, then contains)
+        exact_matches = [name for name in matching_lists if name.lower() == current]
+        starts_with = [name for name in matching_lists if name.lower().startswith(current) and name.lower() != current]
+        contains = [name for name in matching_lists if current in name.lower() and not name.lower().startswith(current) and name.lower() != current]
+        
+        # Combine and limit to 25 results
+        sorted_results = exact_matches + starts_with + contains
+        return sorted_results[:25]
+    except Exception as e:
+        print(f"List autocomplete error: {e}")
+        return []
 
 class ListCog(commands.Cog):
     """Cog for managing sound lists."""
@@ -27,56 +75,6 @@ class ListCog(commands.Cog):
         self.behavior = behavior
         self.db = Database()
     
-    @staticmethod
-    async def _get_sound_autocomplete(ctx: discord.AutocompleteContext):
-        """Autocomplete for sound names."""
-        try:
-            db = Database()
-            current = ctx.value.lower() if ctx.value else ""
-            if not current or len(current) < 2:
-                return []
-            
-            similar_sounds = db.get_sounds_by_similarity_optimized(current, 15)
-            # Return just the filenames without .mp3 extension
-            return [sound[2].split('/')[-1].replace('.mp3', '') for sound in similar_sounds]
-        except Exception as e:
-            print(f"Autocomplete error: {e}")
-            return []
-
-    @staticmethod
-    async def _get_list_autocomplete(ctx: discord.AutocompleteContext):
-        """Autocomplete for sound lists."""
-        try:
-            db = Database()
-            current = ctx.value.lower() if ctx.value else ""
-            
-            # get all lists
-            lists = db.get_sound_lists()
-            
-            matching_lists = []
-            for lst in lists:
-                list_name = lst[1]
-                creator = lst[2]
-                sound_count = lst[4]
-                
-                # Format: "list_name (by creator)"
-                formatted = f"{list_name} (by {creator})"
-                
-                if current in list_name.lower() or current in creator.lower():
-                    matching_lists.append(formatted)
-            
-            # Sort by relevance (exact matches first, then starts with, then contains)
-            exact_matches = [name for name in matching_lists if name.lower() == current]
-            starts_with = [name for name in matching_lists if name.lower().startswith(current) and name.lower() != current]
-            contains = [name for name in matching_lists if current in name.lower() and not name.lower().startswith(current) and name.lower() != current]
-            
-            # Combine and limit to 25 results
-            sorted_results = exact_matches + starts_with + contains
-            return sorted_results[:25]
-        except Exception as e:
-            print(f"List autocomplete error: {e}")
-            return []
-
     @commands.slash_command(name="createlist", description="Create a new sound list")
     async def create_list(
         self, 
@@ -279,28 +277,6 @@ class ListCog(commands.Cog):
         await ctx.delete()
 
 
-    @commands.slash_command(name="mylists", description="Show your sound lists")
-    async def my_lists(self, ctx: discord.ApplicationContext):
-        """Show lists belonging to the user."""
-        # Get the user's lists
-        lists = self.db.get_sound_lists(creator=ctx.author.name)
-        if not lists:
-            await ctx.respond("You don't have any sound lists yet. Create one with `/createlist`.", ephemeral=True)
-            return
-            
-        # Create a view with buttons for each list
-        view = UserSoundListsView(self.behavior, lists, ctx.author.name)
-        
-        # Send a message with the view
-        await self.behavior.send_message(
-            title="Your Sound Lists",
-            description=f"You have {len(lists)} sound lists. Click a list to view its sounds.",
-            view=view
-        )
-        
-        # Remove the redundant confirmation message if any (ctx.respond creates one)
-        # But we haven't called respond yet.
-        await ctx.respond("Here are your lists!", ephemeral=True, delete_after=0)
 
 
 def setup(bot: discord.Bot, behavior=None):

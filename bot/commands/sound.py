@@ -95,11 +95,6 @@ class SoundCog(commands.Cog):
         await ctx.respond("Processing your request...", delete_after=0)
         await self.behavior._sound_service.change_filename(current, new, ctx.user)
     
-    @commands.slash_command(name="list", description="Returns database of sounds")
-    async def list_sounds(self, ctx: discord.ApplicationContext):
-        """Show the sound database."""
-        await ctx.respond("Processing your request...", delete_after=0)
-        await self.behavior._sound_service.list_sounds(ctx.user)
     
     @commands.slash_command(name="lastsounds", description="Returns last sounds downloaded")
     async def lastsounds(

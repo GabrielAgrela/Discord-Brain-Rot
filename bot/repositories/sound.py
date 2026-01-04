@@ -29,7 +29,7 @@ class SoundRepository(BaseRepository[Sound]):
             filename=row['filename'],
             date=datetime.fromisoformat(row['date']) if row['date'] else None,
             favorite=bool(row['favorite']),
-            blacklist=bool(row['blacklist']),
+            favorite=bool(row['favorite']),
             slap=bool(row.get('slap', 0)) if 'slap' in row.keys() else False,
         )
     
@@ -69,15 +69,13 @@ class SoundRepository(BaseRepository[Sound]):
         )
         return [self._row_to_entity(row) for row in rows]
     
-    def get_random(self, count: int = 1, favorite_only: bool = False,
-                   exclude_blacklisted: bool = True) -> List[Sound]:
+    def get_random(self, count: int = 1, favorite_only: bool = False) -> List[Sound]:
         """
         Get random sound(s).
         
         Args:
             count: Number of random sounds to return
             favorite_only: Only return favorites
-            exclude_blacklisted: Exclude blacklisted sounds
             
         Returns:
             List of random Sound entities
@@ -85,8 +83,6 @@ class SoundRepository(BaseRepository[Sound]):
         conditions = []
         if favorite_only:
             conditions.append("favorite = 1")
-        if exclude_blacklisted:
-            conditions.append("blacklist = 0")
         
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
         
@@ -129,8 +125,7 @@ class SoundRepository(BaseRepository[Sound]):
         return [(self._row_to_entity(row), 100) for row in rows]
     
     def insert(self, original_filename: str, filename: str,
-               favorite: bool = False, blacklist: bool = False,
-               date: Optional[datetime] = None) -> int:
+               favorite: bool = False, date: Optional[datetime] = None) -> int:
         """
         Insert a new sound.
         
@@ -138,7 +133,6 @@ class SoundRepository(BaseRepository[Sound]):
             original_filename: Original filename when uploaded
             filename: Current filename
             favorite: Whether to mark as favorite
-            blacklist: Whether to blacklist
             date: Date added (defaults to now)
             
         Returns:
@@ -150,14 +144,13 @@ class SoundRepository(BaseRepository[Sound]):
         return self._execute_write(
             """
             INSERT INTO sounds (originalfilename, filename, favorite, blacklist, date)
-            VALUES (?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, 0, ?)
             """,
-            (original_filename, filename, int(favorite), int(blacklist), date.isoformat())
+            (original_filename, filename, int(favorite), date.isoformat())
         )
     
     def update(self, sound_id: int, filename: Optional[str] = None,
                favorite: Optional[bool] = None, 
-               blacklist: Optional[bool] = None,
                slap: Optional[bool] = None) -> bool:
         """
         Update a sound's properties.
@@ -176,9 +169,6 @@ class SoundRepository(BaseRepository[Sound]):
         if favorite is not None:
             updates.append("favorite = ?")
             params.append(int(favorite))
-        if blacklist is not None:
-            updates.append("blacklist = ?")
-            params.append(int(blacklist))
         if slap is not None:
             updates.append("slap = ?")
             params.append(int(slap))

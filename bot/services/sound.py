@@ -396,11 +396,6 @@ class SoundService:
                     title=f"Last {count} Sounds Downloaded", 
                     view=SoundView(self.bot_behavior, sounds)
                 )
-            else:
-                self.db.insert_action(user.name, "list_all_sounds", "all")
-                message = await self.message_service.send_message(
-                    description=f"Total sounds downloaded: {len(sounds)}"
-                )
             
             await asyncio.sleep(120)
             try:

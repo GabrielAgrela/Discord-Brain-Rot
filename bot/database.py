@@ -134,9 +134,10 @@ class Database:
             print(f"An error occurred: {e}")
 
 
-    def insert_sound(self, originalfilename, filename, favorite=0, blacklist=0, date=datetime.datetime.now()):
+    def insert_sound(self, originalfilename, filename, favorite=0, date=datetime.datetime.now()):
         try:
-            self.cursor.execute("INSERT INTO sounds (originalfilename, Filename, favorite, blacklist, timestamp) VALUES (?, ?, ?, ?, ?);", (originalfilename, filename, favorite, blacklist, date))
+            # blacklist is always 0 now
+            self.cursor.execute("INSERT INTO sounds (originalfilename, Filename, favorite, blacklist, timestamp) VALUES (?, ?, ?, 0, ?);", (originalfilename, filename, favorite, date))
             self.conn.commit()
             print("Sound inserted successfully")
         except sqlite3.Error as e:
@@ -151,12 +152,12 @@ class Database:
             print(f"An error occurred: {e}")
 
     def get_random_sounds(self, favorite=None, num_sounds=1):
-        # get random sound(s) where blacklist is 0, and favorite is 1 if favorite is True
+        # get random sound(s), favorite is 1 if favorite is True
         try:
             if favorite:
-                self.cursor.execute("SELECT * FROM sounds WHERE blacklist = 0 AND favorite = 1 ORDER BY RANDOM() LIMIT ?;", (num_sounds,))
+                self.cursor.execute("SELECT * FROM sounds WHERE favorite = 1 ORDER BY RANDOM() LIMIT ?;", (num_sounds,))
             else:
-                self.cursor.execute("SELECT * FROM sounds WHERE blacklist = 0 ORDER BY RANDOM() LIMIT ?;", (num_sounds,))
+                self.cursor.execute("SELECT * FROM sounds ORDER BY RANDOM() LIMIT ?;", (num_sounds,))
             return self.cursor.fetchall()
         except sqlite3.Error as e:
             print(f"An error occurred: {e}")
@@ -290,8 +291,7 @@ class Database:
             # Combine conditions with OR to match any variation
             query = f"""
                 SELECT * FROM sounds 
-                WHERE blacklist = 0 
-                AND ({" OR ".join(like_conditions)})
+                WHERE ({" OR ".join(like_conditions)})
                 LIMIT 150
             """
             
@@ -366,7 +366,7 @@ class Database:
             print(f"An error occurred: {e}")
             return None
 
-    def get_sounds(self, favorite=None, blacklist=None, slap=None, num_sounds=25, sort="DESC", favorite_by_user=False, user=None):
+    def get_sounds(self, favorite=None, slap=None, num_sounds=25, sort="DESC", favorite_by_user=False, user=None):
         if favorite_by_user and user:
             try:
                 # Query the actions table for favorite_sound actions by the specified user
@@ -398,7 +398,6 @@ class Database:
         
         # Existing functionality
         favorite = 1 if favorite else 0
-        blacklist = 1 if blacklist else 0
         slap = 1 if slap else 0
         try:
             conditions = []
@@ -407,9 +406,6 @@ class Database:
             if favorite is not None:
                 conditions.append("favorite = ?")
                 params.append(favorite)
-            if blacklist is not None:
-                conditions.append("blacklist = ?")
-                params.append(blacklist)
             if slap is not None:
                 if slap == 1:
                     #remove conditions
@@ -591,11 +587,10 @@ class Database:
             print(f"An error occurred: {e}")
             return False
 
-    async def update_sound(self, filename, new_filename=None, favorite=None, blacklist=None, slap=None):
+    async def update_sound(self, filename, new_filename=None, favorite=None, slap=None):
         if new_filename is not None:
             new_filename = new_filename + ".mp3"
         favorite = 1 if favorite else 0 if favorite is not None else None
-        blacklist = 1 if blacklist else 0 if blacklist is not None else None
         slap = 1 if slap else 0 if slap is not None else None
 
         try:
@@ -603,8 +598,6 @@ class Database:
                 self.cursor.execute("UPDATE sounds SET Filename = ? WHERE Filename = ?;", (new_filename, filename))
             if favorite is not None:
                 self.cursor.execute("UPDATE sounds SET favorite = ? WHERE Filename = ?;", (favorite, filename))
-            if blacklist is not None:
-                self.cursor.execute("UPDATE sounds SET blacklist = ? WHERE Filename = ?;", (blacklist, filename))
             if slap is not None:
                 self.cursor.execute("UPDATE sounds SET slap = ? WHERE filename = ?", (slap, filename))
             self.conn.commit()

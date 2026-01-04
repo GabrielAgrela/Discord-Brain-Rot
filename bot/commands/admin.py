@@ -65,27 +65,6 @@ class AdminCog(commands.Cog):
         except Exception as e:
             print(f"Error during reboot: {e}")
     
-    @commands.slash_command(name="fixvoice", description="Fix voice connection issues (Admin only)")
-    async def fixvoice(self, ctx: discord.ApplicationContext):
-        """Clean up voice connections to fix issues."""
-        if not self._is_admin(ctx.author):
-            await ctx.respond("You don't have permission to use this command.", ephemeral=True)
-            return
-        
-        await ctx.respond("🔧 Cleaning up voice connections...", ephemeral=False)
-        print(f"Voice cleanup initiated by {ctx.author.name}")
-        
-        try:
-            await self.behavior._audio_service.cleanup_all_voice_connections()
-            await self.behavior._message_service.send_message(
-                title="✅ Voice Cleanup Complete",
-                description=f"All connections cleaned up by {ctx.author.mention}.",
-                delete_time=10
-            )
-        except Exception as e:
-            await self.behavior._message_service.send_error(
-                f"Voice cleanup failed: {e}"
-            )
     
     @commands.slash_command(name="lastlogs", description="Show the last service logs")
     async def lastlogs(
@@ -160,57 +139,6 @@ class AdminCog(commands.Cog):
             
         await ctx.followup.send(f"```{formatted}```", ephemeral=True)
 
-    @commands.slash_command(name="backup", description="Backup Discord-Brain-Rot project to USB drive (Admin only)")
-    async def backup(self, ctx: discord.ApplicationContext):
-        """Backup the entire Discord-Brain-Rot project to USB drive."""
-        if not self._is_admin(ctx.author):
-            await ctx.respond("You don't have permission to use this command.", ephemeral=True)
-            return
-
-        await ctx.respond("🔄 Starting backup process...", ephemeral=False)
-        print(f"Backup initiated by {ctx.author.name} ({ctx.author.id})")
-
-        try:
-            # Simplified backup logic assuming Linux environment
-            # Original code had specific paths /media/usb
-            usb_path = "/media/user/USB" # Check mounting path - original code had /media/usb
-            # Let's use the path from original code if possible or a standard one.
-            # Original code said: usb_path = "/media/usb"
-            # I will trust the original code's path assumption or try to be robust.
-            
-            # Since I can't easily check the mounting point inside this environment for the user's specific setup without running commands,
-            # I will copy the logic from the original file I just read.
-            usb_path = "/media/usb" 
-            backup_dir = os.path.join(usb_path, "brainrotbup")
-            source_dir = os.getcwd() # Assumption: bot running from project root
-            
-            # Check if USB exists
-            if not os.path.exists(usb_path):
-                 await ctx.edit_original_response(content=f"❌ USB drive not found at {usb_path}")
-                 return
-
-            # Construct rsync command
-            # rsync -av --exclude 'venv' --exclude '__pycache__' source dest
-            cmd = f"sudo rsync -av --exclude 'venv' --exclude '__pycache__' --exclude '.git' {source_dir}/ {backup_dir}/"
-            
-            # This requires sudo which might prompt for password or fail if not configured for nopasswd.
-            # The original code likely ran as root or had permissions.
-            # I'll stick to the original implementation's intent.
-            
-            process = await asyncio.create_subprocess_shell(
-                cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            stdout, stderr = await process.communicate()
-            
-            if process.returncode == 0:
-                await ctx.edit_original_response(content="✅ Backup completed successfully!")
-            else:
-                await ctx.edit_original_response(content=f"❌ Backup failed: {stderr.decode()}")
-                
-        except Exception as e:
-            await ctx.edit_original_response(content=f"❌ Error during backup: {e}")
 
 
 def setup(bot: discord.Bot, behavior=None):

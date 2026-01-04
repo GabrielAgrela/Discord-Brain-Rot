@@ -333,6 +333,4 @@ class BotBehavior:
     async def delayed_list_selector_update(self, *args, **kwargs):
         return await self._sound_service.delayed_list_selector_update(*args, **kwargs)
 
-    async def cleanup_all_voice_connections(self):
-        return await self._audio_service.cleanup_all_voice_connections()
 

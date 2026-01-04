@@ -31,8 +31,13 @@ class MuteToggleButton(Button):
             slap_sounds = Database().get_sounds(slap=True, num_sounds=100)
             if slap_sounds:
                 random_slap = random.choice(slap_sounds)
-                asyncio.create_task(self.bot_behavior._sound_service.play_request(random_slap[1], interaction.user.name, exact=True))
-                await asyncio.sleep(3)
+                # Resolve channel similar to PlaySlapButton
+                channel = self.bot_behavior._audio_service.get_user_voice_channel(interaction.guild, interaction.user.name)
+                if not channel:
+                    channel = self.bot_behavior._audio_service.get_largest_voice_channel(interaction.guild)
+                
+                if channel:
+                    asyncio.create_task(self.bot_behavior._audio_service.play_slap(channel, random_slap[2], interaction.user.name))
             
             await self.bot_behavior._mute_service.activate(duration_seconds=1800, requested_by=interaction.user)
             Database().insert_action(interaction.user.name, "mute_30_minutes", "")
@@ -44,23 +49,3 @@ class MuteToggleButton(Button):
             except discord.NotFound:
                 pass
 
-class ListBlacklistButton(Button):
-    def __init__(self, bot_behavior, **kwargs):
-        super().__init__(**kwargs)
-        self.bot_behavior = bot_behavior
-
-    async def callback(self, interaction):
-        await interaction.response.defer()
-        blacklisted = Database().get_sounds(num_sounds=1000, blacklist=True)
-        Database().insert_action(interaction.user.name, "list_blacklisted_sounds", len(blacklisted))
-        if len(blacklisted) > 0:
-            blacklisted_entries = [f"{sound[0]}: {sound[2]}" for sound in blacklisted]
-            blacklisted_content = "\n".join(blacklisted_entries)
-            
-            with open("blacklisted.txt", "w") as f:
-                f.write(blacklisted_content)
-            
-            await self.bot_behavior._message_service.send_message("🗑️ Blacklisted Sounds 🗑️", file=discord.File("blacklisted.txt", "blacklisted.txt"), delete_time=30)
-            os.remove("blacklisted.txt")  
-        else:
-            await interaction.followup.send("No blacklisted sounds found.", ephemeral=True)

@@ -222,6 +222,10 @@ class AudioService:
             if not voice_client:
                 return False
 
+            # Stop any currently playing audio to allow instant skip
+            if voice_client.is_playing():
+                voice_client.stop()
+
             audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Sounds", audio_file))
 
             if not os.path.exists(audio_file_path):
@@ -513,10 +517,3 @@ class AudioService:
         except Exception as e:
             print(f"[AudioService] Error updating progress bar: {e}")
 
-    async def cleanup_all_voice_connections(self):
-        """Disconnect from all voice channels across all guilds."""
-        for vc in self.bot.voice_clients:
-            try:
-                await vc.disconnect(force=True)
-            except Exception as e:
-                print(f"[AudioService] Error disconnecting from voice connection: {e}")

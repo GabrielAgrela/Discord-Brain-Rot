@@ -9,7 +9,7 @@ class ControlsView(View):
             ListFavoritesButton, ListUserFavoritesButton,
             BrainRotButton, StatsButton
         )
-        from bot.ui.buttons.admin import MuteToggleButton, ListBlacklistButton
+        from bot.ui.buttons.admin import MuteToggleButton
         from bot.ui.buttons.sounds import PlaySlapButton
         from bot.ui.buttons.upload import UploadSoundButton
         from bot.ui.buttons.list_buttons import ListLastScrapedSoundsButton
@@ -18,7 +18,6 @@ class ControlsView(View):
         self.add_item(PlayRandomFavoriteButton(bot_behavior, label="🎲Play Random Favorite⭐", style=discord.ButtonStyle.success))
         self.add_item(ListFavoritesButton(bot_behavior, label="⭐Favorites⭐", style=discord.ButtonStyle.success))
         self.add_item(ListUserFavoritesButton(bot_behavior, label="💖My Favorites💖", style=discord.ButtonStyle.success))
-        self.add_item(ListBlacklistButton(bot_behavior, label="🗑️Blacklisted🗑️", style=discord.ButtonStyle.success))
         self.add_item(PlaySlapButton(bot_behavior, label="", emoji="👋", style=discord.ButtonStyle.success))
 
         self.add_item(BrainRotButton(bot_behavior, label="🧠Brain Rot🧠", style=discord.ButtonStyle.success))

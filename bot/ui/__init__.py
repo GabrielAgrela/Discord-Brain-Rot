@@ -25,7 +25,7 @@ from bot.ui.buttons.misc import (
     PlayRandomFavoriteButton, ListFavoritesButton, ListUserFavoritesButton
 )
 from bot.ui.buttons.admin import (
-    MuteToggleButton, ListBlacklistButton
+    MuteToggleButton
 )
 from bot.ui.buttons.events import (
     ConfirmUserEventButton, CancelButton, DeleteEventButton
@@ -34,7 +34,8 @@ from bot.ui.views.sounds import (
     SoundBeingPlayedView, SoundBeingPlayedWithSuggestionsView
 )
 from bot.ui.views.lists import (
-    PaginatedSoundListView, UserSoundListsView
+    PaginatedSoundListView
+
 )
 from bot.ui.views.controls import (
     ControlsView, DownloadedSoundView, SoundView
@@ -72,12 +73,13 @@ __all__ = [
     'PlayRandomFavoriteButton', 'ListFavoritesButton', 'ListUserFavoritesButton',
     
     # Buttons - Admin & Events
-    'MuteToggleButton', 'ListBlacklistButton',
+    'MuteToggleButton',
     'ConfirmUserEventButton', 'CancelButton', 'DeleteEventButton',
     
     # Views
     'SoundBeingPlayedView', 'SoundBeingPlayedWithSuggestionsView',
-    'PaginatedSoundListView', 'UserSoundListsView',
+    'PaginatedSoundListView',
+
     'ControlsView', 'DownloadedSoundView', 'SoundView',
     'UserEventSelectView', 'EventView', 'PaginatedEventView',
     'PaginatedFavoritesView', 'UploadChoiceView',

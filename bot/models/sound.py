@@ -26,7 +26,6 @@ class Sound:
     original_filename: str
     filename: str
     favorite: bool = False
-    blacklist: bool = False
     slap: bool = False
     date: Optional[datetime] = None
     play_count: int = 0
@@ -42,7 +41,6 @@ class Sound:
                 filename=row[2],
                 date=datetime.fromisoformat(row[3]) if row[3] else None,
                 favorite=bool(row[4]),
-                blacklist=bool(row[5]),
                 slap=bool(row[6]) if len(row) > 6 else False,
             )
         elif len(row) >= 3:
