@@ -10,7 +10,7 @@ class SoundBeingPlayedView(View):
         self.user_id = user_id
 
         from bot.ui.buttons.sounds import (
-            ReplayButton, FavoriteButton, BlacklistButton, 
+            ReplayButton, FavoriteButton, 
             SlapButton, DownloadSoundButton, ChangeSoundNameButton,
             AssignUserEventButton
         )
@@ -19,7 +19,6 @@ class SoundBeingPlayedView(View):
         # Row 0: Common Actions
         self.add_item(ReplayButton(bot_behavior=bot_behavior, audio_file=audio_file, emoji="🔁", style=discord.ButtonStyle.primary, row=0))
         self.add_item(FavoriteButton(bot_behavior=bot_behavior, audio_file=audio_file, row=0))
-        self.add_item(BlacklistButton(bot_behavior=bot_behavior, audio_file=audio_file, row=0))
         self.add_item(SlapButton(bot_behavior=bot_behavior, audio_file=audio_file, row=0))
         self.add_item(DownloadSoundButton(bot_behavior=bot_behavior, audio_file=audio_file, row=0))
         
@@ -47,7 +46,7 @@ class SoundBeingPlayedWithSuggestionsView(View):
         self.similar_sounds = similar_sounds
 
         from bot.ui.buttons.sounds import (
-            ReplayButton, FavoriteButton, BlacklistButton, 
+            ReplayButton, FavoriteButton, 
             SlapButton, DownloadSoundButton, ChangeSoundNameButton,
             AssignUserEventButton
         )
@@ -56,7 +55,6 @@ class SoundBeingPlayedWithSuggestionsView(View):
         # Row 0: Common Actions
         self.add_item(ReplayButton(bot_behavior=bot_behavior, audio_file=audio_file, emoji="🔁", style=discord.ButtonStyle.primary, row=0))
         self.add_item(FavoriteButton(bot_behavior=bot_behavior, audio_file=audio_file, row=0))
-        self.add_item(BlacklistButton(bot_behavior=bot_behavior, audio_file=audio_file, row=0))
         self.add_item(SlapButton(bot_behavior=bot_behavior, audio_file=audio_file, row=0))
         self.add_item(DownloadSoundButton(bot_behavior=bot_behavior, audio_file=audio_file, row=0))
         

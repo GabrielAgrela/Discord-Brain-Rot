@@ -4,6 +4,7 @@ import discord
 import time
 import functools
 from datetime import datetime
+import traceback
 from typing import Optional, List, Dict, Any
 from mutagen.mp3 import MP3
 from bot.database import Database
@@ -224,15 +225,32 @@ class AudioService:
             audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Sounds", audio_file))
 
             if not os.path.exists(audio_file_path):
-                sound_info = self.db.get_sound(audio_file, True)
-                if sound_info and len(sound_info) > 2:
-                    audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Sounds", sound_info[2]))
-                    if not os.path.exists(audio_file_path):
-                        await self.message_service.send_error(f"Audio file not found: {audio_file_path}")
-                        return False
+                # Try getting sound info by Filename first
+                sound_info = self.db.get_sound(audio_file, False)
+                if sound_info:
+                    # Found by Filename, check if original filename exists on disk
+                    original_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Sounds", sound_info[1]))
+                    if os.path.exists(original_path):
+                        audio_file_path = original_path
+                    else:
+                        # Try searching by original filename directly (legacy fallback)
+                        sound_info_orig = self.db.get_sound(audio_file, True)
+                        if sound_info_orig and len(sound_info_orig) > 2:
+                            audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Sounds", sound_info_orig[2]))
+                        else:
+                            await self.message_service.send_error(f"Sound '{audio_file}' not found on disk or database")
+                            return False
                 else:
-                    await self.message_service.send_error(f"Sound '{audio_file}' not found in database")
-                    return False
+                     # Try searching by original filename directly (legacy fallback)
+                    sound_info_orig = self.db.get_sound(audio_file, True)
+                    if sound_info_orig and len(sound_info_orig) > 2:
+                        audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Sounds", sound_info_orig[2]))
+                        if not os.path.exists(audio_file_path):
+                             await self.message_service.send_error(f"Audio file not found: {audio_file_path}")
+                             return False
+                    else:
+                        await self.message_service.send_error(f"Sound '{audio_file}' not found in database")
+                        return False
 
             try:
                 audio = MP3(audio_file_path)
@@ -247,7 +265,7 @@ class AudioService:
             sound_message = None
             
             # Re-check slap sound
-            sound_info = self.db.get_sound(audio_file, True)
+            sound_info = self.db.get_sound(audio_file, False)
             is_slap_sound = sound_info and sound_info[6] == 1
             
             if bot_channel and not is_entrance:
@@ -356,7 +374,8 @@ class AudioService:
                         await self.message_service.send_controls(self._behavior)
 
             # FFmpeg options
-            ffmpeg_options = '-af "volume=1.0'
+            vol = effects.get('volume', 1.0) if effects else 1.0
+            ffmpeg_options = f'-af "volume={vol}'
             if effects:
                 filters = []
                 if effects.get('pitch'):
@@ -431,6 +450,7 @@ class AudioService:
 
         except Exception as e:
             print(f"[AudioService] Error in play_audio: {e}")
+            traceback.print_exc()
             self.playback_done.set()
             return False
 

@@ -30,7 +30,9 @@ class STSButton(Button):
         # Start the STS process - sts_EL expects (user, sound, char, region)
         asyncio.create_task(self.bot_behavior._voice_transformation_service.sts_EL(interaction.user, self.audio_file, self.char))
         # Record the action
-        Database().insert_action(interaction.user.name, "sts_EL", Database().get_sound(self.audio_file, True)[0])
+        sound = Database().get_sound(self.audio_file, False)
+        if sound:
+            Database().insert_action(interaction.user.name, "sts_EL", sound[0])
         # Delete the character selection message
         try:
             await interaction.message.delete()
@@ -47,7 +49,9 @@ class IsolateButton(Button):
     async def callback(self, interaction):
         await interaction.response.defer()
         asyncio.create_task(self.bot_behavior._audio_service.isolate_voice(interaction.message.channel, self.audio_file))
-        Database().insert_action(interaction.user.name, "isolate", Database().get_sounds_by_similarity(self.audio_file)[0][0][0])
+        similar_sounds = Database().get_sounds_by_similarity(self.audio_file)
+        if similar_sounds and similar_sounds[0]:
+            Database().insert_action(interaction.user.name, "isolate", similar_sounds[0][0][0])
 
 class FavoriteButton(Button):
     def __init__(self, bot_behavior, audio_file, **kwargs):
@@ -58,7 +62,11 @@ class FavoriteButton(Button):
 
     async def callback(self, interaction: discord.Interaction):
         await interaction.response.defer()
-        sound = Database().get_sound(self.audio_file, True)
+        sound = Database().get_sound(self.audio_file, False)
+        if not sound:
+             await interaction.followup.send("Sound not found in database.", ephemeral=True)
+             return
+            
         favorite = 1 if not sound[3] else 0
         await Database().update_sound(sound[2], None, favorite)
         
@@ -74,34 +82,7 @@ class FavoriteButton(Button):
         # No need to update the button state or view
         Database().insert_action(interaction.user.name, action_type, sound[0])
 
-class BlacklistButton(Button):
-
-    def __init__(self, bot_behavior, audio_file, **kwargs):
-        self.bot_behavior = bot_behavior
-        self.audio_file = audio_file
-        self.kwargs = kwargs
-        self.update_button_state()
-
-    def update_button_state(self):
-        if Database().get_sound(self.audio_file, True)[4]:  # Check if blacklisted (index 4)
-            super().__init__(label="🗑️❌", style=discord.ButtonStyle.primary, **self.kwargs)
-        else:
-            super().__init__(label="", emoji="🗑️", style=discord.ButtonStyle.primary, **self.kwargs)
-
-    async def callback(self, interaction: discord.Interaction):
-        await interaction.response.defer()
-        sound = Database().get_sound(self.audio_file, True)
-        blacklist = 1 if not sound[4] else 0
-        await Database().update_sound(sound[2], None, None, blacklist)
-
-        
-        # Update the button state
-        self.update_button_state()
-        
-        # Update the entire view
-        from bot.ui.views.sounds import SoundBeingPlayedView
-        await interaction.message.edit(view=SoundBeingPlayedView(self.bot_behavior, self.audio_file))
-        Database().insert_action(interaction.user.name, "blacklist_sound", sound[0])
+# BlacklistButton Removed
 
 class ChangeSoundNameButton(Button):
     def __init__(self, bot_behavior, sound_name, **kwargs):
@@ -142,7 +123,16 @@ class DownloadSoundButton(Button):
                 await interaction.followup.send(file=discord.File(sound_path), ephemeral=True)
                 Database().insert_action(interaction.user.name, "download_sound", self.audio_file)
             else:
-                await interaction.followup.send("Sound file not found.", ephemeral=True)
+                 # Check if the sound exists with its original name (if the filename passed is the original name but renamed in DB)
+                sound = Database().get_sound(self.audio_file, False)
+                if sound:
+                     original_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Sounds", sound[1]))
+                     if os.path.exists(original_path):
+                          await interaction.followup.send(file=discord.File(original_path), ephemeral=True)
+                          Database().insert_action(interaction.user.name, "download_sound", self.audio_file)
+                          return
+
+                await interaction.followup.send("Sound file not found on server.", ephemeral=True)
         except Exception as e:
             print(f"DownloadSoundButton error: {e}")
             await interaction.followup.send("Error sending file.", ephemeral=True)
@@ -174,7 +164,8 @@ class SlapButton(Button):
         self.update_button_state()
 
     def update_button_state(self):
-        if Database().get_sound(self.audio_file, True)[6]:  # Check if slap (index 6)
+        sound = Database().get_sound(self.audio_file, False) # Lookup by Filename
+        if sound and sound[6]:  # Check if slap (index 6) matches 1 (True)
             super().__init__(label="👋❌", style=discord.ButtonStyle.primary, **self.kwargs)
         else:
             super().__init__(label="", emoji="👋", style=discord.ButtonStyle.primary, **self.kwargs)
@@ -187,7 +178,11 @@ class SlapButton(Button):
             await interaction.followup.send("Only admins and moderators can add slap sounds! 😤", ephemeral=True)
             return
             
-        sound = Database().get_sound(self.audio_file, True)
+        sound = Database().get_sound(self.audio_file, False)
+        if not sound:
+             await interaction.followup.send("Sound not found in database.", ephemeral=True)
+             return
+
         slap = 1 if not sound[6] else 0
         await Database().update_sound(sound[2], slap=slap)
         
@@ -274,4 +269,6 @@ class STSCharacterSelectButton(Button):
             ephemeral=True,
             delete_after=10
         )
-        Database().insert_action(interaction.user.name, "sts_character_select", Database().get_sound(self.audio_file, True)[0])
+        sound = Database().get_sound(self.audio_file, False)
+        if sound:
+            Database().insert_action(interaction.user.name, "sts_character_select", sound[0])

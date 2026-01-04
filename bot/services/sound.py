@@ -232,12 +232,18 @@ class SoundService:
                 await self.message_service.send_error(f"Error during upload: {str(e)}")
 
     async def save_sound_from_video(self, url: str, custom_filename: Optional[str] = None, time_limit: Optional[int] = None) -> str:
-        """Download sound from TikTok or YouTube video."""
+        """Download sound from TikTok or YouTube video to Downloads folder.
+        
+        The file will be picked up by move_sounds() which will move it to Sounds,
+        register it in the database, and show the button view.
+        """
         try:
-            filename = self.manual_downloader.video_to_mp3(url, self.sounds_dir, custom_filename, time_limit)
-            full_path = os.path.join(self.sounds_dir, filename)
-            # Insert into database
-            self.db.insert_sound(filename, filename)
+            # Save to Downloads folder so move_sounds picks it up with button view
+            downloads_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Downloads"))
+            os.makedirs(downloads_dir, exist_ok=True)
+            filename = self.manual_downloader.video_to_mp3(url, downloads_dir, custom_filename, time_limit)
+            full_path = os.path.join(downloads_dir, filename)
+            # Don't insert to DB here - move_sounds will do that
             return full_path
         except Exception as e:
             print(f"[SoundService] Error in save_sound_from_video: {e}")

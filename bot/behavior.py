@@ -72,6 +72,7 @@ class BotBehavior:
         self._audio_service.set_voice_transformation_service(self._voice_transformation_service)
         self._audio_service.set_behavior(self)
         self._message_service.set_behavior(self)
+        self._user_event_service.set_behavior(self)
         
         # Legacy components still in transition
         self.TTS = self._voice_transformation_service.tts_engine

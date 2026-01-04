@@ -12,6 +12,11 @@ class UserEventService:
         self.audio_service = audio_service
         self.message_service = message_service
         self.db = Database()
+        self.behavior = None
+
+    def set_behavior(self, behavior):
+        """Set the behavior reference."""
+        self.behavior = behavior
 
     async def add_user_event(self, username: str, event: str, sound_name: str) -> bool:
         """Add a join/leave event sound for a user."""
@@ -62,11 +67,10 @@ class UserEventService:
             description += "\n".join([f"• {event[2]}" for event in join_events[:current_page_end]])
             description += f"\nShowing sounds 1-{current_page_end} of {total_events}"
             
-            # We'll pass None for behavior, will need to fix this dependency later
             await self.message_service.send_message(
                 title=f"🎵 {user_name}'s Join Event Sounds (Page 1/{(total_events + 19) // 20})",
                 description=description,
-                view=PaginatedEventView(None, join_events, user_full_name, "join"),
+                view=PaginatedEventView(self.behavior, join_events, user_full_name, "join"),
                 delete_time=60
             )
         
@@ -81,7 +85,7 @@ class UserEventService:
             await self.message_service.send_message(
                 title=f"🎵 {user_name}'s Leave Event Sounds (Page 1/{(total_events + 19) // 20})",
                 description=description,
-                view=PaginatedEventView(None, leave_events, user_full_name, "leave"),
+                view=PaginatedEventView(self.behavior, leave_events, user_full_name, "leave"),
                 delete_time=60
             )
         

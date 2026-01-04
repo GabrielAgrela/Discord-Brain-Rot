@@ -13,6 +13,12 @@ from discord.commands import Option
 from bot.database import Database
 
 
+
+async def _get_user_choices(ctx: discord.AutocompleteContext):
+    """Get all known users for autocomplete."""
+    db = Database()
+    return db.get_all_users()
+
 class EventCog(commands.Cog):
     """Cog for managing user events (join/leave sounds)."""
     
@@ -21,12 +27,6 @@ class EventCog(commands.Cog):
         self.behavior = behavior
         self.db = Database()
     
-    @staticmethod
-    async def _get_user_choices(ctx: discord.AutocompleteContext):
-        """Get all known users for autocomplete."""
-        db = Database()
-        return db.get_all_users()
-
     @commands.slash_command(name="addevent", description="Add a join/leave event sound for a user")
     async def add_event(
         self, 
@@ -58,7 +58,10 @@ class EventCog(commands.Cog):
             target_user_full = username
         else:
             target_user = ctx.user.name
-            target_user_full = f"{ctx.user.name}#{ctx.user.discriminator}"
+            if ctx.user.discriminator and ctx.user.discriminator != "0":
+                 target_user_full = f"{ctx.user.name}#{ctx.user.discriminator}"
+            else:
+                 target_user_full = ctx.user.name
         
         if not await self.behavior.list_user_events(target_user, target_user_full, requesting_user=ctx.user.name):
             await ctx.followup.send(f"No event sounds found for {target_user}!", ephemeral=True)

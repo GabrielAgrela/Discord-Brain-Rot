@@ -4,7 +4,7 @@ UI subpackage - Discord UI components (buttons, views, modals).
 
 from bot.ui.buttons.sounds import (
     ReplayButton, STSButton, IsolateButton, FavoriteButton, 
-    BlacklistButton, ChangeSoundNameButton, DownloadSoundButton,
+    ChangeSoundNameButton, DownloadSoundButton,
     PlaySoundButton, SlapButton, PlaySlapButton, AssignUserEventButton,
     STSCharacterSelectButton
 )
@@ -56,7 +56,7 @@ from bot.ui.modals import (
 __all__ = [
     # Buttons - Sounds
     'ReplayButton', 'STSButton', 'IsolateButton', 'FavoriteButton', 
-    'BlacklistButton', 'ChangeSoundNameButton', 'DownloadSoundButton',
+    'ChangeSoundNameButton', 'DownloadSoundButton',
     'PlaySoundButton', 'SlapButton', 'PlaySlapButton', 'AssignUserEventButton',
     'STSCharacterSelectButton', 'UploadSoundButton', 'UploadMP3FileButton',
     

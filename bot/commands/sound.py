@@ -17,6 +17,21 @@ from bot.database import Database
 from bot.models.sound import SoundEffect
 
 
+async def _get_sound_autocomplete(ctx: discord.AutocompleteContext):
+    """Autocomplete for sound names."""
+    try:
+        db = Database()
+        current = ctx.value.lower() if ctx.value else ""
+        if not current or len(current) < 2:
+            return []
+        
+        similar_sounds = db.get_sounds_by_similarity_optimized(current, 15)
+        # similar_sounds is a list of (sound_tuple, score)
+        return [sound[0][2].split('/')[-1].replace('.mp3', '') for sound in similar_sounds]
+    except Exception as e:
+        print(f"Autocomplete error: {e}")
+        return []
+
 class SoundCog(commands.Cog):
     """Cog for sound playback commands."""
     
@@ -31,21 +46,6 @@ class SoundCog(commands.Cog):
         self.bot = bot
         self.behavior = behavior
         self.db = Database()
-    
-    @staticmethod
-    async def _get_sound_autocomplete(ctx: discord.AutocompleteContext):
-        """Autocomplete for sound names."""
-        try:
-            db = Database()
-            current = ctx.value.lower() if ctx.value else ""
-            if not current or len(current) < 2:
-                return []
-            
-            similar_sounds = db.get_sounds_by_similarity_optimized(current, 15)
-            return [sound[2].split('/')[-1].replace('.mp3', '') for sound in similar_sounds]
-        except Exception as e:
-            print(f"Autocomplete error: {e}")
-            return []
     
     @commands.slash_command(name="toca", description="Write a name of something you want to hear")
     async def toca(
