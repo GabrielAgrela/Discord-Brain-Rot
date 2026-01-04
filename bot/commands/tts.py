@@ -52,7 +52,7 @@ class TTSCog(commands.Cog):
             avatar = getattr(discord_user, "display_avatar", None)
             url = avatar.url if avatar else DEFAULT_TTS_THUMBNAIL
         
-        await self.behavior.send_message(
+        await self.behavior._message_service.send_message(
             title=f"TTS • {profile.get('display', language.title())} {flag}",
             description=f"'{message}'",
             thumbnail=url
@@ -60,13 +60,13 @@ class TTSCog(commands.Cog):
         
         try:
             if profile.get("provider") == "elevenlabs":
-                await self.behavior.tts_EL(user, message, profile.get("voice", "en"))
+                await self.behavior._voice_transformation_service.tts_EL(user, message, profile.get("voice", "en"))
             else:
                 lang = profile.get("lang", "en")
                 region = profile.get("region", "")
-                await self.behavior.tts(user, message, lang, region)
+                await self.behavior._voice_transformation_service.tts(user, message, lang, region)
         except Exception as e:
-            await self.behavior.send_message(title=str(e))
+            await self.behavior._message_service.send_error(str(e))
 
     @commands.slash_command(name="sts", description="Speech-To-Speech conversion")
     async def sts(
@@ -89,16 +89,16 @@ class TTSCog(commands.Cog):
             avatar = getattr(discord_user, "display_avatar", None)
             url = avatar.url if avatar else DEFAULT_TTS_THUMBNAIL
         
-        await self.behavior.send_message(
+        await self.behavior._message_service.send_message(
             title=f"{sound} to {profile.get('display', char.title())}",
             description=f"'{profile.get('display', char.title())}'",
             thumbnail=url
         )
         
         try:
-            await self.behavior.sts_EL(user, sound, char)
+            await self.behavior._voice_transformation_service.sts_EL(user, sound, char)
         except Exception as e:
-            await self.behavior.send_message(title=str(e))
+            await self.behavior._message_service.send_error(str(e))
     
     @commands.slash_command(name="isolate", description="Isolate voice from a sound")
     async def isolate(
@@ -113,9 +113,9 @@ class TTSCog(commands.Cog):
         self.behavior.color = discord.Color.dark_blue()
         
         try:
-            await self.behavior.isolate_voice(user, sound)
+            await self.behavior._audio_service.isolate_voice(user, sound)
         except Exception as e:
-            await self.behavior.send_message(title=str(e))
+            await self.behavior._message_service.send_error(str(e))
 
 
 def setup(bot: discord.Bot, behavior=None):

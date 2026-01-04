@@ -109,10 +109,10 @@ class DeleteEventButton(Button):
             else:
                 await interaction.followup.send("Failed to delete the event!", ephemeral=True)
         else:
-            channel = self.bot_behavior.get_user_voice_channel(interaction.guild, interaction.user.name)
+            channel = self.bot_behavior._audio_service.get_user_voice_channel(interaction.guild, interaction.user.name)
             if channel:
                 similar_sounds = Database().get_sounds_by_similarity(self.sound, 1)
-                await self.bot_behavior.play_audio(channel, similar_sounds[0][1], interaction.user.name)
+                await self.bot_behavior._audio_service.play_audio(channel, similar_sounds[0][1], interaction.user.name)
                 Database().insert_action(interaction.user.name, f"play_{self.event}_event_sound", self.sound)
             else:
                 await interaction.followup.send("You need to be in a voice channel to play sounds! 😭", ephemeral=True)

@@ -35,6 +35,12 @@ class MessageService:
         self.bot_channel_name = bot_channel_name
         self.color = discord.Color.dark_grey()
         self._last_message: Optional[discord.Message] = None
+        self._controls_message: Optional[discord.Message] = None
+        self._bot_behavior = None  # Set later to avoid circular dependency
+
+    def set_behavior(self, behavior):
+        """Set bot behavior reference for re-sending controls."""
+        self._bot_behavior = behavior
     
     def get_bot_channel(self, guild: Optional[discord.Guild] = None) -> Optional[discord.TextChannel]:
         """
@@ -93,6 +99,7 @@ class MessageService:
             description=description,
             color=color or self.color,
         )
+        embed.add_field(name="", value="[🥵 gabrielagrela.com 🥵](https://gabrielagrela.com)")
         
         if thumbnail:
             embed.set_thumbnail(url=thumbnail)
@@ -106,6 +113,11 @@ class MessageService:
             
             message = await channel.send(**kwargs)
             self._last_message = message
+            
+            # Re-send controls to keep them at the bottom
+            if self._bot_behavior and self._controls_message:
+                await self.send_controls(self._bot_behavior)
+            
             return message
             
         except Exception as e:
@@ -254,7 +266,83 @@ class MessageService:
             print(f"[MessageService] Error updating message: {e}")
             return False
     
+    async def send_controls(self, bot_behavior) -> bool:
+        """Send the main bot controls view."""
+        from bot.ui.views.controls import ControlsView
+        channel = self.get_bot_channel()
+        if not channel:
+            return False
+            
+        try:
+            if self._controls_message:
+                try:
+                    await self._controls_message.delete()
+                except:
+                    pass
+            
+            self._controls_message = await channel.send(view=ControlsView(bot_behavior))
+            return True
+        except Exception as e:
+            print(f"[MessageService] Error sending controls: {e}")
+            return False
+
+    async def delete_controls(self):
+        """Delete the current controls message."""
+        if self._controls_message:
+            try:
+                await self._controls_message.delete()
+                self._controls_message = None
+            except:
+                pass
+
     @property
     def last_message(self) -> Optional[discord.Message]:
         """Get the last message sent by this service."""
         return self._last_message
+
+    @property
+    def controls_message(self) -> Optional[discord.Message]:
+        """Get the current controls message."""
+        return self._controls_message
+
+    async def delete_controls_message(self, delete_all=True):
+        """Find and delete control messages in the bot channel history."""
+        channel = self.get_bot_channel()
+        if not channel:
+            return
+            
+        try:
+            if delete_all:
+                async for message in channel.history(limit=100):
+                    if message.components and not message.embeds:
+                        try:
+                            # Discord.py components structure
+                            first_label = message.components[0].children[0].label or ""
+                        except:
+                            first_label = ""
+                        
+                        if "Play Random" in first_label:
+                            await message.delete()
+            else:
+                # Just find the current one if not already tracked
+                if self._controls_message:
+                    await self._controls_message.delete()
+                    self._controls_message = None
+        except Exception as e:
+            print(f"[MessageService] Error deleting control messages: {e}")
+
+    async def clean_buttons(self, count=5):
+        """Remove components/buttons from recent messages."""
+        channel = self.get_bot_channel()
+        if not channel:
+            return
+            
+        try:
+            async for message in channel.history(limit=count):
+                if message.components:
+                    if message.embeds:
+                        await message.edit(view=None)
+                    else:
+                        await message.delete()
+        except Exception as e:
+            print(f"[MessageService] Error cleaning buttons: {e}")

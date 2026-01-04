@@ -65,11 +65,11 @@ class SoundSelect(discord.ui.Select):
         sound_id = self.values[0]
         sound = Database().get_sound(sound_id)
         if sound:
-            channel = self.bot_behavior.get_user_voice_channel(interaction.guild, interaction.user.name)
+            channel = self.bot_behavior._audio_service.get_user_voice_channel(interaction.guild, interaction.user.name)
             if not channel:
-                channel = self.bot_behavior.get_largest_voice_channel(interaction.guild)
+                channel = self.bot_behavior._audio_service.get_largest_voice_channel(interaction.guild)
             if channel:
-                asyncio.create_task(self.bot_behavior.play_audio(channel, sound[0], interaction.user.name))
+                asyncio.create_task(self.bot_behavior._audio_service.play_audio(channel, sound[0], interaction.user.name))
                 Database().insert_action(interaction.user.name, "select_play_sound", sound[0])
 
 class AddToListSelect(discord.ui.Select):
@@ -138,7 +138,8 @@ class STSCharacterSelect(discord.ui.Select):
     async def callback(self, interaction):
         await interaction.response.defer()
         char = self.values[0]
-        asyncio.create_task(self.bot_behavior.sts_EL(interaction.message.channel, self.audio_file, char))
+        # sts_EL expects (user, sound, char, region)
+        asyncio.create_task(self.bot_behavior._voice_transformation_service.sts_EL(interaction.user, self.audio_file, char))
         Database().insert_action(interaction.user.name, "sts_EL", Database().get_sound(self.audio_file, True)[0])
 
 class SimilarSoundsSelect(discord.ui.Select):
@@ -160,11 +161,11 @@ class SimilarSoundsSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         await interaction.response.defer()
         sound_name = self.values[0]
-        channel = self.bot_behavior.get_user_voice_channel(interaction.guild, interaction.user.name)
+        channel = self.bot_behavior._audio_service.get_user_voice_channel(interaction.guild, interaction.user.name)
         if not channel:
-            channel = self.bot_behavior.get_largest_voice_channel(interaction.guild)
+            channel = self.bot_behavior._audio_service.get_largest_voice_channel(interaction.guild)
         if channel:
-            asyncio.create_task(self.bot_behavior.play_audio(channel, sound_name, interaction.user.name))
+            asyncio.create_task(self.bot_behavior._audio_service.play_audio(channel, sound_name, interaction.user.name))
             Database().insert_action(interaction.user.name, "select_similar_sound", sound_name)
 
 class LoadingSimilarSoundsSelect(discord.ui.Select):

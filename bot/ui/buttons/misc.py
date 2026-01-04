@@ -11,7 +11,7 @@ class SubwaySurfersButton(Button):
 
     async def callback(self, interaction):
         await interaction.response.defer()
-        asyncio.create_task(self.bot_behavior.subway_surfers())
+        asyncio.create_task(self.bot_behavior._brain_rot_service.subway_surfers(interaction.user))
 
 class SliceAllButton(Button):
     def __init__(self, bot_behavior, **kwargs):
@@ -20,7 +20,7 @@ class SliceAllButton(Button):
 
     async def callback(self, interaction):
         await interaction.response.defer()
-        asyncio.create_task(self.bot_behavior.slice_all())
+        asyncio.create_task(self.bot_behavior._brain_rot_service.slice_all(interaction.user))
 
 class FamilyGuyButton(Button):
     def __init__(self, bot_behavior, **kwargs):
@@ -29,7 +29,7 @@ class FamilyGuyButton(Button):
 
     async def callback(self, interaction):
         await interaction.response.defer()
-        asyncio.create_task(self.bot_behavior.family_guy())
+        asyncio.create_task(self.bot_behavior._brain_rot_service.family_guy(interaction.user))
 
 class BrainRotButton(Button):
     def __init__(self, bot_behavior, **kwargs):
@@ -39,27 +39,26 @@ class BrainRotButton(Button):
     async def callback(self, interaction):
         await interaction.response.defer()
 
-        if self.bot_behavior.brain_rot_lock.locked():
-            if self.bot_behavior.brain_rot_cooldown_message:
+        if self.bot_behavior._brain_rot_service.lock.locked():
+            if self.bot_behavior._brain_rot_service.cooldown_message:
                 try:
-                    await self.bot_behavior.brain_rot_cooldown_message.delete()
+                    await self.bot_behavior._brain_rot_service.cooldown_message.delete()
                 except (discord.NotFound, discord.Forbidden):
                     pass 
-            self.bot_behavior.brain_rot_cooldown_message = await self.bot_behavior.send_message(
+            self.bot_behavior._brain_rot_service.cooldown_message = await self.bot_behavior._message_service.send_message(
                 title="🧠 Brain Rot Active 🧠",
                 description="A brain rot function is already in progress. Please wait!",
-                delete_time=5, 
-                send_controls=False 
+                delete_time=5
             )
             return
 
         async def run_brain_rot():
             try:
-                async with self.bot_behavior.brain_rot_lock:
+                async with self.bot_behavior._brain_rot_service.lock:
                     brain_rot_functions = [
-                        self.bot_behavior.subway_surfers,
-                        self.bot_behavior.slice_all,
-                        self.bot_behavior.family_guy
+                        self.bot_behavior._brain_rot_service.subway_surfers,
+                        self.bot_behavior._brain_rot_service.slice_all,
+                        self.bot_behavior._brain_rot_service.family_guy
                     ]
                     chosen_function = random.choice(brain_rot_functions)
                     
@@ -69,12 +68,12 @@ class BrainRotButton(Button):
                     except Exception as e:
                         print(f"Error during brain rot function '{chosen_function.__name__}': {e}")
             finally:
-                if self.bot_behavior.brain_rot_cooldown_message:
+                if self.bot_behavior._brain_rot_service.cooldown_message:
                     try:
-                        await self.bot_behavior.brain_rot_cooldown_message.delete()
+                        await self.bot_behavior._brain_rot_service.cooldown_message.delete()
                     except (discord.NotFound, discord.Forbidden):
                         pass 
-                    self.bot_behavior.brain_rot_cooldown_message = None
+                    self.bot_behavior._brain_rot_service.cooldown_message = None
 
         asyncio.create_task(run_brain_rot())
 
@@ -85,7 +84,7 @@ class StatsButton(Button):
 
     async def callback(self, interaction):
         await interaction.response.defer()
-        asyncio.create_task(self.bot_behavior.display_top_users(interaction.user, number_users=20, number_sounds=5, days=700, by="plays"))
+        asyncio.create_task(self.bot_behavior._stats_service.display_top_users(interaction.user, number_users=20, number_sounds=5, days=700, by="plays"))
 
 class PlayRandomButton(Button):
     def __init__(self, bot_behavior, **kwargs):
@@ -94,7 +93,7 @@ class PlayRandomButton(Button):
 
     async def callback(self, interaction):
         await interaction.response.defer()
-        asyncio.create_task(self.bot_behavior.play_random_sound(interaction.user.name))
+        asyncio.create_task(self.bot_behavior._sound_service.play_random_sound(interaction.user.name))
 
 class PlayRandomFavoriteButton(Button):
     def __init__(self, bot_behavior, **kwargs):
@@ -103,7 +102,7 @@ class PlayRandomFavoriteButton(Button):
 
     async def callback(self, interaction):
         await interaction.response.defer()
-        asyncio.create_task(self.bot_behavior.play_random_favorite_sound(interaction.user.name))
+        asyncio.create_task(self.bot_behavior._sound_service.play_random_favorite_sound(interaction.user.name))
 
 class ListFavoritesButton(Button):
     current_favorites_message = None
@@ -127,7 +126,7 @@ class ListFavoritesButton(Button):
         if len(favorites) > 0:
             from bot.ui.views.favorites import PaginatedFavoritesView
             view = PaginatedFavoritesView(self.bot_behavior, favorites, interaction.user.name)
-            message = await self.bot_behavior.send_message(
+            message = await self.bot_behavior._message_service.send_message(
                 title=f"⭐ All Favorite Sounds (Page 1/{len(view.pages)}) ⭐",
                 description=f"All favorite sounds in the database\nShowing sounds 1-{min(20, len(favorites))} of {len(favorites)}",
                 view=view,
@@ -159,7 +158,7 @@ class ListUserFavoritesButton(Button):
         if len(favorites) > 0:
             from bot.ui.views.favorites import PaginatedFavoritesView
             view = PaginatedFavoritesView(self.bot_behavior, favorites, interaction.user.name)
-            message = await self.bot_behavior.send_message(
+            message = await self.bot_behavior._message_service.send_message(
                 title=f"🤩 {interaction.user.name}'s Favorites (Page 1/{len(view.pages)}) 🤩",
                 description=f"Showing sounds 1-{min(20, len(favorites))} of {len(favorites)}",
                 view=view,

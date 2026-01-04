@@ -37,7 +37,7 @@ class UploadMP3ChoiceButton(Button):
 
     async def callback(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
-        await self.bot_behavior.prompt_upload_mp3(interaction)
+        await self.bot_behavior._sound_service.prompt_upload_sound(interaction)
 
 class UploadChoiceView(View):
     def __init__(self, bot_behavior):
@@ -51,4 +51,4 @@ class UploadMP3FileButton(Button):
         self.bot_behavior = bot_behavior
 
     async def callback(self, interaction):
-        await self.bot_behavior.prompt_upload_mp3(interaction)
+        await self.bot_behavior._sound_service.prompt_upload_sound(interaction)

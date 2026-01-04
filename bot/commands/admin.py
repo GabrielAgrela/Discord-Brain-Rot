@@ -42,7 +42,7 @@ class AdminCog(commands.Cog):
             await ctx.respond("You don't have permission to use this command.", ephemeral=True)
             return
         
-        await self.behavior.send_message(
+        await self.behavior._message_service.send_message(
             title="🚨 System Reboot Initiated 🚨",
             description=f"Rebooting the machine as requested by {ctx.author.mention}..."
         )
@@ -76,17 +76,15 @@ class AdminCog(commands.Cog):
         print(f"Voice cleanup initiated by {ctx.author.name}")
         
         try:
-            await self.behavior.cleanup_all_voice_connections()
-            await self.behavior.send_message(
+            await self.behavior._audio_service.cleanup_all_voice_connections()
+            await self.behavior._message_service.send_message(
                 title="✅ Voice Cleanup Complete",
                 description=f"All connections cleaned up by {ctx.author.mention}.",
                 delete_time=10
             )
         except Exception as e:
-            await self.behavior.send_message(
-                title="❌ Voice Cleanup Failed",
-                description=f"Failed: {e}",
-                delete_time=10
+            await self.behavior._message_service.send_error(
+                f"Voice cleanup failed: {e}"
             )
     
     @commands.slash_command(name="lastlogs", description="Show the last service logs")

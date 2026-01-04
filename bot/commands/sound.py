@@ -70,11 +70,11 @@ class SoundCog(commands.Cog):
             
             if message == "random":
                 asyncio.run_coroutine_threadsafe(
-                    self.behavior.play_random_sound(username, effects=effects.to_dict()), 
+                    self.behavior._sound_service.play_random_sound(username, effects=effects.to_dict()), 
                     self.bot.loop
                 )
             else:
-                await self.behavior.play_request(message, author.name, effects=effects.to_dict())
+                await self.behavior._sound_service.play_request(message, author.name, effects=effects.to_dict())
                 
         except Exception as e:
             print(f"Error in toca command: {e}")
@@ -93,13 +93,13 @@ class SoundCog(commands.Cog):
     ):
         """Rename a sound file."""
         await ctx.respond("Processing your request...", delete_after=0)
-        await self.behavior.change_filename(current, new, ctx.user)
+        await self.behavior._sound_service.change_filename(current, new, ctx.user)
     
     @commands.slash_command(name="list", description="Returns database of sounds")
     async def list_sounds(self, ctx: discord.ApplicationContext):
         """Show the sound database."""
         await ctx.respond("Processing your request...", delete_after=0)
-        await self.behavior.list_sounds(ctx.user)
+        await self.behavior._sound_service.list_sounds(ctx.user)
     
     @commands.slash_command(name="lastsounds", description="Returns last sounds downloaded")
     async def lastsounds(
@@ -108,23 +108,24 @@ class SoundCog(commands.Cog):
         number: Option(int, "Number of sounds", default=10, required=False)
     ):
         """Show recently downloaded sounds."""
-        await self.behavior.list_sounds(ctx, number)
+        await self.behavior._sound_service.list_sounds(ctx, number)
     @commands.slash_command(name="subwaysurfers", description="Play Subway Surfers gameplay")
     async def subway_surfers(self, ctx: discord.ApplicationContext):
         """Play Subway Surfers."""
         await ctx.respond("Processing your request...", delete_after=0)
-        await self.behavior.subway_surfers()
+        await self.behavior._brain_rot_service.subway_surfers(ctx.user)
 
     @commands.slash_command(name="familyguy", description="Play Family Guy clip")
     async def family_guy(self, ctx: discord.ApplicationContext):
         """Play Family Guy."""
         await ctx.respond("Processing your request...", delete_after=0)
-        await self.behavior.family_guy()
+        await self.behavior._brain_rot_service.family_guy(ctx.user)
 
     @commands.slash_command(name="slice", description="Play Slice All gameplay")
     async def slice(self, ctx: discord.ApplicationContext):
         """Play Slice All."""
-        await self.behavior.slice_all(ctx)
+        await ctx.respond("Processing your request...", delete_after=0)
+        await self.behavior._brain_rot_service.slice_all(ctx.user)
 
 def setup(bot: discord.Bot, behavior=None):
     """

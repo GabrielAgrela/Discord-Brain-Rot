@@ -10,7 +10,7 @@ class ListSoundsButton(Button):
 
     async def callback(self, interaction):
         await interaction.response.defer()
-        asyncio.create_task(self.bot_behavior.list_sounds(user=interaction.user))
+        asyncio.create_task(self.bot_behavior._sound_service.list_sounds(user=interaction.user))
 
 class ListLastScrapedSoundsButton(Button):
     def __init__(self, bot_behavior, **kwargs):
@@ -19,7 +19,7 @@ class ListLastScrapedSoundsButton(Button):
 
     async def callback(self, interaction):
         await interaction.response.defer()
-        asyncio.create_task(self.bot_behavior.list_sounds(interaction.user, 25))
+        asyncio.create_task(self.bot_behavior._sound_service.list_sounds(interaction.user, 25))
         Database().insert_action(interaction.user.name, "list_last_scraped_sounds", "")
 
 class SoundListButton(Button):
@@ -117,11 +117,11 @@ class SoundListItemButton(Button):
 
     async def callback(self, interaction):
         await interaction.response.defer()
-        channel = self.bot_behavior.get_user_voice_channel(interaction.guild, interaction.user.name)
+        channel = self.bot_behavior._audio_service.get_user_voice_channel(interaction.guild, interaction.user.name)
         if not channel:
-            channel = self.bot_behavior.get_largest_voice_channel(interaction.guild)
+            channel = self.bot_behavior._audio_service.get_largest_voice_channel(interaction.guild)
         if channel:
-            asyncio.create_task(self.bot_behavior.play_audio(channel, self.sound_filename, interaction.user.name))
+            asyncio.create_task(self.bot_behavior._audio_service.play_audio(channel, self.sound_filename, interaction.user.name))
         else:
             await interaction.followup.send("No voice channel available! 😭", ephemeral=True)
 

@@ -191,7 +191,9 @@ class TTS:
         
         filenames = Database().get_sounds_by_similarity(input_audio_name)
         
-        filename = filenames[0][1] if filenames else None
+        # get_sounds_by_similarity returns [(sound_tuple, score), ...]
+        # sound_tuple[2] is the filename
+        filename = filenames[0][0][2] if filenames else None
 
         tmp_filename = f"{filename}-{char}.mp3"
          # Check if the file already exists
@@ -276,7 +278,10 @@ class TTS:
                     if channel is None:
                         await self.behavior.send_error_message("No available voice channel for TTS playback.")
                         return
-                    await self.behavior.play_audio(channel, self.filename, "admin", is_tts=True)
+                    # Pass character and original sound name for proper STS embed
+                    original_sound_name = filename.replace('.mp3', '') if filename else ''
+                    await self.behavior.play_audio(channel, self.filename, "admin", is_tts=True, original_message=original_sound_name, sts_char=char)
+
                     self.update_last_request_time()
                     print("Audio stream saved and played successfully.")
                 else:

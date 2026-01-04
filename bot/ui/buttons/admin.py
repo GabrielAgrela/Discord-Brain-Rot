@@ -14,7 +14,7 @@ class MuteToggleButton(Button):
         self._refresh_state()
 
     def _refresh_state(self):
-        if self.bot_behavior.get_mute_remaining() > 0:
+        if self.bot_behavior._mute_service.get_remaining_seconds() > 0:
             self.label = "🔊Unmute🔊"
         else:
             self.label = "🔇30m Mute🔇"
@@ -22,19 +22,19 @@ class MuteToggleButton(Button):
     async def callback(self, interaction):
         await interaction.response.defer()
 
-        is_muted = self.bot_behavior.get_mute_remaining() > 0
+        is_muted = self.bot_behavior._mute_service.get_remaining_seconds() > 0
 
         if is_muted:
-            await self.bot_behavior.deactivate_mute(requested_by=interaction.user)
+            await self.bot_behavior._mute_service.deactivate(requested_by=interaction.user)
             Database().insert_action(interaction.user.name, "unmute", "")
         else:
             slap_sounds = Database().get_sounds(slap=True, num_sounds=100)
             if slap_sounds:
                 random_slap = random.choice(slap_sounds)
-                asyncio.create_task(self.bot_behavior.play_request(random_slap[1], interaction.user.name, exact=True))
+                asyncio.create_task(self.bot_behavior._sound_service.play_request(random_slap[1], interaction.user.name, exact=True))
                 await asyncio.sleep(3)
             
-            await self.bot_behavior.activate_mute(duration_seconds=1800, requested_by=interaction.user)
+            await self.bot_behavior._mute_service.activate(duration_seconds=1800, requested_by=interaction.user)
             Database().insert_action(interaction.user.name, "mute_30_minutes", "")
 
         self._refresh_state()
@@ -60,7 +60,7 @@ class ListBlacklistButton(Button):
             with open("blacklisted.txt", "w") as f:
                 f.write(blacklisted_content)
             
-            await self.bot_behavior.send_message("🗑️ Blacklisted Sounds 🗑️", file=discord.File("blacklisted.txt", "blacklisted.txt"), delete_time=30)
+            await self.bot_behavior._message_service.send_message("🗑️ Blacklisted Sounds 🗑️", file=discord.File("blacklisted.txt", "blacklisted.txt"), delete_time=30)
             os.remove("blacklisted.txt")  
         else:
             await interaction.followup.send("No blacklisted sounds found.", ephemeral=True)

@@ -14,7 +14,7 @@ class ReplayButton(Button):
 
     async def callback(self, interaction):
         await interaction.response.defer()
-        asyncio.create_task(self.bot_behavior.play_audio(interaction.user.voice.channel, self.audio_file, interaction.user.name))
+        asyncio.create_task(self.bot_behavior._audio_service.play_audio(interaction.user.voice.channel, self.audio_file, interaction.user.name))
         Database().insert_action(interaction.user.name, "replay_sound", Database().get_sounds_by_similarity(self.audio_file)[0][0][0])
  
 class STSButton(Button):
@@ -27,8 +27,8 @@ class STSButton(Button):
 
     async def callback(self, interaction):
         await interaction.response.defer()
-        # Start the STS process
-        asyncio.create_task(self.bot_behavior.sts_EL(interaction.message.channel, self.audio_file, self.char))
+        # Start the STS process - sts_EL expects (user, sound, char, region)
+        asyncio.create_task(self.bot_behavior._voice_transformation_service.sts_EL(interaction.user, self.audio_file, self.char))
         # Record the action
         Database().insert_action(interaction.user.name, "sts_EL", Database().get_sound(self.audio_file, True)[0])
         # Delete the character selection message
@@ -46,7 +46,7 @@ class IsolateButton(Button):
 
     async def callback(self, interaction):
         await interaction.response.defer()
-        asyncio.create_task(self.bot_behavior.isolate_voice(interaction.message.channel, self.audio_file))
+        asyncio.create_task(self.bot_behavior._audio_service.isolate_voice(interaction.message.channel, self.audio_file))
         Database().insert_action(interaction.user.name, "isolate", Database().get_sounds_by_similarity(self.audio_file)[0][0][0])
 
 class FavoriteButton(Button):
@@ -69,6 +69,7 @@ class FavoriteButton(Button):
             action_type = "favorite_sound"
         else:
             await interaction.followup.send(f"Removed **{sound_name}** from your favorites!", ephemeral=True, delete_after=5)
+            action_type = "unfavorite_sound"
         
         # No need to update the button state or view
         Database().insert_action(interaction.user.name, action_type, sound[0])
@@ -157,11 +158,11 @@ class PlaySoundButton(Button):
 
     async def callback(self, interaction):
         await interaction.response.defer()
-        channel = self.bot_behavior.get_user_voice_channel(interaction.guild, interaction.user.name)
+        channel = self.bot_behavior._audio_service.get_user_voice_channel(interaction.guild, interaction.user.name)
         if not channel:
-            channel = self.bot_behavior.get_largest_voice_channel(interaction.guild)
+            channel = self.bot_behavior._audio_service.get_largest_voice_channel(interaction.guild)
         if channel:
-            asyncio.create_task(self.bot_behavior.play_audio(channel, self.sound_name, interaction.user.name))
+            asyncio.create_task(self.bot_behavior._audio_service.play_audio(channel, self.sound_name, interaction.user.name))
         else:
             await interaction.followup.send("No voice channel available to play sounds! 😭", ephemeral=True)
 
@@ -209,8 +210,15 @@ class PlaySlapButton(Button):
         slap_sounds = Database().get_sounds(slap=True, num_sounds=100)
         if slap_sounds:
             random_slap = random.choice(slap_sounds)
-
-            asyncio.create_task(self.bot_behavior.play_request(random_slap[1], interaction.user.name, exact=True)) 
+            # Use fast silent slap path - stops current audio, plays immediately, no embed
+            channel = self.bot_behavior._audio_service.get_user_voice_channel(interaction.guild, interaction.user.name)
+            if not channel:
+                channel = self.bot_behavior._audio_service.get_largest_voice_channel(interaction.guild)
+            if channel:
+                asyncio.create_task(self.bot_behavior._audio_service.play_slap(
+                    channel, random_slap[2], interaction.user.name
+                ))
+                Database().insert_action(interaction.user.name, "play_slap", random_slap[0])
         else:
             await interaction.followup.send("No slap sounds found in the database!", ephemeral=True, delete_after=5)
 
