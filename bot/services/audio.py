@@ -342,11 +342,28 @@ class AudioService:
                         description.append(f"⏱️ Duration: {duration_str}")
                         description.append("Progress: Loading...")
                     
-                    # Add branding
-                    description.append("[🥵 gabrielagrela.com 🥵](https://gabrielagrela.com)")
-                    description.append(f"Requested by {user}")
+                    # Add lists containing this sound
+                    if sound_filename:
+                        lists_containing = self.db.get_lists_containing_sound(sound_filename)
+                        if lists_containing:
+                            list_names = [lst[1] for lst in lists_containing[:3]]  # Max 3 lists
+                            if len(lists_containing) > 3:
+                                list_names.append(f"+{len(lists_containing) - 3} more")
+                            description.append(f"📁 Lists: {', '.join(list_names)}")
+                    
+                    # Add users who favorited this sound
+                    if sound_id:
+                        favorited_by = self.db.get_users_who_favorited_sound(sound_id)
+                        if favorited_by:
+                            users_display = favorited_by[:3]  # Max 3 users
+                            if len(favorited_by) > 3:
+                                users_display.append(f"+{len(favorited_by) - 3} more")
+                            description.append(f"❤️ Favorited by: {', '.join(users_display)}")
                     
                     description_text = "\n".join(description)
+                    
+                    # Footer with requester
+                    footer_text = f"Requested by {user}"
                     
                     embed_title = f"🔊 {audio_file.replace('.mp3', '')} 🔊"
                     thumbnail_url = None
@@ -379,6 +396,7 @@ class AudioService:
                     view = SoundBeingPlayedView(behavior_ref, audio_file, include_add_to_list_select=False)
                     
                     embed = discord.Embed(title=embed_title, description=description_text, color=discord.Color.red())
+                    embed.set_footer(text=footer_text)
                     if thumbnail_url:
                         embed.set_thumbnail(url=thumbnail_url)
                     sound_message = await bot_channel.send(embed=embed, view=view)

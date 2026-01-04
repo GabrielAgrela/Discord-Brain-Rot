@@ -48,29 +48,30 @@ class BackgroundService:
         except Exception as e:
             print(f"[BackgroundService] Error updating status: {e}")
 
-    @tasks.loop(minutes=30)
+    @tasks.loop(count=1)
     async def play_sound_periodically_loop(self):
-        """Randomly join voice channels and play sounds."""
-        try:
-            # Skip the first run (bot just started)
-            if not hasattr(self, '_first_run_done'):
-                self._first_run_done = True
-                # Set a random next time
-                sleep_time = random.uniform(600, 1800)
+        """Randomly play sounds at random intervals (10-30 minutes)."""
+        await self.bot.wait_until_ready()
+        
+        while not self.bot.is_closed():
+            try:
+                # Set random wait time (10-30 minutes)
+                sleep_time = random.uniform(60*3, 60*15)
                 self.bot.next_download_time = time.time() + sleep_time
-                return
-            
-            for guild in self.bot.guilds:
-                channel = self.audio_service.get_largest_voice_channel(guild)
-                if channel:
-                    random_sounds = self.db.get_random_sounds(num_sounds=1)
-                    if random_sounds:
-                        sound = random_sounds[0]
-                        await self.audio_service.play_audio(channel, sound[2], "periodic function")
-                        self.db.insert_action("admin", "play_sound_periodically", sound[0])
-            
-            # Schedule next random time
-            sleep_time = random.uniform(600, 1800)
-            self.bot.next_download_time = time.time() + sleep_time
-        except Exception as e:
-            print(f"[BackgroundService] Error in periodic playback: {e}")
+                
+                await asyncio.sleep(sleep_time)
+                
+                # Play sound in each guild
+                for guild in self.bot.guilds:
+                    channel = self.audio_service.get_largest_voice_channel(guild)
+                    if channel:
+                        random_sounds = self.db.get_random_sounds(num_sounds=1)
+                        if random_sounds:
+                            sound = random_sounds[0]
+                            print(f"[BackgroundService] Playing periodic sound: {sound[2]} in {guild.name}")
+                            await self.audio_service.play_audio(channel, sound[2], "periodic function")
+                            self.db.insert_action("admin", "play_sound_periodically", sound[0])
+                            
+            except Exception as e:
+                print(f"[BackgroundService] Error in periodic playback: {e}")
+                await asyncio.sleep(60)  # Wait a minute before retrying on error

@@ -157,9 +157,7 @@ async def on_ready():
     await behavior.clean_buttons()
     await behavior.send_controls(force=True)
     
-    
-    bot.loop.create_task(behavior.play_sound_periodically())
-    bot.loop.create_task(behavior.update_bot_status())
+    # Background tasks are handled by BackgroundService (started automatically in BotBehavior)
     bot.loop.create_task(SoundDownloader(behavior, behavior.db, os.getenv("CHROMEDRIVER_PATH")).move_sounds())
     check_playback_queue.start()
 
