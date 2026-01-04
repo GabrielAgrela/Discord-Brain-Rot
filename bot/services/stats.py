@@ -1,7 +1,7 @@
 import discord
 import asyncio
 from datetime import datetime
-from bot.database import Database
+from bot.repositories import ActionRepository
 
 class StatsService:
     """
@@ -12,12 +12,12 @@ class StatsService:
         self.bot = bot
         self.message_service = message_service
         self.sound_service = sound_service
-        self.db = Database()
+        self.action_repo = ActionRepository()
 
     async def display_top_users(self, requesting_user, number_users=5, number_sounds=5, days=7, by="plays"):
         """Calculate and display top users and sounds in the bot channel."""
-        self.db.insert_action(requesting_user.name, "list_top_users", by)
-        top_users = self.db.get_top_users(number_users, days, by)
+        self.action_repo.insert(requesting_user.name, "list_top_users", by)
+        top_users = self.action_repo.get_top_users(days, number_users, by)
         
         bot_channel = self.message_service.get_bot_channel(self.bot.guilds[0] if self.bot.guilds else None)
         if not bot_channel:
@@ -41,7 +41,7 @@ class StatsService:
                 embed.set_thumbnail(url=discord_user.default_avatar.url)
 
             # Get top sounds for this specific user
-            user_top_sounds, _ = self.db.get_top_sounds(number=number_sounds, days=days, user=username)
+            user_top_sounds, _ = self.action_repo.get_top_sounds(days, number_sounds, username)
             for sound in user_top_sounds:
                 embed.add_field(name=f"🎵 **{sound[0]}**", value=f"Played **{sound[1]}** times", inline=False)
 
@@ -49,7 +49,7 @@ class StatsService:
             messages.append(message)
 
         # Overall summary
-        sound_summary, total_plays = self.db.get_top_sounds(number=10, days=days, user=None)
+        sound_summary, total_plays = self.action_repo.get_top_sounds(days, 10, None)
         average_per_day = total_plays / days if days > 0 else total_plays
         
         summary_embed = discord.Embed(
@@ -70,9 +70,6 @@ class StatsService:
         summary_message = await bot_channel.send(embed=summary_embed)
         messages.append(summary_message)
 
-        # Send controls via BotBehavior (passing through self.sound_service.bot_behavior if available)
-        # For now, just rely on the fact that we'll call it from BotBehavior
-        
         await asyncio.sleep(60)
         for message in messages:
             try:

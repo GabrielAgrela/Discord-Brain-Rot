@@ -9,8 +9,16 @@ Repositories provide an abstraction over the database, enabling:
 
 from bot.repositories.base import BaseRepository
 from bot.repositories.sound import SoundRepository
+from bot.repositories.action import ActionRepository
+from bot.repositories.list import ListRepository
+from bot.repositories.event import EventRepository
+from bot.repositories.stats import StatsRepository
 
 __all__ = [
     "BaseRepository",
     "SoundRepository",
+    "ActionRepository",
+    "ListRepository",
+    "EventRepository",
+    "StatsRepository",
 ]

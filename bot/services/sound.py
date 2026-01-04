@@ -8,7 +8,8 @@ import functools
 import uuid
 import time
 from typing import Optional, List, Tuple, Any
-from bot.database import Database
+from bot.repositories import SoundRepository, ActionRepository, ListRepository
+from bot.database import Database  # Keep for get_sounds_by_similarity until migrated
 from moviepy.editor import VideoFileClip
 from bot.downloaders.manual import ManualSoundDownloader
 
@@ -22,6 +23,13 @@ class SoundService:
         self.bot = bot
         self.audio_service = audio_service
         self.message_service = message_service
+        
+        # Repositories
+        self.sound_repo = SoundRepository()
+        self.action_repo = ActionRepository()
+        self.list_repo = ListRepository()
+        
+        # Keep Database for complex queries (get_sounds_by_similarity)
         self.db = Database()
         self.manual_downloader = ManualSoundDownloader()
         self.upload_lock = asyncio.Lock()
@@ -35,7 +43,7 @@ class SoundService:
 
     async def play_random_sound(self, user: str = "admin", effects: Optional[dict] = None):
         """Pick a random sound and play it in the user's or largest channel."""
-        sounds = self.db.get_random_sounds(num_sounds=1)
+        sounds = self.sound_repo.get_random_sounds(num_sounds=1)
         if not sounds:
             return
         
@@ -47,11 +55,11 @@ class SoundService:
             
         if channel:
             await self.audio_service.play_audio(channel, sound[2], user, effects=effects)
-            self.db.insert_action(user, "play_random_sound", sound[0])
+            self.action_repo.insert(user, "play_random_sound", sound[0])
 
     async def play_random_favorite_sound(self, username: str):
         """Pick a random favorite sound for the user and play it."""
-        sounds = self.db.get_random_sounds(favorite=True, num_sounds=1)
+        sounds = self.sound_repo.get_random_sounds(favorite=True, num_sounds=1)
         if sounds:
             sound = sounds[0]
             guild = self.bot.guilds[0]
@@ -61,7 +69,7 @@ class SoundService:
             
             if channel:
                 await self.audio_service.play_audio(channel, sound[2], username)
-                self.db.insert_action(username, "play_random_favorite_sound", sound[0])
+                self.action_repo.insert(username, "play_random_favorite_sound", sound[0])
 
     async def play_random_sound_from_list(self, list_name: str, username: str):
         """Play a random sound from a specific list."""
@@ -74,12 +82,12 @@ class SoundService:
             if not channel:
                 return
 
-            random_sound = self.db.get_random_sound_from_list(list_name)
+            random_sound = self.list_repo.get_random_sound_from_list(list_name)
             if not random_sound:
                 await self.message_service.send_error(f"No sounds found in list '{list_name}'.")
                 return
             
-            self.db.insert_action(username, f"play_random_from_{list_name}", random_sound[0])
+            self.action_repo.insert(username, f"play_random_from_{list_name}", random_sound[0])
             # random_sound[1] is filename
             await self.audio_service.play_audio(channel, random_sound[1], username)
         except Exception as e:
@@ -89,7 +97,7 @@ class SoundService:
         """Play a specific sound requested by a user, with fuzzy matching support."""
         if exact:
             # First try exact match from DB
-            sound_info = self.db.get_sound_by_name(sound_id_or_name)
+            sound_info = self.sound_repo.get_sound_by_name(sound_id_or_name)
             if not sound_info:
                 # Fallback to direct file check if not in DB
                 if not sound_id_or_name.endswith('.mp3'):
@@ -122,9 +130,9 @@ class SoundService:
             )
             
             # Insert action
-            sound_info = self.db.get_sound(filename)
+            sound_info = self.sound_repo.get_sound(filename)
             if sound_info:
-                self.db.insert_action(user, "play_request", sound_info[0])
+                self.action_repo.insert(user, "play_request", sound_info[0])
             return True
         return False
 
@@ -159,7 +167,7 @@ class SoundService:
                     return False, "Invalid MP3 file format."
 
                 # Insert into DB
-                self.db.insert_sound(final_filename, final_filename)
+                self.sound_repo.insert_sound(final_filename, final_filename)
         except Exception as e:
             print(f"[SoundService] Error saving uploaded sound: {e}")
             return False, "System error while saving file."
@@ -220,7 +228,7 @@ class SoundService:
 
                 if file_path:
                     filename = os.path.basename(file_path)
-                    self.db.insert_action(interaction.user.name, "upload_sound", filename)
+                    self.action_repo.insert(interaction.user.name, "upload_sound", filename)
                     await self.message_service.send_message("✅ Success!", f"Sound `{filename}` uploaded successfully.")
                 
                 await response.delete()
@@ -292,7 +300,7 @@ class SoundService:
                     raise Exception("Downloaded file is not a valid MP3.")
                 
                 # Insert into DB
-                self.db.insert_sound(os.path.basename(final_path), os.path.basename(final_path))
+                self.sound_repo.insert_sound(os.path.basename(final_path), os.path.basename(final_path))
                 return final_path
 
     async def find_and_update_similar_sounds(self, sound_message, audio_file, original_message, send_controls=False, num_suggestions=5):
@@ -301,7 +309,7 @@ class SoundService:
             if not sound_message:
                 return
 
-            sound_info = self.db.get_sound(audio_file, True)
+            sound_info = self.sound_repo.get_sound(audio_file, True)
             if not sound_info:
                 return
 
@@ -340,7 +348,7 @@ class SoundService:
                 self.bot_behavior, 
                 audio_file, 
                 similar_sounds_list, 
-                include_add_to_list_select=False
+                include_add_to_list_select=True
             )
             
             await sound_message.edit(view=combined_view)
@@ -387,11 +395,11 @@ class SoundService:
             if not bot_channel:
                 return
 
-            sounds = self.db.get_sounds(num_sounds=count)
+            sounds = self.sound_repo.get_sounds(num_sounds=count)
             from bot.ui import SoundView
             
             if count > 0:
-                self.db.insert_action(user.name, "list_last_sounds", str(count))
+                self.action_repo.insert(user.name, "list_last_sounds", str(count))
                 message = await self.message_service.send_message(
                     title=f"Last {count} Sounds Downloaded", 
                     view=SoundView(self.bot_behavior, sounds)
@@ -407,5 +415,5 @@ class SoundService:
 
     async def change_filename(self, oldfilename: str, newfilename: str, user: Any):
         """Update a sound's filename in the database and log the action."""
-        self.db.insert_action(user.name, "change_filename", f"{oldfilename} to {newfilename}")
-        await self.db.update_sound(oldfilename, new_filename=newfilename)
+        self.action_repo.insert(user.name, "change_filename", f"{oldfilename} to {newfilename}")
+        await asyncio.to_thread(self.sound_repo.update_sound, oldfilename, new_filename=newfilename)

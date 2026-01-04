@@ -190,7 +190,8 @@ async def on_ready():
                     print(f"Could not read voice mode: {e}")
                 if not bot.startup_sound_played:
                     try:
-                        random_sound = Database().get_random_sounds()[0][2]
+                        from bot.repositories import SoundRepository
+                        random_sound = SoundRepository().get_random_sounds(num_sounds=1)[0][2]
                         await behavior.play_audio(channel_to_join, random_sound, "startup")
                     except Exception as e:
                         print(f"Error playing startup sound: {e}")

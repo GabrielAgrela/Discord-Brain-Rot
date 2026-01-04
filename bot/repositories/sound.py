@@ -23,14 +23,21 @@ class SoundRepository(BaseRepository[Sound]):
     
     def _row_to_entity(self, row: sqlite3.Row) -> Sound:
         """Convert a database row to a Sound entity."""
+        # Check if date column exists (not all databases have it)
+        date_value = None
+        if 'date' in row.keys():
+            try:
+                date_value = datetime.fromisoformat(row['date']) if row['date'] else None
+            except:
+                date_value = None
+        
         return Sound(
             id=row['id'],
             original_filename=row['originalfilename'],
             filename=row['filename'],
-            date=datetime.fromisoformat(row['date']) if row['date'] else None,
+            date=date_value,
             favorite=bool(row['favorite']),
-            favorite=bool(row['favorite']),
-            slap=bool(row.get('slap', 0)) if 'slap' in row.keys() else False,
+            slap=bool(row['slap']) if 'slap' in row.keys() else False,
         )
     
     def get_by_id(self, id: int) -> Optional[Sound]:
@@ -61,10 +68,71 @@ class SoundRepository(BaseRepository[Sound]):
         )
         return self._row_to_entity(row) if row else None
     
+    def get_sound(self, sound_name: str, original_filename: bool = False) -> Optional[tuple]:
+        """
+        Get a sound by name, returning a tuple for backwards compatibility.
+        
+        This matches the old Database.get_sound() return format:
+        (id, originalfilename, filename, date, favorite, blacklist, slap)
+        
+        Args:
+            sound_name: Sound filename to search for
+            original_filename: If True, search by originalfilename first
+            
+        Returns:
+            Tuple with sound data or None
+        """
+        if not sound_name.endswith('.mp3'):
+            sound_name = f"{sound_name}.mp3"
+        
+        if original_filename:
+            # First try originalfilename
+            row = self._execute_one(
+                "SELECT * FROM sounds WHERE originalfilename = ?",
+                (sound_name,)
+            )
+            if row:
+                return tuple(row)
+            
+            # Fall back to Filename match
+            row = self._execute_one(
+                "SELECT * FROM sounds WHERE Filename = ?",
+                (sound_name,)
+            )
+            if row:
+                return tuple(row)
+        else:
+            # First try Filename
+            row = self._execute_one(
+                "SELECT * FROM sounds WHERE Filename = ?",
+                (sound_name,)
+            )
+            if row:
+                return tuple(row)
+            
+            # Fall back to originalfilename
+            row = self._execute_one(
+                "SELECT * FROM sounds WHERE originalfilename = ?",
+                (sound_name,)
+            )
+            if row:
+                return tuple(row)
+        
+        # Final fallback: LIKE search
+        sound_name_pattern = f"%{sound_name.replace('.mp3', '')}%"
+        row = self._execute_one(
+            "SELECT * FROM sounds WHERE Filename LIKE ? OR originalfilename LIKE ?",
+            (sound_name_pattern, sound_name_pattern)
+        )
+        if row:
+            return tuple(row)
+        
+        return None
+    
     def get_all(self, limit: int = 100) -> List[Sound]:
         """Get all sounds, ordered by date descending."""
         rows = self._execute(
-            "SELECT * FROM sounds ORDER BY date DESC LIMIT ?",
+            "SELECT * FROM sounds ORDER BY id DESC LIMIT ?",
             (limit,)
         )
         return [self._row_to_entity(row) for row in rows]
@@ -91,6 +159,131 @@ class SoundRepository(BaseRepository[Sound]):
             (count,)
         )
         return [self._row_to_entity(row) for row in rows]
+    
+    def get_random_sounds(self, favorite: bool = None, num_sounds: int = 1) -> List[tuple]:
+        """
+        Get random sounds, returning tuples for backwards compatibility.
+        
+        Args:
+            favorite: Filter by favorite status (True = favorites only)
+            num_sounds: Number of sounds to return
+            
+        Returns:
+            List of sound tuples
+        """
+        conditions = ["slap = 0"]  # Exclude slap sounds from random
+        if favorite:
+            conditions.append("favorite = 1")
+        
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        
+        rows = self._execute(
+            f"SELECT * FROM sounds {where_clause} ORDER BY RANDOM() LIMIT ?",
+            (num_sounds,)
+        )
+        return [tuple(row) for row in rows]
+    
+    def get_sounds(self, favorite: bool = None, slap: bool = None, num_sounds: int = 25, 
+                   sort: str = "DESC", favorite_by_user: bool = False, user: str = None) -> List[tuple]:
+        """
+        Get sounds with filtering, returning tuples for backwards compatibility.
+        """
+        conditions = []
+        if favorite is not None:
+            conditions.append(f"favorite = {1 if favorite else 0}")
+        if slap is not None:
+            conditions.append(f"slap = {1 if slap else 0}")
+        
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        
+        rows = self._execute(
+            f"SELECT * FROM sounds {where_clause} ORDER BY id {sort} LIMIT ?",
+            (num_sounds,)
+        )
+        return [tuple(row) for row in rows]
+    
+    def get_sound_by_name(self, sound_name: str) -> Optional[tuple]:
+        """
+        Get a sound by its name (with or without .mp3 extension).
+        Returns tuple for backwards compatibility.
+        """
+        # Try with .mp3
+        if not sound_name.endswith('.mp3'):
+            search_name = f"{sound_name}.mp3"
+        else:
+            search_name = sound_name
+        
+        # Try filename first
+        row = self._execute_one(
+            "SELECT * FROM sounds WHERE filename = ?",
+            (search_name,)
+        )
+        if row:
+            return tuple(row)
+        
+        # Try original filename
+        row = self._execute_one(
+            "SELECT * FROM sounds WHERE originalfilename = ?",
+            (search_name,)
+        )
+        if row:
+            return tuple(row)
+        
+        # Try without .mp3
+        base_name = sound_name.replace('.mp3', '')
+        row = self._execute_one(
+            "SELECT * FROM sounds WHERE filename LIKE ? OR originalfilename LIKE ?",
+            (f"%{base_name}%", f"%{base_name}%")
+        )
+        if row:
+            return tuple(row)
+        
+        return None
+    
+    def insert_sound(self, original_filename: str, filename: str, 
+                     favorite: int = 0, date=None) -> int:
+        """Insert a new sound (backwards compatibility signature)."""
+        from datetime import datetime
+        if date is None:
+            date = datetime.now()
+        
+        return self._execute_write(
+            """
+            INSERT INTO sounds (originalfilename, filename, favorite, blacklist, date, slap)
+            VALUES (?, ?, ?, 0, ?, 0)
+            """,
+            (original_filename, filename, favorite, date.strftime("%Y-%m-%d %H:%M:%S") if hasattr(date, 'strftime') else str(date))
+        )
+    
+    def update_sound(self, filename: str, new_filename: str = None, 
+                     favorite: int = None, slap: int = None) -> bool:
+        """Update a sound's properties (backwards compatibility signature)."""
+        updates = []
+        params = []
+        
+        if new_filename is not None:
+            updates.append("filename = ?")
+            params.append(new_filename)
+        if favorite is not None:
+            updates.append("favorite = ?")
+            params.append(favorite)
+        if slap is not None:
+            updates.append("slap = ?")
+            params.append(slap)
+        
+        if not updates:
+            return False
+        
+        params.append(filename if not filename.endswith('.mp3') else filename)
+        if not filename.endswith('.mp3'):
+            filename = f"{filename}.mp3"
+        params[-1] = filename
+        
+        self._execute_write(
+            f"UPDATE sounds SET {', '.join(updates)} WHERE filename = ?",
+            tuple(params)
+        )
+        return True
     
     def search(self, query: str, limit: int = 25) -> List[Tuple[Sound, int]]:
         """
@@ -191,7 +384,7 @@ class SoundRepository(BaseRepository[Sound]):
     def get_favorites(self, limit: int = 100) -> List[Sound]:
         """Get all favorite sounds."""
         rows = self._execute(
-            "SELECT * FROM sounds WHERE favorite = 1 ORDER BY date DESC LIMIT ?",
+            "SELECT * FROM sounds WHERE favorite = 1 ORDER BY id DESC LIMIT ?",
             (limit,)
         )
         return [self._row_to_entity(row) for row in rows]

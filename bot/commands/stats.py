@@ -12,7 +12,7 @@ from discord.ext import commands
 from discord.commands import Option
 import datetime
 
-from bot.database import Database
+from bot.repositories import ActionRepository, StatsRepository
 
 
 class StatsCog(commands.Cog):
@@ -21,7 +21,8 @@ class StatsCog(commands.Cog):
     def __init__(self, bot: discord.Bot, behavior):
         self.bot = bot
         self.behavior = behavior
-        self.db = Database()
+        self.action_repo = ActionRepository()
+        self.stats_repo = StatsRepository()
 
     @commands.slash_command(name="top", description="Leaderboard of sounds or users")
     async def top(
@@ -47,7 +48,7 @@ class StatsCog(commands.Cog):
             # Let's assume for now we need to implement the logic here using get_top_sounds/users.
             
             # Let's implement the display logic here using behavior.embed/message service
-            top_sounds, total = self.db.get_top_sounds(number, numberdays)
+            top_sounds, total = self.action_repo.get_top_sounds(numberdays, number)
             
             description = ""
             for i, (name, count) in enumerate(top_sounds, 1):
@@ -63,7 +64,7 @@ class StatsCog(commands.Cog):
             )
             
         else:
-            top_users = self.db.get_top_users(number, numberdays)
+            top_users = self.action_repo.get_top_users(numberdays, number)
             
             description = ""
             for i, (name, count) in enumerate(top_users, 1):
@@ -99,7 +100,7 @@ class StatsCog(commands.Cog):
         # It was in PersonalGreeter calls: db.get_user_year_stats
         
         try:
-            stats = self.db.get_user_year_stats(username, review_year)
+            stats = self.stats_repo.get_user_year_stats(username, review_year)
             await self._send_year_review_embed(ctx, target_user, stats, review_year)
         except AttributeError:
              await self.behavior.send_message(title="Error", description="Year review stats not available directly.")

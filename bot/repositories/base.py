@@ -23,17 +23,32 @@ class BaseRepository(ABC, Generic[T]):
     - Enables swapping storage backends (e.g., for testing)
     """
     
-    def __init__(self, db_path: Optional[str] = None):
+    _shared_connection: Optional[sqlite3.Connection] = None
+    _shared_db_path: Optional[str] = None
+    
+    @classmethod
+    def set_shared_connection(cls, conn: sqlite3.Connection, db_path: str):
+        """Set a shared connection for all repositories (from Database singleton)."""
+        cls._shared_connection = conn
+        cls._shared_db_path = db_path
+    
+    def __init__(self, db_path: Optional[str] = None, use_shared: bool = True):
         """
         Initialize the repository with a database path.
         
         Args:
             db_path: Path to SQLite database. If None, uses default.
+            use_shared: If True and shared connection exists, use it.
         """
+        self._use_shared = use_shared and BaseRepository._shared_connection is not None
+        
         if db_path is None:
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            project_root = os.path.dirname(os.path.dirname(script_dir))
-            db_path = os.path.join(project_root, "database.db")
+            if self._use_shared and BaseRepository._shared_db_path:
+                db_path = BaseRepository._shared_db_path
+            else:
+                script_dir = os.path.dirname(os.path.abspath(__file__))
+                project_root = os.path.dirname(os.path.dirname(script_dir))
+                db_path = os.path.join(project_root, "database.db")
         self._db_path = db_path
     
     @property
@@ -43,10 +58,13 @@ class BaseRepository(ABC, Generic[T]):
     
     def _get_connection(self) -> sqlite3.Connection:
         """
-        Create a new database connection.
+        Get a database connection.
         
-        Note: Connections should be short-lived and closed after use.
+        If shared connection is available and enabled, returns it.
+        Otherwise creates a new connection.
         """
+        if self._use_shared and BaseRepository._shared_connection is not None:
+            return BaseRepository._shared_connection
         conn = sqlite3.connect(self._db_path)
         conn.row_factory = sqlite3.Row
         return conn
@@ -62,6 +80,11 @@ class BaseRepository(ABC, Generic[T]):
         Returns:
             List of Row objects
         """
+        if self._use_shared and BaseRepository._shared_connection is not None:
+            cursor = BaseRepository._shared_connection.cursor()
+            cursor.execute(query, params)
+            return cursor.fetchall()
+        
         conn = self._get_connection()
         try:
             cursor = conn.cursor()
@@ -95,6 +118,12 @@ class BaseRepository(ABC, Generic[T]):
         Returns:
             Last row ID for INSERT, or rows affected for UPDATE/DELETE
         """
+        if self._use_shared and BaseRepository._shared_connection is not None:
+            cursor = BaseRepository._shared_connection.cursor()
+            cursor.execute(query, params)
+            BaseRepository._shared_connection.commit()
+            return cursor.lastrowid
+        
         conn = self._get_connection()
         try:
             cursor = conn.cursor()
@@ -115,6 +144,12 @@ class BaseRepository(ABC, Generic[T]):
         Returns:
             Number of rows affected
         """
+        if self._use_shared and BaseRepository._shared_connection is not None:
+            cursor = BaseRepository._shared_connection.cursor()
+            cursor.executemany(query, params_list)
+            BaseRepository._shared_connection.commit()
+            return cursor.rowcount
+        
         conn = self._get_connection()
         try:
             cursor = conn.cursor()

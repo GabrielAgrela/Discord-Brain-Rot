@@ -2,7 +2,7 @@ import asyncio
 import random
 import os
 import discord
-from bot.database import Database
+from bot.repositories import ActionRepository
 from typing import Optional
 from moviepy.editor import VideoFileClip
 
@@ -16,7 +16,7 @@ class BrainRotService:
         self.bot = bot
         self.audio_service = audio_service
         self.message_service = message_service
-        self.db = Database()
+        self.action_repo = ActionRepository()
         self.lock = asyncio.Lock()
         self.cooldown_message: Optional[discord.Message] = None
         self.data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Data"))
@@ -49,7 +49,7 @@ class BrainRotService:
                 chosen = random.choice(functions)
                 try:
                     await chosen(user)
-                    self.db.insert_action(user.name if hasattr(user, 'name') else str(user), 
+                    self.action_repo.insert(user.name if hasattr(user, 'name') else str(user), 
                                          f"brain_rot_{chosen.__name__}", "")
                 except Exception as e:
                     print(f"[BrainRotService] Error in {chosen.__name__}: {e}")
@@ -119,4 +119,4 @@ class BrainRotService:
             pass
         
         username = user.name if hasattr(user, 'name') else str(user) if user else "admin"
-        self.db.insert_action(username, folder_name.lower(), file)
+        self.action_repo.insert(username, folder_name.lower(), file)

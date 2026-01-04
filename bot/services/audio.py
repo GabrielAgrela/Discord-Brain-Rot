@@ -7,7 +7,7 @@ from datetime import datetime
 import traceback
 from typing import Optional, List, Dict, Any
 from mutagen.mp3 import MP3
-from bot.database import Database
+from bot.repositories import SoundRepository, ActionRepository, ListRepository, StatsRepository
 
 class AudioService:
     """
@@ -25,7 +25,12 @@ class AudioService:
         self.ffmpeg_path = ffmpeg_path
         self.mute_service = mute_service
         self.message_service = message_service
-        self.db = Database()
+        
+        # Repositories
+        self.sound_repo = SoundRepository()
+        self.action_repo = ActionRepository()
+        self.list_repo = ListRepository()
+        self.stats_repo = StatsRepository()
         
         # Audio state moved from BotBehavior
         self.last_played_time: Optional[datetime] = None
@@ -217,7 +222,7 @@ class AudioService:
                         if extra != "":
                             description.append(f"Similarity: {extra}%")
                         
-                        sound_info = self.db.get_sound(audio_file, True)
+                        sound_info = self.sound_repo.get_sound(audio_file, True)
                         is_slap_sound = sound_info and sound_info[6] == 1
                         interrupt_emoji = "👋" if is_slap_sound else "⏭️"
                         
@@ -252,7 +257,7 @@ class AudioService:
 
             if not os.path.exists(audio_file_path):
                 # Try getting sound info by Filename first
-                sound_info = self.db.get_sound(audio_file, False)
+                sound_info = self.sound_repo.get_sound(audio_file, False)
                 if sound_info:
                     # Found by Filename, check if original filename exists on disk
                     original_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Sounds", sound_info[1]))
@@ -260,7 +265,7 @@ class AudioService:
                         audio_file_path = original_path
                     else:
                         # Try searching by original filename directly (legacy fallback)
-                        sound_info_orig = self.db.get_sound(audio_file, True)
+                        sound_info_orig = self.sound_repo.get_sound(audio_file, True)
                         if sound_info_orig and len(sound_info_orig) > 2:
                             audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Sounds", sound_info_orig[2]))
                         else:
@@ -268,7 +273,7 @@ class AudioService:
                             return False
                 else:
                      # Try searching by original filename directly (legacy fallback)
-                    sound_info_orig = self.db.get_sound(audio_file, True)
+                    sound_info_orig = self.sound_repo.get_sound(audio_file, True)
                     if sound_info_orig and len(sound_info_orig) > 2:
                         audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Sounds", sound_info_orig[2]))
                         if not os.path.exists(audio_file_path):
@@ -291,7 +296,7 @@ class AudioService:
             sound_message = None
             
             # Re-check slap sound
-            sound_info = self.db.get_sound(audio_file, False)
+            sound_info = self.sound_repo.get_sound(audio_file, False)
             is_slap_sound = sound_info and sound_info[6] == 1
             
             if bot_channel and not is_entrance:
@@ -305,11 +310,11 @@ class AudioService:
                     sound_id = sound_info[0] if sound_info else None
                     
                     if sound_id:
-                        play_count = self.db.get_sound_play_count(sound_id)
+                        play_count = self.action_repo.get_sound_play_count(sound_id)
                         description.append(f"🔢 Play count: {play_count + 1}")
                         
                         # Add download date information
-                        download_date = self.db.get_sound_download_date(sound_id)
+                        download_date = self.stats_repo.get_sound_download_date(sound_id)
                         if download_date and download_date != "Unknown date":
                             try:
                                 if isinstance(download_date, str) and "2023-10-30" in download_date:
@@ -344,7 +349,7 @@ class AudioService:
                     
                     # Add lists containing this sound
                     if sound_filename:
-                        lists_containing = self.db.get_lists_containing_sound(sound_filename)
+                        lists_containing = self.list_repo.get_lists_containing_sound(sound_filename)
                         if lists_containing:
                             list_names = [lst[1] for lst in lists_containing[:3]]  # Max 3 lists
                             if len(lists_containing) > 3:
@@ -353,7 +358,7 @@ class AudioService:
                     
                     # Add users who favorited this sound
                     if sound_id:
-                        favorited_by = self.db.get_users_who_favorited_sound(sound_id)
+                        favorited_by = self.stats_repo.get_users_who_favorited_sound(sound_id)
                         if favorited_by:
                             users_display = favorited_by[:3]  # Max 3 users
                             if len(favorited_by) > 3:
@@ -393,7 +398,7 @@ class AudioService:
                     from bot.ui import SoundBeingPlayedView
                     # Pass behavior reference if available
                     behavior_ref = self._behavior if hasattr(self, '_behavior') else None
-                    view = SoundBeingPlayedView(behavior_ref, audio_file, include_add_to_list_select=False)
+                    view = SoundBeingPlayedView(behavior_ref, audio_file, include_add_to_list_select=True)
                     
                     embed = discord.Embed(title=embed_title, description=description_text, color=discord.Color.red())
                     embed.set_footer(text=footer_text)

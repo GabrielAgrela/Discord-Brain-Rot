@@ -3,7 +3,7 @@ import random
 import time
 import discord
 from discord.ext import tasks
-from bot.database import Database
+from bot.repositories import SoundRepository, ActionRepository
 
 class BackgroundService:
     """
@@ -14,7 +14,11 @@ class BackgroundService:
         self.bot = bot
         self.audio_service = audio_service
         self.sound_service = sound_service
-        self.db = Database()
+        
+        # Repositories
+        self.sound_repo = SoundRepository()
+        self.action_repo = ActionRepository()
+        
         self._started = False
 
     def start_tasks(self):
@@ -65,12 +69,12 @@ class BackgroundService:
                 for guild in self.bot.guilds:
                     channel = self.audio_service.get_largest_voice_channel(guild)
                     if channel:
-                        random_sounds = self.db.get_random_sounds(num_sounds=1)
+                        random_sounds = self.sound_repo.get_random_sounds(num_sounds=1)
                         if random_sounds:
                             sound = random_sounds[0]
                             print(f"[BackgroundService] Playing periodic sound: {sound[2]} in {guild.name}")
                             await self.audio_service.play_audio(channel, sound[2], "periodic function")
-                            self.db.insert_action("admin", "play_sound_periodically", sound[0])
+                            self.action_repo.insert("admin", "play_sound_periodically", sound[0])
                             
             except Exception as e:
                 print(f"[BackgroundService] Error in periodic playback: {e}")

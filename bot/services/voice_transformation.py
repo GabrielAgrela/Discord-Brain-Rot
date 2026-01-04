@@ -1,5 +1,5 @@
 import discord
-from bot.database import Database
+from bot.repositories import ActionRepository
 from bot.tts import TTS
 from typing import Optional
 
@@ -15,7 +15,7 @@ class VoiceTransformationService:
         self.bot = bot
         self.audio_service = audio_service
         self.message_service = message_service
-        self.db = Database()
+        self.action_repo = ActionRepository()
         
         # Legacy TTS expects a 'behavior' object with specific methods.
         # We pass self to satisfy those dependencies.
@@ -23,12 +23,12 @@ class VoiceTransformationService:
     
     async def tts(self, user, speech: str, lang: str = "en", region: str = ""):
         """Standard gTTS text-to-speech."""
-        self.db.insert_action(user.name, "tts", speech)
+        self.action_repo.insert(user.name, "tts", speech)
         await self.tts_engine.save_as_mp3(speech, lang, region)
 
     async def tts_EL(self, user, speech: str, lang: str = "en", region: str = ""):
         """ElevenLabs text-to-speech."""
-        self.db.insert_action(user.name, "tts_EL", speech)
+        self.action_repo.insert(user.name, "tts_EL", speech)
         await self.tts_engine.save_as_mp3_EL(speech, lang, region)
 
     async def sts_EL(self, user, sound: str, char: str = "ventura", region: str = ""):

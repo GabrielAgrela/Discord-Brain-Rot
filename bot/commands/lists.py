@@ -15,15 +15,28 @@ from discord.ext import commands
 from discord.commands import Option
 import re
 
-from bot.database import Database
+from bot.repositories import ListRepository, SoundRepository
+from bot.database import Database  # Keep for get_sounds_by_similarity until migrated
 from bot.ui import PaginatedSoundListView
 
+
+# Repositories for autocomplete functions
+_list_repo = None
+_db = None
+
+def _get_repos():
+    """Lazy initialize repositories for autocomplete functions."""
+    global _list_repo, _db
+    if _list_repo is None:
+        _list_repo = ListRepository()
+        _db = Database()
+    return _list_repo, _db
 
 
 async def _get_sound_autocomplete(ctx: discord.AutocompleteContext):
     """Autocomplete for sound names."""
     try:
-        db = Database()
+        _, db = _get_repos()
         current = ctx.value.lower() if ctx.value else ""
         if not current or len(current) < 2:
             return []
@@ -38,11 +51,11 @@ async def _get_sound_autocomplete(ctx: discord.AutocompleteContext):
 async def _get_list_autocomplete(ctx: discord.AutocompleteContext):
     """Autocomplete for sound lists."""
     try:
-        db = Database()
+        list_repo, _ = _get_repos()
         current = ctx.value.lower() if ctx.value else ""
         
         # get all lists
-        lists = db.get_sound_lists()
+        lists = list_repo.get_all(limit=200)
         
         matching_lists = []
         for lst in lists:
@@ -73,6 +86,12 @@ class ListCog(commands.Cog):
     def __init__(self, bot: discord.Bot, behavior):
         self.bot = bot
         self.behavior = behavior
+        
+        # Repositories
+        self.list_repo = ListRepository()
+        self.sound_repo = SoundRepository()
+        
+        # Keep Database for get_sounds_by_similarity until migrated
         self.db = Database()
     
     @commands.slash_command(name="createlist", description="Create a new sound list")
@@ -83,13 +102,13 @@ class ListCog(commands.Cog):
     ):
         """Create a new sound list."""
         # Check if the user already has a list with this name
-        existing_list = self.db.get_list_by_name(list_name, ctx.author.name)
+        existing_list = self.list_repo.get_by_name(list_name, ctx.author.name)
         if existing_list:
             await ctx.respond(f"You already have a list named '{list_name}'.", ephemeral=True)
             return
             
         # Create the list
-        list_id = self.db.create_sound_list(list_name, ctx.author.name)
+        list_id = self.list_repo.create(list_name, ctx.author.name)
         if list_id:
             await ctx.respond(f"Created list '{list_name}'.", ephemeral=True)
             
@@ -109,46 +128,32 @@ class ListCog(commands.Cog):
         list_name: Option(str, "Name of the list", required=True, autocomplete=_get_list_autocomplete)
     ):
         """Add a sound to a list."""
-        # Get the list
-        # Handle "List Name (by Creator)" format from autocomplete if necessary, 
-        # but DB lookup usually expects just the name if creator isn't specified.
-        # But get_list_by_name can take just name.
-        
         # Parse the list name if it came from autocomplete
         match = re.match(r'^(.+?) \(by (.+)\)$', list_name)
         actual_name = match.group(1) if match else list_name
         
-        sound_list = self.db.get_list_by_name(actual_name)
+        sound_list = self.list_repo.get_by_name(actual_name)
         if not sound_list:
             await ctx.respond(f"List '{actual_name}' not found.", ephemeral=True)
             return
         
-        # Get the sound ID
-        # Reuse similarity search logic to find correct sound ID
+        # Get the sound ID using similarity search
         similar = self.db.get_sounds_by_similarity(sound, num_results=1)
         if not similar:
              await ctx.respond(f"Sound '{sound}' not found.", ephemeral=True)
              return
              
-        soundid = similar[0][1] # Filename 
-        # But wait, add_sound_to_list in DB expects sound_filename (the actual encoded filename)
-        # get_sounds_by_similarity returns tuple rows from sounds table. 
-        # Index 0 is ID, 1 is originalfilename, 2 is Filename. 
-        # Looking at DB.add_sound_to_list, it takes list_id and sound_filename.
-        # Looking at original code: soundid = db.get_sounds_by_similarity(sound)[0][1]
+        soundid = similar[0][1]  # Filename from similarity result
         
         # Add the sound to the list
-        success, message = self.db.add_sound_to_list(sound_list[0], soundid)
+        success, message = self.list_repo.add_sound(sound_list[0], soundid)
         
         if success:
-            # Get the list creator for the success message
             list_creator = sound_list[2]
             
-            # If the user adding the sound is not the creator, include that in the message
             if list_creator != ctx.author.name:
                 await ctx.respond(f"Added sound '{sound}' to {list_creator}'s list '{actual_name}'.", ephemeral=True)
                 
-                # Optionally notify in the channel about the addition
                 await self.behavior.send_message(
                     title=f"Sound Added to List",
                     description=f"{ctx.author.name} added '{sound}' to {list_creator}'s list '{actual_name}'."
@@ -169,8 +174,7 @@ class ListCog(commands.Cog):
         match = re.match(r'^(.+?) \(by (.+)\)$', list_name)
         actual_name = match.group(1) if match else list_name
         
-        # Get the list
-        sound_list = self.db.get_list_by_name(actual_name)
+        sound_list = self.list_repo.get_by_name(actual_name)
         if not sound_list:
             await ctx.respond(f"List '{actual_name}' not found.", ephemeral=True)
             return
@@ -181,17 +185,7 @@ class ListCog(commands.Cog):
             return
             
         # Remove the sound from the list
-        # Need to find actual filename first potentially? 
-        # DB.remove_sound_from_list takes list_id and sound_filename
-        # Original code passed 'sound' directly. Let's assume user passes correct name or we need to find it.
-        # But if 'sound' comes from autocomplete or free text, it might need resolution.
-        # For consistency with add_to_list logic, we might need to resolve it, 
-        # BUT remove_sound_from_list expects the stored filename.
-        # The user likely types the original/display name.
-        
-        # Let's try to resolve it to the exact filename in the list if possible
-        # Or blindly trust it. The original code blindly passed 'sound'.
-        success = self.db.remove_sound_from_list(sound_list[0], sound)
+        success = self.list_repo.remove_sound(sound_list[0], sound)
         
         if success:
             await ctx.respond(f"Removed sound '{sound}' from list '{actual_name}'.", ephemeral=True)
@@ -209,8 +203,7 @@ class ListCog(commands.Cog):
         match = re.match(r'^(.+?) \(by (.+)\)$', list_name)
         actual_name = match.group(1) if match else list_name
 
-        # Get the list
-        sound_list = self.db.get_list_by_name(actual_name)
+        sound_list = self.list_repo.get_by_name(actual_name)
         if not sound_list:
             await ctx.respond(f"List '{actual_name}' not found.", ephemeral=True)
             return
@@ -221,11 +214,10 @@ class ListCog(commands.Cog):
             return
             
         # Delete the list
-        success = self.db.delete_sound_list(sound_list[0])
+        success = self.list_repo.delete(sound_list[0])
         if success:
             await ctx.respond(f"Deleted list '{actual_name}'.", ephemeral=True)
             
-            # Send a message confirming the deletion
             await self.behavior.send_message(
                 title="List Deleted",
                 description=f"The list '{actual_name}' has been deleted."
@@ -241,15 +233,12 @@ class ListCog(commands.Cog):
         list_name: Option(str, "Name of the list to display", required=True, autocomplete=_get_list_autocomplete)
     ):
         """Display a sound list."""
-        # Defer immediately to acknowledge the interaction
         await ctx.defer()
         
-        # Parse the list name
         match = re.match(r'^(.+?) \(by (.+)\)$', list_name)
         actual_list_name = match.group(1) if match else list_name
         
-        # Get the list
-        sound_list = self.db.get_list_by_name(actual_list_name)
+        sound_list = self.list_repo.get_by_name(actual_list_name)
         if not sound_list:
             await ctx.followup.send(f"List '{actual_list_name}' not found.", ephemeral=True)
             return
@@ -258,7 +247,7 @@ class ListCog(commands.Cog):
         display_name = sound_list[1]
         
         # Get the sounds in the list
-        sounds = self.db.get_sounds_in_list(list_id)
+        sounds = self.list_repo.get_sounds_in_list(list_id)
         if not sounds:
             await ctx.followup.send(f"List '{display_name}' is empty.", ephemeral=True)
             return
@@ -266,14 +255,12 @@ class ListCog(commands.Cog):
         # Create a paginated view with buttons for each sound
         view = PaginatedSoundListView(self.behavior, list_id, display_name, sounds, ctx.author.name)
         
-        # Send a message with the view
         await self.behavior.send_message(
             title=f"Sound List: {display_name} (Page 1/{len(view.pages)})",
             description=f"Contains {len(sounds)} sounds. Showing sounds 1-{min(4, len(sounds))} of {len(sounds)}",
             view=view
         )
         
-        # Delete the deferred "thinking..." message
         await ctx.delete()
 
 
