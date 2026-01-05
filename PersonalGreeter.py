@@ -24,6 +24,8 @@ import time
 
 import platform # Added for OS detection
 import re # Add import for regex
+import ctypes.util
+import discord.opus
 
 env = Environment()
 intents = discord.Intents(guilds=True, voice_states=True, messages=True, message_content=True, members=True)
@@ -151,6 +153,18 @@ async def check_playback_queue():
 @default_permissions(manage_messages=True)
 @bot.event
 async def on_ready():
+    # --- Load Opus library ---
+    if not discord.opus.is_loaded():
+        opus_path = ctypes.util.find_library('opus')
+        if opus_path:
+            try:
+                discord.opus.load_opus(opus_path)
+                print(f"Successfully loaded Opus library from {opus_path}")
+            except Exception as e:
+                print(f"Failed to load Opus library: {e}")
+        else:
+            print("Warning: Opus library not found in the system.")
+
     print(f"We have logged in as {bot.user}")
     #bot.loop.create_task(behavior.check_if_in_game())
     await behavior.delete_controls_message()
@@ -186,8 +200,10 @@ async def on_ready():
                     vc = guild.voice_client
                     if vc is not None:
                         print(f"Voice encryption mode: {getattr(vc, 'mode', 'unknown')}")
+                        # Start background keyword detection
+                        await behavior._audio_service.start_keyword_detection(guild)
                 except Exception as e:
-                    print(f"Could not read voice mode: {e}")
+                    print(f"Could not read voice mode or start detection: {e}")
                 if not bot.startup_sound_played:
                     try:
                         from bot.repositories import SoundRepository

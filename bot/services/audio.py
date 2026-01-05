@@ -3,10 +3,19 @@ import os
 import discord
 import time
 import functools
+import threading
+import io
+import wave
+import json
+import audioop
+import queue
 from datetime import datetime
 import traceback
 from typing import Optional, List, Dict, Any
 from mutagen.mp3 import MP3
+import speech_recognition as sr
+import vosk
+from discord import sinks
 from bot.repositories import SoundRepository, ActionRepository, ListRepository, StatsRepository
 
 class AudioService:
@@ -43,6 +52,23 @@ class AudioService:
         self.playback_done = asyncio.Event()
         self.playback_done.set()
         
+        # Keyword detection state
+        self.keyword_sinks: Dict[int, 'KeywordDetectionSink'] = {}
+        
+        # Initialize Vosk model for local STT
+        try:
+            model_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Data", "models", "vosk-model-small-pt-0.3"))
+            if os.path.exists(model_path):
+                print(f"[AudioService] Loading Vosk model from {model_path}...")
+                self.vosk_model = vosk.Model(model_path)
+                print("[AudioService] Vosk model loaded successfully.")
+            else:
+                print(f"[AudioService] Warning: Vosk model not found at {model_path}")
+                self.vosk_model = None
+        except Exception as e:
+            print(f"[AudioService] Error loading Vosk model: {e}")
+            self.vosk_model = None
+        
         # Dependency on other services that will be added later
         self.sound_service = None
         self.voice_transformation_service = None
@@ -72,13 +98,19 @@ class AudioService:
                          print(f"[AudioService] Error forcing disconnect: {e}")
                 elif voice_client.channel.id != channel.id:
                     await voice_client.move_to(channel)
+                    # Restart keyword detection if moved
+                    await self.start_keyword_detection(channel.guild)
                     return voice_client
                 else:
+                    # Ensure detection is running
+                    await self.start_keyword_detection(channel.guild)
                     return voice_client
             
             for attempt in range(3):
                 try:
                     voice_client = await channel.connect(timeout=10.0)
+                    # Start keyword detection on new connection
+                    await self.start_keyword_detection(channel.guild)
                     return voice_client
                 except Exception as e:
                     print(f"[AudioService] Connection attempt {attempt + 1} failed: {e}")
@@ -569,4 +601,199 @@ class AudioService:
                         pass
         except Exception as e:
             print(f"[AudioService] Error updating progress bar: {e}")
+
+    async def start_keyword_detection(self, guild: discord.Guild):
+        """Start background keyword detection in the specified guild."""
+        try:
+            voice_client = guild.voice_client
+            if not voice_client or not voice_client.is_connected():
+                return False
+
+            if guild.id in self.keyword_sinks:
+                return True
+
+            print(f"[AudioService] Starting keyword detection in {guild.name}")
+            sink = KeywordDetectionSink(self, guild)
+            # Use specific encryption mode if needed, py-cord 2.7 should handle it
+            voice_client.start_recording(sink, self._on_detection_finished, guild)
+            self.keyword_sinks[guild.id] = sink
+            return True
+        except Exception as e:
+            print(f"[AudioService] Error starting keyword detection: {e}")
+            return False
+
+    async def stop_keyword_detection(self, guild: discord.Guild):
+        """Stop background keyword detection in the specified guild."""
+        try:
+            if guild.id in self.keyword_sinks:
+                voice_client = guild.voice_client
+                if voice_client:
+                    voice_client.stop_recording()
+                del self.keyword_sinks[guild.id]
+                print(f"[AudioService] Stopped keyword detection in {guild.name}")
+            return True
+        except Exception as e:
+            print(f"[AudioService] Error stopping keyword detection: {e}")
+            return False
+
+    async def _on_detection_finished(self, sink, guild):
+        """Cleanup when detection recording is stopped."""
+        if hasattr(sink, 'stop'):
+            sink.stop()
+
+class KeywordDetectionSink(sinks.Sink):
+    def __init__(self, audio_service, guild):
+        super().__init__()
+        self.audio_service = audio_service
+        self.guild = guild
+        self.recognizers = {} # user_id -> vosk.KaldiRecognizer
+        self.resample_states = {} # user_id -> audioop state
+        self.last_audio_time = {} # user_id -> timestamp
+        self.queue = queue.Queue()
+        self.running = True
+        self.worker_thread = threading.Thread(target=self._worker, name=f"VoskWorker-{guild.id}", daemon=True)
+        self.worker_thread.start()
+        self.keyword = "chapada"
+        # Log directory for per-user transcripts
+        self.log_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Data", "vosk_logs"))
+        os.makedirs(self.log_dir, exist_ok=True)
+
+    def _log_to_file(self, username, text):
+        """Log final transcription to per-user file."""
+        try:
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            log_file = os.path.join(self.log_dir, f"{username}.txt")
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write(f"[{timestamp}] {text}\n")
+        except Exception as e:
+            print(f"[VoskLogger] Error writing log for {username}: {e}")
+
+    def stop(self):
+        self.running = False
+        self.queue.put((None, None))
+
+    def write(self, data, user_id):
+        if self.running:
+            self.last_audio_time[user_id] = time.time()
+            self.queue.put((data, user_id))
+
+    def _worker(self):
+        while self.running:
+            try:
+                # Wait for data or timeout to handle silence flushing
+                try:
+                    data, user_id = self.queue.get(timeout=0.1)
+                except queue.Empty:
+                    # Timeout reached - check for silent periods to flush Vosk
+                    self._flush_silence()
+                    continue
+
+                if data is None: # Stop signal
+                    break
+                
+                self.detect_keyword(data, user_id)
+                self.queue.task_done()
+            except Exception as e:
+                print(f"[VoskWorker] Error: {e}")
+                traceback.print_exc()
+
+    def _flush_silence(self):
+        """Force Vosk to finalize results for users who stopped talking."""
+        now = time.time()
+        
+        for user_id, last_time in list(self.last_audio_time.items()):
+            # If idle for > 300ms, force Vosk to finalize
+            if now - last_time > 0.3:
+                if user_id in self.recognizers:
+                    rec = self.recognizers[user_id]
+                    # Force finalization by getting the final result
+                    result = json.loads(rec.FinalResult())
+                    text = result.get("text", "").lower()
+                    
+                    if text:
+                        member = self.guild.get_member(user_id)
+                        username = member.name if member else f"user_{user_id}"
+                        timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+                        print(f"[{timestamp}] [Vosk Final (Flushed)] {username}: \"{text}\"")
+                        self._log_to_file(username, text)
+                        
+                        if self.keyword in text:
+                            print(f"[{timestamp}] [KeywordDetection] Detected keyword '{self.keyword}' from user {username}!")
+                            # Reset state
+                            del self.recognizers[user_id]
+                            if user_id in self.resample_states: del self.resample_states[user_id]
+                            asyncio.run_coroutine_threadsafe(self.trigger_slap(user_id), self.audio_service.bot.loop)
+                
+                # Remove from tracking until they speak again
+                del self.last_audio_time[user_id]
+
+    def detect_keyword(self, pcm_data, user_id, is_silence=False):
+        member = self.guild.get_member(user_id)
+        username = member.name if member else f"user_{user_id}"
+        
+        try:
+            if not is_silence:
+                # OPTIMIZATION: C-accelerated resampling using audioop with state tracking
+                # 1. Convert to mono by taking left channel
+                mono_data = audioop.tomono(pcm_data, 2, 1, 0)
+                # 2. Resample from 48000 to 16000 with per-user state to avoid audio skew
+                state = self.resample_states.get(user_id)
+                optimized_pcm, state = audioop.ratecv(mono_data, 2, 1, 48000, 16000, state)
+                self.resample_states[user_id] = state
+            else:
+                optimized_pcm = pcm_data # Already resampled silence
+            
+            if not self.audio_service.vosk_model:
+                return
+
+            if user_id not in self.recognizers:
+                self.recognizers[user_id] = vosk.KaldiRecognizer(self.audio_service.vosk_model, 16000)
+
+            rec = self.recognizers[user_id]
+            if rec.AcceptWaveform(optimized_pcm):
+                result = json.loads(rec.Result())
+                text = result.get("text", "").lower()
+                timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+                if text:
+                    print(f"[{timestamp}] [Vosk Final] {username}: \"{text}\"")
+                    self._log_to_file(username, text)
+            else:
+                result = json.loads(rec.PartialResult())
+                text = result.get("partial", "").lower()
+                timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+                if text:
+                    # Only print partials if they are not silence flushes
+                    if not is_silence:
+                        print(f"[{timestamp}] [Vosk Hearing] {username}: \"{text}...\"")
+
+            if text and self.keyword in text:
+                timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+                print(f"[{timestamp}] [KeywordDetection] Detected keyword '{self.keyword}' from user {username}!")
+                # Reset state so we start fresh for the next detection
+                if user_id in self.recognizers: del self.recognizers[user_id]
+                if user_id in self.resample_states: del self.resample_states[user_id]
+                # Trigger slap asynchronously
+                asyncio.run_coroutine_threadsafe(self.trigger_slap(user_id), self.audio_service.bot.loop)
+        except Exception as e:
+            if not is_silence:
+                print(f"[KeywordDetection] Error in detect_keyword for {username}: {e}")
+
+    async def trigger_slap(self, user_id):
+        if not self.guild.voice_client:
+            return
+
+        member = self.guild.get_member(user_id)
+        requester_name = member.name if member else f"user_{user_id}"
+        
+        # Get a random slap sound
+        slap_sounds = self.audio_service._behavior.db.get_sounds(slap=True, num_sounds=100)
+        if slap_sounds:
+            import random
+            random_slap = random.choice(slap_sounds)
+            channel = self.guild.voice_client.channel
+            if channel:
+                print(f"[KeywordDetection] Playing random slap for {requester_name}")
+                await self.audio_service.play_slap(channel, random_slap[2], requester_name)
+                # Log action
+                self.audio_service._behavior.db.insert_action(requester_name, "keyword_slap", random_slap[0])
 

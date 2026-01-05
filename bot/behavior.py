@@ -313,14 +313,6 @@ class BotBehavior:
     async def is_playing_sound(self):
         return self._audio_service.is_playing_sound()
 
-
-    
-
-        
-    #every 10 seconds check if the user is in a game
-
-
-    
     async def add_user_event(self, username, event, sound_name):
         return await self._user_event_service.add_user_event(username, event, sound_name)
 
