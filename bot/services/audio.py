@@ -664,12 +664,19 @@ class KeywordDetectionSink(sinks.Sink):
         self.last_audio_time = {} # user_id -> timestamp
         self.queue = queue.Queue()
         self.running = True
-        self.worker_thread = threading.Thread(target=self._worker, name=f"VoskWorker-{guild.id}", daemon=True)
-        self.worker_thread.start()
         self.keyword = "chapada"
+        self.last_partial = {} # user_id -> last partial text to avoid duplicate logs
+        self.max_queue_size = 100 # Queue limit to prevent lag
+        self.recognizer_start_time = {} # user_id -> when recognizer was created
+        self.max_segment_duration = 10.0 # Force flush after 10 seconds of continuous speech
+        self.audio_buffers = {} # user_id -> bytearray for batching
+        self.min_batch_size = 28800 # ~300ms at 48kHz stereo (48000 * 2 * 2 * 0.3)
         # Log directory for per-user transcripts
         self.log_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Data", "vosk_logs"))
         os.makedirs(self.log_dir, exist_ok=True)
+        # Single worker thread
+        self.worker_thread = threading.Thread(target=self._worker, name=f"VoskWorker-{guild.id}", daemon=True)
+        self.worker_thread.start()
 
     def _log_to_file(self, username, text):
         """Log final transcription to per-user file."""
@@ -686,22 +693,60 @@ class KeywordDetectionSink(sinks.Sink):
         self.queue.put((None, None))
 
     def write(self, data, user_id):
-        if self.running:
-            self.last_audio_time[user_id] = time.time()
-            self.queue.put((data, user_id))
+        if not self.running:
+            return
+        receive_time = time.time()
+        self.last_audio_time[user_id] = receive_time
+        
+        # Buffer audio per-user to reduce queue pressure
+        if user_id not in self.audio_buffers:
+            self.audio_buffers[user_id] = bytearray()
+        self.audio_buffers[user_id].extend(data)
+        
+        # CRITICAL: Cap buffer size to prevent massive chunks (max ~500ms = 48000B)
+        max_buffer = 48000
+        if len(self.audio_buffers[user_id]) > max_buffer:
+            # Keep only the most recent audio
+            self.audio_buffers[user_id] = self.audio_buffers[user_id][-max_buffer:]
+        
+        # Only queue when we have enough data (~300ms) or if queue is empty
+        if len(self.audio_buffers[user_id]) >= self.min_batch_size or self.queue.qsize() == 0:
+            buf_size = len(self.audio_buffers[user_id])
+            if self.queue.qsize() < self.max_queue_size:
+                # Include timestamp in queue entry for latency tracking
+                self.queue.put((bytes(self.audio_buffers[user_id]), user_id, receive_time))
+                print(f"[DEBUG] Queued {buf_size}B for user {user_id}, queue size: {self.queue.qsize()}")
+            else:
+                print(f"[DEBUG] DROPPED {buf_size}B for user {user_id}, queue full at {self.max_queue_size}")
+            self.audio_buffers[user_id] = bytearray()
+
 
     def _worker(self):
+        """Single worker thread for all audio processing."""
+        last_heartbeat = time.time()
         while self.running:
             try:
-                # Wait for data or timeout to handle silence flushing
+                # Heartbeat every 60 seconds
+                if time.time() - last_heartbeat > 60:
+                    qsize = self.queue.qsize()
+                    print(f"[VoskWorker] Heartbeat - Queue: {qsize}, Running: {self.running}")
+                    last_heartbeat = time.time()
+                
                 try:
-                    data, user_id = self.queue.get(timeout=0.1)
+                    item = self.queue.get(timeout=0.1)
+                    if len(item) == 3:
+                        data, user_id, queued_time = item
+                        dequeue_latency = (time.time() - queued_time) * 1000
+                        print(f"[DEBUG] Dequeued user {user_id}, waited {dequeue_latency:.0f}ms in queue")
+                    else:
+                        data, user_id = item
                 except queue.Empty:
-                    # Timeout reached - check for silent periods to flush Vosk
+                    # Timeout - check for silence to flush
                     self._flush_silence()
                     continue
-
-                if data is None: # Stop signal
+                
+                if data is None:  # Stop signal
+                    print("[VoskWorker] Received stop signal")
                     break
                 
                 self.detect_keyword(data, user_id)
@@ -709,36 +754,65 @@ class KeywordDetectionSink(sinks.Sink):
             except Exception as e:
                 print(f"[VoskWorker] Error: {e}")
                 traceback.print_exc()
+        print("[VoskWorker] Thread exited")
 
     def _flush_silence(self):
-        """Force Vosk to finalize results for users who stopped talking."""
+        """Force Vosk to finalize results for users who stopped talking and cleanup idle users."""
         now = time.time()
         
         for user_id, last_time in list(self.last_audio_time.items()):
+            idle_time = now - last_time
+            
             # If idle for > 300ms, force Vosk to finalize
-            if now - last_time > 0.3:
+            if idle_time > 0.3:
+                self._flush_user(user_id)
+                if user_id in self.last_audio_time:
+                    del self.last_audio_time[user_id]
+            
+            # Force flush after max segment duration even if still talking
+            elif user_id in self.recognizer_start_time:
+                segment_time = now - self.recognizer_start_time[user_id]
+                if segment_time > self.max_segment_duration:
+                    self._flush_user(user_id)
+            
+            # Cleanup users idle for more than 30 seconds to free memory
+            if idle_time > 30:
                 if user_id in self.recognizers:
-                    rec = self.recognizers[user_id]
-                    # Force finalization by getting the final result
-                    result = json.loads(rec.FinalResult())
-                    text = result.get("text", "").lower()
-                    
-                    if text:
-                        member = self.guild.get_member(user_id)
-                        username = member.name if member else f"user_{user_id}"
-                        timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-                        print(f"[{timestamp}] [Vosk Final (Flushed)] {username}: \"{text}\"")
-                        self._log_to_file(username, text)
-                        
-                        if self.keyword in text:
-                            print(f"[{timestamp}] [KeywordDetection] Detected keyword '{self.keyword}' from user {username}!")
-                            # Reset state
-                            del self.recognizers[user_id]
-                            if user_id in self.resample_states: del self.resample_states[user_id]
-                            asyncio.run_coroutine_threadsafe(self.trigger_slap(user_id), self.audio_service.bot.loop)
-                
-                # Remove from tracking until they speak again
-                del self.last_audio_time[user_id]
+                    del self.recognizers[user_id]
+                if user_id in self.resample_states:
+                    del self.resample_states[user_id]
+                if user_id in self.last_partial:
+                    del self.last_partial[user_id]
+                if user_id in self.recognizer_start_time:
+                    del self.recognizer_start_time[user_id]
+
+    def _flush_user(self, user_id):
+        """Force finalize and cleanup a user's recognizer."""
+        if user_id not in self.recognizers:
+            return
+        
+        rec = self.recognizers[user_id]
+        try:
+            result = json.loads(rec.FinalResult())
+            text = result.get("text", "").lower()
+        except Exception:
+            text = ""
+        
+        # Always delete recognizer after FinalResult (it's finished)
+        del self.recognizers[user_id]
+        if user_id in self.resample_states: del self.resample_states[user_id]
+        if user_id in self.recognizer_start_time: del self.recognizer_start_time[user_id]
+        
+        if text:
+            member = self.guild.get_member(user_id)
+            username = member.name if member else f"user_{user_id}"
+            timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+            print(f"[{timestamp}] [Vosk Final (Flushed)] {username}: \"{text}\"")
+            self._log_to_file(username, text)
+            
+            if self.keyword in text:
+                print(f"[{timestamp}] [KeywordDetection] Detected keyword '{self.keyword}' from user {username}!")
+                asyncio.run_coroutine_threadsafe(self.trigger_slap(user_id), self.audio_service.bot.loop)
 
     def detect_keyword(self, pcm_data, user_id, is_silence=False):
         member = self.guild.get_member(user_id)
@@ -761,6 +835,7 @@ class KeywordDetectionSink(sinks.Sink):
 
             if user_id not in self.recognizers:
                 self.recognizers[user_id] = vosk.KaldiRecognizer(self.audio_service.vosk_model, 16000)
+                self.recognizer_start_time[user_id] = time.time()
 
             rec = self.recognizers[user_id]
             if rec.AcceptWaveform(optimized_pcm):
@@ -773,11 +848,19 @@ class KeywordDetectionSink(sinks.Sink):
             else:
                 result = json.loads(rec.PartialResult())
                 text = result.get("partial", "").lower()
-                timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-                if text:
-                    # Only print partials if they are not silence flushes
-                    if not is_silence:
-                        print(f"[{timestamp}] [Vosk Hearing] {username}: \"{text}...\"")
+                
+                # Only log if partial changed (avoid duplicate spam)
+                if text and text != self.last_partial.get(user_id):
+                    self.last_partial[user_id] = text
+                    # Check for keyword in partial too for faster detection
+                    if self.keyword in text:
+                        timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+                        print(f"[{timestamp}] [KeywordDetection] Detected keyword '{self.keyword}' from user {username}!")
+                        if user_id in self.recognizers: del self.recognizers[user_id]
+                        if user_id in self.resample_states: del self.resample_states[user_id]
+                        if user_id in self.last_partial: del self.last_partial[user_id]
+                        asyncio.run_coroutine_threadsafe(self.trigger_slap(user_id), self.audio_service.bot.loop)
+                        return # Early return after triggering
 
             if text and self.keyword in text:
                 timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
