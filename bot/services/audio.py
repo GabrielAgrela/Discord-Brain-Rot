@@ -612,12 +612,25 @@ class AudioService:
             if guild.id in self.keyword_sinks:
                 return True
 
+            # Wait for voice connection to fully stabilize
+            await asyncio.sleep(1.0)
+            
+            # Re-check after delay
+            voice_client = guild.voice_client
+            if not voice_client or not voice_client.is_connected():
+                print(f"[AudioService] Voice connection lost during delay, skipping keyword detection")
+                return False
+
             print(f"[AudioService] Starting keyword detection in {guild.name}")
             sink = KeywordDetectionSink(self, guild)
-            # Use specific encryption mode if needed, py-cord 2.7 should handle it
-            voice_client.start_recording(sink, self._on_detection_finished, guild)
-            self.keyword_sinks[guild.id] = sink
-            return True
+            try:
+                voice_client.start_recording(sink, self._on_detection_finished, guild)
+                self.keyword_sinks[guild.id] = sink
+                return True
+            except Exception as e:
+                print(f"[AudioService] Failed to start recording: {e}")
+                sink.stop()
+                return False
         except Exception as e:
             print(f"[AudioService] Error starting keyword detection: {e}")
             return False

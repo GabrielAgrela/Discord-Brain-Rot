@@ -200,18 +200,26 @@ async def on_ready():
                     vc = guild.voice_client
                     if vc is not None:
                         print(f"Voice encryption mode: {getattr(vc, 'mode', 'unknown')}")
-                        # Start background keyword detection
-                        await behavior._audio_service.start_keyword_detection(guild)
                 except Exception as e:
-                    print(f"Could not read voice mode or start detection: {e}")
+                    print(f"Could not read voice mode: {e}")
+                
+                # Play startup sound FIRST before starting keyword detection
                 if not bot.startup_sound_played:
                     try:
                         from bot.repositories import SoundRepository
                         random_sound = SoundRepository().get_random_sounds(num_sounds=1)[0][2]
                         await behavior.play_audio(channel_to_join, random_sound, "startup")
+                        # Wait for sound to start playing
+                        await asyncio.sleep(3)
                     except Exception as e:
                         print(f"Error playing startup sound: {e}")
                     bot.startup_sound_played = True
+                
+                # Start keyword detection AFTER startup sound
+                try:
+                    await behavior._audio_service.start_keyword_detection(guild)
+                except Exception as e:
+                    print(f"Could not start keyword detection: {e}")
             except discord.ClientException as e:
                 print(f"Error connecting to {channel_to_join.name} in {guild.name}: {e}. Already connected elsewhere or connection issue.")
             except asyncio.TimeoutError:
