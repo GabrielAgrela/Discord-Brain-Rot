@@ -3,7 +3,13 @@ from discord.ui import View
 from bot.database import Database
 
 class UserEventSelectView(View):
-    def __init__(self, bot_behavior, audio_file, guild_members, interaction_user_id, message_to_edit=None):
+    def __init__(self, bot_behavior, audio_file, guild_members=None, interaction_user_id=None, message_to_edit=None):
+        """
+        View for assigning user events to sounds.
+        
+        Note: guild_members is now optional (kept for backwards compatibility) since
+        the native UserSelectComponent doesn't need a pre-populated member list.
+        """
         super().__init__(timeout=180)
         self.bot_behavior = bot_behavior
         self.audio_file = audio_file
@@ -13,12 +19,13 @@ class UserEventSelectView(View):
 
         self.selected_event_type = None
         self.selected_user_id = None
+        self.selected_user = None  # Store the User object from native select
 
-        from bot.ui.selects import EventTypeSelect, UserSelect
+        from bot.ui.selects import EventTypeSelect, UserSelectComponent
         from bot.ui.buttons.events import ConfirmUserEventButton, CancelButton
 
         self.event_type_select = EventTypeSelect(bot_behavior)
-        self.user_select = UserSelect(bot_behavior, guild_members)
+        self.user_select = UserSelectComponent(bot_behavior, row=1)  # Native Discord user picker
         self.confirm_button = ConfirmUserEventButton(bot_behavior, audio_file)
         self.cancel_button = CancelButton()
 
@@ -52,9 +59,6 @@ class UserEventSelectView(View):
             if self.message_to_edit:
                 for option in self.event_type_select.options:
                     option.default = (self.selected_event_type is not None and option.value == self.selected_event_type)
-
-                for option in self.user_select.options:
-                    option.default = (self.selected_user_id is not None and option.value == self.selected_user_id)
                 
                 await self.message_to_edit.edit(content=new_content, view=self)
         except Exception as e:
@@ -74,6 +78,7 @@ class UserEventSelectView(View):
                 await self.message_to_edit.edit(content=f"Event assignment for '{self.sound_name_no_ext}' timed out.", view=self)
             except:
                 pass
+
 
 class EventView(View):
     def __init__(self, bot_behavior, user_id, event, sounds):

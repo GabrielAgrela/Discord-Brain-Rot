@@ -2,23 +2,16 @@ import discord
 from discord.ui import Button, View
 
 class UploadSoundButton(Button):
+    """Button that opens the unified upload modal (URL + File upload)."""
+    
     def __init__(self, bot_behavior, **kwargs):
         super().__init__(**kwargs)
         self.bot_behavior = bot_behavior
 
     async def callback(self, interaction):
-        try:
-            view = UploadChoiceView(self.bot_behavior)
-            await interaction.response.send_message(
-                content="Choose how you want to upload:",
-                view=view,
-                ephemeral=True,
-                delete_after=60
-            )
-        except Exception:
-            from bot.ui.modals import UploadSoundModal
-            modal = UploadSoundModal(self.bot_behavior)
-            await interaction.response.send_modal(modal)
+        from bot.ui.modals import UploadSoundWithFileModal
+        modal = UploadSoundWithFileModal(self.bot_behavior)
+        await interaction.response.send_modal(modal)
 
 class UploadURLChoiceButton(Button):
     def __init__(self, bot_behavior):
@@ -31,13 +24,16 @@ class UploadURLChoiceButton(Button):
         await interaction.response.send_modal(modal)
 
 class UploadMP3ChoiceButton(Button):
+    """Button that opens the new FileUpload modal for direct MP3 uploads."""
+    
     def __init__(self, bot_behavior):
         super().__init__(label="Upload MP3 File", style=discord.ButtonStyle.success)
         self.bot_behavior = bot_behavior
 
     async def callback(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
-        await self.bot_behavior._sound_service.prompt_upload_sound(interaction)
+        from bot.ui.modals import UploadSoundWithFileModal
+        modal = UploadSoundWithFileModal(self.bot_behavior)
+        await interaction.response.send_modal(modal)
 
 class UploadChoiceView(View):
     def __init__(self, bot_behavior):

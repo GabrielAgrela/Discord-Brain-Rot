@@ -1,9 +1,18 @@
 import discord
+from discord import ui
 import asyncio
 from bot.database import Database
 
-class EventTypeSelect(discord.ui.Select):
-    def __init__(self, bot_behavior):
+
+class EventTypeSelect(ui.Select):
+    """
+    Select for choosing event type (join/leave).
+    
+    Pycord 2.7.0 Note: StringSelect is a partial helper, not a base class.
+    We use ui.Select with select_type parameter for typed behavior.
+    """
+    
+    def __init__(self, bot_behavior, row: int = 0):
         self.bot_behavior = bot_behavior
         options = [
             discord.SelectOption(label="Join Event", value="join", description="Sound plays when user joins voice."),
@@ -14,7 +23,8 @@ class EventTypeSelect(discord.ui.Select):
             min_values=1,
             max_values=1,
             options=options,
-            custom_id="event_type_select"
+            custom_id="event_type_select",
+            row=row
         )
 
     async def callback(self, interaction: discord.Interaction):
@@ -22,8 +32,39 @@ class EventTypeSelect(discord.ui.Select):
         view.selected_event_type = self.values[0]
         await view.update_display_message(interaction)
 
-class UserSelect(discord.ui.Select):
-    def __init__(self, bot_behavior, guild_members):
+
+class UserSelectComponent(ui.Select):
+    """
+    Native Discord user picker using Pycord 2.7.0's UserSelect.
+    
+    Uses select_type=ComponentType.user_select for the native user picker UI.
+    This removes the 25 user limit and provides Discord's built-in user search.
+    """
+    
+    def __init__(self, bot_behavior, row: int = 0):
+        self.bot_behavior = bot_behavior
+        super().__init__(
+            select_type=discord.ComponentType.user_select,
+            placeholder="Select a user...",
+            min_values=1,
+            max_values=1,
+            row=row
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        view = self.view
+        # values is a list of User/Member objects with the native UserSelect
+        selected_user = self.values[0]
+        view.selected_user_id = f"{selected_user.name}#{selected_user.discriminator}"
+        view.selected_user = selected_user
+        await view.update_display_message(interaction)
+
+
+# Keep the old UserSelect as an alias for backwards compatibility during transition
+class UserSelect(ui.Select):
+    """Legacy user select - kept for compatibility, prefer UserSelectComponent."""
+    
+    def __init__(self, bot_behavior, guild_members, row: int = 0):
         self.bot_behavior = bot_behavior
         options = []
         for member in guild_members[:25]:
@@ -37,7 +78,8 @@ class UserSelect(discord.ui.Select):
             min_values=1,
             max_values=1,
             options=options,
-            custom_id="user_select"
+            custom_id="user_select",
+            row=row
         )
 
     async def callback(self, interaction: discord.Interaction):
@@ -45,7 +87,10 @@ class UserSelect(discord.ui.Select):
         view.selected_user_id = self.values[0]
         await view.update_display_message(interaction)
 
-class SoundSelect(discord.ui.Select):
+
+class SoundSelect(ui.Select):
+    """Select for choosing a sound to play."""
+    
     def __init__(self, bot_behavior, sounds, row: int = 0):
         self.bot_behavior = bot_behavior
         options = []
@@ -63,8 +108,6 @@ class SoundSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         await interaction.response.defer()
         sound_filename = self.values[0]
-        # We don't strictly need to fetch from DB if we trust the value, but let's verify exists?
-        # Actually play_audio handles validation.
         channel = self.bot_behavior._audio_service.get_user_voice_channel(interaction.guild, interaction.user.name)
         if not channel:
             channel = self.bot_behavior._audio_service.get_largest_voice_channel(interaction.guild)
@@ -72,7 +115,10 @@ class SoundSelect(discord.ui.Select):
             asyncio.create_task(self.bot_behavior._audio_service.play_audio(channel, sound_filename, interaction.user.name))
             Database().insert_action(interaction.user.name, "select_play_sound", sound_filename)
 
-class AddToListSelect(discord.ui.Select):
+
+class AddToListSelect(ui.Select):
+    """Select for adding a sound to a list."""
+    
     def __init__(self, bot_behavior, sound_filename, lists, default_list_id: int = None, row: int = 0):
         self.bot_behavior = bot_behavior
         self.sound_filename = sound_filename
@@ -118,7 +164,10 @@ class AddToListSelect(discord.ui.Select):
         else:
             await interaction.followup.send(f"Failed: {message}", ephemeral=True)
 
-class STSCharacterSelect(discord.ui.Select):
+
+class STSCharacterSelect(ui.Select):
+    """Select for voice character transformation."""
+    
     def __init__(self, bot_behavior, audio_file, row: int = 0):
         self.bot_behavior = bot_behavior
         self.audio_file = audio_file
@@ -138,16 +187,18 @@ class STSCharacterSelect(discord.ui.Select):
     async def callback(self, interaction):
         await interaction.response.defer()
         char = self.values[0]
-        # sts_EL expects (user, sound, char, region)
         asyncio.create_task(self.bot_behavior._voice_transformation_service.sts_EL(interaction.user, self.audio_file, char))
         Database().insert_action(interaction.user.name, "sts_EL", Database().get_sound(self.audio_file, True)[0])
 
-class SimilarSoundsSelect(discord.ui.Select):
+
+class SimilarSoundsSelect(ui.Select):
+    """Select for playing similar sounds."""
+    
     def __init__(self, bot_behavior, similar_sounds, row: int = 3):
         self.bot_behavior = bot_behavior
         options = []
         for sound, similarity in similar_sounds:
-            sound_name = sound[2] # Filename index is 2
+            sound_name = sound[2]  # Filename index is 2
             options.append(discord.SelectOption(
                 label=f"{sound_name.replace('.mp3', '')} ({int(similarity)}%)",
                 value=sound_name
@@ -168,7 +219,10 @@ class SimilarSoundsSelect(discord.ui.Select):
             asyncio.create_task(self.bot_behavior._audio_service.play_audio(channel, sound_name, interaction.user.name))
             Database().insert_action(interaction.user.name, "select_similar_sound", sound_name)
 
-class LoadingSimilarSoundsSelect(discord.ui.Select):
+
+class LoadingSimilarSoundsSelect(ui.Select):
+    """Placeholder select shown while similar sounds are loading."""
+    
     def __init__(self):
         super().__init__(
             placeholder="Loading similar sounds...",
@@ -176,5 +230,6 @@ class LoadingSimilarSoundsSelect(discord.ui.Select):
             max_values=1,
             options=[discord.SelectOption(label="Loading...", value="loading")],
             disabled=True,
-            row=3, 
+            row=3,
         )
+

@@ -168,9 +168,11 @@ class SoundService:
 
                 # Insert into DB
                 self.sound_repo.insert_sound(final_filename, final_filename)
+                return True, save_path  # <-- This was missing!
         except Exception as e:
             print(f"[SoundService] Error saving uploaded sound: {e}")
             return False, "System error while saving file."
+
 
     async def prompt_upload_sound(self, interaction: discord.Interaction):
         """Prompt user for a sound upload (DM or channel interaction)."""
