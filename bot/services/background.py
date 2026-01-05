@@ -1,13 +1,16 @@
 import asyncio
+import os
 import random
 import time
 import discord
 from discord.ext import tasks
 from bot.repositories import SoundRepository, ActionRepository
+from bot.downloaders.sound import SoundDownloader
 
 class BackgroundService:
     """
-    Service for background tasks like status updates and periodic sound playback.
+    Service for background tasks like status updates, periodic sound playback,
+    and MyInstants scraping.
     """
     
     def __init__(self, bot, audio_service, sound_service):
@@ -34,6 +37,8 @@ class BackgroundService:
                 self.update_bot_status_loop.start()
             if not self.play_sound_periodically_loop.is_running():
                 self.play_sound_periodically_loop.start()
+            if not self.scrape_sounds_loop.is_running():
+                self.scrape_sounds_loop.start()
             print("[BackgroundService] Background tasks started.")
 
     @tasks.loop(seconds=60)
@@ -79,3 +84,37 @@ class BackgroundService:
             except Exception as e:
                 print(f"[BackgroundService] Error in periodic playback: {e}")
                 await asyncio.sleep(60)  # Wait a minute before retrying on error
+
+    @tasks.loop(count=1)
+    async def scrape_sounds_loop(self):
+        """Periodically scrape new sounds from MyInstants."""
+        await self.bot.wait_until_ready()
+        
+        first_run = True
+        while not self.bot.is_closed():
+            try:
+                if not first_run:
+                    # Wait 30-60 minutes between scrapes
+                    sleep_time = random.uniform(60*30, 60*60)
+                    print(f"[BackgroundService] Next MyInstants scrape in {int(sleep_time/60)} minutes")
+                    await asyncio.sleep(sleep_time)
+                first_run = False
+                
+                # Run the scraper in a thread executor since it uses Selenium (blocking)
+                print("[BackgroundService] Starting MyInstants scraper...")
+                loop = asyncio.get_event_loop()
+                
+                # Create scraper instance - needs behavior reference for db
+                # We'll use a fresh Database instance since the scraper does that internally
+                from bot.database import Database
+                db = Database()
+                downloader = SoundDownloader(None, db, os.getenv("CHROMEDRIVER_PATH"))
+                
+                # Run blocking download_sound in executor
+                await loop.run_in_executor(None, downloader.download_sound)
+                print("[BackgroundService] MyInstants scrape completed")
+                
+            except Exception as e:
+                print(f"[BackgroundService] Error in scrape_sounds_loop: {e}")
+                await asyncio.sleep(60)  # Wait a minute before retrying on error
+
