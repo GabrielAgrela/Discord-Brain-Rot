@@ -1,88 +1,554 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>lulucas</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
-    <link href="https://fonts.googleapis.com/css2?family=Bungee+Shade&display=swap" rel="stylesheet">
+    <title>Brain Rot Soundboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #0f0f1a;
+            --bg-secondary: #1a1a2e;
+            --bg-card: rgba(30, 30, 50, 0.8);
+            --bg-card-hover: rgba(40, 40, 70, 0.9);
+            --accent-primary: #6366f1;
+            --accent-secondary: #8b5cf6;
+            --accent-gradient: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #a855f7 100%);
+            --text-primary: #ffffff;
+            --text-secondary: #a0a0b0;
+            --text-muted: #6b7280;
+            --border-color: rgba(99, 102, 241, 0.2);
+            --success: #10b981;
+            --warning: #f59e0b;
+            --error: #ef4444;
+            --shadow-glow: 0 0 40px rgba(99, 102, 241, 0.15);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            background-image:
+                radial-gradient(ellipse at 20% 20%, rgba(99, 102, 241, 0.08) 0%, transparent 50%),
+                radial-gradient(ellipse at 80% 80%, rgba(139, 92, 246, 0.08) 0%, transparent 50%);
+        }
+
+        /* Navigation */
+        .nav {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-color);
+            padding: 0.75rem 2rem;
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+            backdrop-filter: blur(10px);
+        }
+
+        .nav-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .nav-brand {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            text-decoration: none;
+        }
+
+        .nav-brand-emoji {
+            font-size: 1.75rem;
+            animation: pulse 2s infinite;
+        }
+
+        .nav-brand-text {
+            font-size: 1.25rem;
+            font-weight: 700;
+            background: var(--accent-gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                transform: scale(1);
+            }
+
+            50% {
+                transform: scale(1.1);
+            }
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .nav-link {
+            color: var(--text-secondary);
+            text-decoration: none;
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            font-size: 0.875rem;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .nav-link:hover {
+            background: var(--bg-card);
+            color: var(--text-primary);
+        }
+
+        .nav-link.active {
+            background: var(--accent-gradient);
+            color: white;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        /* Header */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .logo {
+            font-size: 2rem;
+            font-weight: 700;
+            background: var(--accent-gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .logo-emoji {
+            font-size: 2.5rem;
+        }
+
+        /* Tables Grid Layout */
+        .tables-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 1.5rem;
+        }
+
+        @media (max-width: 1200px) {
+            .tables-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Card Component */
+        .card {
+            background: var(--bg-card);
+            backdrop-filter: blur(10px);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .card-title {
+            font-size: 1.125rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        /* Search Input */
+        .search-input {
+            width: 100%;
+            padding: 0.75rem 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            color: var(--text-primary);
+            font-size: 0.875rem;
+            margin-bottom: 1rem;
+            transition: all 0.3s ease;
+        }
+
+        .search-input:focus {
+            outline: none;
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+        }
+
+        .search-input::placeholder {
+            color: var(--text-muted);
+        }
+
+        /* Table */
+        .table-container {
+            flex: 1;
+            overflow-y: auto;
+            max-height: 500px;
+            scrollbar-width: thin;
+            scrollbar-color: var(--accent-primary) var(--bg-secondary);
+        }
+
+        .table-container::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .table-container::-webkit-scrollbar-track {
+            background: var(--bg-secondary);
+            border-radius: 3px;
+        }
+
+        .table-container::-webkit-scrollbar-thumb {
+            background: var(--accent-primary);
+            border-radius: 3px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th {
+            text-align: left;
+            padding: 0.75rem;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            border-bottom: 1px solid var(--border-color);
+            position: sticky;
+            top: 0;
+            background: var(--bg-card);
+        }
+
+        td {
+            padding: 0.75rem;
+            font-size: 0.875rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        tr {
+            transition: all 0.2s ease;
+        }
+
+        tr:hover {
+            background: var(--bg-secondary);
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        /* Play Button */
+        .play-button {
+            padding: 0.4rem 0.8rem;
+            border: none;
+            border-radius: 6px;
+            background: var(--accent-gradient);
+            color: white;
+            font-size: 0.75rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .play-button:hover:not(:disabled) {
+            transform: scale(1.05);
+            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
+        }
+
+        .play-button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .play-button.queued {
+            background: var(--success);
+        }
+
+        .play-button.error {
+            background: var(--error);
+        }
+
+        /* Pagination */
+        .pagination {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 1rem;
+            margin-top: 1rem;
+            padding-top: 1rem;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .pagination button {
+            padding: 0.5rem 1rem;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            background: var(--bg-secondary);
+            color: var(--text-secondary);
+            font-size: 0.75rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .pagination button:hover:not(:disabled) {
+            background: var(--bg-card-hover);
+            color: var(--text-primary);
+            border-color: var(--accent-primary);
+        }
+
+        .pagination button:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        .pagination-info {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+
+        /* Action Badge */
+        .action-badge {
+            display: inline-block;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            font-weight: 500;
+            background: var(--bg-secondary);
+        }
+
+        .action-badge.play {
+            background: rgba(16, 185, 129, 0.2);
+            color: #10b981;
+        }
+
+        .action-badge.favorite {
+            background: rgba(245, 158, 11, 0.2);
+            color: #f59e0b;
+        }
+
+        .action-badge.join {
+            background: rgba(99, 102, 241, 0.2);
+            color: #6366f1;
+        }
+
+        .action-badge.leave {
+            background: rgba(239, 68, 68, 0.2);
+            color: #ef4444;
+        }
+
+        /* Filename truncation */
+        .filename {
+            max-width: 200px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .container {
+                padding: 1rem;
+            }
+
+            .nav {
+                padding: 0.75rem 1rem;
+            }
+
+            .nav-links {
+                gap: 0.25rem;
+            }
+
+            .nav-link {
+                padding: 0.4rem 0.6rem;
+                font-size: 0.8rem;
+            }
+
+            .nav-link span:first-child {
+                display: none;
+            }
+
+            .table-container {
+                max-height: 350px;
+            }
+
+            th,
+            td {
+                padding: 0.5rem;
+                font-size: 0.75rem;
+            }
+
+            .filename {
+                max-width: 120px;
+            }
+        }
+    </style>
 </head>
+
 <body>
-    <div class="title-container">
-        <div class="title-shadow">O LUCAS TEM PERNINHAS DE FRANGO</div>
-        <div class="title-text">O LUCAS TEM PERNINHAS DE FRANGO</div>
-    </div>
-    
-    <div class="tables-container">
-        <div class="table-container">
-            <h2>Recent Actions</h2>
-            <input type="text" id="searchActions" placeholder="Search Actions...">
-            <table id="actionsTable">
-                <thead>
-                    <tr>
-                        <th>Action</th>
-                        <th>Filename</th>
-                        <th>Timestamp</th>
-                        <th>Username</th>
-                    </tr>
-                </thead>
-                <tbody id="actionsTableBody">
-                    <!-- Data will be inserted here dynamically -->
-                </tbody>
-            </table>
-            <div class="pagination">
-                <button id="prevPageActions">Previous</button>
-                <span id="currentPageActions">1</span> / <span id="totalPagesActions">1</span>
-                <button id="nextPageActions">Next</button>
+    <!-- Navigation -->
+    <nav class="nav">
+        <div class="nav-container">
+            <a href="/" class="nav-brand">
+                <span class="nav-brand-emoji">🧠</span>
+                <span class="nav-brand-text">Brain Rot</span>
+            </a>
+            <div class="nav-links">
+                <a href="/" class="nav-link active">
+                    <span>🎵</span> Soundboard
+                </a>
+                <a href="/analytics" class="nav-link">
+                    <span>📊</span> Analytics
+                </a>
             </div>
         </div>
+    </nav>
 
-        <div class="table-container">
-            <h2>Favorite Sounds</h2>
-            <input type="text" id="searchFavorites" placeholder="Search Favorites...">
-            <table id="favoritesTable">
-                <thead>
-                    <tr>
-                        <th>Filename</th>
-                        <th>Play</th>
-                    </tr>
-                </thead>
-                <tbody id="favoritesTableBody">
-                    <!-- Data will be inserted here dynamically -->
-                </tbody>
-            </table>
-            <div class="pagination">
-                <button id="prevPageFavorites">Previous</button>
-                <span id="currentPageFavorites">1</span> / <span id="totalPagesFavorites">1</span>
-                <button id="nextPageFavorites">Next</button>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <span class="logo-emoji">🎵</span>
+                <h1 class="logo">Soundboard</h1>
             </div>
-        </div>
+        </header>
 
-        <div class="table-container">
-            <h2>All Sounds</h2>
-            <input type="text" id="searchAllSounds" placeholder="Search Sounds...">
-            <table id="allSoundsTable">
-                <thead>
-                    <tr>
-                        <th>Filename</th>
-                        <th>Date</th>
-                        <th>Play</th>
-                    </tr>
-                </thead>
-                <tbody id="allSoundsTableBody">
-                    <!-- Data will be inserted here dynamically -->
-                </tbody>
-            </table>
-            <div class="pagination">
-                <button id="prevPageAllSounds">Previous</button>
-                <span id="currentPageAllSounds">1</span> / <span id="totalPagesAllSounds">1</span>
-                <button id="nextPageAllSounds">Next</button>
+        <!-- Tables Grid -->
+        <div class="tables-grid">
+            <!-- Recent Actions -->
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">⚡ Recent Actions</h2>
+                </div>
+                <input type="text" id="searchActions" class="search-input" placeholder="Search actions...">
+                <div class="table-container">
+                    <table id="actionsTable">
+                        <thead>
+                            <tr>
+                                <th>Action</th>
+                                <th>Sound</th>
+                                <th>User</th>
+                                <th>Time</th>
+                            </tr>
+                        </thead>
+                        <tbody id="actionsTableBody">
+                            <!-- Data will be inserted here dynamically -->
+                        </tbody>
+                    </table>
+                </div>
+                <div class="pagination">
+                    <button id="prevPageActions">← Prev</button>
+                    <span class="pagination-info">
+                        <span id="currentPageActions">1</span> / <span id="totalPagesActions">1</span>
+                    </span>
+                    <button id="nextPageActions">Next →</button>
+                </div>
+            </div>
+
+            <!-- Favorite Sounds -->
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">⭐ Favorites</h2>
+                </div>
+                <input type="text" id="searchFavorites" class="search-input" placeholder="Search favorites...">
+                <div class="table-container">
+                    <table id="favoritesTable">
+                        <thead>
+                            <tr>
+                                <th>Sound</th>
+                                <th>Play</th>
+                            </tr>
+                        </thead>
+                        <tbody id="favoritesTableBody">
+                            <!-- Data will be inserted here dynamically -->
+                        </tbody>
+                    </table>
+                </div>
+                <div class="pagination">
+                    <button id="prevPageFavorites">← Prev</button>
+                    <span class="pagination-info">
+                        <span id="currentPageFavorites">1</span> / <span id="totalPagesFavorites">1</span>
+                    </span>
+                    <button id="nextPageFavorites">Next →</button>
+                </div>
+            </div>
+
+            <!-- All Sounds -->
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">🎵 All Sounds</h2>
+                </div>
+                <input type="text" id="searchAllSounds" class="search-input" placeholder="Search sounds...">
+                <div class="table-container">
+                    <table id="allSoundsTable">
+                        <thead>
+                            <tr>
+                                <th>Sound</th>
+                                <th>Date</th>
+                                <th>Play</th>
+                            </tr>
+                        </thead>
+                        <tbody id="allSoundsTableBody">
+                            <!-- Data will be inserted here dynamically -->
+                        </tbody>
+                    </table>
+                </div>
+                <div class="pagination">
+                    <button id="prevPageAllSounds">← Prev</button>
+                    <span class="pagination-info">
+                        <span id="currentPageAllSounds">1</span> / <span id="totalPagesAllSounds">1</span>
+                    </span>
+                    <button id="nextPageAllSounds">Next →</button>
+                </div>
             </div>
         </div>
     </div>
 
     <script>
-        const itemsPerPage = window.matchMedia("(max-width: 768px) and (max-height: 1024px)").matches ? 5 : 15;
+        const itemsPerPage = window.matchMedia("(max-width: 768px)").matches ? 10 : 15;
         let currentPageActions = 1;
         let currentPageFavorites = 1;
         let currentPageAllSounds = 1;
@@ -94,39 +560,70 @@
             all_sounds: null
         };
 
+        // Helper function to format time ago
+        function formatTimeAgo(timestamp) {
+            const date = new Date(timestamp);
+            const now = new Date();
+            const diffMs = now - date;
+            const diffMins = Math.floor(diffMs / 60000);
+            const diffHours = Math.floor(diffMs / 3600000);
+
+            if (diffMins < 1) return 'Just now';
+            if (diffMins < 60) return `${diffMins}m ago`;
+            if (diffHours < 24) return `${diffHours}h ago`;
+            return date.toLocaleDateString();
+        }
+
+        // Get action badge class
+        function getActionClass(action) {
+            if (action.includes('play')) return 'play';
+            if (action.includes('favorite')) return 'favorite';
+            if (action === 'join') return 'join';
+            if (action === 'leave') return 'leave';
+            return '';
+        }
+
+        // Format action name
+        function formatAction(action) {
+            const actionMap = {
+                'play_random_sound': 'Random',
+                'play_request': 'Played',
+                'replay_sound': 'Replayed',
+                'play_from_list': 'List',
+                'play_similar_sound': 'Similar',
+                'play_sound_periodically': 'Auto',
+                'play_random_favorite_sound': 'Favorite',
+                'favorite_sound': 'Favorited',
+                'unfavorite_sound': 'Unfavorited',
+                'join': 'Joined',
+                'leave': 'Left'
+            };
+            return actionMap[action] || action;
+        }
+
         function fetchData(endpoint, page, tableBodyId, currentPageId, totalPagesId, prevButtonId, nextButtonId, searchInputId) {
-            console.log(`Fetching ${endpoint} data for page ${page}`);
             const tableBody = document.getElementById(tableBodyId);
             const prevButton = document.getElementById(prevButtonId);
             const nextButton = document.getElementById(nextButtonId);
             const searchInput = document.getElementById(searchInputId);
-            const searchQuery = searchInput.value.trim(); // Get search query
-            
-            // Construct API URL with search parameter
+            const searchQuery = searchInput.value.trim();
+
             const apiUrl = `/api/${endpoint}?page=${page}&per_page=${itemsPerPage}&search=${encodeURIComponent(searchQuery)}`;
 
             return fetch(apiUrl)
                 .then(response => response.json())
                 .then(data => {
-                    console.log(`Received ${data.items.length} items for ${endpoint}`);
-                    
-                    // Check if the new data is different from the last fetched data
                     const hasNewEntries = JSON.stringify(data.items) !== JSON.stringify(lastFetchedData[endpoint]);
-                    
+
                     if (hasNewEntries) {
-                        // Update the last fetched data
                         lastFetchedData[endpoint] = data.items;
 
-                        // Fade out the existing content
                         tableBody.style.opacity = '0';
                         tableBody.style.transition = 'opacity 0.2s';
 
-                        // Wait for fade out to complete before updating content
                         setTimeout(() => {
-                            // Clear existing rows
                             tableBody.innerHTML = '';
 
-                            // Create and insert new rows
                             data.items.forEach((item, index) => {
                                 let row = document.createElement('tr');
                                 row.style.opacity = '0';
@@ -134,52 +631,66 @@
                                 row.style.transitionDelay = `${index * 20}ms`;
 
                                 if (endpoint === 'actions') {
+                                    // Action badge
                                     let actionCell = document.createElement('td');
-                                    actionCell.textContent = item.action;
+                                    const badge = document.createElement('span');
+                                    badge.className = `action-badge ${getActionClass(item.action)}`;
+                                    badge.textContent = formatAction(item.action);
+                                    actionCell.appendChild(badge);
                                     row.appendChild(actionCell);
 
+                                    // Filename
                                     let filenameCell = document.createElement('td');
-                                    filenameCell.textContent = item.filename || item.target; // Display filename if available
+                                    filenameCell.className = 'filename';
+                                    filenameCell.textContent = (item.filename || item.target || '-').replace('.mp3', '');
+                                    filenameCell.title = item.filename || item.target || '';
                                     row.appendChild(filenameCell);
 
-                                    let timestampCell = document.createElement('td');
-                                    timestampCell.textContent = item.timestamp;
-                                    row.appendChild(timestampCell);
-
+                                    // Username
                                     let usernameCell = document.createElement('td');
                                     usernameCell.textContent = item.username;
                                     row.appendChild(usernameCell);
+
+                                    // Time
+                                    let timestampCell = document.createElement('td');
+                                    timestampCell.textContent = formatTimeAgo(item.timestamp);
+                                    timestampCell.title = item.timestamp;
+                                    row.appendChild(timestampCell);
+
                                 } else if (endpoint === 'favorites') {
                                     let filenameCell = document.createElement('td');
-                                    filenameCell.textContent = item.filename;
+                                    filenameCell.className = 'filename';
+                                    filenameCell.textContent = item.filename.replace('.mp3', '');
+                                    filenameCell.title = item.filename;
                                     row.appendChild(filenameCell);
 
-                                    // Add Play button cell for favorites
                                     const playCell = document.createElement('td');
                                     const playButton = document.createElement('button');
-                                    playButton.textContent = 'Play';
-                                    playButton.className = 'play-button'; 
+                                    playButton.textContent = '▶ Play';
+                                    playButton.className = 'play-button';
                                     playButton.setAttribute('data-filename', item.filename);
                                     playCell.appendChild(playButton);
                                     row.appendChild(playCell);
+
                                 } else if (endpoint === 'all_sounds') {
-                                    // Explicitly create cells for all_sounds
                                     let filenameCell = document.createElement('td');
-                                    filenameCell.textContent = item.filename;
+                                    filenameCell.className = 'filename';
+                                    filenameCell.textContent = item.filename.replace('.mp3', '');
+                                    filenameCell.title = item.filename;
                                     row.appendChild(filenameCell);
 
                                     let dateCell = document.createElement('td');
-                                    dateCell.textContent = item.timestamp;
+                                    dateCell.textContent = formatTimeAgo(item.timestamp);
+                                    dateCell.title = item.timestamp;
                                     row.appendChild(dateCell);
 
-                                    // Add Play button cell
                                     const playCell = document.createElement('td');
                                     const playButton = document.createElement('button');
-                                    playButton.textContent = 'Play';
-                                    playButton.className = 'play-button'; // Add class for styling/selection
-                                    playButton.setAttribute('data-filename', item.filename); // Store filename
+                                    playButton.textContent = '▶ Play';
+                                    playButton.className = 'play-button';
+                                    playButton.setAttribute('data-filename', item.filename);
                                     playCell.appendChild(playButton);
-                                    row.appendChild(playCell); // Append the play cell to the row
+                                    row.appendChild(playCell);
                                 }
 
                                 tableBody.appendChild(row);
@@ -188,20 +699,16 @@
                             document.getElementById(currentPageId).textContent = page;
                             document.getElementById(totalPagesId).textContent = data.total_pages;
 
-                            // Update button states
                             prevButton.disabled = (page <= 1);
                             nextButton.disabled = (page >= data.total_pages);
 
-                            // Trigger reflow to ensure new opacity is applied
                             void tableBody.offsetWidth;
 
-                            // Fade in the new content
                             tableBody.style.opacity = '1';
                             Array.from(tableBody.children).forEach(row => {
                                 row.style.opacity = '1';
                             });
 
-                            // Remove transition styles after animation completes
                             setTimeout(() => {
                                 tableBody.style.transition = '';
                                 Array.from(tableBody.children).forEach(row => {
@@ -209,11 +716,9 @@
                                     row.style.transitionDelay = '';
                                 });
                             }, data.items.length * 50 + 300);
-                        }, 100); // Wait for fade out to complete
-                    } else {
-                        console.log(`No new entries for ${endpoint}`);
+                        }, 100);
                     }
-                    
+
                     return hasNewEntries;
                 })
                 .catch(error => {
@@ -231,21 +736,19 @@
                 if (!isButtonCooldown && !this.disabled) {
                     isButtonCooldown = true;
                     fetchFunction(increment);
-                    
-                    // Disable buttons visually
+
                     prevButton.disabled = true;
                     nextButton.disabled = true;
 
                     setTimeout(() => {
                         isButtonCooldown = false;
-                        // Re-enable buttons (if they should be enabled)
                         fetchFunction();
-                    }, 500); // 500ms cooldown
+                    }, 500);
                 }
             }
 
-            prevButton.addEventListener('click', () => handleButtonClick(false));
-            nextButton.addEventListener('click', () => handleButtonClick(true));
+            prevButton.addEventListener('click', () => handleButtonClick.call(prevButton, false));
+            nextButton.addEventListener('click', () => handleButtonClick.call(nextButton, true));
         }
 
         function fetchActions(increment = null, forcePageOne = false) {
@@ -282,16 +785,15 @@
         setupPagination('prevPageFavorites', 'nextPageFavorites', fetchFavorites);
         setupPagination('prevPageAllSounds', 'nextPageAllSounds', fetchAllSounds);
 
-        // --- Event listener for Play buttons (adjusted to listen on tables-container) ---
-        document.querySelector('.tables-container').addEventListener('click', async (event) => {
+        // Event listener for Play buttons
+        document.querySelector('.tables-grid').addEventListener('click', async (event) => {
             if (event.target.classList.contains('play-button')) {
                 const button = event.target;
                 const filename = button.getAttribute('data-filename');
                 if (!filename) return;
 
-                console.log(`Requesting playback for: ${filename}`);
-                button.disabled = true; // Disable button temporarily
-                button.textContent = 'Queueing...';
+                button.disabled = true;
+                button.textContent = '⏳';
 
                 try {
                     const response = await fetch('/api/play_sound', {
@@ -303,29 +805,36 @@
                     });
 
                     if (response.ok) {
-                        console.log(`Successfully queued: ${filename}`);
-                        button.textContent = 'Queued';
-                        // Optionally re-enable after a delay or change text permanently
+                        button.textContent = '✓ Queued';
+                        button.classList.add('queued');
                         setTimeout(() => {
-                            button.textContent = 'Play';
+                            button.textContent = '▶ Play';
+                            button.classList.remove('queued');
                             button.disabled = false;
-                         }, 2000); // Re-enable after 2 seconds
+                        }, 2000);
                     } else {
-                        const errorData = await response.json();
-                        console.error(`Failed to queue ${filename}: ${errorData.error || response.statusText}`);
-                        button.textContent = 'Error';
-                        // Keep button disabled or provide other feedback
+                        button.textContent = '✗ Error';
+                        button.classList.add('error');
+                        setTimeout(() => {
+                            button.textContent = '▶ Play';
+                            button.classList.remove('error');
+                            button.disabled = false;
+                        }, 2000);
                     }
                 } catch (error) {
-                    console.error(`Network error queuing ${filename}:`, error);
-                    button.textContent = 'Error';
-                     // Keep button disabled or provide other feedback
+                    console.error(`Network error:`, error);
+                    button.textContent = '✗ Error';
+                    button.classList.add('error');
+                    setTimeout(() => {
+                        button.textContent = '▶ Play';
+                        button.classList.remove('error');
+                        button.disabled = false;
+                    }, 2000);
                 }
             }
         });
-        // --- End of play button code ---
 
-        // --- Backend Search Trigger --- 
+        // Backend Search with debounce
         function setupBackendSearch(inputId, fetchFunction) {
             const searchInput = document.getElementById(inputId);
             let debounceTimer;
@@ -333,31 +842,19 @@
             searchInput.addEventListener('input', () => {
                 clearTimeout(debounceTimer);
                 debounceTimer = setTimeout(() => {
-                    // Trigger fetch function, forcing page 1
-                    fetchFunction(null, true); // Pass special flag/arg to force page 1
-                }, 350); // Debounce search input slightly longer for backend
+                    fetchFunction(null, true);
+                }, 350);
             });
         }
 
-        // Setup search input listeners
         setupBackendSearch('searchActions', fetchActions);
         setupBackendSearch('searchFavorites', fetchFavorites);
         setupBackendSearch('searchAllSounds', fetchAllSounds);
-        // --- End of Backend Search Trigger ---
 
-        // Auto-refresh every 1 second (adjust as needed)
+        // Auto-refresh every 2 seconds
         setInterval(() => {
-            Promise.all([fetchActions(), fetchFavorites(), fetchAllSounds()])
-                .then(results => {
-                    const hasNewEntries = results.some(result => result);
-                    if (hasNewEntries) {
-                        console.log('New entries found, table updated.');
-                        // Search filter will be reapplied by MutationObserver
-                    } else {
-                        // console.log('No new entries, no table update needed.');
-                    }
-                });
-        }, 1000); // Changed interval to 1000ms
+            Promise.all([fetchActions(), fetchFavorites(), fetchAllSounds()]);
+        }, 2000);
 
         // Initial data fetch
         fetchActions();
@@ -365,4 +862,5 @@
         fetchAllSounds();
     </script>
 </body>
+
 </html>

@@ -306,6 +306,141 @@ class StatsRepository(BaseRepository):
                     current_streak = 1
                 longest_streak = max(longest_streak, current_streak)
                 prev_date = current_date
-            stats['longest_streak'] = longest_streak
+        stats['longest_streak'] = longest_streak
         
         return stats
+    
+    # ===== Analytics Dashboard Methods =====
+    
+    def get_activity_heatmap(self, days: int = 30) -> List[Dict[str, Any]]:
+        """
+        Get activity counts grouped by day of week and hour for heatmap visualization.
+        
+        Args:
+            days: Number of days to look back (0 = all time)
+            
+        Returns:
+            List of dicts with day_of_week (0-6), hour (0-23), and count
+        """
+        conditions = ["action IN ('play_random_sound', 'replay_sound', 'play_random_favorite_sound', 'play_request', 'play_from_list', 'play_similar_sound', 'play_sound_periodically')"]
+        params = []
+        
+        if days > 0:
+            from datetime import timedelta
+            cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+            conditions.append("timestamp >= ?")
+            params.append(cutoff)
+        
+        where_clause = " AND ".join(conditions)
+        
+        rows = self._execute(
+            f"""
+            SELECT 
+                CAST(strftime('%w', timestamp) AS INTEGER) as day_of_week,
+                CAST(strftime('%H', timestamp) AS INTEGER) as hour,
+                COUNT(*) as count
+            FROM actions
+            WHERE {where_clause}
+            GROUP BY day_of_week, hour
+            ORDER BY day_of_week, hour
+            """,
+            tuple(params)
+        )
+        
+        return [{'day': row['day_of_week'], 'hour': row['hour'], 'count': row['count']} for row in rows]
+    
+    def get_activity_timeline(self, days: int = 30) -> List[Dict[str, Any]]:
+        """
+        Get daily activity counts for timeline/line chart visualization.
+        
+        Args:
+            days: Number of days to look back
+            
+        Returns:
+            List of dicts with date and count
+        """
+        from datetime import timedelta
+        cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        
+        rows = self._execute(
+            """
+            SELECT 
+                date(timestamp) as date,
+                COUNT(*) as count
+            FROM actions
+            WHERE action IN ('play_random_sound', 'replay_sound', 'play_random_favorite_sound', 
+                           'play_request', 'play_from_list', 'play_similar_sound', 'play_sound_periodically')
+            AND date(timestamp) >= ?
+            GROUP BY date(timestamp)
+            ORDER BY date(timestamp) ASC
+            """,
+            (cutoff,)
+        )
+        
+        return [{'date': row['date'], 'count': row['count']} for row in rows]
+    
+    def get_summary_stats(self, days: int = 0) -> Dict[str, Any]:
+        """
+        Get aggregated summary statistics for the analytics dashboard.
+        
+        Args:
+            days: Number of days to look back (0 = all time)
+            
+        Returns:
+            Dict with total_sounds, total_plays, active_users, sounds_this_week
+        """
+        from datetime import timedelta
+        
+        stats = {
+            'total_sounds': 0,
+            'total_plays': 0,
+            'active_users': 0,
+            'sounds_this_week': 0
+        }
+        
+        # Total sounds
+        row = self._execute_one("SELECT COUNT(*) as count FROM sounds")
+        stats['total_sounds'] = row['count'] if row else 0
+        
+        # Build time filter
+        time_filter = ""
+        params = []
+        if days > 0:
+            cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+            time_filter = "AND timestamp >= ?"
+            params.append(cutoff)
+        
+        # Total plays
+        row = self._execute_one(
+            f"""
+            SELECT COUNT(*) as count FROM actions 
+            WHERE action IN ('play_random_sound', 'replay_sound', 'play_random_favorite_sound', 
+                           'play_request', 'play_from_list', 'play_similar_sound', 'play_sound_periodically')
+            {time_filter}
+            """,
+            tuple(params)
+        )
+        stats['total_plays'] = row['count'] if row else 0
+        
+        # Active users
+        row = self._execute_one(
+            f"""
+            SELECT COUNT(DISTINCT username) as count FROM actions 
+            WHERE action IN ('play_random_sound', 'replay_sound', 'play_random_favorite_sound', 
+                           'play_request', 'play_from_list', 'play_similar_sound')
+            {time_filter}
+            """,
+            tuple(params)
+        )
+        stats['active_users'] = row['count'] if row else 0
+        
+        # Sounds added this week
+        week_ago = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
+        row = self._execute_one(
+            "SELECT COUNT(*) as count FROM sounds WHERE timestamp >= ?",
+            (week_ago,)
+        )
+        stats['sounds_this_week'] = row['count'] if row else 0
+        
+        return stats
+

@@ -218,5 +218,307 @@ def request_play_sound():
         print(f"Error queuing playback: {e}")
         return jsonify({'error': 'Internal server error'}), 500
 
+
+# ===== Analytics Dashboard =====
+
+@app.route('/analytics')
+def analytics():
+    """Render the analytics dashboard page."""
+    return render_template('analytics.html')
+
+
+@app.route('/api/analytics/summary')
+def get_analytics_summary():
+    """Get summary statistics for the dashboard."""
+    try:
+        days = int(request.args.get('days', 0))
+    except ValueError:
+        days = 0
+    
+    conn = sqlite3.connect('/home/gabi/github/Discord-Brain-Rot/database.db')
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    stats = {
+        'total_sounds': 0,
+        'total_plays': 0,
+        'active_users': 0,
+        'sounds_this_week': 0
+    }
+    
+    # Total sounds
+    cursor.execute("SELECT COUNT(*) as count FROM sounds")
+    row = cursor.fetchone()
+    stats['total_sounds'] = row['count'] if row else 0
+    
+    # Build time filter
+    time_filter = ""
+    params = []
+    if days > 0:
+        from datetime import timedelta
+        cutoff = (datetime.datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+        time_filter = "AND timestamp >= ?"
+        params.append(cutoff)
+    
+    # Total plays
+    cursor.execute(
+        f"""
+        SELECT COUNT(*) as count FROM actions 
+        WHERE action IN ('play_random_sound', 'replay_sound', 'play_random_favorite_sound', 
+                       'play_request', 'play_from_list', 'play_similar_sound', 'play_sound_periodically', 'play_sound_generic')
+        {time_filter}
+        """,
+        tuple(params)
+    )
+    row = cursor.fetchone()
+    stats['total_plays'] = row['count'] if row else 0
+    
+    # Active users
+    cursor.execute(
+        f"""
+        SELECT COUNT(DISTINCT username) as count FROM actions 
+        WHERE action IN ('play_random_sound', 'replay_sound', 'play_random_favorite_sound', 
+                       'play_request', 'play_from_list', 'play_similar_sound')
+        {time_filter}
+        """,
+        tuple(params)
+    )
+    row = cursor.fetchone()
+    stats['active_users'] = row['count'] if row else 0
+    
+    # Sounds added this week
+    from datetime import timedelta
+    week_ago = (datetime.datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
+    cursor.execute("SELECT COUNT(*) as count FROM sounds WHERE timestamp >= ?", (week_ago,))
+    row = cursor.fetchone()
+    stats['sounds_this_week'] = row['count'] if row else 0
+    
+    conn.close()
+    return jsonify(stats)
+
+
+@app.route('/api/analytics/top_users')
+def get_analytics_top_users():
+    """Get top users by play count."""
+    try:
+        days = int(request.args.get('days', 7))
+        limit = int(request.args.get('limit', 10))
+    except ValueError:
+        days = 7
+        limit = 10
+    
+    conn = sqlite3.connect('/home/gabi/github/Discord-Brain-Rot/database.db')
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    time_filter = ""
+    params = []
+    if days > 0:
+        from datetime import timedelta
+        cutoff = (datetime.datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+        time_filter = "AND timestamp >= ?"
+        params.append(cutoff)
+    
+    params.append(limit)
+    
+    cursor.execute(
+        f"""
+        SELECT username, COUNT(*) as count
+        FROM actions
+        WHERE action IN ('play_random_sound', 'replay_sound', 'play_random_favorite_sound', 
+                        'play_request', 'play_from_list', 'play_similar_sound')
+        {time_filter}
+        GROUP BY username
+        ORDER BY count DESC
+        LIMIT ?
+        """,
+        tuple(params)
+    )
+    
+    users = [{'username': row['username'], 'count': row['count']} for row in cursor.fetchall()]
+    conn.close()
+    return jsonify({'users': users})
+
+
+@app.route('/api/analytics/top_sounds')
+def get_analytics_top_sounds():
+    """Get top played sounds."""
+    try:
+        days = int(request.args.get('days', 7))
+        limit = int(request.args.get('limit', 10))
+    except ValueError:
+        days = 7
+        limit = 10
+    
+    conn = sqlite3.connect('/home/gabi/github/Discord-Brain-Rot/database.db')
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    time_filter = ""
+    params = []
+    if days > 0:
+        from datetime import timedelta
+        cutoff = (datetime.datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+        time_filter = "AND a.timestamp >= ?"
+        params.append(cutoff)
+    
+    params.append(limit)
+    
+    cursor.execute(
+        f"""
+        SELECT s.Filename, COUNT(*) as count
+        FROM actions a
+        JOIN sounds s ON a.target = s.id
+        WHERE a.action IN ('play_random_sound', 'replay_sound', 'play_random_favorite_sound', 
+                          'play_request', 'play_from_list', 'play_similar_sound', 'play_sound_periodically', 'play_sound_generic')
+        AND s.slap = 0
+        {time_filter}
+        GROUP BY s.Filename
+        ORDER BY count DESC
+        LIMIT ?
+        """,
+        tuple(params)
+    )
+    
+    sounds = [{'filename': row['Filename'], 'count': row['count']} for row in cursor.fetchall()]
+    conn.close()
+    return jsonify({'sounds': sounds})
+
+
+@app.route('/api/analytics/activity_heatmap')
+def get_analytics_heatmap():
+    """Get activity heatmap data (day of week x hour)."""
+    try:
+        days = int(request.args.get('days', 30))
+    except ValueError:
+        days = 30
+    
+    conn = sqlite3.connect('/home/gabi/github/Discord-Brain-Rot/database.db')
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    time_filter = ""
+    params = []
+    if days > 0:
+        from datetime import timedelta
+        cutoff = (datetime.datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+        time_filter = "AND timestamp >= ?"
+        params.append(cutoff)
+    
+    cursor.execute(
+        f"""
+        SELECT 
+            CAST(strftime('%w', timestamp) AS INTEGER) as day_of_week,
+            CAST(strftime('%H', timestamp) AS INTEGER) as hour,
+            COUNT(*) as count
+        FROM actions
+        WHERE action IN ('play_random_sound', 'replay_sound', 'play_random_favorite_sound', 
+                        'play_request', 'play_from_list', 'play_similar_sound', 'play_sound_periodically', 'play_sound_generic')
+        {time_filter}
+        GROUP BY day_of_week, hour
+        ORDER BY day_of_week, hour
+        """,
+        tuple(params)
+    )
+    
+    heatmap = [{'day': row['day_of_week'], 'hour': row['hour'], 'count': row['count']} for row in cursor.fetchall()]
+    conn.close()
+    return jsonify({'heatmap': heatmap})
+
+
+@app.route('/api/analytics/activity_timeline')
+def get_analytics_timeline():
+    """Get activity for timeline chart. Groups by week for all-time, by day otherwise."""
+    try:
+        days = int(request.args.get('days', 30))
+    except ValueError:
+        days = 30
+    
+    conn = sqlite3.connect('/home/gabi/github/Discord-Brain-Rot/database.db')
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    from datetime import timedelta
+    
+    if days == 0:
+        # All time: group by week for readability
+        cursor.execute(
+            """
+            SELECT 
+                strftime('%Y-W%W', timestamp) as period,
+                MIN(date(timestamp)) as date,
+                COUNT(*) as count
+            FROM actions
+            WHERE action IN ('play_random_sound', 'replay_sound', 'play_random_favorite_sound', 
+                           'play_request', 'play_from_list', 'play_similar_sound', 'play_sound_periodically',
+                           'play_sound_generic')
+            GROUP BY period
+            ORDER BY period ASC
+            """
+        )
+    else:
+        # Limited time: group by day
+        cutoff = (datetime.datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        cursor.execute(
+            """
+            SELECT 
+                date(timestamp) as date,
+                COUNT(*) as count
+            FROM actions
+            WHERE action IN ('play_random_sound', 'replay_sound', 'play_random_favorite_sound', 
+                           'play_request', 'play_from_list', 'play_similar_sound', 'play_sound_periodically',
+                           'play_sound_generic')
+            AND date(timestamp) >= ?
+            GROUP BY date(timestamp)
+            ORDER BY date(timestamp) ASC
+            """,
+            (cutoff,)
+        )
+    
+    timeline = [{'date': row['date'], 'count': row['count']} for row in cursor.fetchall()]
+    conn.close()
+    return jsonify({'timeline': timeline})
+
+
+@app.route('/api/analytics/recent_activity')
+def get_analytics_recent():
+    """Get recent activity feed."""
+    try:
+        limit = int(request.args.get('limit', 20))
+    except ValueError:
+        limit = 20
+    
+    conn = sqlite3.connect('/home/gabi/github/Discord-Brain-Rot/database.db')
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    cursor.execute(
+        """
+        SELECT a.username, a.action, a.timestamp, s.Filename
+        FROM actions a
+        LEFT JOIN sounds s ON a.target = s.id
+        WHERE a.action IN ('play_random_sound', 'replay_sound', 'play_random_favorite_sound', 
+                          'play_request', 'play_from_list', 'play_similar_sound', 'play_sound_periodically',
+                          'favorite_sound', 'unfavorite_sound', 'join', 'leave')
+        ORDER BY a.id DESC
+        LIMIT ?
+        """,
+        (limit,)
+    )
+    
+    activities = []
+    for row in cursor.fetchall():
+        activities.append({
+            'username': row['username'],
+            'action': row['action'],
+            'timestamp': row['timestamp'],
+            'sound': row['Filename'] if row['Filename'] else None
+        })
+    
+    conn.close()
+    return jsonify({'activities': activities})
+
+
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=8080)
+
