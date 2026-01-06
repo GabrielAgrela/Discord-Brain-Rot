@@ -587,7 +587,7 @@ class AudioService:
                     new_lines = []
                     for line in lines:
                         if line.startswith("Progress:"):
-                            new_lines.append(f"Progress: {bar} {elapsed_int}s / {duration_int}s")
+                            new_lines.append(f"Progress: {bar}")
                         else:
                             new_lines.append(line)
                     
