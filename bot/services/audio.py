@@ -610,7 +610,7 @@ class AudioService:
                     bar = "█" * bar_length
                     for line in lines:
                         if line.startswith("Progress:"):
-                            new_lines.append(f"Progress: {bar} {duration_int}s / {duration_int}s ✅")
+                            new_lines.append(f"Progress: {bar} ✅")
                         else:
                             new_lines.append(line)
                     embed.description = "\n".join(new_lines)
