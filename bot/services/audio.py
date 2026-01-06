@@ -61,6 +61,8 @@ class AudioService:
         
         # Initialize Vosk model for local STT
         try:
+            # Silence internal Vosk logs to avoid spamming the console
+            vosk.SetLogLevel(-1)
             model_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Data", "models", "vosk-model-small-pt-0.3"))
             if os.path.exists(model_path):
                 print(f"[AudioService] Loading Vosk model from {model_path}...")
@@ -715,6 +717,8 @@ class KeywordDetectionSink(sinks.Sink):
         """Reload keywords from the database repository."""
         try:
             self.keywords = self.audio_service.keyword_repo.get_as_dict()
+            # Reset recognizers so they are recreated with the new grammar list
+            self.recognizers = {}
             print(f"[KeywordDetectionSink] Refreshed {len(self.keywords)} keywords")
         except Exception as e:
             print(f"[KeywordDetectionSink] Error refreshing keywords: {e}")
@@ -854,10 +858,29 @@ class KeywordDetectionSink(sinks.Sink):
                     asyncio.run_coroutine_threadsafe(self.trigger_action(user_id, keyword, action), self.audio_service.bot.loop)
                     break  # Only trigger one action per flush
 
-    def _check_keywords(self, text: str) -> tuple:
-        """Check if any keyword is in the text. Returns (keyword, action) or (None, None)."""
+    def _check_keywords(self, text: str, result_obj: dict = None) -> tuple:
+        """Check if any keyword is in the text as a whole word. Returns (keyword, action) or (None, None)."""
+        import re
+        
+        # If we have word-level confidence, check it
+        if result_obj and "result" in result_obj:
+            for word_info in result_obj["result"]:
+                word = word_info.get("word", "").lower()
+                conf = word_info.get("conf", 0.0)
+                
+                # Use a higher threshold for keywords to avoid false positives (e.g., chaves vs chapada)
+                if word in self.keywords and conf > 0.90:
+                    print(f"[KeywordDetection] Confirmed keyword '{word}' with high confidence: {conf:.2f}")
+                    return word, self.keywords[word]
+                elif word in self.keywords:
+                    print(f"[KeywordDetection] Ignored potential keyword '{word}' due to low confidence: {conf:.2f}")
+            
+            return None, None
+
+        # Fallback for simple text check (use with caution)
+        # We only do this if we don't have a structured result (should not happen for final results)
         for keyword, action in self.keywords.items():
-            if keyword in text:
+            if re.search(rf"\b{re.escape(keyword.lower())}\b", text.lower()):
                 return keyword, action
         return None, None
 
@@ -881,7 +904,23 @@ class KeywordDetectionSink(sinks.Sink):
                 return
 
             if user_id not in self.recognizers:
-                self.recognizers[user_id] = vosk.KaldiRecognizer(self.audio_service.vosk_model, 16000)
+                # Use grammar to significantly improve keyword detection accuracy
+                if self.keywords:
+                    # Keywords + distractor words + [unk] to allow non-keyword speech to be ignored
+                    # This prevents Vosk from "forcing" every sound into a keyword
+                    distractors = [
+                        "o", "a", "os", "as", "um", "uma", "de", "do", "da", "em", "no", "na", "com", "para", "por",
+                        "que", "se", "foi", "tem", "sim", "mas", "mais", "eu", "ele",
+                        "eles", "isso", "esta", "este", "aqui", "quem", "como", "quando", "onde"
+                    ]
+                    grammar = list(self.keywords.keys()) + distractors + ["[unk]"]
+                    grammar_json = json.dumps(grammar)
+                    self.recognizers[user_id] = vosk.KaldiRecognizer(self.audio_service.vosk_model, 16000, grammar_json)
+                else:
+                    self.recognizers[user_id] = vosk.KaldiRecognizer(self.audio_service.vosk_model, 16000)
+                
+                # Enable confidence scores
+                self.recognizers[user_id].SetWords(True)
                 self.recognizer_start_time[user_id] = time.time()
 
             rec = self.recognizers[user_id]
@@ -892,6 +931,16 @@ class KeywordDetectionSink(sinks.Sink):
                 if text:
                     print(f"[{timestamp}] [Vosk Final] {username}: \"{text}\"")
                     self._log_to_file(username, text)
+                    
+                    # Check keywords in final result (most accurate)
+                    keyword, action = self._check_keywords(text, result)
+                    if keyword:
+                        print(f"[{timestamp}] [KeywordDetection] Detected keyword '{keyword}' from user {username}")
+                        if user_id in self.recognizers: del self.recognizers[user_id]
+                        if user_id in self.resample_states: del self.resample_states[user_id]
+                        if user_id in self.last_partial: del self.last_partial[user_id]
+                        asyncio.run_coroutine_threadsafe(self.trigger_action(user_id, keyword, action), self.audio_service.bot.loop)
+                        return
             else:
                 result = json.loads(rec.PartialResult())
                 text = result.get("partial", "").lower()
@@ -899,27 +948,9 @@ class KeywordDetectionSink(sinks.Sink):
                 # Only log if partial changed (avoid duplicate spam)
                 if text and text != self.last_partial.get(user_id):
                     self.last_partial[user_id] = text
-                    # Check for any keyword in partial for faster detection
-                    keyword, action = self._check_keywords(text)
-                    if keyword:
-                        timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-                        print(f"[{timestamp}] [KeywordDetection] Detected keyword '{keyword}' from user {username}!")
-                        if user_id in self.recognizers: del self.recognizers[user_id]
-                        if user_id in self.resample_states: del self.resample_states[user_id]
-                        if user_id in self.last_partial: del self.last_partial[user_id]
-                        asyncio.run_coroutine_threadsafe(self.trigger_action(user_id, keyword, action), self.audio_service.bot.loop)
-                        return # Early return after triggering
-
-            # Check for any keyword in final text
-            if text:
-                keyword, action = self._check_keywords(text)
-                if keyword:
-                    timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-                    print(f"[{timestamp}] [KeywordDetection] Detected keyword '{keyword}' from user {username}!")
-                    # Reset state so we start fresh for the next detection
-                    if user_id in self.recognizers: del self.recognizers[user_id]
-                    if user_id in self.resample_states: del self.resample_states[user_id]
-                    asyncio.run_coroutine_threadsafe(self.trigger_action(user_id, keyword, action), self.audio_service.bot.loop)
+                    # We DISABLED keyword detection on partial results to avoid false positives 
+                    # from words that sound similar or are incomplete.
+                    pass 
         except Exception as e:
             if not is_silence:
                 print(f"[KeywordDetection] Error in detect_keyword for {username}: {e}")
