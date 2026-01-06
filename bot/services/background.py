@@ -39,7 +39,28 @@ class BackgroundService:
                 self.play_sound_periodically_loop.start()
             if not self.scrape_sounds_loop.is_running():
                 self.scrape_sounds_loop.start()
+            if not self.keyword_detection_health_check.is_running():
+                self.keyword_detection_health_check.start()
             print("[BackgroundService] Background tasks started.")
+
+    @tasks.loop(seconds=30)
+    async def keyword_detection_health_check(self):
+        """
+        Periodically check if keyword detection is running when bot is connected.
+        
+        This handles the case where the bot disconnects randomly and the STT stops
+        but never gets restarted.
+        """
+        try:
+            for guild in self.bot.guilds:
+                voice_client = guild.voice_client
+                # If bot is connected to voice but keyword detection is not running, restart it
+                if voice_client and voice_client.is_connected():
+                    if guild.id not in self.audio_service.keyword_sinks:
+                        print(f"[BackgroundService] Health check: Keyword detection not running in {guild.name}, restarting...")
+                        await self.audio_service.start_keyword_detection(guild)
+        except Exception as e:
+            print(f"[BackgroundService] Error in keyword detection health check: {e}")
 
     @tasks.loop(seconds=60)
     async def update_bot_status_loop(self):

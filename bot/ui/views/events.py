@@ -1,14 +1,18 @@
 import discord
+from discord import SelectDefaultValue, SelectDefaultValueType
 from discord.ui import View
 from bot.database import Database
 
 class UserEventSelectView(View):
-    def __init__(self, bot_behavior, audio_file, guild_members=None, interaction_user_id=None, message_to_edit=None):
+    def __init__(self, bot_behavior, audio_file, guild_members=None, interaction_user_id=None, message_to_edit=None, interaction_user=None):
         """
         View for assigning user events to sounds.
         
-        Note: guild_members is now optional (kept for backwards compatibility) since
-        the native UserSelectComponent doesn't need a pre-populated member list.
+        Pycord 2.7.0: Uses SelectDefaultValue to pre-select the interaction user,
+        making self-assignment more intuitive (common use case).
+        
+        Args:
+            interaction_user: The User object of who triggered the view (for pre-selection)
         """
         super().__init__(timeout=180)
         self.bot_behavior = bot_behavior
@@ -17,15 +21,27 @@ class UserEventSelectView(View):
         self.interaction_user_id = interaction_user_id
         self.message_to_edit = message_to_edit 
 
-        self.selected_event_type = None
-        self.selected_user_id = None
-        self.selected_user = None  # Store the User object from native select
+        # Pre-select the interaction user for convenience (most common: self-assignment)
+        # Pre-select "join" event type as default (most common use case)
+        self.selected_event_type = "join"
+        if interaction_user:
+            self.selected_user_id = f"{interaction_user.name}#{interaction_user.discriminator}"
+            self.selected_user = interaction_user
+        else:
+            self.selected_user_id = None
+            self.selected_user = None
 
         from bot.ui.selects import EventTypeSelect, UserSelectComponent
         from bot.ui.buttons.events import ConfirmUserEventButton, CancelButton
 
         self.event_type_select = EventTypeSelect(bot_behavior)
-        self.user_select = UserSelectComponent(bot_behavior, row=1)  # Native Discord user picker
+        
+        # Create user select with default value (Pycord 2.7.0 feature)
+        default_values = []
+        if interaction_user:
+            default_values = [SelectDefaultValue(id=interaction_user.id, type=SelectDefaultValueType.user)]
+        
+        self.user_select = UserSelectComponent(bot_behavior, row=1, default_values=default_values)
         self.confirm_button = ConfirmUserEventButton(bot_behavior, audio_file)
         self.cancel_button = CancelButton()
 
@@ -35,9 +51,28 @@ class UserEventSelectView(View):
         self.add_item(self.cancel_button)
 
     async def get_initial_message_content(self):
-        return f"Assigning event for sound: **{self.sound_name_no_ext}**\n"
+        base = f"Assigning event for sound: **{self.sound_name_no_ext}**\n"
+        if self.selected_user_id and self.selected_event_type:
+            # Check database to show ADD or REMOVE (same logic as update_display_message)
+            is_set = Database().get_user_event_sound(self.selected_user_id, self.selected_event_type, self.sound_name_no_ext)
+            action_text = "REMOVE" if is_set else "ADD"
+            user_display = self.selected_user_id.split('#')[0]
+            base += f"\n **{action_text}** this sound as a **{self.selected_event_type}** event for **{user_display}**."
+        elif self.selected_user_id:
+            user_display = self.selected_user_id.split('#')[0]
+            base += f"User **{user_display}** is pre-selected. Select an event type to continue."
+        return base
 
     async def update_display_message(self, interaction_from_select: discord.Interaction):
+        """Update the message content based on current selections.
+        
+        FIX: Must defer the interaction to prevent 'interaction failed' error.
+        Discord requires every interaction to receive a response within 3 seconds.
+        """
+        # CRITICAL: Defer first to acknowledge the interaction
+        if not interaction_from_select.response.is_done():
+            await interaction_from_select.response.defer()
+        
         new_content = f"Assigning event for sound: **{self.sound_name_no_ext}**\n"
         
         if self.selected_event_type and self.selected_user_id:

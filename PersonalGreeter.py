@@ -283,6 +283,24 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
             # Ignore when directly joining the AFK channel
             print(f"Ignoring join event for {member_str} in AFK channel {channel}")
             return
+    
+    # Check if bot should disconnect when someone leaves
+    if event == "leave" and before.channel:
+        # Check if the bot is in the channel the user left
+        voice_client = before.channel.guild.voice_client
+        if voice_client and voice_client.channel == before.channel:
+            # Check if only bots remain in the channel
+            non_bot_members = [m for m in before.channel.members if not m.bot]
+            if len(non_bot_members) == 0:
+                print(f"[AutoDisconnect] No non-bot members left in {before.channel.name}, disconnecting...")
+                try:
+                    # Stop keyword detection before disconnecting
+                    await behavior._audio_service.stop_keyword_detection(before.channel.guild)
+                    await voice_client.disconnect()
+                    print(f"[AutoDisconnect] Disconnected from {before.channel.name}")
+                except Exception as e:
+                    print(f"[AutoDisconnect] Error disconnecting: {e}")
+                return  # No need to play leave sound if disconnecting
         
     # Log the voice state update
     print(f"Voice state update: {member_str} {event} channel {channel}")

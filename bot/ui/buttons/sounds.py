@@ -235,7 +235,14 @@ class AssignUserEventButton(Button):
             return
 
         from bot.ui.views.events import UserEventSelectView
-        view = UserEventSelectView(self.bot_behavior, self.audio_file, guild_members, interaction.user.id)
+        # Pass interaction_user for SelectDefaultValue pre-selection (Pycord 2.7.0)
+        view = UserEventSelectView(
+            self.bot_behavior, 
+            self.audio_file, 
+            guild_members, 
+            interaction.user.id,
+            interaction_user=interaction.user  # New: enables pre-selection
+        )
         initial_message_content = await view.get_initial_message_content()
         
         await interaction.response.send_message(

@@ -377,9 +377,9 @@ class Database:
     def get_user_event_sound(self, user_id, event, sound):
         """Delegate to EventRepository for backwards compatibility."""
         from bot.repositories import EventRepository
-        # Check if event exists
-        events = EventRepository().get_user_events(user_id, event)
-        return sound in events
+        # Use get_event_sound which returns the tuple if exists, None otherwise
+        result = EventRepository().get_event_sound(user_id, event, sound)
+        return result is not None
     
     def toggle_user_event_sound(self, user_id, event, sound):
         """Delegate to EventRepository for backwards compatibility."""

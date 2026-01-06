@@ -10,12 +10,13 @@ class EventTypeSelect(ui.Select):
     
     Pycord 2.7.0 Note: StringSelect is a partial helper, not a base class.
     We use ui.Select with select_type parameter for typed behavior.
+    Default: "join" is pre-selected since it's the most common use case.
     """
     
     def __init__(self, bot_behavior, row: int = 0):
         self.bot_behavior = bot_behavior
         options = [
-            discord.SelectOption(label="Join Event", value="join", description="Sound plays when user joins voice."),
+            discord.SelectOption(label="Join Event", value="join", description="Sound plays when user joins voice.", default=True),
             discord.SelectOption(label="Leave Event", value="leave", description="Sound plays when user leaves voice."),
         ]
         super().__init__(
@@ -39,16 +40,19 @@ class UserSelectComponent(ui.Select):
     
     Uses select_type=ComponentType.user_select for the native user picker UI.
     This removes the 25 user limit and provides Discord's built-in user search.
+    
+    Pycord 2.7.0: Supports default_values to pre-select a user.
     """
     
-    def __init__(self, bot_behavior, row: int = 0):
+    def __init__(self, bot_behavior, row: int = 0, default_values: list = None):
         self.bot_behavior = bot_behavior
         super().__init__(
             select_type=discord.ComponentType.user_select,
             placeholder="Select a user...",
             min_values=1,
             max_values=1,
-            row=row
+            row=row,
+            default_values=default_values or []
         )
 
     async def callback(self, interaction: discord.Interaction):

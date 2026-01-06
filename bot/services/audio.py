@@ -529,10 +529,23 @@ class AudioService:
                 if "Not connected to voice" in str(e):
                     try:
                         print("[AudioService] Detected zombie connection in play loop, forcing disconnect.")
+                        # Stop keyword detection first
+                        await self.stop_keyword_detection(channel.guild)
                         await voice_client.disconnect(force=True)
                         await asyncio.sleep(1)
-                    except:
-                        pass
+                        # Reconnect and restart keyword detection
+                        print("[AudioService] Attempting to reconnect after zombie cleanup...")
+                        new_vc = await self.ensure_voice_connected(channel)
+                        if new_vc:
+                            print("[AudioService] Reconnected successfully, retrying sound playback...")
+                            # Retry playing the sound (increment retry count to prevent infinite loop)
+                            return await self.play_audio(
+                                channel, audio_file, user, is_entrance, is_tts,
+                                extra, original_message, send_controls,
+                                retry_count + 1, effects, show_suggestions, num_suggestions
+                            )
+                    except Exception as reconnect_error:
+                        print(f"[AudioService] Error during zombie cleanup/reconnect: {reconnect_error}")
                 self.playback_done.set()
                 return False
 
@@ -639,9 +652,21 @@ class AudioService:
         """Stop background keyword detection in the specified guild."""
         try:
             if guild.id in self.keyword_sinks:
+                sink = self.keyword_sinks[guild.id]
+                
+                # Stop the sink worker thread first
+                sink.stop()
+                
                 voice_client = guild.voice_client
                 if voice_client:
-                    voice_client.stop_recording()
+                    try:
+                        voice_client.stop_recording()
+                    except Exception as e:
+                        print(f"[AudioService] Error stopping recording: {e}")
+                    
+                    # Give the voice client time to clean up pending async tasks
+                    await asyncio.sleep(0.5)
+                
                 del self.keyword_sinks[guild.id]
                 print(f"[AudioService] Stopped keyword detection in {guild.name}")
             return True
