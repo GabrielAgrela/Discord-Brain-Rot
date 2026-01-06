@@ -31,14 +31,6 @@ class ListRepository(BaseRepository):
         )
         return (row['id'], row['list_name'], row['creator']) if row else None
     
-    def get_all(self, limit: int = 100) -> List[Tuple]:
-        """Get all sound lists."""
-        rows = self._execute(
-            "SELECT * FROM sound_lists ORDER BY list_name LIMIT ?",
-            (limit,)
-        )
-        return [(row['id'], row['list_name'], row['creator']) for row in rows]
-    
     def create(self, name: str, creator: str) -> int:
         """
         Create a new sound list.
@@ -61,14 +53,6 @@ class ListRepository(BaseRepository):
         self._execute_write("DELETE FROM sound_lists WHERE id = ?", (list_id,))
         return True
     
-    def get_by_id(self, list_id: int) -> Optional[Tuple]:
-        """Get a list by ID."""
-        row = self._execute_one(
-            "SELECT * FROM sound_lists WHERE id = ?",
-            (list_id,)
-        )
-        return (row['id'], row['list_name'], row['creator']) if row else None
-    
     def get_by_name(self, name: str, creator: str = None) -> Optional[Tuple]:
         """Get a list by name and optionally creator."""
         if creator:
@@ -83,9 +67,13 @@ class ListRepository(BaseRepository):
             )
         return (row['id'], row['list_name'], row['creator']) if row else None
     
-    def get_all(self, creator: str = None) -> List[Tuple]:
+    def get_all(self, creator: str = None, limit: int = 100) -> List[Tuple]:
         """
         Get all sound lists, optionally filtered by creator.
+        
+        Args:
+            creator: Optional filter by creator username
+            limit: Maximum number of lists to return
         
         Returns:
             List of (id, list_name, creator, sound_count) tuples
@@ -99,8 +87,9 @@ class ListRepository(BaseRepository):
                 WHERE sl.creator = ?
                 GROUP BY sl.id
                 ORDER BY sl.list_name
+                LIMIT ?
                 """,
-                (creator,)
+                (creator, limit)
             )
         else:
             rows = self._execute(
@@ -110,7 +99,9 @@ class ListRepository(BaseRepository):
                 LEFT JOIN sound_list_items sli ON sl.id = sli.list_id
                 GROUP BY sl.id
                 ORDER BY sl.list_name
-                """
+                LIMIT ?
+                """,
+                (limit,)
             )
         return [(row['id'], row['list_name'], row['creator'], row['sound_count']) for row in rows]
     

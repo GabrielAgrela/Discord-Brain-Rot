@@ -139,6 +139,17 @@ class Database:
             );
             '''
 
+            # Create keywords table
+            create_keywords_table = '''
+            CREATE TABLE IF NOT EXISTS keywords (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                keyword TEXT NOT NULL UNIQUE,
+                action_type TEXT NOT NULL,
+                action_value TEXT NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+            '''
+
             # Execute table creation
             cursor.execute(create_actions_table)
             cursor.execute(create_sounds_table)
@@ -146,6 +157,19 @@ class Database:
             cursor.execute(create_voice_activity_table)
             cursor.execute(create_sound_lists_table)
             cursor.execute(create_list_items_table)
+            cursor.execute(create_keywords_table)
+
+            # Populate default keywords if empty
+            cursor.execute("SELECT COUNT(*) FROM keywords")
+            if cursor.fetchone()[0] == 0:
+                defaults = [
+                    ("chapada", "slap", "")
+                ]
+                cursor.executemany(
+                    "INSERT INTO keywords (keyword, action_type, action_value) VALUES (?, ?, ?)",
+                    defaults
+                )
+                print("Populated default keywords")
 
             # Commit the changes
             conn.commit()

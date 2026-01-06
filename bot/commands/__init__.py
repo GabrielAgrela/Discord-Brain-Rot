@@ -9,5 +9,13 @@ Each cog handles a specific category of functionality.
 # from bot.commands.sound import SoundCog
 # from bot.commands.tts import TTSCog
 # etc.
+# from bot.commands.stats import StatsCog
+from bot.commands.keywords import KeywordCog
 
-__all__ = []
+__all__ = [
+    "SoundCog",
+    "ListCog",
+    "EventCog",
+    "StatsCog",
+    "KeywordCog",
+]

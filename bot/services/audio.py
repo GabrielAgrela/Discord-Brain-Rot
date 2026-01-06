@@ -16,7 +16,10 @@ from mutagen.mp3 import MP3
 import speech_recognition as sr
 import vosk
 from discord import sinks
-from bot.repositories import SoundRepository, ActionRepository, ListRepository, StatsRepository
+from bot.repositories import (
+    SoundRepository, ActionRepository, ListRepository, 
+    StatsRepository, KeywordRepository
+)
 
 class AudioService:
     """
@@ -40,6 +43,7 @@ class AudioService:
         self.action_repo = ActionRepository()
         self.list_repo = ListRepository()
         self.stats_repo = StatsRepository()
+        self.keyword_repo = KeywordRepository()
         
         # Audio state moved from BotBehavior
         self.last_played_time: Optional[datetime] = None
@@ -689,7 +693,11 @@ class KeywordDetectionSink(sinks.Sink):
         self.last_audio_time = {} # user_id -> timestamp
         self.queue = queue.Queue()
         self.running = True
-        self.keyword = "chapada"
+        
+        # Load keywords from database
+        self.keywords = {}
+        self.refresh_keywords()
+        
         self.last_partial = {} # user_id -> last partial text to avoid duplicate logs
         self.max_queue_size = 100 # Queue limit to prevent lag
         self.recognizer_start_time = {} # user_id -> when recognizer was created
@@ -702,6 +710,14 @@ class KeywordDetectionSink(sinks.Sink):
         # Single worker thread
         self.worker_thread = threading.Thread(target=self._worker, name=f"VoskWorker-{guild.id}", daemon=True)
         self.worker_thread.start()
+
+    def refresh_keywords(self):
+        """Reload keywords from the database repository."""
+        try:
+            self.keywords = self.audio_service.keyword_repo.get_as_dict()
+            print(f"[KeywordDetectionSink] Refreshed {len(self.keywords)} keywords")
+        except Exception as e:
+            print(f"[KeywordDetectionSink] Error refreshing keywords: {e}")
 
     def _log_to_file(self, username, text):
         """Log final transcription to per-user file."""
@@ -740,9 +756,6 @@ class KeywordDetectionSink(sinks.Sink):
             if self.queue.qsize() < self.max_queue_size:
                 # Include timestamp in queue entry for latency tracking
                 self.queue.put((bytes(self.audio_buffers[user_id]), user_id, receive_time))
-                print(f"[DEBUG] Queued {buf_size}B for user {user_id}, queue size: {self.queue.qsize()}")
-            else:
-                print(f"[DEBUG] DROPPED {buf_size}B for user {user_id}, queue full at {self.max_queue_size}")
             self.audio_buffers[user_id] = bytearray()
 
 
@@ -762,7 +775,6 @@ class KeywordDetectionSink(sinks.Sink):
                     if len(item) == 3:
                         data, user_id, queued_time = item
                         dequeue_latency = (time.time() - queued_time) * 1000
-                        print(f"[DEBUG] Dequeued user {user_id}, waited {dequeue_latency:.0f}ms in queue")
                     else:
                         data, user_id = item
                 except queue.Empty:
@@ -835,9 +847,19 @@ class KeywordDetectionSink(sinks.Sink):
             print(f"[{timestamp}] [Vosk Final (Flushed)] {username}: \"{text}\"")
             self._log_to_file(username, text)
             
-            if self.keyword in text:
-                print(f"[{timestamp}] [KeywordDetection] Detected keyword '{self.keyword}' from user {username}!")
-                asyncio.run_coroutine_threadsafe(self.trigger_slap(user_id), self.audio_service.bot.loop)
+            # Check for keywords in flushed text
+            for keyword, action in self.keywords.items():
+                if keyword in text:
+                    print(f"[{timestamp}] [KeywordDetection] Detected keyword '{keyword}' from user {username}!")
+                    asyncio.run_coroutine_threadsafe(self.trigger_action(user_id, keyword, action), self.audio_service.bot.loop)
+                    break  # Only trigger one action per flush
+
+    def _check_keywords(self, text: str) -> tuple:
+        """Check if any keyword is in the text. Returns (keyword, action) or (None, None)."""
+        for keyword, action in self.keywords.items():
+            if keyword in text:
+                return keyword, action
+        return None, None
 
     def detect_keyword(self, pcm_data, user_id, is_silence=False):
         member = self.guild.get_member(user_id)
@@ -877,44 +899,61 @@ class KeywordDetectionSink(sinks.Sink):
                 # Only log if partial changed (avoid duplicate spam)
                 if text and text != self.last_partial.get(user_id):
                     self.last_partial[user_id] = text
-                    # Check for keyword in partial too for faster detection
-                    if self.keyword in text:
+                    # Check for any keyword in partial for faster detection
+                    keyword, action = self._check_keywords(text)
+                    if keyword:
                         timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-                        print(f"[{timestamp}] [KeywordDetection] Detected keyword '{self.keyword}' from user {username}!")
+                        print(f"[{timestamp}] [KeywordDetection] Detected keyword '{keyword}' from user {username}!")
                         if user_id in self.recognizers: del self.recognizers[user_id]
                         if user_id in self.resample_states: del self.resample_states[user_id]
                         if user_id in self.last_partial: del self.last_partial[user_id]
-                        asyncio.run_coroutine_threadsafe(self.trigger_slap(user_id), self.audio_service.bot.loop)
+                        asyncio.run_coroutine_threadsafe(self.trigger_action(user_id, keyword, action), self.audio_service.bot.loop)
                         return # Early return after triggering
 
-            if text and self.keyword in text:
-                timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-                print(f"[{timestamp}] [KeywordDetection] Detected keyword '{self.keyword}' from user {username}!")
-                # Reset state so we start fresh for the next detection
-                if user_id in self.recognizers: del self.recognizers[user_id]
-                if user_id in self.resample_states: del self.resample_states[user_id]
-                # Trigger slap asynchronously
-                asyncio.run_coroutine_threadsafe(self.trigger_slap(user_id), self.audio_service.bot.loop)
+            # Check for any keyword in final text
+            if text:
+                keyword, action = self._check_keywords(text)
+                if keyword:
+                    timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+                    print(f"[{timestamp}] [KeywordDetection] Detected keyword '{keyword}' from user {username}!")
+                    # Reset state so we start fresh for the next detection
+                    if user_id in self.recognizers: del self.recognizers[user_id]
+                    if user_id in self.resample_states: del self.resample_states[user_id]
+                    asyncio.run_coroutine_threadsafe(self.trigger_action(user_id, keyword, action), self.audio_service.bot.loop)
         except Exception as e:
             if not is_silence:
                 print(f"[KeywordDetection] Error in detect_keyword for {username}: {e}")
 
-    async def trigger_slap(self, user_id):
+    async def trigger_action(self, user_id, keyword: str, action: str):
+        """Trigger the action for a detected keyword."""
         if not self.guild.voice_client:
             return
 
         member = self.guild.get_member(user_id)
         requester_name = member.name if member else f"user_{user_id}"
+        channel = self.guild.voice_client.channel
         
-        # Get a random slap sound
-        slap_sounds = self.audio_service._behavior.db.get_sounds(slap=True, num_sounds=100)
-        if slap_sounds:
-            import random
-            random_slap = random.choice(slap_sounds)
-            channel = self.guild.voice_client.channel
-            if channel:
+        if not channel:
+            return
+        
+        if action == "slap":
+            # Play random slap sound
+            slap_sounds = self.audio_service._behavior.db.get_sounds(slap=True, num_sounds=100)
+            if slap_sounds:
+                import random
+                random_slap = random.choice(slap_sounds)
                 print(f"[KeywordDetection] Playing random slap for {requester_name}")
                 await self.audio_service.play_slap(channel, random_slap[2], requester_name)
-                # Log action
                 self.audio_service._behavior.db.insert_action(requester_name, "keyword_slap", random_slap[0])
-
+        
+        elif action.startswith("list:"):
+            # Play random sound from a specific list
+            list_name = action.split(":", 1)[1]
+            from bot.repositories import ListRepository
+            sound = ListRepository().get_random_sound_from_list(list_name)
+            if sound:
+                print(f"[KeywordDetection] Playing random sound from '{list_name}' list for {requester_name}: {sound[2]}")
+                await self.audio_service.play_slap(channel, sound[2], requester_name)
+                self.audio_service._behavior.db.insert_action(requester_name, f"keyword_{keyword}", sound[0])
+            else:
+                print(f"[KeywordDetection] No sounds found in list '{list_name}'")

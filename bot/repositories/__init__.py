@@ -13,6 +13,7 @@ from bot.repositories.action import ActionRepository
 from bot.repositories.list import ListRepository
 from bot.repositories.event import EventRepository
 from bot.repositories.stats import StatsRepository
+from bot.repositories.keyword import KeywordRepository
 
 __all__ = [
     "BaseRepository",
@@ -21,4 +22,5 @@ __all__ = [
     "ListRepository",
     "EventRepository",
     "StatsRepository",
+    "KeywordRepository",
 ]

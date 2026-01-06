@@ -18,6 +18,7 @@ from bot.commands.admin import AdminCog
 from bot.commands.lists import ListCog
 from bot.commands.events import EventCog
 from bot.commands.stats import StatsCog
+from bot.commands.keywords import KeywordCog
 import random
 import time
 
@@ -43,6 +44,7 @@ bot.add_cog(AdminCog(bot, behavior))
 bot.add_cog(ListCog(bot, behavior))
 bot.add_cog(EventCog(bot, behavior))
 bot.add_cog(StatsCog(bot, behavior))
+bot.add_cog(KeywordCog(bot, behavior))
 db = Database(behavior=behavior)
 
 
