@@ -953,7 +953,9 @@ class KeywordDetectionSink(sinks.Sink):
             sound = ListRepository().get_random_sound_from_list(list_name)
             if sound:
                 print(f"[KeywordDetection] Playing random sound from '{list_name}' list for {requester_name}: {sound[2]}")
-                await self.audio_service.play_slap(channel, sound[2], requester_name)
+                # Use play_audio instead of play_slap to show the normal message in chat
+                # Disable suggestions for keywords to avoid lag (user request)
+                await self.audio_service.play_audio(channel, sound[2], requester_name, show_suggestions=False)
                 self.audio_service._behavior.db.insert_action(requester_name, f"keyword_{keyword}", sound[0])
             else:
                 print(f"[KeywordDetection] No sounds found in list '{list_name}'")
