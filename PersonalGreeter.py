@@ -1,3 +1,6 @@
+from bot.logger import setup_logging
+setup_logging()
+
 import asyncio
 import os
 import subprocess

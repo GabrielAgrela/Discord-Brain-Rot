@@ -12,9 +12,11 @@ import os
 import platform
 import asyncio
 import subprocess
+from datetime import datetime
 import discord
 from discord.ext import commands
 from discord.commands import Option
+from config import LOGS_DIR
 
 
 class AdminCog(commands.Cog):
@@ -87,7 +89,7 @@ class AdminCog(commands.Cog):
         await ctx.followup.send(f"```{formatted}```", ephemeral=True)
     
     def _get_service_logs(self, lines: int = 10, service_name: str = None):
-        """Get logs from journalctl or log file."""
+        """Get logs from the current day's log file or journalctl if specified."""
         try:
             if service_name:
                 output = subprocess.check_output(
@@ -97,7 +99,22 @@ class AdminCog(commands.Cog):
                 )
                 return output.strip().splitlines()
             
-            # Try user logs, then system logs
+            # Use the new date-based log file
+            log_filename = LOGS_DIR / f"{datetime.now().strftime('%Y-%m-%d')}.log"
+            
+            if os.path.exists(log_filename):
+                try:
+                    # Use tail command to efficiently get the last N lines
+                    output = subprocess.check_output(
+                        ['tail', '-n', str(lines), str(log_filename)],
+                        stderr=subprocess.STDOUT,
+                        text=True
+                    )
+                    return output.strip().splitlines()
+                except subprocess.CalledProcessError:
+                    pass
+
+            # Fallback to journalctl if file doesn't exist or error occurs
             for cmd in [
                 ['journalctl', '--user', '-n', str(lines), '--no-pager'],
                 ['journalctl', '-n', str(lines), '--no-pager'],

@@ -24,6 +24,9 @@ DOWNLOADS_DIR = PROJECT_ROOT / "Downloads"
 # Data directory
 DATA_DIR = PROJECT_ROOT / "Data"
 
+# Logs directory
+LOGS_DIR = PROJECT_ROOT / "Logs"
+
 # Database path
 DATABASE_PATH = PROJECT_ROOT / "database.db"
 
