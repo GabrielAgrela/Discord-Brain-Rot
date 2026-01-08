@@ -50,16 +50,20 @@ class AICommentaryService:
         remaining = self.cooldown_seconds - time_since_last
         return max(0, remaining)
 
-    async def trigger_commentary(self, guild_id: int):
+    async def trigger_commentary(self, guild_id: int, force: bool = False, duration: float = 10.0):
         """Orchestrate the AI commentary flow."""
-        if not self.should_trigger():
+        if not force and not self.should_trigger():
+            # print(f"[AICommentary] Trigger skipped (cooldown or processing).")
+            return
+        
+        if self.is_processing:
+            print(f"[AICommentary] Already processing. Blocked trigger (force={force}).")
             return
             
         self.is_processing = True
         self.last_trigger_time = time.time()
         
-        # Wait 5 seconds to capture more of the sentence/context
-        await asyncio.sleep(5.0)
+        print(f"[AICommentary] Triggering commentary (force={force}, duration={duration:.1f}s)...")
         
         try:
             guild = self.behavior.bot.get_guild(guild_id)
@@ -76,7 +80,7 @@ class AICommentaryService:
                 return
 
             # 1. Get audio and user context
-            audio_pcm, active_users = self.behavior._audio_service.get_last_audio_segment_with_users(guild_id, seconds=10)
+            audio_pcm, active_users = self.behavior._audio_service.get_last_audio_segment_with_users(guild_id, seconds=int(duration))
             
             if not audio_pcm or not active_users:
                 print("[AICommentary] No audio or users found for trigger.")

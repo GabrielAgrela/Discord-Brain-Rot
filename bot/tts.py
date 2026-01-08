@@ -398,16 +398,16 @@ class TTS:
         }
         data = {
             "text": text,
-            "model_id": "eleven_v3",
+            "model_id": "eleven_flash_v2_5",
             "output_format": "mp3_44100_128",
             "voice_settings": {
-                "speed": 0.65,
-                "stability": 0,
+                "speed": 1.2,
+                "stability": 0.3,
                 "similarity_boost": 1.0,
                 "style":1,
-                "use_speaker_boost": True
+                "use_speaker_boost": False
             },
-            "use_enhanced": True
+            "use_enhanced": False
         }
 
         async with aiohttp.ClientSession() as session:
