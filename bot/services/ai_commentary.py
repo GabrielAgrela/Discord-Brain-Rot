@@ -44,6 +44,12 @@ class AICommentaryService:
             return False
         return True
 
+    def get_cooldown_remaining(self) -> float:
+        """Return the number of seconds remaining until the next commentary can be triggered."""
+        time_since_last = time.time() - self.last_trigger_time
+        remaining = self.cooldown_seconds - time_since_last
+        return max(0, remaining)
+
     async def trigger_commentary(self, guild_id: int):
         """Orchestrate the AI commentary flow."""
         if not self.should_trigger():

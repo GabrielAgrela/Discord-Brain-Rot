@@ -62,7 +62,7 @@ class BotBehavior:
         self._user_event_service = UserEventService(bot, self._audio_service, self._message_service)
         self._voice_transformation_service = VoiceTransformationService(bot, self._audio_service, self._message_service)
         self._stats_service = StatsService(bot, self._message_service, self._sound_service)
-        self._background_service = BackgroundService(bot, self._audio_service, self._sound_service)
+        self._background_service = BackgroundService(bot, self._audio_service, self._sound_service, self)
         
         from bot.services.ai_commentary import AICommentaryService
         self._ai_commentary_service = AICommentaryService(self)

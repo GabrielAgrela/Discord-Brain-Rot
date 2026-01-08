@@ -13,10 +13,11 @@ class BackgroundService:
     and MyInstants scraping.
     """
     
-    def __init__(self, bot, audio_service, sound_service):
+    def __init__(self, bot, audio_service, sound_service, behavior=None):
         self.bot = bot
         self.audio_service = audio_service
         self.sound_service = sound_service
+        self.behavior = behavior # BotBehavior instance
         
         # Repositories
         self.sound_repo = SoundRepository()
@@ -64,17 +65,33 @@ class BackgroundService:
 
     @tasks.loop(seconds=60)
     async def update_bot_status_loop(self):
-        """Continuously update the bot's status based on next explosion time."""
+        """Continuously update the bot's status based on next explosion time and AI cooldown."""
         try:
+            status_parts = []
+            
+            # 1. Periodic sound (explosion) status
             if hasattr(self.bot, 'next_download_time'):
                 time_left = self.bot.next_download_time - time.time()
                 if time_left > 0:
                     minutes = round(time_left / 60)
                     if minutes < 2:
-                        activity = discord.Activity(name='explosion imminent!!!', type=discord.ActivityType.playing)
+                        status_parts.append('explosion imminent!!!')
                     else:
-                        activity = discord.Activity(name=f'an explosion in ~{minutes}m', type=discord.ActivityType.playing)
-                    await self.bot.change_presence(activity=activity)
+                        status_parts.append(f'an explosion in ~{minutes}m')
+            
+            # 2. AI Commentary (Ventura) status
+            if self.behavior and hasattr(self.behavior, '_ai_commentary_service'):
+                ai_cooldown_seconds = self.behavior._ai_commentary_service.get_cooldown_remaining()
+                if ai_cooldown_seconds > 0:
+                    ai_minutes = round(ai_cooldown_seconds / 60)
+                    status_parts.append(f'Ventura in ~{ai_minutes}m')
+                else:
+                    status_parts.append('Ventura is watching 👁️')
+
+            if status_parts:
+                status_text = " | ".join(status_parts)
+                activity = discord.Activity(name=status_text, type=discord.ActivityType.playing)
+                await self.bot.change_presence(activity=activity)
         except Exception as e:
             print(f"[BackgroundService] Error updating status: {e}")
 
