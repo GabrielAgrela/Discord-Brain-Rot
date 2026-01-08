@@ -401,7 +401,7 @@ class TTS:
             "model_id": "eleven_flash_v2_5",
             "output_format": "mp3_44100_128",
             "voice_settings": {
-                "speed": 1.2,
+                "speed": .85,
                 "stability": 0.3,
                 "similarity_boost": 1.0,
                 "style":1,
