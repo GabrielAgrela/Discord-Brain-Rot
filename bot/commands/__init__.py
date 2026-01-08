@@ -10,7 +10,7 @@ Each cog handles a specific category of functionality.
 # from bot.commands.tts import TTSCog
 # etc.
 # from bot.commands.stats import StatsCog
-from bot.commands.keywords import KeywordCog
+from bot.commands.debug import DebugCog
 
 __all__ = [
     "SoundCog",
@@ -18,4 +18,5 @@ __all__ = [
     "EventCog",
     "StatsCog",
     "KeywordCog",
+    "DebugCog",
 ]

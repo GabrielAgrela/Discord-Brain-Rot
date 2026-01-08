@@ -59,6 +59,9 @@ class AudioService:
         # Keyword detection state
         self.keyword_sinks: Dict[int, 'KeywordDetectionSink'] = {}
         
+        # Buffer for /llmdebug (handled via ring buffer in sink)
+        self.last_audio_buffer: Dict[int, bytes] = {} 
+        
         # Initialize Vosk model for local STT
         try:
             # Silence internal Vosk logs to avoid spamming the console
@@ -88,6 +91,7 @@ class AudioService:
     def set_behavior(self, behavior):
         """Set reference to BotBehavior for passing to views."""
         self._behavior = behavior
+        self.bot.behavior = behavior
 
     async def ensure_voice_connected(self, channel: discord.VoiceChannel) -> Optional[discord.VoiceProtocol]:
         """Ensure the bot is connected to the specified voice channel."""
@@ -641,7 +645,7 @@ class AudioService:
                 return False
 
             print(f"[AudioService] Starting keyword detection in {guild.name}")
-            sink = KeywordDetectionSink(self, guild)
+            sink = KeywordDetectionSink(self, guild, self.bot.loop)
             try:
                 voice_client.start_recording(sink, self._on_detection_finished, guild)
                 self.keyword_sinks[guild.id] = sink
@@ -685,11 +689,21 @@ class AudioService:
         if hasattr(sink, 'stop'):
             sink.stop()
 
+    def get_last_audio_segment_with_users(self, guild_id: int, seconds: int = 10) -> tuple:
+        """Retrieve the last N seconds of mixed/concatenated audio and the list of users."""
+        if guild_id in self.keyword_sinks:
+            sink = self.keyword_sinks[guild_id]
+            audio = sink.get_buffer_content(seconds)
+            users = sink.get_recent_users(seconds)
+            return audio, users
+        return None, []
+
 class KeywordDetectionSink(sinks.Sink):
-    def __init__(self, audio_service, guild):
+    def __init__(self, audio_service, guild, loop):
         super().__init__()
         self.audio_service = audio_service
         self.guild = guild
+        self.loop = loop
         self.recognizers = {} # user_id -> vosk.KaldiRecognizer
         self.resample_states = {} # user_id -> audioop state
         self.last_audio_time = {} # user_id -> timestamp
@@ -706,6 +720,17 @@ class KeywordDetectionSink(sinks.Sink):
         self.max_segment_duration = 10.0 # Force flush after 10 seconds of continuous speech
         self.audio_buffers = {} # user_id -> bytearray for batching
         self.min_batch_size = 28800 # ~300ms at 48kHz stereo (48000 * 2 * 2 * 0.3)
+        # Audio buffering for /llmdebug (Global)
+        self.buffer_seconds = 15 
+        self.full_buffer_size = 48000 * 2 * 2 * self.buffer_seconds 
+        self.audio_ring_buffer = bytearray(self.full_buffer_size)
+        self.buffer_pos = 0
+        self.buffer_last_update: Dict[int, float] = {} # user_id -> timestamp (persistent)
+        self.buffer_lock = threading.Lock()
+        
+        # Auto-AI Commentary state
+        self.speech_start_time: Dict[int, float] = {} # user_id -> timestamp when they started talking
+
         # Log directory for per-user transcripts
         self.log_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Data", "vosk_logs"))
         os.makedirs(self.log_dir, exist_ok=True)
@@ -742,7 +767,46 @@ class KeywordDetectionSink(sinks.Sink):
             return
         receive_time = time.time()
         self.last_audio_time[user_id] = receive_time
+        self.buffer_last_update[user_id] = receive_time
         
+        # Track speech duration for Auto-AI
+        if user_id not in self.speech_start_time:
+            self.speech_start_time[user_id] = receive_time
+        else:
+            duration = receive_time - self.speech_start_time[user_id]
+            if duration >= 2.0: # User has been talking for 2+ seconds
+                # Trigger Auto-AI
+                if hasattr(self.audio_service.bot, 'behavior'):
+                    behavior = self.audio_service.bot.behavior
+                    if hasattr(behavior, '_ai_commentary_service'):
+                        asyncio.run_coroutine_threadsafe(
+                            behavior._ai_commentary_service.trigger_commentary(self.guild.id),
+                            self.loop
+                        )
+                    else:
+                        print("[AutoAI] Error: _ai_commentary_service not found on behavior")
+                else:
+                    print("[AutoAI] Error: behavior not found on bot")
+        
+        # Add to global circular buffer for /llmdebug
+        with self.buffer_lock:
+            data_len = len(data)
+            if data_len > self.full_buffer_size:
+                data = data[-self.full_buffer_size:]
+                data_len = len(data)
+            
+            end_pos = self.buffer_pos + data_len
+            if end_pos <= self.full_buffer_size:
+                self.audio_ring_buffer[self.buffer_pos:end_pos] = data
+                self.buffer_pos = end_pos % self.full_buffer_size
+            else:
+                # Wrap around
+                first_part_len = self.full_buffer_size - self.buffer_pos
+                self.audio_ring_buffer[self.buffer_pos:] = data[:first_part_len]
+                second_part_len = data_len - first_part_len
+                self.audio_ring_buffer[:second_part_len] = data[first_part_len:]
+                self.buffer_pos = second_part_len
+
         # Buffer audio per-user to reduce queue pressure
         if user_id not in self.audio_buffers:
             self.audio_buffers[user_id] = bytearray()
@@ -806,6 +870,10 @@ class KeywordDetectionSink(sinks.Sink):
             
             # If idle for > 300ms, force Vosk to finalize
             if idle_time > 0.3:
+                # Reset speech start time on silence
+                if user_id in self.speech_start_time:
+                    del self.speech_start_time[user_id]
+                
                 self._flush_user(user_id)
                 if user_id in self.last_audio_time:
                     del self.last_audio_time[user_id]
@@ -824,8 +892,33 @@ class KeywordDetectionSink(sinks.Sink):
                     del self.resample_states[user_id]
                 if user_id in self.last_partial:
                     del self.last_partial[user_id]
-                if user_id in self.recognizer_start_time:
-                    del self.recognizer_start_time[user_id]
+    def get_buffer_content(self, seconds: int = 10) -> bytes:
+        """Get the last N seconds of audio from the global ring buffer."""
+        bytes_needed = 48000 * 2 * 2 * seconds
+        if bytes_needed > self.full_buffer_size:
+            bytes_needed = self.full_buffer_size
+            
+        with self.buffer_lock:
+            if self.buffer_pos >= bytes_needed:
+                return bytes(self.audio_ring_buffer[self.buffer_pos - bytes_needed : self.buffer_pos])
+            else:
+                # Need to wrap around for reading
+                part2 = self.audio_ring_buffer[:self.buffer_pos]
+                remaining = bytes_needed - len(part2)
+                part1 = self.audio_ring_buffer[self.full_buffer_size - remaining :]
+                return bytes(part1 + part2)
+
+    def get_recent_users(self, seconds: int = 15) -> List[str]:
+        """Get the list of usernames who spoke in the last N seconds."""
+        now = time.time()
+        active_usernames = []
+        with self.buffer_lock:
+            for user_id, last_time in self.buffer_last_update.items():
+                if now - last_time < seconds:
+                    member = self.guild.get_member(user_id)
+                    username = member.name if member else f"User_{user_id}"
+                    active_usernames.append(username)
+        return active_usernames
 
     def _flush_user(self, user_id):
         """Force finalize and cleanup a user's recognizer."""

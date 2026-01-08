@@ -64,6 +64,9 @@ class BotBehavior:
         self._stats_service = StatsService(bot, self._message_service, self._sound_service)
         self._background_service = BackgroundService(bot, self._audio_service, self._sound_service)
         
+        from bot.services.ai_commentary import AICommentaryService
+        self._ai_commentary_service = AICommentaryService(self)
+        
         # Start background tasks
         self._background_service.start_tasks()
         
