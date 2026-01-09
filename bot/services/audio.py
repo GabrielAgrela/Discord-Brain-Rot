@@ -218,7 +218,7 @@ class AudioService:
                         original_message="", 
                         send_controls=True, retry_count=0, effects=None, 
                         show_suggestions: bool = True, 
-                        num_suggestions: int = 5,
+                        num_suggestions: int = 25,
                         sts_char: str = None):
         """Play an audio file in the specified voice channel."""
         MAX_RETRIES = 3
@@ -731,6 +731,7 @@ class KeywordDetectionSink(sinks.Sink):
         # Auto-AI Commentary state
         self.speech_start_time: Dict[int, float] = {} # user_id -> timestamp when they started talking
         self.ventura_trigger_times: Dict[int, float] = {} # user_id -> timestamp when "ventura" was heard
+        # Exact keywords to match (must be whole words, not substrings)
         self.ventura_keywords = ["ventura", "andré ventura", "andre ventura"]
         self.last_ventura_trigger_time = 0
 
@@ -760,6 +761,21 @@ class KeywordDetectionSink(sinks.Sink):
                 f.write(f"[{timestamp}] {text}\n")
         except Exception as e:
             print(f"[VoskLogger] Error writing log for {username}: {e}")
+
+    def _is_ventura_match(self, text: str) -> bool:
+        """Check if text contains 'ventura' as a whole word (not substring).
+        
+        Uses word boundary matching to prevent false triggers on similar words
+        like 'aventura', 'boaventura', 'venturar', etc.
+        """
+        import re
+        text_lower = text.lower()
+        for keyword in self.ventura_keywords:
+            # Use word boundaries to match whole words only
+            pattern = r'\b' + re.escape(keyword) + r'\b'
+            if re.search(pattern, text_lower):
+                return True
+        return False
 
     def stop(self):
         self.running = False
@@ -1054,8 +1070,8 @@ class KeywordDetectionSink(sinks.Sink):
                     print(f"[{timestamp}] [Vosk Final] {username}: \"{text}\"")
                     self._log_to_file(username, text)
                     
-                    # Detect Ventura in final results as well
-                    if any(vk in text for vk in self.ventura_keywords):
+                    # Detect Ventura in final results as well (strict word match)
+                    if self._is_ventura_match(text):
                         now = time.time()
                         if now - self.last_ventura_trigger_time < 30:
                             print(f"[VenturaTrigger] Cooldown active (final). Skipping trigger for {username}.")
@@ -1081,8 +1097,8 @@ class KeywordDetectionSink(sinks.Sink):
                 if text and text != self.last_partial.get(user_id):
                     self.last_partial[user_id] = text
                     
-                    # Detect Ventura in partial results for faster response
-                    if any(vk in text for vk in self.ventura_keywords):
+                    # Detect Ventura in partial results for faster response (strict word match)
+                    if self._is_ventura_match(text):
                         now = time.time()
                         if now - self.last_ventura_trigger_time < 30:
                             # Too much spam in partials, only log once if we haven't already
