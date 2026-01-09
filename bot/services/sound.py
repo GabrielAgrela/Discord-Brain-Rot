@@ -305,7 +305,7 @@ class SoundService:
                 self.sound_repo.insert_sound(os.path.basename(final_path), os.path.basename(final_path))
                 return final_path
 
-    async def find_and_update_similar_sounds(self, sound_message, audio_file, original_message, send_controls=False, num_suggestions=5):
+    async def find_and_update_similar_sounds(self, sound_message, audio_file, original_message, send_controls=False, num_suggestions=25):
         """Background task to find similar sounds and update the playback message."""
         try:
             if not sound_message:
@@ -377,7 +377,7 @@ class SoundService:
                     if filename not in seen_filenames:
                         seen_filenames.add(filename)
                         similar_sounds.append(s)
-                    if len(similar_sounds) >= 5:
+                    if len(similar_sounds) >= 25:
                         break
 
             view = SoundBeingPlayedWithSuggestionsView(
