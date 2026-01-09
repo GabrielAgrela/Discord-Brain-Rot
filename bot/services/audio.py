@@ -734,6 +734,7 @@ class KeywordDetectionSink(sinks.Sink):
         # Exact keywords to match (must be whole words, not substrings)
         self.ventura_keywords = ["ventura", "andré ventura", "andre ventura"]
         self.last_ventura_trigger_time = 0
+        self.ventura_trigger_enabled = False  # Set to True to enable Ventura speech trigger
 
         # Log directory for per-user transcripts
         self.log_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Data", "vosk_logs"))
@@ -904,24 +905,27 @@ class KeywordDetectionSink(sinks.Sink):
 
         # 2. Handle Ventura trigger silence detection (2.0s threshold)
         # We use buffer_last_update as it is more persistent than last_audio_time
-        for user_id in list(self.ventura_trigger_times.keys()):
-            last_activity = self.buffer_last_update.get(user_id, 0)
-            idle_time = now - last_activity
-            
-            if idle_time > 2.0:
-                trigger_time = self.ventura_trigger_times.pop(user_id)
-                # Duration is trigger until now + 5s prefix for context
-                duration = (now - trigger_time) + 5.0
-                duration = min(duration, 30.0) # Cap at 30s
+        if not self.ventura_trigger_enabled:
+            self.ventura_trigger_times.clear()  # Clear any pending triggers
+        else:
+            for user_id in list(self.ventura_trigger_times.keys()):
+                last_activity = self.buffer_last_update.get(user_id, 0)
+                idle_time = now - last_activity
                 
-                print(f"[VenturaTrigger] Silence detected (2s) for user {user_id}. Triggering AI commentary (duration={duration:.1f}s)")
-                if hasattr(self.audio_service.bot, 'behavior'):
-                    behavior = self.audio_service.bot.behavior
-                    if hasattr(behavior, '_ai_commentary_service'):
-                        asyncio.run_coroutine_threadsafe(
-                            behavior._ai_commentary_service.trigger_commentary(self.guild.id, force=True, duration=duration),
-                            self.loop
-                        )
+                if idle_time > 2.0:
+                    trigger_time = self.ventura_trigger_times.pop(user_id)
+                    # Duration is trigger until now + 5s prefix for context
+                    duration = (now - trigger_time) + 5.0
+                    duration = min(duration, 30.0) # Cap at 30s
+                    
+                    print(f"[VenturaTrigger] Silence detected (2s) for user {user_id}. Triggering AI commentary (duration={duration:.1f}s)")
+                    if hasattr(self.audio_service.bot, 'behavior'):
+                        behavior = self.audio_service.bot.behavior
+                        if hasattr(behavior, '_ai_commentary_service'):
+                            asyncio.run_coroutine_threadsafe(
+                                behavior._ai_commentary_service.trigger_commentary(self.guild.id, force=True, duration=duration),
+                                self.loop
+                            )
             
         # 3. Cleanup users idle for more than 30 seconds to free memory
         for user_id, last_time in list(self.buffer_last_update.items()):
@@ -1071,7 +1075,7 @@ class KeywordDetectionSink(sinks.Sink):
                     self._log_to_file(username, text)
                     
                     # Detect Ventura in final results as well (strict word match)
-                    if self._is_ventura_match(text):
+                    if self.ventura_trigger_enabled and self._is_ventura_match(text):
                         now = time.time()
                         if now - self.last_ventura_trigger_time < 30:
                             print(f"[VenturaTrigger] Cooldown active (final). Skipping trigger for {username}.")
@@ -1098,7 +1102,7 @@ class KeywordDetectionSink(sinks.Sink):
                     self.last_partial[user_id] = text
                     
                     # Detect Ventura in partial results for faster response (strict word match)
-                    if self._is_ventura_match(text):
+                    if self.ventura_trigger_enabled and self._is_ventura_match(text):
                         now = time.time()
                         if now - self.last_ventura_trigger_time < 30:
                             # Too much spam in partials, only log once if we haven't already
