@@ -242,18 +242,54 @@ class SoundRepository(BaseRepository[Sound]):
     
     def insert_sound(self, original_filename: str, filename: str, 
                      favorite: int = 0, date=None) -> int:
-        """Insert a new sound (backwards compatibility signature)."""
+        """Insert a new sound and queue embedding generation (backwards compatibility signature)."""
         from datetime import datetime
         if date is None:
             date = datetime.now()
         
-        return self._execute_write(
+        sound_id = self._execute_write(
             """
             INSERT INTO sounds (originalfilename, filename, favorite, blacklist, date, slap)
             VALUES (?, ?, ?, 0, ?, 0)
             """,
             (original_filename, filename, favorite, date.strftime("%Y-%m-%d %H:%M:%S") if hasattr(date, 'strftime') else str(date))
         )
+        
+        # Trigger background embedding generation
+        self._generate_embedding_async(sound_id, filename)
+        
+        return sound_id
+    
+    def _generate_embedding_async(self, sound_id: int, filename: str):
+        """Generate embedding in background thread (non-blocking)."""
+        import threading
+        import os
+        
+        def _do_generate():
+            try:
+                from bot.services.embedding_service import EmbeddingService
+                from bot.repositories.embedding_repository import EmbeddingRepository
+                
+                service = EmbeddingService()
+                repo = EmbeddingRepository()
+                
+                file_path = os.path.join(service.sounds_dir, filename)
+                if not os.path.exists(file_path):
+                    print(f"[SoundRepository] Embedding skipped - file not found: {filename}")
+                    return
+                
+                embedding = service.generate_embedding(file_path)
+                if embedding is not None:
+                    emb_bytes = service.embedding_to_bytes(embedding)
+                    repo.save_embedding(sound_id, filename, emb_bytes, 'openl3', service.embedding_dim)
+                    print(f"[SoundRepository] Embedding generated for: {filename}")
+                else:
+                    print(f"[SoundRepository] Embedding failed for: {filename}")
+            except Exception as e:
+                print(f"[SoundRepository] Embedding error for {filename}: {e}")
+        
+        thread = threading.Thread(target=_do_generate, daemon=True)
+        thread.start()
     
     def update_sound(self, filename: str, new_filename: str = None, 
                      favorite: int = None, slap: int = None) -> bool:

@@ -237,3 +237,63 @@ class LoadingSimilarSoundsSelect(ui.Select):
             row=3,
         )
 
+
+class EmbeddingSimilarSoundsSelect(ui.Select):
+    """Select for playing similar sounds based on audio embeddings (AI similarity)."""
+    
+    def __init__(self, bot_behavior, similar_sounds, row: int = 4):
+        """
+        Args:
+            bot_behavior: Bot behavior instance
+            similar_sounds: List of (sound_id, filename, similarity_score) tuples
+            row: UI row position
+        """
+        self.bot_behavior = bot_behavior
+        options = []
+        for sound_id, filename, similarity in similar_sounds[:25]:  # Discord max is 25
+            # Format similarity as percentage
+            sim_pct = int(similarity * 100)
+            display_name = filename.replace('.mp3', '')[:80]  # Max label length
+            options.append(discord.SelectOption(
+                label=f"{display_name} ({sim_pct}%)",
+                value=filename
+            ))
+        
+        # Fallback if no similar sounds
+        if not options:
+            options.append(discord.SelectOption(label="No similar sounds found", value="none"))
+        
+        super().__init__(
+            placeholder="🔊 AI Similar Sounds...",
+            options=options,
+            row=row,
+            disabled=len(options) == 1 and options[0].value == "none"
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        if self.values[0] == "none":
+            await interaction.response.defer()
+            return
+            
+        await interaction.response.defer()
+        sound_name = self.values[0]
+        channel = self.bot_behavior._audio_service.get_user_voice_channel(interaction.guild, interaction.user.name)
+        if not channel:
+            channel = self.bot_behavior._audio_service.get_largest_voice_channel(interaction.guild)
+        if channel:
+            asyncio.create_task(self.bot_behavior._audio_service.play_audio(channel, sound_name, interaction.user.name))
+            Database().insert_action(interaction.user.name, "select_embedding_similar", sound_name)
+
+
+class LoadingEmbeddingSimilarSoundsSelect(ui.Select):
+    """Placeholder select shown while embedding-based similar sounds are loading."""
+    
+    def __init__(self, row: int = 4):
+        super().__init__(
+            placeholder="🔊 Loading AI Similar Sounds...",
+            min_values=1,
+            max_values=1,
+            options=[discord.SelectOption(label="Analyzing audio...", value="loading")],
+            disabled=True,
+            row=row,
+        )

@@ -48,7 +48,8 @@ from bot.ui.views.favorites import (
 )
 from bot.ui.selects import (
     EventTypeSelect, UserSelect, SoundSelect, AddToListSelect,
-    STSCharacterSelect, SimilarSoundsSelect, LoadingSimilarSoundsSelect
+    STSCharacterSelect, SimilarSoundsSelect, LoadingSimilarSoundsSelect,
+    EmbeddingSimilarSoundsSelect, LoadingEmbeddingSimilarSoundsSelect
 )
 from bot.ui.modals import (
     UploadSoundModal, ChangeSoundNameModal, CreateListModalWithSoundAdd
@@ -87,6 +88,7 @@ __all__ = [
     # Selects
     'EventTypeSelect', 'UserSelect', 'SoundSelect', 'AddToListSelect',
     'STSCharacterSelect', 'SimilarSoundsSelect', 'LoadingSimilarSoundsSelect',
+    'EmbeddingSimilarSoundsSelect', 'LoadingEmbeddingSimilarSoundsSelect',
     
     # Modals
     'UploadSoundModal', 'ChangeSoundNameModal', 'CreateListModalWithSoundAdd',
