@@ -1011,7 +1011,7 @@ class KeywordDetectionSink(sinks.Sink):
                 conf = word_info.get("conf", 0.0)
                 
                 # Use a higher threshold for keywords to avoid false positives (e.g., chaves vs chapada)
-                if word in self.keywords and conf > 0.95:
+                if word in self.keywords and conf > 0.965:
                     print(f"[KeywordDetection] Confirmed keyword '{word}' with high confidence: {conf:.2f}")
                     return word, self.keywords[word]
                 elif word in self.keywords:
