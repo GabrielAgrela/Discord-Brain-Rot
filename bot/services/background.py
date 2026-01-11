@@ -74,19 +74,28 @@ class BackgroundService:
                 time_left = self.bot.next_download_time - time.time()
                 if time_left > 0:
                     minutes = round(time_left / 60)
-                    if minutes < 2:
-                        status_parts.append('explosion imminent!!!')
+                    if minutes < 1:
+                        status_parts.append('🤯')
                     else:
-                        status_parts.append(f'an explosion in ~{minutes}m')
+                        status_parts.append(f'🤯 in ~{minutes}m')
             
             # 2. AI Commentary (Ventura) status
             if self.behavior and hasattr(self.behavior, '_ai_commentary_service'):
                 ai_cooldown_seconds = self.behavior._ai_commentary_service.get_cooldown_remaining()
+                ai_minutes = round(ai_cooldown_seconds / 60)
                 if ai_cooldown_seconds > 0:
-                    ai_minutes = round(ai_cooldown_seconds / 60)
-                    status_parts.append(f'Ventura in ~{ai_minutes}m')
+                    status_parts.append(f'|👂🏻 in ~{ai_minutes}m')
                 else:
-                    status_parts.append('Ventura is watching 👁️')
+                    status_parts.append('|👂🏻')
+
+            # 3. Scraper status
+            if hasattr(self.bot, 'next_scrape_time'):
+                scrape_time_left = self.bot.next_scrape_time - time.time()
+                if scrape_time_left > 0:
+                    scrape_minutes = round(scrape_time_left / 60)
+                    status_parts.append(f'|🔍 in ~{scrape_minutes}m')
+                else:
+                    status_parts.append('|🔍')
 
             if status_parts:
                 status_text = " | ".join(status_parts)
@@ -134,8 +143,12 @@ class BackgroundService:
                 if not first_run:
                     # Wait 30-60 minutes between scrapes
                     sleep_time = random.uniform(60*30, 60*60)
+                    self.bot.next_scrape_time = time.time() + sleep_time
                     print(f"[BackgroundService] Next MyInstants scrape in {int(sleep_time/60)} minutes")
                     await asyncio.sleep(sleep_time)
+                else:
+                    # Set initial scrape time to 0 so it shows "scraping..." on first run
+                    self.bot.next_scrape_time = 0
                 first_run = False
                 
                 # Run the scraper in a thread executor since it uses Selenium (blocking)
