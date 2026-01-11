@@ -993,12 +993,9 @@ class KeywordDetectionSink(sinks.Sink):
             print(f"[{timestamp}] [Vosk Final (Flushed)] {username}: \"{text}\"")
             self._log_to_file(username, text)
             
-            # Check for keywords in flushed text
-            for keyword, action in self.keywords.items():
-                if keyword in text:
-                    print(f"[{timestamp}] [KeywordDetection] Detected keyword '{keyword}' from user {username}!")
-                    asyncio.run_coroutine_threadsafe(self.trigger_action(user_id, keyword, action), self.audio_service.bot.loop)
-                    break  # Only trigger one action per flush
+            # Check for keywords in flushed text (using confidence-based matching)
+            # Note: Flushed results don't have word-level confidence, so we skip triggering here
+            # The main detection happens in detect_keyword() with full confidence data
 
     def _check_keywords(self, text: str, result_obj: dict = None) -> tuple:
         """Check if any keyword is in the text as a whole word. Returns (keyword, action) or (None, None)."""
@@ -1011,11 +1008,11 @@ class KeywordDetectionSink(sinks.Sink):
                 conf = word_info.get("conf", 0.0)
                 
                 # Use a higher threshold for keywords to avoid false positives (e.g., chaves vs chapada)
-                if word in self.keywords and conf > 0.90:
+                if word in self.keywords and conf > 0.95:
                     print(f"[KeywordDetection] Confirmed keyword '{word}' with high confidence: {conf:.2f}")
                     return word, self.keywords[word]
                 elif word in self.keywords:
-                    print(f"[KeywordDetection] Ignored potential keyword '{word}' due to low confidence: {conf:.2f}")
+                    print(f"[KeywordDetection] Ignored potential keyword '{word}' due to low confidence: {conf:.2f} (threshold: 0.95)")
             
             return None, None
 
@@ -1051,9 +1048,14 @@ class KeywordDetectionSink(sinks.Sink):
                     # Keywords + distractor words + [unk] to allow non-keyword speech to be ignored
                     # This prevents Vosk from "forcing" every sound into a keyword
                     distractors = [
+                        # Common Portuguese words
                         "o", "a", "os", "as", "um", "uma", "de", "do", "da", "em", "no", "na", "com", "para", "por",
                         "que", "se", "foi", "tem", "sim", "mas", "mais", "eu", "ele",
-                        "eles", "isso", "esta", "este", "aqui", "quem", "como", "quando", "onde", "ventura"
+                        "eles", "isso", "esta", "este", "aqui", "quem", "como", "quando", "onde", "ventura",
+                        # Phonetically similar words to reduce false positives
+                        "diego", "amigo", "digo", "castigo", "abrigo", "trigo",  # Similar to "diogo"
+                        "fugo", "jugo", "sugue", "fuge", "puge",  # Similar to "hugo"
+                        "chapar", "lapada", "tapado", "palmada", "chapa", "chapas",  # Similar to "chapada"
                     ]
                     grammar = list(self.keywords.keys()) + distractors + ["[unk]"]
                     grammar_json = json.dumps(grammar)
