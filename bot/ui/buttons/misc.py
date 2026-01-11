@@ -84,7 +84,7 @@ class StatsButton(Button):
 
     async def callback(self, interaction):
         await interaction.response.defer()
-        asyncio.create_task(self.bot_behavior._stats_service.display_top_users(interaction.user, number_users=20, number_sounds=5, days=700, by="plays"))
+        asyncio.create_task(self.bot_behavior.display_top_users(interaction.user, number_users=20, number_sounds=5, days=700, by="plays"))
 
 class PlayRandomButton(Button):
     def __init__(self, bot_behavior, **kwargs):

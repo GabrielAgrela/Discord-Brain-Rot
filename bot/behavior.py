@@ -153,6 +153,7 @@ class BotBehavior:
         return False
 
     async def display_top_users(self, user, number_users=5, number_sounds=5, days=7, by="plays"):
+        await self.delete_controls_message()  # Delete controls first so it can be re-sent at bottom
         await self._stats_service.display_top_users(user, number_users, number_sounds, days, by)
         await self.send_controls()
 
