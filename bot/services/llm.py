@@ -13,7 +13,7 @@ class LLMService:
     def __init__(self):
         self.api_key = os.getenv('OPENROUTER_API_KEY')
         self.base_url = "https://openrouter.ai/api/v1/chat/completions"
-        self.model = "google/gemini-3-flash-preview" 
+        self.model = "google/gemini-3-pro-preview" 
         self.fallback_model = "google/gemini-3-flash-preview"
         self.system_prompt = (
             "Tu és o André Ventura versão Brain Rot. És extremamente carismático, polémico e usas muito calão português misturado com 'brain rot'."
