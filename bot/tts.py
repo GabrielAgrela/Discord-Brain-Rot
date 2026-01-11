@@ -401,8 +401,8 @@ class TTS:
             "model_id": "eleven_v3",
             "output_format": "mp3_44100_128",
             "voice_settings": {
-                "speed": .85,
-                "stability": 0.5,
+                "speed": 1,
+                "stability": 0.0,
                 "similarity_boost": 1.0,
                 "style":1,
                 "use_speaker_boost": True
