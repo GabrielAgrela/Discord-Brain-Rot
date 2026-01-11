@@ -141,14 +141,16 @@ class BackgroundService:
         while not self.bot.is_closed():
             try:
                 if not first_run:
-                    # Wait 30-60 minutes between scrapes
-                    sleep_time = random.uniform(60*30, 60*60)
+                    # Wait 8h between scrapes
+                    sleep_time = 60*60*8
                     self.bot.next_scrape_time = time.time() + sleep_time
                     print(f"[BackgroundService] Next MyInstants scrape in {int(sleep_time/60)} minutes")
                     await asyncio.sleep(sleep_time)
                 else:
                     # Set initial scrape time to 0 so it shows "scraping..." on first run
                     self.bot.next_scrape_time = 0
+                    #wait 1 minute first time
+                    await asyncio.sleep(0)
                 first_run = False
                 
                 # Run the scraper in a thread executor since it uses Selenium (blocking)

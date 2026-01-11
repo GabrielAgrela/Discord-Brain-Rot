@@ -11,6 +11,8 @@ import os
 import random
 import shutil
 import time
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 from pydub import AudioSegment
@@ -32,6 +34,9 @@ class SoundDownloader:
     then processes and moves them to the Sounds directory.
     """
     
+    # Number of threads to use for downloading sounds
+    DOWNLOAD_THREADS = 8
+    
     def __init__(self, bot, db, chromedriver_path: str = ""):
         """
         Initialize the sound downloader.
@@ -43,102 +48,222 @@ class SoundDownloader:
         """
         self.db = db
         self.bot = bot
-        chromedriver_path = os.getenv("CHROMEDRIVER_PATH")
-        if not chromedriver_path:
-            chromedriver_path = ChromeDriverManager().install()
-        self.service = Service(executable_path=chromedriver_path)
-        self.options = webdriver.ChromeOptions()
-        self.options.add_argument('--log-level=3')
+        self.chromedriver_path = os.getenv("CHROMEDRIVER_PATH")
+        if not self.chromedriver_path:
+            self.chromedriver_path = ChromeDriverManager().install()
         self.dwdir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Downloads"))
-        self.options.add_experimental_option("prefs", {
+        
+    def _create_driver(self):
+        """Create a new Chrome WebDriver instance."""
+        service = Service(executable_path=self.chromedriver_path)
+        options = webdriver.ChromeOptions()
+        options.add_argument('--log-level=3')
+        options.add_experimental_option("prefs", {
             "download.default_directory": self.dwdir,
             "download.prompt_for_download": False,
         })
-        self.options.add_argument('--headless')
-        self.options.add_argument('window-size=1200x600')
+        options.add_argument('--headless')
+        options.add_argument('window-size=1200x600')
+        return webdriver.Chrome(service=service, options=options)
+
+    def _check_sound_exists_in_db(self, filename: str) -> bool:
+        """
+        Thread-safe check if sound exists in database.
+        Creates its own connection to avoid cursor conflicts.
+        
+        Args:
+            filename: Original filename to check.
+            
+        Returns:
+            True if sound exists, False otherwise.
+        """
+        import sqlite3
+        try:
+            db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "database.db"))
+            conn = sqlite3.connect(db_path, timeout=5.0)
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1 FROM sounds WHERE originalfilename = ? LIMIT 1;", (filename,))
+            result = cursor.fetchone()
+            conn.close()
+            return result is not None
+        except sqlite3.Error as e:
+            print(f"{self.__class__.__name__}: DB check error: {e}")
+            return False
+
+    def _download_single_file(self, url: str, filename: str) -> tuple[str, bool, str]:
+        """
+        Download a single file from a URL.
+        
+        Args:
+            url: URL to download from.
+            filename: Name to save the file as.
+            
+        Returns:
+            Tuple of (filename, success, error_message)
+        """
+        try:
+            # Check if file already exists in Downloads folder
+            out_file_path = os.path.join(self.dwdir, filename)
+            if os.path.exists(out_file_path):
+                return (filename, False, "already exists in Downloads")
+            
+            # Check if file already exists in Sounds folder
+            sounds_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Sounds"))
+            sounds_file_path = os.path.join(sounds_dir, filename)
+            if os.path.exists(sounds_file_path):
+                return (filename, False, "already exists in Sounds")
+            
+            # Re-check database right before download (thread-safe, catches race conditions)
+            if self._check_sound_exists_in_db(filename):
+                return (filename, False, "already in database")
+            
+            response = requests.get(url, timeout=30)
+            if response.status_code == 404:
+                return (filename, False, "404 not found")
+            with open(out_file_path, 'wb') as out_file:
+                out_file.write(response.content)
+            return (filename, True, "")
+        except Exception as e:
+            return (filename, False, str(e))
+
+    def _scrape_single_site(self, country: str) -> list[tuple[str, str]]:
+        """
+        Scrape a single MyInstants site for sound URLs.
+        
+        Args:
+            country: Country code (pt, us, br).
+            
+        Returns:
+            List of (url, filename) tuples for sounds to download.
+        """
+        driver = None
+        sounds_to_download = []
+        
+        try:
+            print(f"{self.__class__.__name__}: Opening Chrome for {country}")
+            driver = self._create_driver()
+            base_url = "https://www.myinstants.com/en/"
+            categories = "index"
+            driver.get(base_url + categories + "/" + country + "/")
+            print(f"{self.__class__.__name__}: Opening {base_url}{categories}/{country}/")
+            
+            wait = WebDriverWait(driver, 0)
+            try:
+                consent_button = wait.until(EC.element_to_be_clickable(
+                    (By.XPATH, '/html/body/div[3]/div[2]/div[1]/div[2]/div[2]/button[1]/p')
+                ))
+                print(f"{self.__class__.__name__}: Clicking consent button for {country}")
+                consent_button.click()
+            except Exception:
+                print(f"{self.__class__.__name__}: No consent button found for {country}")
+            
+            print(f"{self.__class__.__name__}: Scrolling down to get more sounds for {country}")
+            self.scroll_a_little(driver)
+            
+            # Get all divs with class instant
+            sound_elements = driver.find_elements(By.CSS_SELECTOR, 'div.instant')
+            print(f"{self.__class__.__name__}: Found {len(sound_elements)} sounds on {country}")
+            
+            for sound_element in sound_elements:
+                try:
+                    button = sound_element.find_element(By.CSS_SELECTOR, 'button.small-button')
+                    onclick_attr = button.get_attribute('onclick')
+                    filename = onclick_attr.split("'")[1].split('/')[-1]
+                    
+                    # Clean up filename
+                    filename = filename.replace("~", "")
+                    filename = filename.replace("#", "")
+                    filename = filename.replace("--", "-")
+                    filename = filename.replace("--", "-")
+                    filename = filename.replace("...", ".")
+                    filename = filename.replace("..", ".")
+                    filename = filename.replace(".mp3.mp3", ".mp3")
+                    filename = filename.replace('"', '')
+                    url = "https://www.myinstants.com/media/sounds/" + filename
+
+                    if not self._check_sound_exists_in_db(filename):
+                        # Also check if file already exists on disk
+                        sounds_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Sounds"))
+                        downloads_dir = self.dwdir
+                        if os.path.exists(os.path.join(sounds_dir, filename)):
+                            continue
+                        if os.path.exists(os.path.join(downloads_dir, filename)):
+                            continue
+                        sounds_to_download.append((url, filename))
+                except Exception as e:
+                    print(f"{self.__class__.__name__}: Error processing sound element: {e}")
+                    
+        except Exception as e:
+            print(f"{self.__class__.__name__}: Error scraping {country}: {e}")
+        finally:
+            if driver:
+                driver.quit()
+                
+        return sounds_to_download
 
     def download_sound(self) -> None:
         """
         Scrape and download sounds from MyInstants.
         
-        Browses random pages on MyInstants and downloads any sounds
-        that aren't already in the database.
+        Browses all country pages on MyInstants concurrently and downloads
+        any sounds that aren't already in the database using multiple threads.
         """
-        # Import here to avoid circular imports
-        from bot.database import Database
+        countries = ["pt", "us", "br"]
+        all_sounds_to_download = []
         
-        try:
-            print(self.__class__.__name__, ": Opening Chrome")
-            self.driver = webdriver.Chrome(service=self.service, options=self.options)
-            base_url = "https://www.myinstants.com/en/"
-            categories = random.choice(["index"])
-            country = random.choice(["pt", "us", "br"])
-            self.driver.get(base_url + categories + "/" + country + "/")
-            print(self.__class__.__name__, ": Opening ", base_url + categories + "/" + country + "/")
-            wait = WebDriverWait(self.driver, 0)
-            try:
-                consent_button = wait.until(EC.element_to_be_clickable(
-                    (By.XPATH, '/html/body/div[3]/div[2]/div[1]/div[2]/div[2]/button[1]/p')
-                ))
-                print(self.__class__.__name__, ": Clicking consent button")
-                consent_button.click()
-            except Exception:
-                print(self.__class__.__name__, ": No consent button found")
+        # Scrape all sites concurrently using threads
+        print(f"{self.__class__.__name__}: Starting scrape of all {len(countries)} sites concurrently")
+        with ThreadPoolExecutor(max_workers=len(countries)) as executor:
+            futures = {executor.submit(self._scrape_single_site, country): country 
+                      for country in countries}
             
-            print(self.__class__.__name__, ": Scrolling down to get more sounds")
-            self.scroll_a_little(self.driver)
-            
-            # Get all divs with class instant
-            sound_elements = self.driver.find_elements(By.CSS_SELECTOR, 'div.instant')
-            print(self.__class__.__name__, ": Found ", len(sound_elements), " sounds")
-            
-            new_sounds_detected = 0
-            new_sounds_downloaded = 0
-            new_sounds_invalid = 0
-            
-            for i in range(0, len(sound_elements)):
-                button = sound_elements[i].find_element(By.CSS_SELECTOR, 'button.small-button')
-                onclick_attr = button.get_attribute('onclick')
-                filename = onclick_attr.split("'")[1].split('/')[-1]
-                
-                # Clean up filename
-                filename = filename.replace("~", "")
-                filename = filename.replace("#", "")
-                filename = filename.replace("--", "-")
-                filename = filename.replace("--", "-")
-                filename = filename.replace("...", ".")
-                filename = filename.replace("..", ".")
-                filename = filename.replace(".mp3.mp3", ".mp3")
-                filename = filename.replace('"', '')
-                url = "https://www.myinstants.com/media/sounds/" + filename
-
-                if not Database().get_sound(filename, original_filename=True):
-                    new_sounds_detected += 1
-                    response = requests.get(url)
-                    if response.status_code == 404:
-                        new_sounds_invalid += 1
-                        print(f"File {filename} not found, skipping download.")
-                    else:
-                        new_sounds_downloaded += 1
-                        out_file_path = os.path.join(self.dwdir, filename)
-                        with open(out_file_path, 'wb') as out_file:
-                            out_file.write(response.content)
-                            
-        except Exception as e:
-            print(self.__class__.__name__, ": Error downloading sound: ", e)
-            self.driver.quit()
-            
-        try:
-            print(
-                self.__class__.__name__, 
-                f": Sound Downloader finished. {new_sounds_detected} new sounds detected, "
-                f"{new_sounds_downloaded} sounds added, {new_sounds_invalid} sounds invalid (wrong url)"
-            )
+            for future in as_completed(futures):
+                country = futures[future]
+                try:
+                    sounds = future.result()
+                    all_sounds_to_download.extend(sounds)
+                    print(f"{self.__class__.__name__}: Got {len(sounds)} new sounds from {country}")
+                except Exception as e:
+                    print(f"{self.__class__.__name__}: Error getting results from {country}: {e}")
+        
+        # Remove duplicates (same URL might appear on multiple sites)
+        unique_sounds = list({url: (url, filename) for url, filename in all_sounds_to_download}.values())
+        print(f"{self.__class__.__name__}: {len(unique_sounds)} unique new sounds to download")
+        
+        if not unique_sounds:
+            print(f"{self.__class__.__name__}: No new sounds found")
             print("\n-----------------------------------\n")
-        except Exception as e:
-            print(self.__class__.__name__, ": Error printing sound downloader finished: ", e)
-
-        self.driver.quit()
+            return
+        
+        # Download all sounds concurrently using thread pool
+        new_sounds_downloaded = 0
+        new_sounds_invalid = 0
+        
+        print(f"{self.__class__.__name__}: Starting download with {self.DOWNLOAD_THREADS} threads")
+        with ThreadPoolExecutor(max_workers=self.DOWNLOAD_THREADS) as executor:
+            futures = {executor.submit(self._download_single_file, url, filename): filename 
+                      for url, filename in unique_sounds}
+            
+            for future in as_completed(futures):
+                filename = futures[future]
+                try:
+                    fname, success, error = future.result()
+                    if success:
+                        new_sounds_downloaded += 1
+                        print(f"{self.__class__.__name__}: Downloaded {fname}")
+                    else:
+                        new_sounds_invalid += 1
+                        print(f"{self.__class__.__name__}: Failed to download {fname}: {error}")
+                except Exception as e:
+                    new_sounds_invalid += 1
+                    print(f"{self.__class__.__name__}: Error downloading {filename}: {e}")
+        
+        print(
+            f"{self.__class__.__name__}: Sound Downloader finished. "
+            f"{len(unique_sounds)} new sounds detected, "
+            f"{new_sounds_downloaded} sounds added, {new_sounds_invalid} sounds invalid"
+        )
+        print("\n-----------------------------------\n")
 
     async def move_sounds(self) -> None:
         """
