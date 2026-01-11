@@ -402,7 +402,7 @@ class TTS:
             "output_format": "mp3_44100_128",
             "voice_settings": {
                 "speed": .85,
-                "stability": 0.3,
+                "stability": 0.5,
                 "similarity_boost": 1.0,
                 "style":1,
                 "use_speaker_boost": True
