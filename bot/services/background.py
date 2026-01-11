@@ -150,7 +150,7 @@ class BackgroundService:
                     # Set initial scrape time to 0 so it shows "scraping..." on first run
                     self.bot.next_scrape_time = 0
                     #wait 1 minute first time
-                    await asyncio.sleep(0)
+                    await asyncio.sleep(660)
                 first_run = False
                 
                 # Run the scraper in a thread executor since it uses Selenium (blocking)

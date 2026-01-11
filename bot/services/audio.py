@@ -979,6 +979,7 @@ class KeywordDetectionSink(sinks.Sink):
             result = json.loads(rec.FinalResult())
             text = result.get("text", "").lower()
         except Exception:
+            result = {}
             text = ""
         
         # Always delete recognizer after FinalResult (it's finished)
@@ -993,36 +994,43 @@ class KeywordDetectionSink(sinks.Sink):
             print(f"[{timestamp}] [Vosk Final (Flushed)] {username}: \"{text}\"")
             self._log_to_file(username, text)
             
-            # Check for keywords in flushed text
-            for keyword, action in self.keywords.items():
-                if keyword in text:
-                    print(f"[{timestamp}] [KeywordDetection] Detected keyword '{keyword}' from user {username}!")
-                    asyncio.run_coroutine_threadsafe(self.trigger_action(user_id, keyword, action), self.audio_service.bot.loop)
-                    break  # Only trigger one action per flush
+            # Use _check_keywords with the result object to get confidence-based detection
+            # FinalResult() includes word-level confidence when SetWords(True) is enabled
+            keyword, action = self._check_keywords(text, result)
+            if keyword:
+                print(f"[{timestamp}] [KeywordDetection] Detected keyword '{keyword}' from user {username}!")
+                asyncio.run_coroutine_threadsafe(self.trigger_action(user_id, keyword, action), self.audio_service.bot.loop)
 
     def _check_keywords(self, text: str, result_obj: dict = None) -> tuple:
-        """Check if any keyword is in the text as a whole word. Returns (keyword, action) or (None, None)."""
+        """Check if any keyword is in the text. Returns (keyword, action) or (None, None).
+        
+        Uses confidence scores when available to filter out misrecognitions.
+        """
         import re
         
-        # If we have word-level confidence, check it
+        # If we have word-level confidence from Vosk, use it
         if result_obj and "result" in result_obj:
             for word_info in result_obj["result"]:
                 word = word_info.get("word", "").lower()
                 conf = word_info.get("conf", 0.0)
                 
-                # Use a higher threshold for keywords to avoid false positives (e.g., chaves vs chapada)
-                if word in self.keywords and conf > 0.965:
-                    print(f"[KeywordDetection] Confirmed keyword '{word}' with high confidence: {conf:.2f}")
+                if word not in self.keywords:
+                    continue
+                
+                # Single confidence threshold for all keywords
+                required_conf = 0.9
+                if conf >= required_conf:
+                    print(f"[KeywordDetection] Confirmed keyword '{word}' (confidence: {conf:.3f})")
                     return word, self.keywords[word]
-                elif word in self.keywords:
-                    print(f"[KeywordDetection] Ignored potential keyword '{word}' due to low confidence: {conf:.2f} (threshold: 0.95)")
+                else:
+                    print(f"[KeywordDetection] Rejected keyword '{word}' - confidence {conf:.3f} < {required_conf}")
             
             return None, None
 
-        # Fallback for simple text check (use with caution)
-        # We only do this if we don't have a structured result (should not happen for final results)
+        # Fallback: no confidence info available, do simple text match
         for keyword, action in self.keywords.items():
             if re.search(rf"\b{re.escape(keyword.lower())}\b", text.lower()):
+                print(f"[KeywordDetection] Detected keyword '{keyword}' (no confidence info)")
                 return keyword, action
         return None, None
 
@@ -1052,7 +1060,7 @@ class KeywordDetectionSink(sinks.Sink):
                     # This prevents Vosk from "forcing" every sound into a keyword
                     distractors = [
                         # Common Portuguese words
-                        "chapa","ada","cha"
+                        "chapa","ada","cha","o","google",
                     ]
                     grammar = list(self.keywords.keys()) + distractors + ["[unk]"]
                     grammar_json = json.dumps(grammar)
