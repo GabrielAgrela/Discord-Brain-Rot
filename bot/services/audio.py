@@ -1052,13 +1052,7 @@ class KeywordDetectionSink(sinks.Sink):
                     # This prevents Vosk from "forcing" every sound into a keyword
                     distractors = [
                         # Common Portuguese words
-                        "o", "a", "os", "as", "um", "uma", "de", "do", "da", "em", "no", "na", "com", "para", "por",
-                        "que", "se", "foi", "tem", "sim", "mas", "mais", "eu", "ele",
-                        "eles", "isso", "esta", "este", "aqui", "quem", "como", "quando", "onde", "ventura",
-                        # Phonetically similar words to reduce false positives
-                        "diego", "amigo", "digo", "castigo", "abrigo", "trigo",  # Similar to "diogo"
-                        "fugo", "jugo", "sugue", "fuge", "puge",  # Similar to "hugo"
-                        "chapar", "lapada", "tapado", "palmada", "chapa", "chapas",  # Similar to "chapada"
+                        "chapa","ada","cha",
                     ]
                     grammar = list(self.keywords.keys()) + distractors + ["[unk]"]
                     grammar_json = json.dumps(grammar)
