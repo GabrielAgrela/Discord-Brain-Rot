@@ -993,9 +993,12 @@ class KeywordDetectionSink(sinks.Sink):
             print(f"[{timestamp}] [Vosk Final (Flushed)] {username}: \"{text}\"")
             self._log_to_file(username, text)
             
-            # Check for keywords in flushed text (using confidence-based matching)
-            # Note: Flushed results don't have word-level confidence, so we skip triggering here
-            # The main detection happens in detect_keyword() with full confidence data
+            # Check for keywords in flushed text
+            for keyword, action in self.keywords.items():
+                if keyword in text:
+                    print(f"[{timestamp}] [KeywordDetection] Detected keyword '{keyword}' from user {username}!")
+                    asyncio.run_coroutine_threadsafe(self.trigger_action(user_id, keyword, action), self.audio_service.bot.loop)
+                    break  # Only trigger one action per flush
 
     def _check_keywords(self, text: str, result_obj: dict = None) -> tuple:
         """Check if any keyword is in the text as a whole word. Returns (keyword, action) or (None, None)."""
