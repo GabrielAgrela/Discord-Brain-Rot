@@ -84,18 +84,18 @@ class BackgroundService:
                 ai_cooldown_seconds = self.behavior._ai_commentary_service.get_cooldown_remaining()
                 ai_minutes = round(ai_cooldown_seconds / 60)
                 if ai_cooldown_seconds > 0:
-                    status_parts.append(f'|👂🏻 in ~{ai_minutes}m')
+                    status_parts.append(f'👂🏻 in ~{ai_minutes}m')
                 else:
-                    status_parts.append('|👂🏻')
+                    status_parts.append('👂🏻')
 
             # 3. Scraper status
             if hasattr(self.bot, 'next_scrape_time'):
                 scrape_time_left = self.bot.next_scrape_time - time.time()
                 if scrape_time_left > 0:
                     scrape_minutes = round(scrape_time_left / 60)
-                    status_parts.append(f'|🔍 in ~{scrape_minutes}m')
+                    status_parts.append(f'🔍 in ~{scrape_minutes}m')
                 else:
-                    status_parts.append('|🔍')
+                    status_parts.append('🔍')
 
             if status_parts:
                 status_text = " | ".join(status_parts)
