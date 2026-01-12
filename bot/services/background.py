@@ -50,15 +50,24 @@ class BackgroundService:
         Periodically check if keyword detection is running when bot is connected.
         
         This handles the case where the bot disconnects randomly and the STT stops
-        but never gets restarted.
+        but never gets restarted. It also checks if the worker thread is alive,
+        since Discord voice reconnections can stop the worker without removing the sink.
         """
         try:
             for guild in self.bot.guilds:
                 voice_client = guild.voice_client
-                # If bot is connected to voice but keyword detection is not running, restart it
+                # If bot is connected to voice, check keyword detection status
                 if voice_client and voice_client.is_connected():
-                    if guild.id not in self.audio_service.keyword_sinks:
-                        print(f"[BackgroundService] Health check: Keyword detection not running in {guild.name}, restarting...")
+                    sink = self.audio_service.keyword_sinks.get(guild.id)
+                    
+                    if sink is None:
+                        # No sink at all - start keyword detection
+                        print(f"[BackgroundService] Health check: Keyword detection not running in {guild.name}, starting...")
+                        await self.audio_service.start_keyword_detection(guild)
+                    elif hasattr(sink, 'worker_thread') and not sink.worker_thread.is_alive():
+                        # Sink exists but worker thread is dead - restart keyword detection
+                        print(f"[BackgroundService] Health check: VoskWorker thread dead in {guild.name}, restarting keyword detection...")
+                        await self.audio_service.stop_keyword_detection(guild)
                         await self.audio_service.start_keyword_detection(guild)
         except Exception as e:
             print(f"[BackgroundService] Error in keyword detection health check: {e}")

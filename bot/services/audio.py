@@ -1018,7 +1018,7 @@ class KeywordDetectionSink(sinks.Sink):
                     continue
                 
                 # Single confidence threshold for all keywords
-                required_conf = 0.9
+                required_conf = 0.93
                 if conf >= required_conf:
                     print(f"[KeywordDetection] Confirmed keyword '{word}' (confidence: {conf:.3f})")
                     return word, self.keywords[word]
