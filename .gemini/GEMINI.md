@@ -90,6 +90,7 @@ bot/
    - Service tests in `tests/services/`
    - Use existing fixtures from `tests/conftest.py`
 7. **Update `.gitignore`** if the new feature generates artifacts that shouldn't be tracked (cache files, build outputs, logs, etc.)
+8. **Update this file (GEMINI.md)** if you discover patterns, gotchas, or fixes that future agents should know about - this prevents the same mistakes from recurring
 
 ## Testing
 
