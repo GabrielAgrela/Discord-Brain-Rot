@@ -45,8 +45,8 @@ class OnThisDayCog(commands.Cog):
         view = OnThisDayView(
             sounds=sounds,
             months_ago=months_ago,
-            audio_service=self.behavior.audio_service if self.behavior else None,
-            sound_service=self.behavior.sound_service if self.behavior else None
+            audio_service=self.behavior._audio_service if self.behavior else None,
+            sound_service=self.behavior._sound_service if self.behavior else None
         )
         
         embed = view.create_embed()
