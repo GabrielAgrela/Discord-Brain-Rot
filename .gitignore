@@ -20,6 +20,11 @@ database copy.db
 *.log
 .DS_Store
 
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
 # Static and downloaded assets
 # /static/
 # /templates/
