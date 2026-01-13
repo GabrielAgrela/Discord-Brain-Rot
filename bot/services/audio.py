@@ -59,6 +59,10 @@ class AudioService:
         # Keyword detection state
         self.keyword_sinks: Dict[int, 'KeywordDetectionSink'] = {}
         
+        # Per-guild connection locks to prevent race conditions
+        self._connection_locks: Dict[int, asyncio.Lock] = {}
+        self._pending_connections: Dict[int, asyncio.Task] = {}
+        
         # Buffer for /llmdebug (handled via ring buffer in sink)
         self.last_audio_buffer: Dict[int, bytes] = {} 
         
@@ -93,48 +97,88 @@ class AudioService:
         self._behavior = behavior
         self.bot.behavior = behavior
 
+    def _get_connection_lock(self, guild_id: int) -> asyncio.Lock:
+        """Get or create a connection lock for the given guild."""
+        if guild_id not in self._connection_locks:
+            self._connection_locks[guild_id] = asyncio.Lock()
+        return self._connection_locks[guild_id]
+
     async def ensure_voice_connected(self, channel: discord.VoiceChannel) -> Optional[discord.VoiceProtocol]:
-        """Ensure the bot is connected to the specified voice channel."""
-        try:
-            voice_client = channel.guild.voice_client
-
-            if voice_client:
-                if not voice_client.is_connected():
-                    print(f"[AudioService] Voice client in {channel.guild.name} exists but is not connected. Reconnecting...")
-                    try:
-                        await voice_client.disconnect(force=True)
-                        await asyncio.sleep(1)
-                    except Exception as e:
-                         print(f"[AudioService] Error forcing disconnect: {e}")
-                elif voice_client.channel.id != channel.id:
-                    await voice_client.move_to(channel)
-                    # Restart keyword detection if moved
-                    await self.start_keyword_detection(channel.guild)
-                    return voice_client
-                else:
-                    # Ensure detection is running
-                    await self.start_keyword_detection(channel.guild)
-                    return voice_client
-            
-            for attempt in range(3):
+        """Ensure the bot is connected to the specified voice channel.
+        
+        Uses per-guild locks to prevent race conditions from rapid channel switches.
+        """
+        guild_id = channel.guild.id
+        lock = self._get_connection_lock(guild_id)
+        
+        # Cancel any pending connection task for this guild
+        if guild_id in self._pending_connections:
+            pending_task = self._pending_connections[guild_id]
+            if not pending_task.done():
+                print(f"[AudioService] Cancelling pending connection for {channel.guild.name}")
+                pending_task.cancel()
                 try:
-                    voice_client = await channel.connect(timeout=10.0)
-                    # Start keyword detection on new connection
-                    await self.start_keyword_detection(channel.guild)
-                    return voice_client
-                except Exception as e:
-                    print(f"[AudioService] Connection attempt {attempt + 1} failed: {e}")
-                    if attempt < 2:
-                        await asyncio.sleep(1)
-            
-            print("[AudioService] Failed to connect after 3 attempts.")
-            return None
+                    await pending_task
+                except asyncio.CancelledError:
+                    pass
+        
+        async with lock:
+            try:
+                voice_client = channel.guild.voice_client
 
-        except Exception as e:
-            print(f"[AudioService] Error connecting to voice channel: {e}")
-            if self.bot.voice_clients:
-                return self.bot.voice_clients[0]
-            return None
+                if voice_client:
+                    if not voice_client.is_connected():
+                        print(f"[AudioService] Voice client in {channel.guild.name} exists but is not connected. Reconnecting...")
+                        try:
+                            await voice_client.disconnect(force=True)
+                            await asyncio.sleep(0.5)
+                        except Exception as e:
+                            print(f"[AudioService] Error forcing disconnect: {e}")
+                    elif voice_client.channel.id != channel.id:
+                        print(f"[AudioService] Moving from {voice_client.channel.name} to {channel.name}")
+                        await voice_client.move_to(channel)
+                        # Restart keyword detection if moved
+                        await self.start_keyword_detection(channel.guild)
+                        return voice_client
+                    else:
+                        # Already connected to the right channel
+                        await self.start_keyword_detection(channel.guild)
+                        return voice_client
+                
+                # Connect with a single attempt (lock prevents racing)
+                for attempt in range(3):
+                    try:
+                        # Check if another connection snuck in while we waited
+                        voice_client = channel.guild.voice_client
+                        if voice_client and voice_client.is_connected():
+                            if voice_client.channel.id != channel.id:
+                                await voice_client.move_to(channel)
+                            await self.start_keyword_detection(channel.guild)
+                            return voice_client
+                        
+                        voice_client = await channel.connect(timeout=10.0)
+                        # Start keyword detection on new connection
+                        await self.start_keyword_detection(channel.guild)
+                        return voice_client
+                    except asyncio.CancelledError:
+                        print(f"[AudioService] Connection cancelled for {channel.name}")
+                        raise
+                    except Exception as e:
+                        print(f"[AudioService] Connection attempt {attempt + 1} failed: {e}")
+                        if attempt < 2:
+                            await asyncio.sleep(0.5)
+                
+                print("[AudioService] Failed to connect after 3 attempts.")
+                return None
+
+            except asyncio.CancelledError:
+                print(f"[AudioService] Connection to {channel.name} was cancelled")
+                return None
+            except Exception as e:
+                print(f"[AudioService] Error connecting to voice channel: {e}")
+                if self.bot.voice_clients:
+                    return self.bot.voice_clients[0]
+                return None
 
     def get_largest_voice_channel(self, guild: discord.Guild) -> Optional[discord.VoiceChannel]:
         """Find the voice channel with the most members in the given guild."""
@@ -1018,7 +1062,7 @@ class KeywordDetectionSink(sinks.Sink):
                     continue
                 
                 # Single confidence threshold for all keywords
-                required_conf = 0.93
+                required_conf = 0.95
                 if conf >= required_conf:
                     print(f"[KeywordDetection] Confirmed keyword '{word}' (confidence: {conf:.3f})")
                     return word, self.keywords[word]

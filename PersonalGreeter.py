@@ -25,7 +25,11 @@ from bot.commands.keywords import KeywordCog
 from bot.commands.debug import DebugCog
 import random
 import time
+from collections import defaultdict
 
+# Debounce tracking for voice state updates
+_voice_event_debounce: dict = {}  # member_id -> asyncio.Task
+VOICE_DEBOUNCE_SECONDS = 0.5  # Debounce rapid channel switches
 
 import platform # Added for OS detection
 import re # Add import for regex
@@ -310,9 +314,31 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
                 return  # No need to play leave sound if disconnecting
         
     # Log the voice state update
-    print(f"Voice state update: {member_str} {event} channel {channel}")
+    print(f"Voice state update: {member_str} {event} channel ► {channel}")
 
-    await play_audio_for_event(member, member_str, event, channel)
+    # Debounce: Cancel any pending event for this member and schedule new one
+    member_id = member.id
+    if member_id in _voice_event_debounce:
+        pending_task = _voice_event_debounce[member_id]
+        if not pending_task.done():
+            print(f"[Debounce] Cancelling pending event for {member_str}")
+            pending_task.cancel()
+            try:
+                await pending_task
+            except asyncio.CancelledError:
+                pass
+    
+    async def debounced_play():
+        try:
+            await asyncio.sleep(VOICE_DEBOUNCE_SECONDS)
+            await play_audio_for_event(member, member_str, event, channel)
+        except asyncio.CancelledError:
+            print(f"[Debounce] Event cancelled for {member_str} (rapid channel switch)")
+        finally:
+            if member_id in _voice_event_debounce:
+                del _voice_event_debounce[member_id]
+    
+    _voice_event_debounce[member_id] = asyncio.create_task(debounced_play())
 
 async def play_audio_for_event(member, member_str, event, channel):
     try:
