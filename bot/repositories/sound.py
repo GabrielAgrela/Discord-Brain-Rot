@@ -187,7 +187,40 @@ class SoundRepository(BaseRepository[Sound]):
                    sort: str = "DESC", favorite_by_user: bool = False, user: str = None) -> List[tuple]:
         """
         Get sounds with filtering, returning tuples for backwards compatibility.
+        
+        Args:
+            favorite: Filter by global favorite status (True = favorites only)
+            slap: Filter by slap status
+            num_sounds: Maximum number of sounds to return
+            sort: Sort order ("ASC" or "DESC")
+            favorite_by_user: If True, filter by sounds the user has favorited
+            user: Username to filter favorites by (required if favorite_by_user=True)
         """
+        # If filtering by user favorites, use a different query that joins with actions
+        if favorite_by_user and user:
+            rows = self._execute(
+                """
+                WITH UserFavorites AS (
+                    SELECT 
+                        target,
+                        action,
+                        ROW_NUMBER() OVER (PARTITION BY target ORDER BY timestamp DESC) as rn
+                    FROM actions
+                    WHERE username = ?
+                    AND action IN ('favorite_sound', 'unfavorite_sound')
+                )
+                SELECT s.*
+                FROM sounds s
+                INNER JOIN UserFavorites uf ON CAST(uf.target AS INTEGER) = s.id
+                WHERE uf.rn = 1 AND uf.action = 'favorite_sound'
+                ORDER BY s.id DESC
+                LIMIT ?
+                """,
+                (user, num_sounds)
+            )
+            return [tuple(row) for row in rows]
+        
+        # Standard filtering
         conditions = []
         if favorite is not None:
             conditions.append(f"favorite = {1 if favorite else 0}")
