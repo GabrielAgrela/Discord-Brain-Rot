@@ -25,6 +25,7 @@ database copy.db
 .coverage
 htmlcov/
 
+
 # Static and downloaded assets
 # /static/
 # /templates/
