@@ -42,4 +42,5 @@ services:
       - .env
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./actions-runner:/app/actions-runner
+      - /home/gabi/github/Discord-Brain-Rot/actions-runner:/app/actions-runner
+      - /home/gabi/github/Discord-Brain-Rot/.env:/app/.env:ro
