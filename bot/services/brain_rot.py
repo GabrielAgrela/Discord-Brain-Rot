@@ -93,7 +93,6 @@ class BrainRotService:
             title=f"{display_name} clip {title_num} of {len(files)}",
             color=discord.Color.red()
         )
-        embed.add_field(name="", value="[🥵 gabrielagrela.com 🥵](https://gabrielagrela.com)")
         
         message = await bot_channel.send(
             embed=embed,

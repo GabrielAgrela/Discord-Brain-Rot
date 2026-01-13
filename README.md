@@ -1,78 +1,282 @@
-# Discord Brain Rot
+# 🧠 Discord Brain Rot
 
-A versatile Discord bot that serves as a personal butler, playing sound effects based on user-defined events and more brain rot.
+A feature-rich Discord bot that transforms your server into an interactive soundboard experience with AI-powered commentary, real-time voice keyword detection, and automatic sound scraping.
 
-## Prerequisites
+---
 
-- Python 3.7 or higher installed
-- [FFmpeg](https://ffmpeg.org/) installed and added to the system's PATH environment variable
-- A Discord bot token obtained from the Discord Developer Portal
-- An ElevenLabs API Key (optional, for STS, voice isolation, and some TTS features)
-- Google Chrome (or Chromium) and the corresponding ChromeDriver installed.
+## ✨ Features
 
-## Installation
+### 🔊 **Soundboard**
+- **10,000+ sounds** automatically scraped from MyInstants (PT, BR, US)
+- Smart fuzzy search with autocomplete suggestions
+- Playback controls: speed, volume, reverse, progress bar
+- Similar sounds suggestions using AI audio embeddings
+- Personal sound lists and favorites
 
-1.  Clone this repository to your local machine.
-2.  Install the required dependencies by running the following command:
-    ```bash
-    pip install -r requirements.txt
-    ```
-3.  Create a file named `.env` in the project directory and add the following environment variables:
+### 🗣️ **Text-to-Speech & Voice Cloning**
+- **Google TTS**: English, Portuguese, Spanish, French, German, Russian, Arabic, Chinese
+- **ElevenLabs voices**: Ventura, Costa, Tyson (custom character voices)
+- **Speech-to-Speech (STS)**: Convert any sound to a different voice
+- **Voice isolation**: Extract vocals from audio
 
-    ```dotenv
-    DISCORD_BOT_TOKEN=<your-discord-bot-token>
-    FFMPEG_PATH=<path-to-ffmpeg-executable> # e.g., C:\\ffmpeg\\bin\\ffmpeg.exe or /usr/bin/ffmpeg
-    CHROMEDRIVER_PATH=<path-to-chromedriver> # e.g., C:\\chromedriver\\chromedriver.exe or /usr/bin/chromedriver
-    # Optional: ElevenLabs API Key and Voice IDs for advanced features, examples:
-    EL_key=<your-elevenlabs-api-key>
-    EL_voice_id_pt=<your-elevenlabs-pt-voice-id>
-    EL_voice_id_en=<your-elevenlabs-en-voice-id>
-    EL_voice_id_costa=<your-elevenlabs-costa-voice-id>
-    ```
-    *Note: The bot uses a database file (`database.db`). It should be created automatically on the first run if it doesn't exist, based on the `Database.py` setup.*
+### 🎤 **Real-time Voice Detection**
+- **Vosk STT engine** for real-time speech recognition
+- Keyword triggers that play sounds or lists
+- Confidence-based filtering to prevent false positives
 
-4.  Run the bot by executing the following command:
-    ```bash
-    python PersonalGreeter.py
-    ```
-    The bot will automatically handle sound downloading and database management in the background.
+### 🤖 **AI Commentary**
+- Automatic AI commentary using **Gemini** via OpenRouter
+- Listens to voice conversations and provides humorous Portuguese commentary
+- Configurable cooldowns and trigger phrases
 
-## Usage
+### 🎬 **Brain Rot Content**
+- Random Subway Surfers gameplay clips
+- Family Guy clips  
+- Slice All gameplay clips
+- Sends video directly to chat while audio plays
 
-Interact with the bot using slash commands (`/`) in your Discord server.
+### 📊 **Analytics & Web Interface**
+- Flask-powered web dashboard
+- Activity heatmaps (day × hour)
+- Top users and sounds leaderboards
+- Timeline charts and recent activity feed
+- Remote sound playback queue
+- **Status Icons**:
+    - 🤯: Time until next random periodic sound
+    - 👂🏻: AI Commentary (Ventura) cooldown status
+    - 🔍: Next MyInstants sound scraper run
 
-### Key Features & Commands
+### ⚡ **Event System**
+- Custom sounds for user join/leave events
+- Per-user sound assignments
+- "On This Day" - hear what played exactly one year ago
 
-*   **Sound Playback:**
-    *   `/toca [message]` : Play a sound by name. Use the autocomplete suggestions or type 'random'. Supports finding similar sounds.
-    *   `/subwaysurfers`, `/familyguy`: Play specific themed sounds/videos.
-*   **Text-to-Speech (TTS):**
-    *   `/tts [message] [language]`: Generate TTS using Google Translate or ElevenLabs voices (Ventura, Costa, Tyson) along with standard languages like `en`, `pt`, `br`, `es`, `fr`, `de`, `ar`, `ru`, `ch`.
-*   **Speech-to-Speech (STS):** (Requires ElevenLabs API Key)
-    *   `/sts [sound] [char]`: Convert an existing sound to a different voice (e.g., 'tyson', 'ventura', 'costa').
-*   **Voice Isolation:** (Requires ElevenLabs API Key)
-    *   `/isolate [sound]`: Attempt to isolate vocals from a sound file.
-*   **Sound Management:**
-    *   `/change [current] [new]`: Rename a sound file.
-    *   `/lastsounds [number]`: List the most recently downloaded sounds.
-*   **Sound Lists:**
-    *   `/createlist [list_name]`: Create a personal sound list.
-    *   `/addtolist [sound] [list_name]`: Add a sound to a list.
-    *   `/removefromlist [sound] [list_name]`: Remove a sound from one of your lists.
-    *   `/deletelist [list_name]`: Delete one of your lists.
-    *   `/showlist [list_name]`: Display a specific sound list with playback buttons.
-    *   `/mylists`: Show all lists created by you.
-    *   `/showlists`: Show all lists created by anyone.
-*   **Event Sounds:**
-    *   `/addevent [username] [event] [sound]`: Assign a sound to play when a specific user joins or leaves a voice channel.
-    *   `/listevents [username]`: List the join/leave sounds assigned to a user (defaults to you).
-*   **Statistics:**
-    *   `/top [option] [number] [numberdays]`: Show leaderboards for top played sounds or top users ('users' or 'sounds').
+---
 
-## Contributing
+## 🏗️ Architecture
 
-Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
+```
+bot/
+├── commands/       # Discord slash commands (Cogs)
+├── downloaders/    # Sound scrapers (MyInstants, yt-dlp)
+├── models/         # Data models/entities
+├── repositories/   # Database access layer (SQLite)
+├── services/       # Business logic layer
+└── ui/             # Discord UI components (Views, Buttons, Modals)
+```
 
-## License
+The project follows **SOLID principles** with a clean separation of concerns:
+- **Repository Pattern** for all database access
+- **Service Layer** for business logic
+- **Dependency Injection** throughout
+
+---
+
+## 🚀 Quick Start
+
+### Prerequisites
+
+- Python 3.9+
+- [FFmpeg](https://ffmpeg.org/) (in PATH)
+- [Opus library](https://opus-codec.org/) (for voice)
+- Chrome/Chromium + ChromeDriver (for sound scraping)
+
+### Installation
+
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/GabrielAgrela/Discord-Brain-Rot.git
+   cd Discord-Brain-Rot
+   ```
+
+2. **Create virtual environment**
+   ```bash
+   python -m venv venv
+   source venv/bin/activate  # Linux/Mac
+   # or: venv\Scripts\activate  # Windows
+   ```
+
+3. **Install dependencies**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. **Configure environment**
+   
+   Create a `.env` file:
+   ```env
+   # Required
+   DISCORD_BOT_TOKEN=your-discord-bot-token
+   FFMPEG_PATH=/usr/bin/ffmpeg
+   
+   # Sound scraping (optional)
+   CHROMEDRIVER_PATH=/usr/bin/chromedriver
+   
+   # ElevenLabs TTS (optional)
+   EL_key=your-elevenlabs-api-key
+   EL_voice_id_pt=voice-id-for-portuguese
+   EL_voice_id_en=voice-id-for-english
+   EL_voice_id_costa=voice-id-for-costa
+   
+   # AI Commentary (optional)
+   OPENROUTER_API_KEY=your-openrouter-api-key
+   ```
+
+5. **Run the bot**
+   ```bash
+   python PersonalGreeter.py
+   ```
+
+6. **Start the web interface** (optional)
+   ```bash
+   python WebPage.py
+   ```
+
+---
+
+## 📋 Commands
+
+### Sound Playback
+| Command | Description |
+|---------|-------------|
+| `/toca [sound]` | Play a sound (use `random` for random) |
+| `/toca [sound] speed:[0.5-3.0] volume:[0.1-5.0] reverse:[true/false]` | Play with effects |
+| `/lastsounds [n]` | Show last N downloaded sounds |
+| `/change [current] [new]` | Rename a sound |
+
+### Text-to-Speech
+| Command | Description |
+|---------|-------------|
+| `/tts [message] [language]` | Generate TTS audio |
+| `/sts [sound] [character]` | Convert sound to different voice |
+| `/isolate [sound]` | Isolate vocals from audio |
+
+### Sound Lists
+| Command | Description |
+|---------|-------------|
+| `/createlist [name]` | Create a personal sound list |
+| `/addtolist [sound] [list]` | Add sound to a list |
+| `/removefromlist [sound] [list]` | Remove sound from list |
+| `/deletelist [name]` | Delete a list |
+| `/showlist [name]` | Display list with play buttons |
+
+### Keywords
+| Command | Description |
+|---------|-------------|
+| `/keyword add [word] [action]` | Add trigger keyword |
+| `/keyword remove [word]` | Remove keyword |
+| `/keyword list` | Show all keywords |
+
+### Events
+| Command | Description |
+|---------|-------------|
+| `/addevent [user] [join/leave] [sound]` | Set entrance/exit sound |
+| `/listevents [user]` | Show user's event sounds |
+| `/onthisday` | Hear what played one year ago today |
+
+### Statistics
+| Command | Description |
+|---------|-------------|
+| `/top users [n] [days]` | Top users leaderboard |
+| `/top sounds [n] [days]` | Top sounds leaderboard |
+
+### Brain Rot
+| Command | Description |
+|---------|-------------|
+| `/subwaysurfers` | Random Subway Surfers clip |
+| `/familyguy` | Random Family Guy clip |
+| `/slice` | Random Slice All clip |
+
+### Admin
+| Command | Description |
+|---------|-------------|
+| `/reboot` | Reboot host machine |
+| `/lastlogs [n]` | View service logs |
+| `/commands` | Show recent bot commands from logs |
+
+---
+
+## 📱 Adding Sounds via DM
+
+Send the bot a DM with a video URL:
+```
+https://www.tiktok.com/@user/video/123456789
+```
+
+Optional parameters:
+```
+<url> [time_limit_seconds] [custom_filename]
+```
+
+Supported platforms: **TikTok**, **Instagram Reels**, **YouTube**
+
+---
+
+## 🧪 Testing
+
+```bash
+# Run all tests
+pytest tests/ -v
+
+# Run with coverage
+pytest tests/ --cov=bot --cov-report=term
+```
+
+---
+
+## 🗂️ Project Structure
+
+```
+Discord-Brain-Rot/
+├── PersonalGreeter.py    # Main entry point
+├── WebPage.py            # Flask web interface
+├── config.py             # Centralized configuration
+├── bot/                  # Core bot package
+│   ├── commands/         # Slash command Cogs
+│   ├── services/         # Business logic
+│   ├── repositories/     # Data access
+│   ├── models/           # Domain entities
+│   ├── ui/               # Discord components
+│   └── downloaders/      # Sound scrapers
+├── Sounds/               # Sound files (auto-populated)
+├── Data/                 # Video clips (SubwaySurfers, FamilyGuy, etc.)
+├── Downloads/            # Temporary download directory
+├── Logs/                 # Daily log files
+└── tests/                # Test suite
+```
+
+---
+
+## 🔧 Configuration
+
+Key settings in `config.py`:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `DEFAULT_SPEED` | 1.0 | Default playback speed |
+| `DEFAULT_VOLUME` | 1.0 | Default volume |
+| `MIN_SPEED` / `MAX_SPEED` | 0.5 / 3.0 | Speed limits |
+| `MIN_VOLUME` / `MAX_VOLUME` | 0.1 / 5.0 | Volume limits |
+| `DEFAULT_MUTE_DURATION` | 1800 | Mute duration (seconds) |
+
+---
+
+## 📄 License
 
 [MIT](https://choosealicense.com/licenses/mit/)
+
+---
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Follow the architecture patterns in the codebase
+4. Write tests for new functionality
+5. Submit a Pull Request
+
+---
+
+<p align="center">
+  <i>Made with 🧠 and lots of brain rot</i>
+</p>

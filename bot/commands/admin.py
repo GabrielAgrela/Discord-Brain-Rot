@@ -3,9 +3,8 @@ Admin slash commands cog.
 
 This cog handles administrative commands including:
 - /reboot - Reboot the host machine
-- /backup - Backup to USB drive
-- /fixvoice - Fix voice connection issues
 - /lastlogs - Show service logs
+- /commands - Show recent bot commands from logs
 """
 
 import os

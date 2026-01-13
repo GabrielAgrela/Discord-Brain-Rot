@@ -99,7 +99,6 @@ class MessageService:
             description=description,
             color=color or self.color,
         )
-        embed.add_field(name="", value="[🥵 gabrielagrela.com 🥵](https://gabrielagrela.com)")
         
         if thumbnail:
             embed.set_thumbnail(url=thumbnail)
