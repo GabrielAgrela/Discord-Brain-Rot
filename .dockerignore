@@ -1,0 +1,22 @@
+venv/
+__pycache__/
+*.pyc
+.git/
+.github/
+.vscode/
+.pytest_cache/
+.coverage
+htmlcov/
+.env
+.gemini/
+
+# Large data folders (handled via volumes)
+Sounds/
+Data/*
+!Data/models/
+Downloads/
+Logs/
+Debug/
+database.db
+database.db-shm
+database.db-wal

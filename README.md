@@ -132,6 +132,30 @@ The project follows **SOLID principles** with a clean separation of concerns:
    python WebPage.py
    ```
 
+### 🐳 Running with Docker (Recommended)
+
+The easiest way to run the bot and the web dashboard is using Docker Compose.
+
+1. **Configure your `.env` file** (see above).
+2. **Build and start the services**:
+   ```bash
+   docker-compose up --build -d
+   ```
+   The web dashboard will be available at `http://localhost:8080`.
+3. **Check logs**:
+   ```bash
+   # For the bot
+   docker-compose logs -f bot
+   # For the web interface
+   docker-compose logs -f web
+   ```
+4. **Stop services**:
+   ```bash
+   docker-compose down
+   ```
+
+---
+
 ---
 
 ## 📋 Commands

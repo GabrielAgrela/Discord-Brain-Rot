@@ -1,6 +1,7 @@
 /.env
 **/__pycache__/
-/Data
+/Data/*
+!/Data/models/
 /Downloads
 /Sounds
 /database.db

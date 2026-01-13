@@ -1,0 +1,31 @@
+services:
+  bot:
+    build: .
+    container_name: brain-rot-bot
+    restart: always
+    env_file:
+      - .env
+    environment:
+      - FFMPEG_PATH=/usr/bin/ffmpeg
+      - CHROMEDRIVER_PATH=/usr/bin/chromedriver
+    volumes:
+      - ./Sounds:/app/Sounds
+      - ./Data:/app/Data
+      - ./Downloads:/app/Downloads
+      - ./Logs:/app/Logs
+      - ./database.db:/app/database.db
+    command: python PersonalGreeter.py
+
+  web:
+    build: .
+    container_name: brain-rot-web
+    restart: always
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    volumes:
+      - ./database.db:/app/database.db
+      - ./templates:/app/templates
+      - ./static:/app/static
+    command: python WebPage.py
