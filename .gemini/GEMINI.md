@@ -111,3 +111,20 @@ bot/
 - Don't access the database directly from commands or UI
 - Don't create god classes that do everything
 - Don't ignore existing patterns - follow what's already established
+
+## Important Notes
+
+### BotBehavior Attribute Naming
+- Services in `BotBehavior` are stored with underscore prefix (private attributes)
+- Use `behavior._audio_service`, `behavior._sound_service`, etc. (NOT `behavior.audio_service`)
+- This pattern keeps services encapsulated while allowing access when needed
+
+### Service Access Patterns
+- `SoundService` has `sound_repo` attribute for repository access (e.g., `sound_service.sound_repo.get_sound_by_name()`)
+- Services don't expose repository methods directly - access via `.sound_repo`, `.action_repo`, etc.
+- Repository method names may differ from service methods - always verify by checking the repository class
+
+### Testing Limitations
+- Repository unit tests don't catch integration errors with Discord or BotBehavior
+- Attribute name mismatches and service access patterns are only caught at runtime
+- When adding new commands/UI, manually test the full flow to catch integration issues

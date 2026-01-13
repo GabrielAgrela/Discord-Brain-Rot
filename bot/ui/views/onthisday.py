@@ -33,7 +33,8 @@ class OnThisDayButton(Button):
                 channel = interaction.user.voice.channel
             
             if channel:
-                sound = view.sound_service.get_sound_by_name(self.sound_filename)
+                # Use the sound repository to get sound info
+                sound = view.sound_service.sound_repo.get_sound_by_name(self.sound_filename)
                 if sound:
                     await view.audio_service.play_audio(
                         channel=channel,
