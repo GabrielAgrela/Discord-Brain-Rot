@@ -23,6 +23,7 @@ from bot.commands.events import EventCog
 from bot.commands.stats import StatsCog
 from bot.commands.keywords import KeywordCog
 from bot.commands.debug import DebugCog
+from bot.commands.onthisday import OnThisDayCog
 import random
 import time
 from collections import defaultdict
@@ -54,6 +55,7 @@ bot.add_cog(EventCog(bot, behavior))
 bot.add_cog(StatsCog(bot, behavior))
 bot.add_cog(KeywordCog(bot, behavior))
 bot.add_cog(DebugCog(bot, behavior))
+bot.add_cog(OnThisDayCog(bot, behavior))
 db = Database(behavior=behavior)
 
 

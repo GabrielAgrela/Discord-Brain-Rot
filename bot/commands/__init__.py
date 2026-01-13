@@ -19,4 +19,5 @@ __all__ = [
     "StatsCog",
     "KeywordCog",
     "DebugCog",
+    "OnThisDayCog",
 ]

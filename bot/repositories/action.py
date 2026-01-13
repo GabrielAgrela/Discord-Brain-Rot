@@ -176,3 +176,39 @@ class ActionRepository(BaseRepository):
             (str(sound_id),)
         )
         return [row['username'] for row in rows]
+    
+    def get_sounds_on_this_day(self, months_ago: int = 12, limit: int = 10) -> List[Tuple[str, int]]:
+        """
+        Get sounds that were popular on this day in the past.
+        
+        Args:
+            months_ago: How many months to look back (12 = 1 year, 1 = 1 month)
+            limit: Maximum number of sounds to return
+            
+        Returns:
+            List of (filename, play_count) tuples for sounds played on that date
+        """
+        # Calculate the target date range (same day/month in the past)
+        target_date = datetime.now() - timedelta(days=months_ago * 30)
+        
+        # Use a 3-day window around the target date to capture more data
+        start_date = (target_date - timedelta(days=1)).strftime("%Y-%m-%d 00:00:00")
+        end_date = (target_date + timedelta(days=1)).strftime("%Y-%m-%d 23:59:59")
+        
+        rows = self._execute(
+            """
+            SELECT s.Filename, COUNT(*) as count
+            FROM actions a
+            JOIN sounds s ON CAST(a.target AS INTEGER) = s.id
+            WHERE a.action IN ('play_random_sound', 'replay_sound', 'play_random_favorite_sound', 
+                              'play_request', 'play_from_list', 'play_similar_sound', 'play_sound_periodically')
+            AND a.timestamp BETWEEN ? AND ?
+            AND s.slap = 0
+            GROUP BY s.Filename
+            ORDER BY count DESC
+            LIMIT ?
+            """,
+            (start_date, end_date, limit)
+        )
+        
+        return [(row['Filename'], row['count']) for row in rows]

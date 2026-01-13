@@ -49,6 +49,9 @@ from bot.ui.views.favorites import (
 from bot.ui.views.stats import (
     PaginatedStatsView
 )
+from bot.ui.views.onthisday import (
+    OnThisDayView
+)
 from bot.ui.selects import (
     EventTypeSelect, UserSelect, SoundSelect, AddToListSelect,
     STSCharacterSelect, SimilarSoundsSelect, LoadingSimilarSoundsSelect
@@ -85,7 +88,7 @@ __all__ = [
 
     'ControlsView', 'DownloadedSoundView', 'SoundView',
     'UserEventSelectView', 'EventView', 'PaginatedEventView',
-    'PaginatedFavoritesView', 'PaginatedStatsView', 'UploadChoiceView',
+    'PaginatedFavoritesView', 'PaginatedStatsView', 'OnThisDayView', 'UploadChoiceView',
     
     # Selects
     'EventTypeSelect', 'UserSelect', 'SoundSelect', 'AddToListSelect',

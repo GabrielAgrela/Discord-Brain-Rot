@@ -104,3 +104,70 @@ class TestActionRepositoryEdgeCases:
         """Test play count for sound with no plays."""
         count = action_repository.get_sound_play_count(9999)
         assert count == 0
+    
+    def test_get_sounds_on_this_day_empty(self, action_repository):
+        """Test get_sounds_on_this_day returns empty list when no data."""
+        sounds = action_repository.get_sounds_on_this_day(months_ago=12, limit=10)
+        assert sounds == []
+    
+    def test_get_sounds_on_this_day_with_data(self, action_repository, db_connection):
+        """Test get_sounds_on_this_day returns historical sounds."""
+        from datetime import datetime, timedelta
+        
+        cursor = db_connection.cursor()
+        
+        # Insert a sound
+        cursor.execute(
+            "INSERT INTO sounds (originalfilename, Filename, date, favorite, blacklist, slap) VALUES (?, ?, ?, ?, ?, ?)",
+            ("old_sound.mp3", "old_sound.mp3", "2025-01-13 10:00:00", 0, 0, 0)
+        )
+        sound_id = cursor.lastrowid
+        
+        # Insert action from ~1 year ago (implementation uses months_ago * 30 days)
+        target_date = datetime.now() - timedelta(days=12 * 30)  # 360 days, matches implementation
+        action_timestamp = target_date.strftime("%Y-%m-%d %H:%M:%S")
+        
+        cursor.execute(
+            "INSERT INTO actions (username, action, target, timestamp) VALUES (?, ?, ?, ?)",
+            ("user1", "play_request", str(sound_id), action_timestamp)
+        )
+        cursor.execute(
+            "INSERT INTO actions (username, action, target, timestamp) VALUES (?, ?, ?, ?)",
+            ("user2", "play_random_sound", str(sound_id), action_timestamp)
+        )
+        db_connection.commit()
+        
+        sounds = action_repository.get_sounds_on_this_day(months_ago=12, limit=10)
+        
+        # Should find the sound with 2 plays
+        assert len(sounds) == 1
+        assert sounds[0][0] == "old_sound.mp3"
+        assert sounds[0][1] == 2
+    
+    def test_get_sounds_on_this_day_excludes_slaps(self, action_repository, db_connection):
+        """Test that slap sounds are excluded from On This Day results."""
+        from datetime import datetime, timedelta
+        
+        cursor = db_connection.cursor()
+        
+        # Insert a slap sound
+        cursor.execute(
+            "INSERT INTO sounds (originalfilename, Filename, date, favorite, blacklist, slap) VALUES (?, ?, ?, ?, ?, ?)",
+            ("slap_sound.mp3", "slap_sound.mp3", "2025-01-13 10:00:00", 0, 0, 1)  # slap = 1
+        )
+        slap_sound_id = cursor.lastrowid
+        
+        # Insert action from ~1 year ago (implementation uses months_ago * 30 days)
+        target_date = datetime.now() - timedelta(days=12 * 30)  # 360 days
+        action_timestamp = target_date.strftime("%Y-%m-%d %H:%M:%S")
+        
+        cursor.execute(
+            "INSERT INTO actions (username, action, target, timestamp) VALUES (?, ?, ?, ?)",
+            ("user1", "play_request", str(slap_sound_id), action_timestamp)
+        )
+        db_connection.commit()
+        
+        sounds = action_repository.get_sounds_on_this_day(months_ago=12, limit=10)
+        
+        # Should not include slap sounds
+        assert len(sounds) == 0
