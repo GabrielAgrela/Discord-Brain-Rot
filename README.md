@@ -72,87 +72,53 @@ The project follows **SOLID principles** with a clean separation of concerns:
 
 ---
 
-## 🚀 Quick Start
+## 🚀 Quick Start (Docker)
 
-### Prerequisites
+The fastest way to get the bot running is using **Docker Compose**.
 
-- Python 3.9+
-- [FFmpeg](https://ffmpeg.org/) (in PATH)
-- [Opus library](https://opus-codec.org/) (for voice)
-- Chrome/Chromium + ChromeDriver (for sound scraping)
+### 1. Prerequisites
+- [Docker](https://docs.docker.com/get-docker/)
+- [Docker Compose](https://docs.docker.com/compose/install/)
 
-### Installation
-
+### 2. Setup
 1. **Clone the repository**
    ```bash
    git clone https://github.com/GabrielAgrela/Discord-Brain-Rot.git
    cd Discord-Brain-Rot
    ```
 
-2. **Create virtual environment**
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # Linux/Mac
-   # or: venv\Scripts\activate  # Windows
-   ```
-
-3. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-4. **Configure environment**
-   
-   Create a `.env` file:
+2. **Configure your environment**
+   Create a `.env` file in the root directory:
    ```env
    # Required
    DISCORD_BOT_TOKEN=your-discord-bot-token
-   FFMPEG_PATH=/usr/bin/ffmpeg
-   
-   # Sound scraping (optional)
-   CHROMEDRIVER_PATH=/usr/bin/chromedriver
-   
-   # ElevenLabs TTS (optional)
+
+   # ElevenLabs TTS (Optional)
    EL_key=your-elevenlabs-api-key
-   EL_voice_id_pt=voice-id-for-portuguese
-   EL_voice_id_en=voice-id-for-english
-   EL_voice_id_costa=voice-id-for-costa
+   EL_voice_id_pt=...
    
-   # AI Commentary (optional)
+   # AI Commentary (Optional)
    OPENROUTER_API_KEY=your-openrouter-api-key
    ```
 
-5. **Run the bot**
+3. **Launch**
    ```bash
-   python PersonalGreeter.py
-   ```
-
-6. **Start the web interface** (optional)
-   ```bash
-   python WebPage.py
-   ```
-
-### 🐳 Running with Docker (Recommended)
-
-The easiest way to run the bot and the web dashboard is using Docker Compose.
-
-1. **Configure your `.env` file** (see above).
-2. **Build and start the services**:
-   ```bash
+   # Build and start services in the background
    docker-compose up --build -d
    ```
-   The web dashboard will be available at `http://localhost:8080`.
-3. **Check logs**:
-   ```bash
-   # For the bot
-   docker-compose logs -f bot
-   # For the web interface
-   docker-compose logs -f web
-   ```
-4. **Stop services**:
-   ```bash
-   docker-compose down
-   ```
+
+### 3. Usage
+- **Discord Bot**: Once the container is running and logs show "Bot is ready", it will respond to commands in your server.
+- **Web Dashboard**: Accessible at [http://localhost:8080](http://localhost:8080).
+
+### 4. Management
+```bash
+# View logs
+docker-compose logs -f
+
+# Stop and remove containers
+docker-compose down
+```
 
 ---
 
