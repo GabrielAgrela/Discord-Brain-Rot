@@ -16,12 +16,9 @@ jobs:
         echo "Home: $HOME"
         ls -la
         
-    - name: Pull latest code
-      run: |
-        cd /home/gabi/github/Discord-Brain-Rot
-        git pull origin master
-        
+    - name: Checkout code
+      uses: actions/checkout@v4
+
     - name: Deploy with Docker Compose
       run: |
-        cd /home/gabi/github/Discord-Brain-Rot
         docker-compose up --build -d
