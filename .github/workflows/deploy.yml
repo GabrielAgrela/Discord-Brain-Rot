@@ -21,5 +21,7 @@ jobs:
         cd /home/gabi/github/Discord-Brain-Rot
         git pull origin master
         
-    - name: Restart service
-      run: sudo systemctl restart personalgreeter.service 
+    - name: Deploy with Docker Compose
+      run: |
+        cd /home/gabi/github/Discord-Brain-Rot
+        docker-compose up --build -d
