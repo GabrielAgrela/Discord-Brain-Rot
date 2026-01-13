@@ -33,6 +33,10 @@ DATABASE_PATH = PROJECT_ROOT / "database.db"
 # Log file path
 COMMAND_LOG_FILE = '/var/log/personalgreeter.log'
 
+# Backup directory (one level up from project root)
+BACKUP_DIR = PROJECT_ROOT.parent / "backups" / "discord-brainrot"
+BACKUP_EXCLUSIONS = ["venv", "actions-runner", ".git", "__pycache__", ".pytest_cache", "Logs", "Downloads", ".gemini"]
+
 
 # ============================================================================
 # Discord Configuration

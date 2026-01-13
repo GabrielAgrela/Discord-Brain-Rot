@@ -155,6 +155,15 @@ class AdminCog(commands.Cog):
             
         await ctx.followup.send(f"```{formatted}```", ephemeral=True)
 
+    @commands.slash_command(name="backup", description="Backup the entire project (Admin only)")
+    async def backup(self, ctx: discord.ApplicationContext):
+        """Backup the project folder."""
+        if not self._is_admin(ctx.author):
+            await ctx.respond("You don't have permission to use this command.", ephemeral=True)
+            return
+
+        await self.behavior.perform_backup(ctx)
+
 
 
 def setup(bot: discord.Bot, behavior=None):

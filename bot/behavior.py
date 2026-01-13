@@ -42,6 +42,7 @@ from bot.services.user_event import UserEventService
 from bot.services.voice_transformation import VoiceTransformationService
 from bot.services.stats import StatsService
 from bot.services.background import BackgroundService
+from bot.services.backup import BackupService
 
 
 
@@ -63,6 +64,7 @@ class BotBehavior:
         self._voice_transformation_service = VoiceTransformationService(bot, self._audio_service, self._message_service)
         self._stats_service = StatsService(bot, self._message_service, self._sound_service)
         self._background_service = BackgroundService(bot, self._audio_service, self._sound_service, self)
+        self._backup_service = BackupService(bot, self._message_service)
         
         from bot.services.ai_commentary import AICommentaryService
         self._ai_commentary_service = AICommentaryService(self)
@@ -328,5 +330,8 @@ class BotBehavior:
 
     async def delayed_list_selector_update(self, *args, **kwargs):
         return await self._sound_service.delayed_list_selector_update(*args, **kwargs)
+
+    async def perform_backup(self, interaction):
+        return await self._backup_service.perform_backup(interaction)
 
 

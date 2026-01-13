@@ -9,11 +9,15 @@ services:
       - FFMPEG_PATH=/usr/bin/ffmpeg
       - CHROMEDRIVER_PATH=/usr/bin/chromedriver
     volumes:
+      - /home/gabi/github/Discord-Brain-Rot/bot:/app/bot
+      - /home/gabi/github/Discord-Brain-Rot/PersonalGreeter.py:/app/PersonalGreeter.py
+      - /home/gabi/github/Discord-Brain-Rot/config.py:/app/config.py
       - /home/gabi/github/Discord-Brain-Rot/Sounds:/app/Sounds
       - /home/gabi/github/Discord-Brain-Rot/Data:/app/Data
       - /home/gabi/github/Discord-Brain-Rot/Downloads:/app/Downloads
       - /home/gabi/github/Discord-Brain-Rot/Logs:/app/Logs
       - /home/gabi/github/Discord-Brain-Rot/database.db:/app/database.db
+      - /home/gabi/github/backups/discord-brainrot:/backups/discord-brainrot
     command: python PersonalGreeter.py
 
   web:
@@ -25,6 +29,9 @@ services:
     env_file:
       - .env
     volumes:
+      - /home/gabi/github/Discord-Brain-Rot/bot:/app/bot
+      - /home/gabi/github/Discord-Brain-Rot/WebPage.py:/app/WebPage.py
+      - /home/gabi/github/Discord-Brain-Rot/config.py:/app/config.py
       - /home/gabi/github/Discord-Brain-Rot/database.db:/app/database.db
       - /home/gabi/github/Discord-Brain-Rot/templates:/app/templates
       - /home/gabi/github/Discord-Brain-Rot/static:/app/static
