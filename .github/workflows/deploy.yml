@@ -21,4 +21,5 @@ jobs:
 
     - name: Deploy with Docker Compose
       run: |
-        docker-compose up --build -d
+        docker compose version
+        docker compose up --build -d
