@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from typing import TypeVar, Generic, Optional, List, Any
 import sqlite3
 import os
+import config
 
 T = TypeVar('T')
 
@@ -46,9 +47,7 @@ class BaseRepository(ABC, Generic[T]):
             if self._use_shared and BaseRepository._shared_db_path:
                 db_path = BaseRepository._shared_db_path
             else:
-                script_dir = os.path.dirname(os.path.abspath(__file__))
-                project_root = os.path.dirname(os.path.dirname(script_dir))
-                db_path = os.path.join(project_root, "database.db")
+                db_path = str(config.DATABASE_PATH)
         self._db_path = db_path
     
     @property

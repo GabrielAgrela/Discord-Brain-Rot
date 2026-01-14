@@ -37,4 +37,8 @@ class SoundView(View):
         super().__init__(timeout=None)
         from bot.ui.buttons.sounds import PlaySoundButton
         for sound in similar_sounds:
-            self.add_item(PlaySoundButton(bot_behavior, sound[1], style=discord.ButtonStyle.danger, label=sound[2].split('/')[-1].replace('.mp3', '')))
+            # Ensure label is 80 chars or fewer
+            label = sound[2].split('/')[-1].replace('.mp3', '')
+            if len(label) > 80:
+                label = label[:77] + "..."
+            self.add_item(PlaySoundButton(bot_behavior, sound[1], style=discord.ButtonStyle.danger, label=label))

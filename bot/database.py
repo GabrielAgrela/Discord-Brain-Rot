@@ -20,6 +20,7 @@ import sqlite3
 import os
 import datetime
 import time
+import config
 from rapidfuzz import fuzz
 
 
@@ -39,8 +40,7 @@ class Database:
         if self._initialized:
             return
         self._initialized = True
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        self.db_path = os.path.join(script_dir, "..", "database.db")
+        self.db_path = str(config.DATABASE_PATH)
         # Allow usage from background threads with reasonable timeout
         self.conn = sqlite3.connect(self.db_path, check_same_thread=False, timeout=5.0)
         
@@ -72,19 +72,19 @@ class Database:
     def _load_sound_cache(self):
         """Load all sounds into memory for fast similarity search."""
         try:
-            conn = sqlite3.connect(self.db_path, check_same_thread=False)
-            cursor = conn.cursor()
+            # Use the existing connection if possible to see uncommitted changes in the same session
+            cursor = self.conn.cursor()
             cursor.execute("SELECT * FROM sounds")
             Database._sound_cache = cursor.fetchall()
             
             # Pre-normalize all filenames for faster matching
             Database._sound_cache_normalized = [
-                (sound, self.normalize_text(sound[2]))  # (sound_tuple, normalized_filename)
+                (dict(sound) if isinstance(sound, sqlite3.Row) else sound, 
+                 self.normalize_text(sound['Filename'] if isinstance(sound, sqlite3.Row) else sound[2]))
                 for sound in Database._sound_cache
             ]
             Database._cache_timestamp = time.time()
             print(f"[Database] Sound cache loaded: {len(Database._sound_cache)} sounds")
-            conn.close()
         except sqlite3.Error as e:
             print(f"[Database] Error loading sound cache: {e}")
             Database._sound_cache = []
@@ -227,7 +227,9 @@ class Database:
         except sqlite3.Error as e:
             print(f"An error occurred: {e}")
 
-    def insert_sound(self, originalfilename, filename, favorite=0, date=datetime.datetime.now()):
+    def insert_sound(self, originalfilename, filename, favorite=0, date=None):
+        if date is None:
+            date = datetime.datetime.now()
         try:
             self.cursor.execute("INSERT INTO sounds (originalfilename, Filename, favorite, blacklist, timestamp) VALUES (?, ?, ?, 0, ?);", (originalfilename, filename, favorite, date))
             self.conn.commit()

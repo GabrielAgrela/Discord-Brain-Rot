@@ -1,6 +1,7 @@
 import discord
 from discord import ui
 import asyncio
+import sqlite3
 from bot.database import Database
 
 
@@ -99,9 +100,14 @@ class SoundSelect(ui.Select):
         self.bot_behavior = bot_behavior
         options = []
         for sound in sounds[:25]:
+            # sound can be a tuple or Row, handle both
+            filename = sound['Filename'] if isinstance(sound, sqlite3.Row) else sound[2]
+            label = filename.replace('.mp3', '')
+            if len(label) > 80:
+                label = label[:77] + "..."
             options.append(discord.SelectOption(
-                label=sound[2].replace('.mp3', '') if sound[2] else str(sound[0]),
-                value=sound[2]  # Use Filename
+                label=label,
+                value=filename
             ))
         super().__init__(
             placeholder="Select a sound to play...",
@@ -202,9 +208,15 @@ class SimilarSoundsSelect(ui.Select):
         self.bot_behavior = bot_behavior
         options = []
         for sound, similarity in similar_sounds:
-            sound_name = sound[2]  # Filename index is 2
+            # sound can be a tuple or Row, handle both
+            sound_name = sound['Filename'] if isinstance(sound, sqlite3.Row) else sound[2]
+            label = f"{sound_name.replace('.mp3', '')} ({int(similarity)}%)"
+            if len(label) > 80:
+                # Truncate while keeping the similarity percentage
+                suffix = f" ({int(similarity)}%)"
+                label = sound_name.replace('.mp3', '')[:80-len(suffix)-3] + "..." + suffix
             options.append(discord.SelectOption(
-                label=f"{sound_name.replace('.mp3', '')} ({int(similarity)}%)",
+                label=label,
                 value=sound_name
             ))
         super().__init__(

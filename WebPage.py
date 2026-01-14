@@ -20,7 +20,7 @@ def get_actions():
     offset = (page - 1) * per_page
     search_query = request.args.get('search', '').strip()
 
-    conn = sqlite3.connect('database.db')
+    conn = sqlite3.connect('Data/database.db')
     cursor = conn.cursor()
     
     base_query = """
@@ -36,7 +36,7 @@ def get_actions():
         search_term = f"%{search_query}%"
         params.extend([search_term, search_term, search_term, search_term])
 
-    order_limit_offset = " ORDER BY a.id DESC LIMIT ? OFFSET ?"
+    order_limit_offset = " ORDER BY a.timestamp DESC, a.id DESC LIMIT ? OFFSET ?"
     params.extend([per_page, offset])
 
     final_query = base_query + where_clause + order_limit_offset
@@ -62,7 +62,7 @@ def get_actions():
     })
 
 def get_total_count(table_name, search_query=None):
-    conn = sqlite3.connect('database.db')
+    conn = sqlite3.connect('Data/database.db')
     cursor = conn.cursor()
     params = []
     where_clause = ""
@@ -105,7 +105,7 @@ def get_favorites():
     offset = (page - 1) * per_page
     search_query = request.args.get('search', '').strip()
 
-    conn = sqlite3.connect('database.db')
+    conn = sqlite3.connect('Data/database.db')
     cursor = conn.cursor()
 
     base_query = "SELECT Filename, originalfilename FROM sounds WHERE favorite = 1"
@@ -117,7 +117,7 @@ def get_favorites():
         search_term = f"%{search_query}%"
         params.extend([search_term, search_term])
 
-    order_limit_offset = " ORDER BY id DESC LIMIT ? OFFSET ?"
+    order_limit_offset = " ORDER BY timestamp DESC, id DESC LIMIT ? OFFSET ?"
     params.extend([per_page, offset])
 
     final_query = base_query + where_clause + order_limit_offset
@@ -150,7 +150,7 @@ def get_all_sounds():
     offset = (page - 1) * per_page
     search_query = request.args.get('search', '').strip()
 
-    conn = sqlite3.connect('database.db')
+    conn = sqlite3.connect('Data/database.db')
     cursor = conn.cursor()
 
     base_query = "SELECT Filename, originalfilename, timestamp FROM sounds"
@@ -162,7 +162,7 @@ def get_all_sounds():
         search_term = f"%{search_query}%"
         params.extend([search_term, search_term])
 
-    order_limit_offset = " ORDER BY id DESC LIMIT ? OFFSET ?"
+    order_limit_offset = " ORDER BY timestamp DESC, id DESC LIMIT ? OFFSET ?"
     params.extend([per_page, offset])
 
     final_query = base_query + where_clause + order_limit_offset
@@ -199,7 +199,7 @@ def request_play_sound():
     # ----------------------------------------------------------------------
 
     try:
-        conn = sqlite3.connect('database.db')
+        conn = sqlite3.connect('Data/database.db')
         cursor = conn.cursor()
         cursor.execute(
             """
@@ -235,7 +235,7 @@ def get_analytics_summary():
     except ValueError:
         days = 0
     
-    conn = sqlite3.connect('database.db')
+    conn = sqlite3.connect('Data/database.db')
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
@@ -307,7 +307,7 @@ def get_analytics_top_users():
         days = 7
         limit = 10
     
-    conn = sqlite3.connect('database.db')
+    conn = sqlite3.connect('Data/database.db')
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
@@ -350,7 +350,7 @@ def get_analytics_top_sounds():
         days = 7
         limit = 10
     
-    conn = sqlite3.connect('database.db')
+    conn = sqlite3.connect('Data/database.db')
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
@@ -393,7 +393,7 @@ def get_analytics_heatmap():
     except ValueError:
         days = 30
     
-    conn = sqlite3.connect('database.db')
+    conn = sqlite3.connect('Data/database.db')
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
@@ -434,7 +434,7 @@ def get_analytics_timeline():
     except ValueError:
         days = 30
     
-    conn = sqlite3.connect('database.db')
+    conn = sqlite3.connect('Data/database.db')
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
@@ -488,7 +488,7 @@ def get_analytics_recent():
     except ValueError:
         limit = 20
     
-    conn = sqlite3.connect('database.db')
+    conn = sqlite3.connect('Data/database.db')
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     

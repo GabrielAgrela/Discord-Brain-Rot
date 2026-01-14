@@ -28,7 +28,7 @@ DATA_DIR = PROJECT_ROOT / "Data"
 LOGS_DIR = PROJECT_ROOT / "Logs"
 
 # Database path
-DATABASE_PATH = PROJECT_ROOT / "database.db"
+DATABASE_PATH = DATA_DIR / "database.db"
 
 # Log file path
 COMMAND_LOG_FILE = '/var/log/personalgreeter.log'

@@ -2,6 +2,7 @@ import discord
 from bot.repositories import EventRepository, ActionRepository
 from bot.database import Database  # Keep for get_sounds_by_similarity
 from typing import Optional
+import sqlite3
 
 class UserEventService:
     """
@@ -35,8 +36,12 @@ class UserEventService:
                 return False
             
             # Get the most similar sound
-            # results[0] is (sound_data, score), sound_data[2] is filename
-            most_similar_sound = results[0][0][2].replace('.mp3', '')
+            # results[0] is (sound_data, score)
+            sound_data = results[0][0]
+            if isinstance(sound_data, (sqlite3.Row, dict)):
+                most_similar_sound = sound_data['Filename'].replace('.mp3', '')
+            else:
+                most_similar_sound = sound_data[2].replace('.mp3', '')
             
             # Add the event sound to the database
             success = self.event_repo.toggle(username, event, most_similar_sound)

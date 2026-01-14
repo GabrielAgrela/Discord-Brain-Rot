@@ -1,4 +1,5 @@
 import discord
+from typing import Optional
 import asyncio
 from datetime import datetime
 from bot.repositories import ActionRepository
@@ -15,7 +16,7 @@ class StatsService:
         self.sound_service = sound_service
         self.action_repo = ActionRepository()
 
-    async def display_stats(self, requesting_user, number_users=20, number_sounds=5, days=700, by="plays"):
+    async def display_stats(self, requesting_user, number_users=20, number_sounds=5, days=700, by="plays", guild: Optional[discord.Guild] = None):
         """
         Display stats in two phases:
         1. Server-wide summary embed
@@ -23,7 +24,7 @@ class StatsService:
         """
         self.action_repo.insert(requesting_user.name, "list_top_users", by)
         
-        bot_channel = self.message_service.get_bot_channel(self.bot.guilds[0] if self.bot.guilds else None)
+        bot_channel = self.message_service.get_bot_channel(guild)
         if not bot_channel:
             return
 
@@ -75,7 +76,7 @@ class StatsService:
         return embed
 
     # Keep the old method for backwards compatibility
-    async def display_top_users(self, requesting_user, number_users=5, number_sounds=5, days=7, by="plays"):
+    async def display_top_users(self, requesting_user, number_users=5, number_sounds=5, days=7, by="plays", guild: Optional[discord.Guild] = None):
         """Calculate and display top users and sounds in the bot channel."""
         # Redirect to new method
-        await self.display_stats(requesting_user, number_users, number_sounds, days, by)
+        await self.display_stats(requesting_user, number_users, number_sounds, days, by, guild)

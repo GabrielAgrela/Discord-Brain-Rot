@@ -12,6 +12,7 @@ import asyncio
 import discord
 from discord.ext import commands
 from discord.commands import Option
+import sqlite3
 
 from bot.database import Database
 from bot.models.sound import SoundEffect
@@ -26,8 +27,17 @@ async def _get_sound_autocomplete(ctx: discord.AutocompleteContext):
             return []
         
         similar_sounds = db.get_sounds_by_similarity(current, 15)
-        # similar_sounds is a list of (sound_tuple, score)
-        return [sound[0][2].split('/')[-1].replace('.mp3', '') for sound in similar_sounds]
+        # similar_sounds is a list of (sound_data, score)
+        completions = []
+        for s in similar_sounds:
+            sound_data = s[0]
+            # Robustly get filename from Row, dict, or tuple
+            if isinstance(sound_data, (sqlite3.Row, dict)):
+                filename = sound_data['Filename']
+            else:
+                filename = sound_data[2]
+            completions.append(filename.split('/')[-1].replace('.mp3', ''))
+        return completions
     except Exception as e:
         print(f"Autocomplete error: {e}")
         return []
@@ -70,11 +80,11 @@ class SoundCog(commands.Cog):
             
             if message == "random":
                 asyncio.run_coroutine_threadsafe(
-                    self.behavior._sound_service.play_random_sound(username, effects=effects.to_dict()), 
+                    self.behavior._sound_service.play_random_sound(username, effects=effects.to_dict(), guild=ctx.guild), 
                     self.bot.loop
                 )
             else:
-                await self.behavior._sound_service.play_request(message, author.name, effects=effects.to_dict())
+                await self.behavior._sound_service.play_request(message, author.name, effects=effects.to_dict(), guild=ctx.guild)
                 
         except Exception as e:
             print(f"Error in toca command: {e}")
@@ -103,24 +113,24 @@ class SoundCog(commands.Cog):
         number: Option(int, "Number of sounds", default=10, required=False)
     ):
         """Show recently downloaded sounds."""
-        await self.behavior._sound_service.list_sounds(ctx, number)
+        await self.behavior.list_sounds(ctx.user, number, guild=ctx.guild)
     @commands.slash_command(name="subwaysurfers", description="Play Subway Surfers gameplay")
     async def subway_surfers(self, ctx: discord.ApplicationContext):
         """Play Subway Surfers."""
         await ctx.respond("Processing your request...", delete_after=0)
-        await self.behavior._brain_rot_service.subway_surfers(ctx.user)
+        await self.behavior.subway_surfers(ctx.user, guild=ctx.guild)
 
     @commands.slash_command(name="familyguy", description="Play Family Guy clip")
     async def family_guy(self, ctx: discord.ApplicationContext):
         """Play Family Guy."""
         await ctx.respond("Processing your request...", delete_after=0)
-        await self.behavior._brain_rot_service.family_guy(ctx.user)
+        await self.behavior.family_guy(ctx.user, guild=ctx.guild)
 
     @commands.slash_command(name="slice", description="Play Slice All gameplay")
     async def slice(self, ctx: discord.ApplicationContext):
         """Play Slice All."""
         await ctx.respond("Processing your request...", delete_after=0)
-        await self.behavior._brain_rot_service.slice_all(ctx.user)
+        await self.behavior.slice_all(ctx.user, guild=ctx.guild)
 
 def setup(bot: discord.Bot, behavior=None):
     """

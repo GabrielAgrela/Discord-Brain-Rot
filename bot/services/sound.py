@@ -7,6 +7,7 @@ import aiohttp
 import functools
 import uuid
 import time
+import sqlite3
 from typing import Optional, List, Tuple, Any
 from bot.repositories import SoundRepository, ActionRepository, ListRepository
 from bot.database import Database  # Keep for get_sounds_by_similarity until migrated
@@ -109,7 +110,7 @@ class SoundService:
         except Exception as e:
             print(f"[SoundService] Error playing random sound from list {list_name}: {e}")
 
-    async def play_request(self, sound_id_or_name: str, user: str, exact: bool = False, effects: Optional[dict] = None):
+    async def play_request(self, sound_id_or_name: str, user: str, exact: bool = False, effects: Optional[dict] = None, guild: Optional[discord.Guild] = None):
         """Play a specific sound requested by a user, with fuzzy matching support."""
         if exact:
             # First try exact match from DB
@@ -124,7 +125,14 @@ class SoundService:
         else:
             # Find the best match using similarity
             results = self.db.get_sounds_by_similarity(sound_id_or_name, 1)
-            filenames = [r[0][2] for r in results] if results else []
+            filenames = []
+            for r in results:
+                sound_data = r[0]
+                # Robustly get filename from Row, dict, or tuple
+                if isinstance(sound_data, (sqlite3.Row, dict)):
+                    filenames.append(sound_data['Filename'])
+                else:
+                    filenames.append(sound_data[2])
 
         if not filenames:
             await self.message_service.send_error(f"No sounds found matching '{sound_id_or_name}'.")
@@ -353,7 +361,13 @@ class SoundService:
             seen_filenames.add(audio_file)  # Exclude current sound
             similar_sounds_list = []
             for s in all_similar:
-                filename = s[0][2]
+                sound_data = s[0]
+                # Robustly get filename from Row, dict, or tuple
+                if isinstance(sound_data, (sqlite3.Row, dict)):
+                    filename = sound_data['Filename']
+                else:
+                    filename = sound_data[2]
+                
                 if filename not in seen_filenames:
                     seen_filenames.add(filename)
                     similar_sounds_list.append(s)
@@ -394,7 +408,11 @@ class SoundService:
                 seen_filenames.add(audio_file)  # Exclude current sound
                 similar_sounds = []
                 for s in results:
-                    filename = s[0][2]
+                    # s is a (sound_data, score) pair from get_sounds_by_similarity
+                    sound_data = s[0]
+                    # Handle both Row and Tuple
+                    filename = sound_data['Filename'] if isinstance(sound_data, sqlite3.Row) else sound_data[2]
+                    
                     if filename not in seen_filenames:
                         seen_filenames.add(filename)
                         similar_sounds.append(s)
@@ -411,10 +429,10 @@ class SoundService:
         except Exception as e:
             print(f"[SoundService] Error in delayed_list_selector_update: {e}")
 
-    async def list_sounds(self, user, count=0):
+    async def list_sounds(self, user, count=0, guild: Optional[discord.Guild] = None):
         """List sounds in the bot channel."""
         try:
-            bot_channel = self.message_service.get_bot_channel(self.bot.guilds[0] if self.bot.guilds else None)
+            bot_channel = self.message_service.get_bot_channel(guild)
             if not bot_channel:
                 return
 

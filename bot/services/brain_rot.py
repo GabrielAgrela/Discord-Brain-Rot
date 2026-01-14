@@ -21,7 +21,7 @@ class BrainRotService:
         self.cooldown_message: Optional[discord.Message] = None
         self.data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Data"))
 
-    async def run_random(self, user):
+    async def run_random(self, user, guild=None):
         """Run a random brain rot function."""
         if self.lock.locked():
             if self.cooldown_message:
@@ -30,7 +30,7 @@ class BrainRotService:
                 except:
                     pass
             
-            bot_channel = self.message_service.get_bot_channel()
+            bot_channel = self.message_service.get_bot_channel(guild)
             if bot_channel:
                 self.cooldown_message = await self.message_service.send_message(
                     title="🧠 Brain Rot Active 🧠",
@@ -48,7 +48,7 @@ class BrainRotService:
                 ]
                 chosen = random.choice(functions)
                 try:
-                    await chosen(user)
+                    await chosen(user, guild)
                     self.action_repo.insert(user.name if hasattr(user, 'name') else str(user), 
                                          f"brain_rot_{chosen.__name__}", "")
                 except Exception as e:
@@ -56,19 +56,19 @@ class BrainRotService:
 
         asyncio.create_task(run())
 
-    async def subway_surfers(self, user=None):
+    async def subway_surfers(self, user=None, guild=None):
         """Send a random Subway Surfers video clip to chat."""
-        await self._send_video_clip("SubwaySurfers", "Subway Surfers", user)
+        await self._send_video_clip("SubwaySurfers", "Subway Surfers", user, guild)
 
-    async def slice_all(self, user=None):
+    async def slice_all(self, user=None, guild=None):
         """Send a random Slice All video clip to chat."""
-        await self._send_video_clip("SliceAll", "Slice All", user)
+        await self._send_video_clip("SliceAll", "Slice All", user, guild)
 
-    async def family_guy(self, user=None):
+    async def family_guy(self, user=None, guild=None):
         """Send a random Family Guy video clip to chat."""
-        await self._send_video_clip("FamilyGuy", "Family Guy", user)
+        await self._send_video_clip("FamilyGuy", "Family Guy", user, guild)
 
-    async def _send_video_clip(self, folder_name: str, display_name: str, user=None):
+    async def _send_video_clip(self, folder_name: str, display_name: str, user=None, guild=None):
         """Send a random video clip from the specified folder."""
         folder = os.path.join(self.data_dir, folder_name)
         if not os.path.exists(folder):
@@ -84,7 +84,7 @@ class BrainRotService:
         file_path = os.path.join(folder, file)
         title_num = files.index(file) + 1
         
-        bot_channel = self.message_service.get_bot_channel()
+        bot_channel = self.message_service.get_bot_channel(guild)
         if not bot_channel:
             return
             
@@ -101,7 +101,7 @@ class BrainRotService:
         
         # Re-send controls to keep them at the bottom
         if hasattr(self, 'message_service') and self.message_service._bot_behavior:
-            await self.message_service.send_controls(self.message_service._bot_behavior)
+            await self.message_service.send_controls(self.message_service._bot_behavior, guild=guild)
         
         # Wait for video duration + buffer, then delete
         try:

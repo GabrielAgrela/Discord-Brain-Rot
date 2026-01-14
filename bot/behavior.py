@@ -155,10 +155,10 @@ class BotBehavior:
                 return True
         return False
 
-    async def display_top_users(self, user, number_users=5, number_sounds=5, days=7, by="plays"):
+    async def display_top_users(self, user, number_users=5, number_sounds=5, days=7, by="plays", guild: Optional[discord.Guild] = None):
         await self.delete_controls_message()  # Delete controls first so it can be re-sent at bottom
-        await self._stats_service.display_top_users(user, number_users, number_sounds, days, by)
-        await self.send_controls()
+        await self._stats_service.display_top_users(user, number_users, number_sounds, days, by, guild)
+        await self.send_controls(guild=guild)
 
     async def prompt_upload_sound(self, interaction):
         return await self._sound_service.prompt_upload_sound(interaction)
@@ -285,8 +285,8 @@ class BotBehavior:
 
 
     
-    async def list_sounds(self, user, count=0):
-        return await self._sound_service.list_sounds(user, count)
+    async def list_sounds(self, user, count=0, guild=None):
+        return await self._sound_service.list_sounds(user, count, guild)
 
 
 
@@ -294,17 +294,18 @@ class BotBehavior:
 
 
 
-    async def run_random_brain_rot(self, user):
-        return await self._brain_rot_service.run_random(user)
 
-    async def subway_surfers(self, user):
-        return await self._brain_rot_service.subway_surfers(user)
+    async def run_random_brain_rot(self, user, guild=None):
+        return await self._brain_rot_service.run_random(user, guild)
 
-    async def slice_all(self, user):
-        return await self._brain_rot_service.slice_all(user)
+    async def subway_surfers(self, user, guild=None):
+        return await self._brain_rot_service.subway_surfers(user, guild)
 
-    async def family_guy(self, user):
-        return await self._brain_rot_service.family_guy(user)
+    async def slice_all(self, user, guild=None):
+        return await self._brain_rot_service.slice_all(user, guild)
+
+    async def family_guy(self, user, guild=None):
+        return await self._brain_rot_service.family_guy(user, guild)
 
     async def send_message(self, **kwargs):
         # Merge local color if not provided

@@ -213,7 +213,7 @@ class SoundRepository(BaseRepository[Sound]):
                 FROM sounds s
                 INNER JOIN UserFavorites uf ON CAST(uf.target AS INTEGER) = s.id
                 WHERE uf.rn = 1 AND uf.action = 'favorite_sound'
-                ORDER BY s.id DESC
+                ORDER BY s.timestamp DESC, s.id DESC
                 LIMIT ?
                 """,
                 (user, num_sounds)
@@ -230,7 +230,7 @@ class SoundRepository(BaseRepository[Sound]):
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
         
         rows = self._execute(
-            f"SELECT * FROM sounds {where_clause} ORDER BY id {sort} LIMIT ?",
+            f"SELECT * FROM sounds {where_clause} ORDER BY timestamp {sort}, id {sort} LIMIT ?",
             (num_sounds,)
         )
         return [tuple(row) for row in rows]

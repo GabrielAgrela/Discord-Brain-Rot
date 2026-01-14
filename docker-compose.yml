@@ -16,7 +16,6 @@ services:
       - /home/gabi/github/Discord-Brain-Rot/Data:/app/Data
       - /home/gabi/github/Discord-Brain-Rot/Downloads:/app/Downloads
       - /home/gabi/github/Discord-Brain-Rot/Logs:/app/Logs
-      - /home/gabi/github/Discord-Brain-Rot/database.db:/app/database.db
       - /home/gabi/github/backups/discord-brainrot:/backups/discord-brainrot
     command: python PersonalGreeter.py
 
@@ -32,7 +31,7 @@ services:
       - /home/gabi/github/Discord-Brain-Rot/bot:/app/bot
       - /home/gabi/github/Discord-Brain-Rot/WebPage.py:/app/WebPage.py
       - /home/gabi/github/Discord-Brain-Rot/config.py:/app/config.py
-      - /home/gabi/github/Discord-Brain-Rot/database.db:/app/database.db
+      - /home/gabi/github/Discord-Brain-Rot/Data:/app/Data
       - /home/gabi/github/Discord-Brain-Rot/templates:/app/templates
       - /home/gabi/github/Discord-Brain-Rot/static:/app/static
     command: python WebPage.py

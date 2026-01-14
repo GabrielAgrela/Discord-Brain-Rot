@@ -68,8 +68,7 @@ class SoundDownloader:
 
     def _check_sound_exists_in_db(self, filename: str) -> bool:
         """
-        Thread-safe check if sound exists in database.
-        Creates its own connection to avoid cursor conflicts.
+        Check if sound exists in database.
         
         Args:
             filename: Original filename to check.
@@ -77,16 +76,10 @@ class SoundDownloader:
         Returns:
             True if sound exists, False otherwise.
         """
-        import sqlite3
         try:
-            db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "database.db"))
-            conn = sqlite3.connect(db_path, timeout=5.0)
-            cursor = conn.cursor()
-            cursor.execute("SELECT 1 FROM sounds WHERE originalfilename = ? LIMIT 1;", (filename,))
-            result = cursor.fetchone()
-            conn.close()
-            return result is not None
-        except sqlite3.Error as e:
+            # self.db is the Database singleton instance
+            return self.db.get_sound(filename, original_filename=True) is not None
+        except Exception as e:
             print(f"{self.__class__.__name__}: DB check error: {e}")
             return False
 
