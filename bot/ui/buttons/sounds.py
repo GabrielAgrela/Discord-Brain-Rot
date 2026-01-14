@@ -13,9 +13,19 @@ class ReplayButton(Button):
         
 
     async def callback(self, interaction):
-        await interaction.response.defer()
-        asyncio.create_task(self.bot_behavior._audio_service.play_audio(interaction.user.voice.channel, self.audio_file, interaction.user.name))
-        Database().insert_action(interaction.user.name, "replay_sound", Database().get_sounds_by_similarity(self.audio_file)[0][0][0])
+        try:
+            await interaction.response.defer()
+            channel = interaction.user.voice.channel if interaction.user.voice else None
+            if not channel:
+                channel = self.bot_behavior._audio_service.get_largest_voice_channel(interaction.guild)
+                
+            if channel:
+                asyncio.create_task(self.bot_behavior._audio_service.play_audio(channel, self.audio_file, interaction.user.name))
+                Database().insert_action(interaction.user.name, "replay_sound", Database().get_sounds_by_similarity(self.audio_file)[0][0][0])
+            else:
+                await interaction.followup.send("No voice channel available! 😭", ephemeral=True)
+        except Exception as e:
+            print(f"[ReplayButton] Error in callback: {e}")
  
 class STSButton(Button):
     def __init__(self, bot_behavior, audio_file, char, **kwargs):
@@ -147,14 +157,17 @@ class PlaySoundButton(Button):
             self.row = row  # Set the row if provided
 
     async def callback(self, interaction):
-        await interaction.response.defer()
-        channel = self.bot_behavior._audio_service.get_user_voice_channel(interaction.guild, interaction.user.name)
-        if not channel:
-            channel = self.bot_behavior._audio_service.get_largest_voice_channel(interaction.guild)
-        if channel:
-            asyncio.create_task(self.bot_behavior._audio_service.play_audio(channel, self.sound_name, interaction.user.name))
-        else:
-            await interaction.followup.send("No voice channel available to play sounds! 😭", ephemeral=True)
+        try:
+            await interaction.response.defer()
+            channel = self.bot_behavior._audio_service.get_user_voice_channel(interaction.guild, interaction.user.name)
+            if not channel:
+                channel = self.bot_behavior._audio_service.get_largest_voice_channel(interaction.guild)
+            if channel:
+                asyncio.create_task(self.bot_behavior._audio_service.play_audio(channel, self.sound_name, interaction.user.name))
+            else:
+                await interaction.followup.send("No voice channel available to play sounds! 😭", ephemeral=True)
+        except Exception as e:
+            print(f"[PlaySoundButton] Error in callback for '{self.sound_name}': {e}")
 
 class SlapButton(Button):
     def __init__(self, bot_behavior, audio_file, **kwargs):
@@ -200,22 +213,27 @@ class PlaySlapButton(Button):
         self.bot_behavior = bot_behavior
 
     async def callback(self, interaction):
-        await interaction.response.defer()
-        # Get a random slap sound from the database
-        slap_sounds = Database().get_sounds(slap=True, num_sounds=100)
-        if slap_sounds:
-            random_slap = random.choice(slap_sounds)
-            # Use fast silent slap path - stops current audio, plays immediately, no embed
-            channel = self.bot_behavior._audio_service.get_user_voice_channel(interaction.guild, interaction.user.name)
-            if not channel:
-                channel = self.bot_behavior._audio_service.get_largest_voice_channel(interaction.guild)
-            if channel:
-                asyncio.create_task(self.bot_behavior._audio_service.play_slap(
-                    channel, random_slap[2], interaction.user.name
-                ))
-                Database().insert_action(interaction.user.name, "play_slap", random_slap[0])
-        else:
-            await interaction.followup.send("No slap sounds found in the database!", ephemeral=True, delete_after=5)
+        try:
+            await interaction.response.defer()
+            # Get a random slap sound from the database
+            slap_sounds = Database().get_sounds(slap=True, num_sounds=100)
+            if slap_sounds:
+                random_slap = random.choice(slap_sounds)
+                # Use fast silent slap path - stops current audio, plays immediately, no embed
+                channel = self.bot_behavior._audio_service.get_user_voice_channel(interaction.guild, interaction.user.name)
+                if not channel:
+                    channel = self.bot_behavior._audio_service.get_largest_voice_channel(interaction.guild)
+                if channel:
+                    asyncio.create_task(self.bot_behavior._audio_service.play_slap(
+                        channel, random_slap[2], interaction.user.name
+                    ))
+                    Database().insert_action(interaction.user.name, "play_slap", random_slap[0])
+                else:
+                    await interaction.followup.send("Join a voice channel first! 👋", ephemeral=True)
+            else:
+                await interaction.followup.send("No slap sounds found in the database!", ephemeral=True, delete_after=5)
+        except Exception as e:
+            print(f"[PlaySlapButton] Error in callback: {e}")
 
 class AssignUserEventButton(Button):
     def __init__(self, bot_behavior, audio_file, emoji="👤", style=discord.ButtonStyle.primary, **kwargs):

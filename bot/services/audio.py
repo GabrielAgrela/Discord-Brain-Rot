@@ -124,6 +124,7 @@ class AudioService:
         
         async with lock:
             try:
+                print(f"[AudioService] [LOCK ACQUIRED] for {channel.guild.name}")
                 voice_client = channel.guild.voice_client
 
                 if voice_client:
@@ -136,7 +137,12 @@ class AudioService:
                             print(f"[AudioService] Error forcing disconnect: {e}")
                     elif voice_client.channel.id != channel.id:
                         print(f"[AudioService] Moving from {voice_client.channel.name} to {channel.name}")
-                        await voice_client.move_to(channel)
+                        try:
+                            await voice_client.move_to(channel)
+                        except asyncio.TimeoutError:
+                            print(f"[AudioService] Timeout moving to {channel.name}. Reconnecting...")
+                            await voice_client.disconnect(force=True)
+                            voice_client = await channel.connect(timeout=10.0)
                         # Restart keyword detection if moved
                         await self.start_keyword_detection(channel.guild)
                         return voice_client
@@ -189,12 +195,13 @@ class AudioService:
 
     def get_user_voice_channel(self, guild: discord.Guild, user_name: str) -> Optional[discord.VoiceChannel]:
         """Find the voice channel where a specific user is currently connected."""
-        user_name_parts = user_name.split('#')
-        name = user_name_parts[0]
+        # Use member object if possible, or search by name
+        # Discord removed discriminators, so we check for name only or name#discriminator (legacy)
+        search_name = user_name.split('#')[0]
         
         for channel in guild.voice_channels:
             for member in channel.members:
-                if member.name == name:
+                if member.name == search_name or str(member) == user_name:
                     return channel
         return None
 
@@ -265,6 +272,7 @@ class AudioService:
                         num_suggestions: int = 25,
                         sts_char: str = None):
         """Play an audio file in the specified voice channel."""
+        print(f"[AudioService] play_audio(file={audio_file}, user={user}, guild={channel.guild.name})")
         MAX_RETRIES = 3
 
         if self.mute_service.is_muted:
@@ -497,7 +505,7 @@ class AudioService:
                     
                     # Re-send controls to keep them at the bottom
                     if hasattr(self, '_behavior') and self._behavior:
-                        await self.message_service.send_controls(self._behavior)
+                        await self.message_service.send_controls(self._behavior, guild=channel.guild)
                 else:
                     # Slap sound - minimal message
                     embed = discord.Embed(title="👋 Slap!", color=discord.Color.orange())

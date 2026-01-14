@@ -1,4 +1,5 @@
 import asyncio
+from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
 import time
 import discord
@@ -212,8 +213,9 @@ class BotBehavior:
     async def clean_buttons(self, count=5):
         return await self._message_service.clean_buttons(count)
     
-    async def get_bot_channel(self, bot_channel=None):
-        return self._message_service.get_bot_channel(self.bot.guilds[0] if self.bot.guilds else None)
+    async def get_bot_channel(self, guild: Optional[discord.Guild] = None):
+        """Get the bot's primary text channel for a guild."""
+        return self._message_service.get_bot_channel(guild)
 
     def get_mute_remaining(self):
         return self._mute_service.get_remaining_seconds()
@@ -257,17 +259,17 @@ class BotBehavior:
     async def play_sound_periodically(self):
         pass # Handled by BackgroundService
 
-    async def play_random_sound(self, user="admin", effects=None):
-        return await self._sound_service.play_random_sound(user, effects)
+    async def play_random_sound(self, user="admin", effects=None, guild=None):
+        return await self._sound_service.play_random_sound(user, effects, guild)
 
-    async def play_random_favorite_sound(self, username):
-        return await self._sound_service.play_random_favorite_sound(username)
+    async def play_random_favorite_sound(self, username, guild=None):
+        return await self._sound_service.play_random_favorite_sound(username, guild)
 
     async def play_random_sound_from_list(self, list_name, username):
         return await self._sound_service.play_random_sound_from_list(list_name, username)
 
-    async def play_request(self, id, user, exact=False, effects=None):
-        return await self._sound_service.play_request(id, user, exact, effects)
+    async def play_request(self, id, user, exact=False, effects=None, guild=None):
+        return await self._sound_service.play_request(id, user, exact, effects, guild)
 
     async def change_filename(self, oldfilename, newfilename, user):
         return await self._sound_service.change_filename(oldfilename, newfilename, user)
@@ -313,8 +315,9 @@ class BotBehavior:
     async def is_channel_empty(self, channel):
         return self._audio_service.is_channel_empty(channel)
 
-    async def send_controls(self, force=False):
-        return await self._message_service.send_controls(self)
+    async def send_controls(self, force=False, guild: Optional[discord.Guild] = None):
+        """Send main bot controls."""
+        return await self._message_service.send_controls(self, guild=guild)
         
     async def is_playing_sound(self):
         return self._audio_service.is_playing_sound()

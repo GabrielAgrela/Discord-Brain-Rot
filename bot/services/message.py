@@ -265,15 +265,18 @@ class MessageService:
             print(f"[MessageService] Error updating message: {e}")
             return False
     
-    async def send_controls(self, bot_behavior) -> bool:
+    async def send_controls(self, bot_behavior, guild: Optional[discord.Guild] = None) -> bool:
         """Send the main bot controls view."""
         from bot.ui.views.controls import ControlsView
-        channel = self.get_bot_channel()
+        channel = self.get_bot_channel(guild)
         if not channel:
+            print(f"[MessageService] No bot channel found for controls in guild: {guild.name if guild else 'None'}")
             return False
             
         try:
-            if self._controls_message:
+            # We only track the controls message per-instance, which is a bit limiting
+            # for multi-guild, but better than nothing for now.
+            if self._controls_message and self._controls_message.channel.id == channel.id:
                 try:
                     await self._controls_message.delete()
                 except:

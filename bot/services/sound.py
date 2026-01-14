@@ -41,14 +41,20 @@ class SoundService:
         os.makedirs(self.sounds_dir, exist_ok=True)
         os.makedirs(self.downloads_dir, exist_ok=True)
 
-    async def play_random_sound(self, user: str = "admin", effects: Optional[dict] = None):
+    async def play_random_sound(self, user: str = "admin", effects: Optional[dict] = None, guild: Optional[discord.Guild] = None):
         """Pick a random sound and play it in the user's or largest channel."""
         sounds = self.sound_repo.get_random_sounds(num_sounds=1)
         if not sounds:
             return
         
         sound = sounds[0]
-        guild = self.bot.guilds[0]
+        if not guild and self.bot.guilds:
+            guild = self.bot.guilds[0]
+            
+        if not guild:
+            print("[SoundService] No guild available for play_random_sound")
+            return
+
         channel = self.audio_service.get_user_voice_channel(guild, user)
         if not channel:
             channel = self.audio_service.get_largest_voice_channel(guild)
@@ -57,12 +63,17 @@ class SoundService:
             await self.audio_service.play_audio(channel, sound[2], user, effects=effects)
             self.action_repo.insert(user, "play_random_sound", sound[0])
 
-    async def play_random_favorite_sound(self, username: str):
+    async def play_random_favorite_sound(self, username: str, guild: Optional[discord.Guild] = None):
         """Pick a random favorite sound for the user and play it."""
         sounds = self.sound_repo.get_random_sounds(favorite=True, num_sounds=1)
         if sounds:
             sound = sounds[0]
-            guild = self.bot.guilds[0]
+            if not guild and self.bot.guilds:
+                guild = self.bot.guilds[0]
+            
+            if not guild:
+                return
+
             channel = self.audio_service.get_user_voice_channel(guild, username)
             if not channel:
                 channel = self.audio_service.get_largest_voice_channel(guild)
@@ -71,10 +82,15 @@ class SoundService:
                 await self.audio_service.play_audio(channel, sound[2], username)
                 self.action_repo.insert(username, "play_random_favorite_sound", sound[0])
 
-    async def play_random_sound_from_list(self, list_name: str, username: str):
+    async def play_random_sound_from_list(self, list_name: str, username: str, guild: Optional[discord.Guild] = None):
         """Play a random sound from a specific list."""
         try:
-            guild = self.bot.guilds[0]
+            if not guild and self.bot.guilds:
+                guild = self.bot.guilds[0]
+            
+            if not guild:
+                return
+
             channel = self.audio_service.get_user_voice_channel(guild, username)
             if not channel:
                 channel = self.audio_service.get_largest_voice_channel(guild)
@@ -115,7 +131,12 @@ class SoundService:
             return False
 
         filename = filenames[0]
-        guild = self.bot.guilds[0]
+        if not guild and self.bot.guilds:
+            guild = self.bot.guilds[0]
+        
+        if not guild:
+            return False
+
         channel = self.audio_service.get_user_voice_channel(guild, user)
         if not channel:
             channel = self.audio_service.get_largest_voice_channel(guild)
