@@ -35,18 +35,3 @@ services:
       - /home/gabi/github/Discord-Brain-Rot/templates:/app/templates
       - /home/gabi/github/Discord-Brain-Rot/static:/app/static
     command: python WebPage.py
-
-  runner:
-    image: myoung34/github-runner:latest
-    container_name: brain-rot-runner
-    restart: always
-    environment:
-      - REPO_URL=https://github.com/GabrielAgrela/Discord-Brain-Rot
-      - RUNNER_NAME=brain-rot-docker-runner
-      - RUNNER_WORKDIR=/tmp/github-runner-work
-    env_file:
-      - .env
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - /home/gabi/github/Discord-Brain-Rot/actions-runner:/app/actions-runner
-      - /home/gabi/github/Discord-Brain-Rot/.env:/app/.env:ro
