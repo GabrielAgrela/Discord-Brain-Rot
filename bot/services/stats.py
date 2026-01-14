@@ -45,13 +45,16 @@ class StatsService:
             user_message = await bot_channel.send(embed=user_embed, view=view)
             messages.append(user_message)
         
-        # Auto-delete after 60 seconds
-        await asyncio.sleep(60)
-        for message in messages:
-            try:
-                await message.delete()
-            except:
-                pass
+        async def cleanup():
+            # Auto-delete after 60 seconds
+            await asyncio.sleep(60)
+            for message in messages:
+                try:
+                    await message.delete()
+                except:
+                    pass
+                    
+        asyncio.create_task(cleanup())
 
     def _create_server_stats_embed(self, days: int) -> discord.Embed:
         """Create an embed with server-wide statistics."""
