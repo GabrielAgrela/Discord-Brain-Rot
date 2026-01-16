@@ -208,8 +208,13 @@ class SimilarSoundsSelect(ui.Select):
         self.bot_behavior = bot_behavior
         options = []
         for sound, similarity in similar_sounds:
-            # sound can be a tuple or Row, handle both
-            sound_name = sound['Filename'] if isinstance(sound, sqlite3.Row) else sound[2]
+            # sound is the sound_data (already unpacked from tuple)
+            # Check if it's a Row/dict or a tuple
+            if isinstance(sound, (sqlite3.Row, dict)):
+                sound_name = sound['Filename']
+            else:
+                # It's a tuple, filename is at index 2
+                sound_name = sound[2]
             label = f"{sound_name.replace('.mp3', '')} ({int(similarity)}%)"
             if len(label) > 80:
                 # Truncate while keeping the similarity percentage

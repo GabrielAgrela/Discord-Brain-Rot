@@ -57,6 +57,18 @@ def setup_logging():
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
 
+    # Add dedicated error file handler for ERROR and CRITICAL logs
+    error_filename = LOGS_DIR / "errors.log"
+    error_handler = logging.handlers.RotatingFileHandler(
+        filename=error_filename,
+        maxBytes=10*1024*1024,  # 10MB
+        backupCount=5,
+        encoding="utf-8"
+    )
+    error_handler.setLevel(logging.ERROR)  # Only ERROR and CRITICAL
+    error_handler.setFormatter(formatter)
+    logger.addHandler(error_handler)
+
     # Also log to console
     console_handler = logging.StreamHandler(sys.__stdout__)
     console_handler.setFormatter(formatter)
@@ -67,3 +79,4 @@ def setup_logging():
     sys.stderr = StreamToLogger(logger, logging.ERROR)
 
     logging.info("Logging initialized. Output redirected to log file.")
+

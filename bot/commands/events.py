@@ -16,8 +16,8 @@ from bot.database import Database
 
 async def _get_user_choices(ctx: discord.AutocompleteContext):
     """Get all known users for autocomplete."""
-    db = Database()
-    return db.get_all_users()
+    from bot.repositories import EventRepository
+    return EventRepository().get_all_users_with_events()
 
 class EventCog(commands.Cog):
     """Cog for managing user events (join/leave sounds)."""

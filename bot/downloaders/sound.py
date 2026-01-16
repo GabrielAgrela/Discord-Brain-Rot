@@ -50,19 +50,31 @@ class SoundDownloader:
         self.bot = bot
         self.chromedriver_path = os.getenv("CHROMEDRIVER_PATH")
         if not self.chromedriver_path:
-            self.chromedriver_path = ChromeDriverManager().install()
+            # Try to use system-installed chromium-driver first (Docker)
+            if os.path.exists('/usr/bin/chromedriver'):
+                self.chromedriver_path = '/usr/bin/chromedriver'
+            elif os.path.exists('/usr/bin/chromium-driver'):
+                self.chromedriver_path = '/usr/bin/chromium-driver'
+            else:
+                # Fallback to auto-download
+                self.chromedriver_path = ChromeDriverManager().install()
         self.dwdir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Downloads"))
         
     def _create_driver(self):
         """Create a new Chrome WebDriver instance."""
         service = Service(executable_path=self.chromedriver_path)
         options = webdriver.ChromeOptions()
+        # Use chromium binary (installed in Docker as 'chromium')
+        options.binary_location = '/usr/bin/chromium'
         options.add_argument('--log-level=3')
         options.add_experimental_option("prefs", {
             "download.default_directory": self.dwdir,
             "download.prompt_for_download": False,
         })
         options.add_argument('--headless')
+        options.add_argument('--no-sandbox')  # Required for Docker
+        options.add_argument('--disable-dev-shm-usage')  # Overcome limited resource problems
+        options.add_argument('--disable-gpu')  # Disable GPU acceleration
         options.add_argument('window-size=1200x600')
         return webdriver.Chrome(service=service, options=options)
 
@@ -77,8 +89,16 @@ class SoundDownloader:
             True if sound exists, False otherwise.
         """
         try:
-            # self.db is the Database singleton instance
-            return self.db.get_sound(filename, original_filename=True) is not None
+            # Create a local connection/cursor for thread safety
+            # SQLite cursors are not reentrant, so we must not reuse self.db.cursor
+            # when called from multiple threads simultaneously (as in ThreadPoolExecutor)
+            import sqlite3
+            conn = sqlite3.connect(self.db.db_path, timeout=5.0)
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM sounds WHERE originalfilename = ?", (filename,))
+            result = cursor.fetchone()
+            conn.close()
+            return result is not None
         except Exception as e:
             print(f"{self.__class__.__name__}: DB check error: {e}")
             return False

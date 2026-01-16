@@ -128,30 +128,47 @@ class AudioService:
                 voice_client = channel.guild.voice_client
 
                 if voice_client:
-                    if not voice_client.is_connected():
+                    # Check for broken/uninitialized voice client state
+                    if not hasattr(voice_client, 'ws') or voice_client.ws is None or str(type(voice_client.ws)) == "<class 'discord.utils._MissingSentinel'>":
+                        print(f"[AudioService] Detected broken voice client in {channel.guild.name}, cleaning up")
+                        try:
+                            await self.stop_keyword_detection(channel.guild)
+                            await voice_client.disconnect(force=True)
+                        except Exception as e:
+                            print(f"[AudioService] Error cleaning up broken voice client: {e}")
+                        voice_client = None
+                        await asyncio.sleep(0.5)
+                        
+                    elif not voice_client.is_connected():
                         print(f"[AudioService] Voice client in {channel.guild.name} exists but is not connected. Reconnecting...")
                         try:
+                            await self.stop_keyword_detection(channel.guild)
                             await voice_client.disconnect(force=True)
                             await asyncio.sleep(0.5)
                         except Exception as e:
                             print(f"[AudioService] Error forcing disconnect: {e}")
+                        voice_client = None
+                        
                     elif voice_client.channel.id != channel.id:
                         print(f"[AudioService] Moving from {voice_client.channel.name} to {channel.name}")
                         try:
                             await voice_client.move_to(channel)
                         except asyncio.TimeoutError:
                             print(f"[AudioService] Timeout moving to {channel.name}. Reconnecting...")
+                            await self.stop_keyword_detection(channel.guild)
                             await voice_client.disconnect(force=True)
-                            voice_client = await channel.connect(timeout=10.0)
-                        # Restart keyword detection if moved
-                        await self.start_keyword_detection(channel.guild)
-                        return voice_client
+                            await asyncio.sleep(0.5)
+                            voice_client = None
+                        if voice_client:
+                            # Successfully moved, restart keyword detection
+                            await self.start_keyword_detection(channel.guild)
+                            return voice_client
                     else:
-                        # Already connected to the right channel
+                        # Already connected to the right channel, ensure keyword detection is running
                         await self.start_keyword_detection(channel.guild)
                         return voice_client
                 
-                # Connect with a single attempt (lock prevents racing)
+                # Connect with retry logic
                 for attempt in range(3):
                     try:
                         # Check if another connection snuck in while we waited
@@ -162,7 +179,10 @@ class AudioService:
                             await self.start_keyword_detection(channel.guild)
                             return voice_client
                         
+                        
                         voice_client = await channel.connect(timeout=10.0)
+                        # Give the voice connection a moment to fully establish
+                        await asyncio.sleep(0.5)
                         # Start keyword detection on new connection
                         await self.start_keyword_detection(channel.guild)
                         return voice_client
@@ -182,6 +202,7 @@ class AudioService:
                 return None
             except Exception as e:
                 print(f"[AudioService] Error connecting to voice channel: {e}")
+                traceback.print_exc()
                 if self.bot.voice_clients:
                     return self.bot.voice_clients[0]
                 return None
@@ -684,8 +705,18 @@ class AudioService:
             if not voice_client or not voice_client.is_connected():
                 return False
 
+            # Check if we already have a sink
             if guild.id in self.keyword_sinks:
-                return True
+                sink = self.keyword_sinks[guild.id]
+                # Check if the worker thread is still alive
+                if sink.worker_thread.is_alive():
+                    print(f"[AudioService] Keyword detection already running in {guild.name}")
+                    return True
+                else:
+                    # Thread died, clean up old sink and create new one
+                    print(f"[AudioService] VoskWorker thread died, restarting in {guild.name}")
+                    sink.stop()  # Clean up any remaining resources
+                    del self.keyword_sinks[guild.id]
 
             # Wait for voice connection to fully stabilize
             await asyncio.sleep(1.0)
@@ -834,9 +865,24 @@ class KeywordDetectionSink(sinks.Sink):
         self.running = False
         self.queue.put((None, None))
 
+    def ensure_worker_running(self):
+        """Ensure the worker thread is running, restart if needed."""
+        if not self.worker_thread.is_alive():
+            print(f"[KeywordDetectionSink] Worker thread died, restarting for guild {self.guild.id}")
+            self.running = True
+            self.worker_thread = threading.Thread(target=self._worker, name=f"VoskWorker-{self.guild.id}", daemon=True)
+            self.worker_thread.start()
+            return True
+        return False
+
     def write(self, data, user_id):
         if not self.running:
             return
+        
+        # Check if worker thread is alive, restart if needed (resilience)
+        if not self.worker_thread.is_alive():
+            self.ensure_worker_running()
+        
         receive_time = time.time()
         self.last_audio_time[user_id] = receive_time
         self.buffer_last_update[user_id] = receive_time

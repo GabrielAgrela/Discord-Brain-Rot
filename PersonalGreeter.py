@@ -317,6 +317,26 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
         
     # Log the voice state update
     print(f"Voice state update: {member_str} {event} channel ► {channel}")
+    
+    #Follow users to new channel when they move
+    if event == "join" and after.channel:
+        voice_client = after.channel.guild.voice_client
+        # If bot is connected but not in the channel the user joined
+        if voice_client and voice_client.channel != after.channel:
+            # Check if there are non-bot members in the new channel
+            non_bot_members = [m for m in after.channel.members if not m.bot]
+            if len(non_bot_members) > 0:
+                print(f"[AutoFollow] Following {member_str} to {after.channel.name}")
+                try:
+                    # Stop keyword detection in old channel
+                    await behavior._audio_service.stop_keyword_detection(voice_client.guild)
+                    # Move to new channel
+                    await voice_client.move_to(after.channel)
+                    # Restart keyword detection in new channel
+                    await behavior._audio_service.start_keyword_detection(after.channel.guild)
+                    print(f"[AutoFollow] Successfully moved to {after.channel.name}")
+                except Exception as e:
+                    print(f"[AutoFollow] Error moving to {after.channel.name}: {e}")
 
     # Debounce: Cancel any pending event for this member and schedule new one
     member_id = member.id
@@ -344,6 +364,34 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
 
 async def play_audio_for_event(member, member_str, event, channel):
     try:
+        # Check if bot is in the correct voice channel
+        voice_client = channel.guild.voice_client
+        
+        # Wait a bit if bot is currently connecting/moving channels
+        for _ in range(10):  # Wait up to 1 second
+            if voice_client and voice_client.channel == channel and voice_client.is_connected():
+                break  # Bot is in the right channel and connected
+            await asyncio.sleep(0.1)
+            voice_client = channel.guild.voice_client  # Refresh the client reference
+        
+        # If still not in the right channel, try to connect/move
+        if not voice_client or not voice_client.is_connected() or voice_client.channel != channel:
+            print(f"[EventSound] Bot not in {channel.name}, attempting to join for {member_str}'s {event}")
+            try:
+                if voice_client and voice_client.is_connected():
+                    # Bot is connected but in wrong channel, move it
+                    await voice_client.move_to(channel)
+                else:
+                    # Bot not connected at all, connect
+                    await channel.connect()
+                # Restart keyword detection after reconnecting/moving
+                await behavior._audio_service.start_keyword_detection(channel.guild)
+                # Small delay to ensure connection is stable
+                await asyncio.sleep(0.5)
+            except Exception as e:
+                print(f"[EventSound] Failed to join {channel.name} for {event} sound: {e}")
+                return
+        
         user_events = db.get_user_events(member_str, event)
         if user_events:
             if await behavior.is_channel_empty(channel):
@@ -355,9 +403,17 @@ async def play_audio_for_event(member, member_str, event, channel):
                 # Get sound info only once
                 similar_sounds = db.get_sounds_by_similarity(sound_name, 1)
                 if similar_sounds:
-                    sound_row = similar_sounds[0][0] # (row, score) -> row
-                    filename = sound_row[2]
-                    sound_id = sound_row[0]
+                    sound_row = similar_sounds[0][0]  # (row, score) -> row
+                    # Convert Row to dict if needed
+                    if isinstance(sound_row, sqlite3.Row):
+                        sound_row = dict(sound_row)
+                    # Access by column name or index depending on type
+                    if isinstance(sound_row, dict):
+                        filename = sound_row['Filename']
+                        sound_id = sound_row['id']
+                    else:
+                        filename = sound_row[2]
+                        sound_id = sound_row[0]
                     await behavior.play_audio(channel, filename, member_str)
                     db.insert_action(member_str, event, sound_id)
                 else:
@@ -368,7 +424,15 @@ async def play_audio_for_event(member, member_str, event, channel):
             # Log action for default join sound
             similar_sounds = db.get_sounds_by_similarity("gay-echo.mp3", 1)
             if similar_sounds:
-                 db.insert_action(member_str, event, similar_sounds[0][0][0])
+                sound_row = similar_sounds[0][0]
+                # Safe access
+                if isinstance(sound_row, sqlite3.Row):
+                    sound_id = sound_row['id']
+                elif isinstance(sound_row, dict):
+                    sound_id = sound_row['id']
+                else:
+                    sound_id = sound_row[0]
+                db.insert_action(member_str, event, sound_id)
             else:
                  # Fallback if gay-echo not found in DB but exists on disk?
                  db.insert_action(member_str, event, "gay-echo.mp3")

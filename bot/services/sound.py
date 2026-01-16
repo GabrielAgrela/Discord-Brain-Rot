@@ -391,7 +391,9 @@ class SoundService:
             await sound_message.edit(view=combined_view)
             
         except Exception as e:
+            import traceback
             print(f"[SoundService] Error in find_and_update_similar_sounds: {e}")
+            traceback.print_exc()
 
     async def delayed_list_selector_update(self, sound_message, audio_file):
         """Update playback message with list selection after sound finishes."""
@@ -411,7 +413,11 @@ class SoundService:
                     # s is a (sound_data, score) pair from get_sounds_by_similarity
                     sound_data = s[0]
                     # Handle both Row and Tuple
-                    filename = sound_data['Filename'] if isinstance(sound_data, sqlite3.Row) else sound_data[2]
+                    if isinstance(sound_data, (sqlite3.Row, dict)):
+                        filename = sound_data['Filename']
+                    else:
+                        # It's a tuple, filename is at index 2
+                        filename = sound_data[2]
                     
                     if filename not in seen_filenames:
                         seen_filenames.add(filename)
@@ -427,7 +433,9 @@ class SoundService:
             )
             await sound_message.edit(view=view)
         except Exception as e:
+            import traceback
             print(f"[SoundService] Error in delayed_list_selector_update: {e}")
+            traceback.print_exc()
 
     async def list_sounds(self, user, count=0, guild: Optional[discord.Guild] = None):
         """List sounds in the bot channel."""
