@@ -12,6 +12,7 @@ lol_database.db
 database copy.db
 /vosk-model-pt/
 /temp_audio
+/Debug
 /actions-runner
 
 # IDEs and local tools

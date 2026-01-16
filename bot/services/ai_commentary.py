@@ -22,9 +22,13 @@ class AICommentaryService:
         self.last_trigger_time = 0
         self.min_speech_duration = 2.0
         self.is_processing = False
-        self._set_random_cooldown()
+        self.is_first_trigger = True  # Track if this is the first trigger
         
-        # Directory for debug audio (kept for structure, but writing disabled)
+        # Short cooldown on startup for quick testing/responsiveness
+        self.cooldown_seconds = 5
+        print(f"[AICommentary] Initial startup cooldown: {self.cooldown_seconds}s")
+        
+        # Directory for debug audio
         self.debug_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Debug", "llm_audio"))
         os.makedirs(self.debug_dir, exist_ok=True)
 
@@ -99,6 +103,17 @@ class AICommentaryService:
             # 2. Convert to WAV in memory
             wav_data = self._pcm_to_wav(audio_pcm)
 
+            # Debug: Save the audio file sent to Gemini
+            try:
+                timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
+                debug_filename = f"gemini_audio_{timestamp}.wav"
+                debug_path = os.path.join(self.debug_dir, debug_filename)
+                with open(debug_path, 'wb') as f:
+                    f.write(wav_data)
+                print(f"[AICommentary] Debug: Saved audio to {debug_path}")
+            except Exception as e:
+                print(f"[AICommentary] Debug save failed: {e}")
+
             # Update status using the service's update method
             if processing_msg:
                 await self.behavior._message_service.update_message(
@@ -127,10 +142,10 @@ class AICommentaryService:
                 # Play audio using the bot's own member object for logging
                 await self.behavior._voice_transformation_service.tts_EL(guild.me, llm_response, lang="ventura")
                 
-                # Send the final result using the standard function we always use
+                # Send the final result with formatted audio tags visible
                 await self.behavior.send_message(
                     title="O Ventura ouviu isto:",
-                    description=f"_{transcription}_\n\n**Resposta:**\n{llm_response}\n\n**Usuários ouvidos:** {', '.join(active_users)}",
+                    description=f"_{transcription}_\n\n**Resposta (com tags de áudio):**\n`{llm_response}`\n\n**Usuários ouvidos:** {', '.join(active_users)}",
                     color=discord.Color.red(),
                     channel=channel
                 )
@@ -139,8 +154,13 @@ class AICommentaryService:
                 if processing_msg:
                     await processing_msg.delete()
                 
-                # Re-roll cooldown for the next time
-                self._set_random_cooldown()
+                # After first successful trigger, switch to random cooldown
+                if self.is_first_trigger:
+                    self.is_first_trigger = False
+                    self._set_random_cooldown()
+                else:
+                    # Re-roll cooldown for subsequent triggers
+                    self._set_random_cooldown()
                 
                 print(f"[AICommentary] Successfully sent transcription to channel: {channel.name}")
             except Exception as e:
