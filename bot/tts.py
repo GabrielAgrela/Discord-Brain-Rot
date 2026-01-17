@@ -269,7 +269,7 @@ class TTS:
                     final_audio = audio
 
                     path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", self.filename))
-                    Database().insert_sound(os.path.basename(self.filename), os.path.basename(self.filename))
+                    Database().insert_sound(os.path.basename(self.filename), os.path.basename(self.filename), is_elevenlabs=1)
                     final_audio.export(path, format="mp3")
                     # Integrated loudness normalization (EBU R128)
                     self._loudnorm_inplace(path)
@@ -351,7 +351,7 @@ class TTS:
                     final_audio = louder_audio
 
                     path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", self.filename))
-                    Database().insert_sound(os.path.basename(self.filename), os.path.basename(self.filename))
+                    Database().insert_sound(os.path.basename(self.filename), os.path.basename(self.filename), is_elevenlabs=1)
 
                     final_audio.export(path, format="mp3")
                     # Integrated loudness normalization (EBU R128)
@@ -419,7 +419,7 @@ class TTS:
                     final_audio = louder_audio
 
                     path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", self.filename))
-                    Database().insert_sound(os.path.basename(self.filename), os.path.basename(self.filename))
+                    Database().insert_sound(os.path.basename(self.filename), os.path.basename(self.filename), is_elevenlabs=1)
                     #self.db.add_entry(os.path.basename(self.filename))
 
                     final_audio.export(path, format="mp3")

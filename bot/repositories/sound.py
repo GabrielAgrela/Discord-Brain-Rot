@@ -171,7 +171,7 @@ class SoundRepository(BaseRepository[Sound]):
         Returns:
             List of sound tuples
         """
-        conditions = ["slap = 0"]  # Exclude slap sounds from random
+        conditions = ["slap = 0", "is_elevenlabs = 0"]  # Exclude slap and ElevenLabs sounds
         if favorite:
             conditions.append("favorite = 1")
         
@@ -221,13 +221,13 @@ class SoundRepository(BaseRepository[Sound]):
             return [tuple(row) for row in rows]
         
         # Standard filtering
-        conditions = []
+        conditions = ["is_elevenlabs = 0"]  # Always exclude ElevenLabs sounds from listings
         if favorite is not None:
             conditions.append(f"favorite = {1 if favorite else 0}")
         if slap is not None:
             conditions.append(f"slap = {1 if slap else 0}")
         
-        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        where_clause = f"WHERE {' AND '.join(conditions)}"
         
         rows = self._execute(
             f"SELECT * FROM sounds {where_clause} ORDER BY timestamp {sort}, id {sort} LIMIT ?",
@@ -274,7 +274,7 @@ class SoundRepository(BaseRepository[Sound]):
         return None
     
     def insert_sound(self, original_filename: str, filename: str, 
-                     favorite: int = 0, date=None) -> int:
+                     favorite: int = 0, date=None, is_elevenlabs: int = 0) -> int:
         """Insert a new sound (backwards compatibility signature)."""
         from datetime import datetime
         if date is None:
@@ -282,10 +282,10 @@ class SoundRepository(BaseRepository[Sound]):
         
         return self._execute_write(
             """
-            INSERT INTO sounds (originalfilename, filename, favorite, blacklist, date, slap)
-            VALUES (?, ?, ?, 0, ?, 0)
+            INSERT INTO sounds (originalfilename, filename, favorite, blacklist, date, slap, is_elevenlabs)
+            VALUES (?, ?, ?, 0, ?, 0, ?)
             """,
-            (original_filename, filename, favorite, date.strftime("%Y-%m-%d %H:%M:%S") if hasattr(date, 'strftime') else str(date))
+            (original_filename, filename, favorite, date.strftime("%Y-%m-%d %H:%M:%S") if hasattr(date, 'strftime') else str(date), is_elevenlabs)
         )
     
     def update_sound(self, filename: str, new_filename: str = None, 
@@ -332,11 +332,12 @@ class SoundRepository(BaseRepository[Sound]):
         Returns:
             List of (Sound, score) tuples ordered by relevance
         """
-        # Simple LIKE search - the full fuzzy search is more complex
+        # Simple LIKE search - excludes ElevenLabs sounds
         rows = self._execute(
             """
             SELECT * FROM sounds 
-            WHERE filename LIKE ? OR originalfilename LIKE ?
+            WHERE (filename LIKE ? OR originalfilename LIKE ?)
+            AND is_elevenlabs = 0
             ORDER BY 
                 CASE 
                     WHEN filename LIKE ? THEN 1

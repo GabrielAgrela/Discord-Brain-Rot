@@ -129,7 +129,8 @@ class Database:
                 Filename TEXT NOT NULL,
                 favorite BOOLEAN NOT NULL CHECK (favorite IN (0, 1)),
                 blacklist BOOLEAN NOT NULL CHECK (blacklist IN (0, 1)),
-                slap BOOLEAN NOT NULL CHECK (slap IN (0, 1)) DEFAULT 0
+                slap BOOLEAN NOT NULL CHECK (slap IN (0, 1)) DEFAULT 0,
+                is_elevenlabs BOOLEAN NOT NULL DEFAULT 0 CHECK (is_elevenlabs IN (0, 1))
             );
             '''
 
@@ -227,11 +228,14 @@ class Database:
         except sqlite3.Error as e:
             print(f"An error occurred: {e}")
 
-    def insert_sound(self, originalfilename, filename, favorite=0, date=None):
+    def insert_sound(self, originalfilename, filename, favorite=0, date=None, is_elevenlabs=0):
         if date is None:
             date = datetime.datetime.now()
         try:
-            self.cursor.execute("INSERT INTO sounds (originalfilename, Filename, favorite, blacklist, timestamp) VALUES (?, ?, ?, 0, ?);", (originalfilename, filename, favorite, date))
+            self.cursor.execute(
+                "INSERT INTO sounds (originalfilename, Filename, favorite, blacklist, timestamp, is_elevenlabs) VALUES (?, ?, ?, 0, ?, ?);",
+                (originalfilename, filename, favorite, date, is_elevenlabs)
+            )
             self.conn.commit()
             self.invalidate_sound_cache()  # Refresh cache for similarity search
             print("Sound inserted successfully")
@@ -284,6 +288,11 @@ class Database:
         
         # Use cached sounds with pre-normalized filenames
         for sound, normalized_filename in Database._sound_cache_normalized:
+            # Skip ElevenLabs generated sounds
+            sound_dict = sound if isinstance(sound, dict) else dict(sound)
+            if sound_dict.get('is_elevenlabs', 0) == 1:
+                continue
+            
             # Calculate multiple fuzzy matching scores (same algorithms, C++ speed)
             token_set_score = fuzz.token_set_ratio(normalized_req, normalized_filename)
             partial_ratio_score = fuzz.partial_ratio(normalized_req, normalized_filename)

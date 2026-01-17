@@ -75,13 +75,13 @@ def get_total_count(table_name, search_query=None):
              params.extend([search_term, search_term, search_term, search_term])
         query = base_query + where_clause
     elif table_name == 'sounds':
-        query = "SELECT COUNT(*) FROM sounds"
+        query = "SELECT COUNT(*) FROM sounds WHERE is_elevenlabs = 0"
         if search_query:
-            query += " WHERE (Filename LIKE ? OR originalfilename LIKE ?)"
+            query += " AND (Filename LIKE ? OR originalfilename LIKE ?)"
             search_term = f"%{search_query}%"
             params.extend([search_term, search_term])
     elif table_name == 'sounds_fav':
-        query = "SELECT COUNT(*) FROM sounds WHERE favorite = 1"
+        query = "SELECT COUNT(*) FROM sounds WHERE favorite = 1 AND is_elevenlabs = 0"
         if search_query:
             query += " AND (Filename LIKE ? OR originalfilename LIKE ?)"
             search_term = f"%{search_query}%"
@@ -108,7 +108,7 @@ def get_favorites():
     conn = sqlite3.connect('Data/database.db')
     cursor = conn.cursor()
 
-    base_query = "SELECT Filename, originalfilename FROM sounds WHERE favorite = 1"
+    base_query = "SELECT Filename, originalfilename FROM sounds WHERE favorite = 1 AND is_elevenlabs = 0"
     where_clause = ""
     params = []
 
@@ -153,12 +153,12 @@ def get_all_sounds():
     conn = sqlite3.connect('Data/database.db')
     cursor = conn.cursor()
 
-    base_query = "SELECT Filename, originalfilename, timestamp FROM sounds"
+    base_query = "SELECT Filename, originalfilename, timestamp FROM sounds WHERE is_elevenlabs = 0"
     where_clause = ""
     params = []
 
     if search_query:
-        where_clause = " WHERE (Filename LIKE ? OR originalfilename LIKE ?)"
+        where_clause = " AND (Filename LIKE ? OR originalfilename LIKE ?)"
         search_term = f"%{search_query}%"
         params.extend([search_term, search_term])
 

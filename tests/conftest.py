@@ -33,6 +33,7 @@ def db_connection():
             favorite INTEGER DEFAULT 0,
             blacklist INTEGER DEFAULT 0,
             slap INTEGER DEFAULT 0,
+            is_elevenlabs INTEGER DEFAULT 0,
             timestamp TEXT
         )
     """)
