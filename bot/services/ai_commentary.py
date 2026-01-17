@@ -31,6 +31,10 @@ class AICommentaryService:
         # Directory for debug audio
         self.debug_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Debug", "llm_audio"))
         os.makedirs(self.debug_dir, exist_ok=True)
+        
+        # Track if we've sent the "listening" notification
+        self.cooldown_ended_notified = False
+        self.listening_msg = None
 
     def _set_random_cooldown(self):
         """Set a random cooldown between 1 and 3 hours."""
@@ -44,9 +48,34 @@ class AICommentaryService:
         
         time_since_last = time.time() - self.last_trigger_time
         if time_since_last < self.cooldown_seconds:
-            # print(f"[AICommentary] Cooldown active: {self.cooldown_seconds - time_since_last:.1f}s remaining")
             return False
         return True
+    
+    async def notify_listening_if_ready(self, guild_id: int):
+        """Send 'Ventura is listening' message when cooldown ends."""
+        if self.cooldown_ended_notified or self.is_processing:
+            return
+        
+        if self.get_cooldown_remaining() > 0:
+            return
+        
+        self.cooldown_ended_notified = True
+        
+        guild = self.behavior.bot.get_guild(guild_id)
+        if not guild:
+            return
+        
+        channel = self._get_target_channel(guild)
+        if channel:
+            try:
+                self.listening_msg = await self.behavior.send_message(
+                    title="👂 Ventura está a ouvir...",
+                    description="O cooldown terminou. A gravar a conversa...",
+                    color=discord.Color.blue(),
+                    channel=channel
+                )
+            except Exception as e:
+                print(f"[AICommentary] Error sending listening msg: {e}")
 
     def get_cooldown_remaining(self) -> float:
         """Return the number of seconds remaining until the next commentary can be triggered."""
@@ -93,14 +122,27 @@ class AICommentaryService:
 
             print(f"[AICommentary] Triggered! Users: {active_users}")
 
-            # Send initial "Processing" message using the standard function
+            # Delete the listening message if it exists
+            if self.listening_msg:
+                try:
+                    await self.listening_msg.delete()
+                except:
+                    pass
+                self.listening_msg = None
+
+            # Send "processing" message
             processing_msg = await self.behavior.send_message(
-                title="André Ventura a ouvir...",
-                description=f"Ouvi {len(active_users)} pessoas ({', '.join(active_users)}). A processar o áudio... 🎙️",
+                title="🎧 Ventura a processar...",
+                description=f"Ouvi {len(active_users)} pessoas ({', '.join(active_users)}). A preparar o áudio... 🎙️",
                 channel=channel
             )
 
-            # 2. Convert to WAV in memory
+            # 2. Trim first 1s to remove Opus decoder initialization artifacts, then convert to WAV
+            # 48kHz stereo 16-bit = 192000 bytes per second
+            trim_bytes = 192000
+            if len(audio_pcm) > trim_bytes * 2:  # Only trim if we have enough audio
+                audio_pcm = audio_pcm[trim_bytes:]
+            
             wav_data = self._pcm_to_wav(audio_pcm)
 
             # Debug: Save the audio file sent to Gemini
@@ -114,11 +156,12 @@ class AICommentaryService:
             except Exception as e:
                 print(f"[AICommentary] Debug save failed: {e}")
 
-            # Update status using the service's update method
+            # Update status to "analyzing"
             if processing_msg:
                 await self.behavior._message_service.update_message(
                     processing_msg,
-                    description="A analisar a vossa conversa... 👁️‍🗨️"
+                    title="🧠 Ventura a analisar...",
+                    description="A enviar para o Gemini... 👁️‍🗨️"
                 )
 
             # 4. Get LLM response
@@ -162,6 +205,9 @@ class AICommentaryService:
                     # Re-roll cooldown for subsequent triggers
                     self._set_random_cooldown()
                 
+                # Reset listening notification for next cooldown cycle
+                self.cooldown_ended_notified = False
+                
                 print(f"[AICommentary] Successfully sent transcription to channel: {channel.name}")
             except Exception as e:
                 print(f"[AICommentary] Playback/Display error: {e}")
@@ -201,7 +247,8 @@ class AICommentaryService:
     def _pcm_to_wav(self, pcm_data: bytes) -> bytes:
         """Convert raw PCM data to mono 16kHz WAV."""
         try:
-            mono_data = audioop.tomono(pcm_data, 2, 1, 0)
+            # Average both stereo channels (0.5 left + 0.5 right)
+            mono_data = audioop.tomono(pcm_data, 2, 0.5, 0.5)
             resampled_data, _ = audioop.ratecv(mono_data, 2, 1, 48000, 16000, None)
             with io.BytesIO() as wav_io:
                 with wave.open(wav_io, 'wb') as wav_file:

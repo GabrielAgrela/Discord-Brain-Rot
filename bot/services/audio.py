@@ -810,21 +810,19 @@ class KeywordDetectionSink(sinks.Sink):
         self.max_segment_duration = 10.0 # Force flush after 10 seconds of continuous speech
         self.audio_buffers = {} # user_id -> bytearray for batching
         self.min_batch_size = 28800 # ~300ms at 48kHz stereo (48000 * 2 * 2 * 0.3)
-        # Audio buffering for /llmdebug (Global)
+        # Audio buffering for AI Commentary - PER-USER timestamped chunks
         self.buffer_seconds = 30
-        self.full_buffer_size = 48000 * 2 * 2 * self.buffer_seconds 
-        self.audio_ring_buffer = bytearray(self.full_buffer_size)
-        self.buffer_pos = 0
-        self.buffer_last_update: Dict[int, float] = {} # user_id -> timestamp (persistent)
+        self.user_audio_buffers: Dict[int, list] = {}  # user_id -> list of (timestamp, audio_bytes)
+        self.buffer_last_update: Dict[int, float] = {}  # user_id -> timestamp
         self.buffer_lock = threading.Lock()
         
         # Auto-AI Commentary state
-        self.speech_start_time: Dict[int, float] = {} # user_id -> timestamp when they started talking
-        self.ventura_trigger_times: Dict[int, float] = {} # user_id -> timestamp when "ventura" was heard
-        # Exact keywords to match (must be whole words, not substrings)
-        self.ventura_keywords = ["ventura", "andré ventura", "andre ventura"]
+        self.speech_start_time: Dict[int, float] = {}  # user_id -> when they started talking
+        self.pending_ai_trigger: Optional[float] = None  # Time when 2s speech detected (wait for silence)
+        self.ventura_trigger_times: Dict[int, float] = {}  # user_id -> when "ventura" heard
+        self.ventura_keywords = ["ventura", "andre ventura"]
         self.last_ventura_trigger_time = 0
-        self.ventura_trigger_enabled = False  # Set to True to enable Ventura speech trigger
+        self.ventura_trigger_enabled = False
 
         # Log directory for per-user transcripts
         self.log_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Data", "vosk_logs"))
@@ -894,43 +892,27 @@ class KeywordDetectionSink(sinks.Sink):
         self.last_audio_time[user_id] = receive_time
         self.buffer_last_update[user_id] = receive_time
         
-        # Track speech duration for Auto-AI
+        # Track speech duration for Auto-AI (mark for trigger, wait for silence)
         if user_id not in self.speech_start_time:
             self.speech_start_time[user_id] = receive_time
         else:
             duration = receive_time - self.speech_start_time[user_id]
-            if duration >= 2.0: # User has been talking for 2+ seconds
-                # Trigger Auto-AI
-                if hasattr(self.audio_service.bot, 'behavior'):
-                    behavior = self.audio_service.bot.behavior
-                    if hasattr(behavior, '_ai_commentary_service'):
-                        asyncio.run_coroutine_threadsafe(
-                            behavior._ai_commentary_service.trigger_commentary(self.guild.id),
-                            self.loop
-                        )
-                    else:
-                        print("[AutoAI] Error: _ai_commentary_service not found on behavior")
-                else:
-                    print("[AutoAI] Error: behavior not found on bot")
+            if duration >= 2.0 and self.pending_ai_trigger is None:
+                # Mark pending - actual trigger fires when silence is detected
+                self.pending_ai_trigger = receive_time
         
-        # Add to global circular buffer for /llmdebug
+        # Store audio in per-user timestamped buffer
         with self.buffer_lock:
-            data_len = len(data)
-            if data_len > self.full_buffer_size:
-                data = data[-self.full_buffer_size:]
-                data_len = len(data)
+            if user_id not in self.user_audio_buffers:
+                self.user_audio_buffers[user_id] = []
             
-            end_pos = self.buffer_pos + data_len
-            if end_pos <= self.full_buffer_size:
-                self.audio_ring_buffer[self.buffer_pos:end_pos] = data
-                self.buffer_pos = end_pos % self.full_buffer_size
-            else:
-                # Wrap around
-                first_part_len = self.full_buffer_size - self.buffer_pos
-                self.audio_ring_buffer[self.buffer_pos:] = data[:first_part_len]
-                second_part_len = data_len - first_part_len
-                self.audio_ring_buffer[:second_part_len] = data[first_part_len:]
-                self.buffer_pos = second_part_len
+            self.user_audio_buffers[user_id].append((receive_time, data))
+            
+            # Prune old chunks
+            cutoff = receive_time - self.buffer_seconds
+            self.user_audio_buffers[user_id] = [
+                (ts, audio) for ts, audio in self.user_audio_buffers[user_id] if ts >= cutoff
+            ]
 
         # Buffer audio per-user to reduce queue pressure
         if user_id not in self.audio_buffers:
@@ -1014,11 +996,41 @@ class KeywordDetectionSink(sinks.Sink):
         """Force Vosk to finalize results for users who stopped talking and cleanup idle users."""
         now = time.time()
         
-        # 1. Handle Vosk flushing for speech-to-text (0.3s threshold)
+        # Check if ALL users are silent (for pending AI trigger)
+        all_silent = True
+        for user_id, last_time in self.buffer_last_update.items():
+            if now - last_time < 1.5:
+                all_silent = False
+                break
+        
+        # Handle pending Auto-AI trigger on silence
+        if self.pending_ai_trigger is not None and all_silent:
+            trigger_start = self.pending_ai_trigger
+            self.pending_ai_trigger = None
+            duration = min(now - trigger_start + 5.0, 30.0)  # Add context, cap at 30s
+            
+            print(f"[AutoAI] Silence detected. Triggering (duration={duration:.1f}s)")
+            if hasattr(self.audio_service.bot, 'behavior'):
+                behavior = self.audio_service.bot.behavior
+                if hasattr(behavior, '_ai_commentary_service'):
+                    asyncio.run_coroutine_threadsafe(
+                        behavior._ai_commentary_service.trigger_commentary(self.guild.id, duration=duration),
+                        self.loop
+                    )
+        
+        # Send "listening" notification when cooldown ends
+        if hasattr(self.audio_service.bot, 'behavior'):
+            behavior = self.audio_service.bot.behavior
+            if hasattr(behavior, '_ai_commentary_service'):
+                asyncio.run_coroutine_threadsafe(
+                    behavior._ai_commentary_service.notify_listening_if_ready(self.guild.id),
+                    self.loop
+                )
+        
+        # Handle Vosk flushing for speech-to-text (1s threshold)
         for user_id, last_time in list(self.last_audio_time.items()):
             idle_time = now - last_time
             if idle_time > 1:
-                # Reset speech start time on silence
                 if user_id in self.speech_start_time:
                     del self.speech_start_time[user_id]
                 
@@ -1026,7 +1038,6 @@ class KeywordDetectionSink(sinks.Sink):
                 if user_id in self.last_audio_time:
                     del self.last_audio_time[user_id]
             
-            # Force flush after max segment duration even if still talking
             elif user_id in self.recognizer_start_time:
                 segment_time = now - self.recognizer_start_time[user_id]
                 if segment_time > self.max_segment_duration:
@@ -1071,20 +1082,22 @@ class KeywordDetectionSink(sinks.Sink):
                 if user_id in self.last_partial:
                     del self.last_partial[user_id]
     def get_buffer_content(self, seconds: int = 10) -> bytes:
-        """Get the last N seconds of audio from the global ring buffer."""
-        bytes_needed = 48000 * 2 * 2 * seconds
-        if bytes_needed > self.full_buffer_size:
-            bytes_needed = self.full_buffer_size
-            
+        """Get the last N seconds of audio from all users' buffers."""
+        now = time.time()
+        cutoff = now - seconds
+        
         with self.buffer_lock:
-            if self.buffer_pos >= bytes_needed:
-                return bytes(self.audio_ring_buffer[self.buffer_pos - bytes_needed : self.buffer_pos])
-            else:
-                # Need to wrap around for reading
-                part2 = self.audio_ring_buffer[:self.buffer_pos]
-                remaining = bytes_needed - len(part2)
-                part1 = self.audio_ring_buffer[self.full_buffer_size - remaining :]
-                return bytes(part1 + part2)
+            all_chunks = []
+            for user_id, chunks in self.user_audio_buffers.items():
+                for ts, audio in chunks:
+                    if ts >= cutoff:
+                        all_chunks.append((ts, audio))
+            
+            if not all_chunks:
+                return bytes()
+            
+            all_chunks.sort(key=lambda x: x[0])
+            return b''.join(audio for ts, audio in all_chunks)
 
     def get_recent_users(self, seconds: int = 15) -> List[str]:
         """Get the list of usernames who spoke in the last N seconds."""
