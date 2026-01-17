@@ -30,11 +30,13 @@ class LLMService:
             "Na transcrição, tenta ser fiel ao que ouviste. Se houver ruído, podes basear a tua resposta nesse ruído."
         )
         
-    async def prompt_llm(self, text: str, active_users: Optional[List[str]] = None, audio_data: Optional[bytes] = None) -> dict:
+    async def prompt_llm(self, text: str, active_users: Optional[List[str]] = None, 
+                         audio_data: Optional[bytes] = None, memories: Optional[List[tuple]] = None) -> dict:
         """
         Send a prompt to the LLM and return the response.
         If audio_data is provided, it will be included in the prompt.
         active_users: List of usernames who were speaking.
+        memories: List of (transcription, response) tuples from previous interactions.
         """
         if not self.api_key:
             print("[LLMService] Error: OPENROUTER_API_KEY not found in environment.")
@@ -53,8 +55,16 @@ class LLMService:
         user_context = ""
         if active_users:
             user_context = f" Conversa real entre: {', '.join(active_users)}."
+        
+        # Add memory context if available
+        memory_context = ""
+        if memories and len(memories) > 0:
+            memory_context = "\n\n**Últimas interações (NÃO repitas expressões, sê criativo anteriores!):**"
+            for i, (trans, resp) in enumerate(memories, 1):
+                memory_context += f"\n{i}. Ouviste: \"{trans[:100]}...\" → Disseste: \"{resp[:100]}...\""
+            memory_context += "\n\n**IMPORTANTE: Varia o teu estilo e não uses as mesmas piadas/frases!**"
             
-        full_text = f"{text}{user_context} Sê criativo, usa calão e evita clichês."
+        full_text = f"{text}{user_context}{memory_context} Sê criativo, usa calão e evita clichês."
         content.append({"type": "text", "text": full_text})
             
         if audio_data:

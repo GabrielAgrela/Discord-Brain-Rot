@@ -277,8 +277,8 @@ class BotBehavior:
     async def tts(self, user, speech, lang="en", region=""):
         return await self._voice_transformation_service.tts(user, speech, lang, region)
 
-    async def tts_EL(self, user, speech, lang="en", region=""):
-        return await self._voice_transformation_service.tts_EL(user, speech, lang, region)
+    async def tts_EL(self, user, speech, lang="en", region="", send_controls=True):
+        return await self._voice_transformation_service.tts_EL(user, speech, lang, region, send_controls)
 
     async def sts_EL(self, user, sound, char="ventura", region=""):
         return await self._voice_transformation_service.sts_EL(user, sound, char, region)

@@ -196,6 +196,18 @@ class Database:
             cursor.execute(create_list_items_table)
             cursor.execute(create_keywords_table)
 
+            # Create ai_commentary_memory table
+            create_ai_memory_table = '''
+            CREATE TABLE IF NOT EXISTS ai_commentary_memory (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id TEXT NOT NULL,
+                transcription TEXT NOT NULL,
+                response TEXT NOT NULL,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+            '''
+            cursor.execute(create_ai_memory_table)
+
             # Populate default keywords if empty
             cursor.execute("SELECT COUNT(*) FROM keywords")
             if cursor.fetchone()[0] == 0:
@@ -249,6 +261,37 @@ class Database:
             print("User inserted successfully")
         except sqlite3.Error as e:
             print(f"An error occurred: {e}")
+
+    # ===== AI Commentary Memory =====
+    
+    def save_ai_memory(self, guild_id: str, transcription: str, response: str):
+        """Save an AI commentary interaction to memory."""
+        try:
+            self.cursor.execute(
+                "INSERT INTO ai_commentary_memory (guild_id, transcription, response) VALUES (?, ?, ?);",
+                (str(guild_id), transcription, response)
+            )
+            self.conn.commit()
+        except sqlite3.Error as e:
+            print(f"[Database] Error saving AI memory: {e}")
+    
+    def get_recent_ai_memories(self, guild_id: str, limit: int = 3) -> list:
+        """Get the last N AI commentary memories for a guild."""
+        try:
+            self.cursor.execute(
+                """SELECT transcription, response, timestamp 
+                   FROM ai_commentary_memory 
+                   WHERE guild_id = ? 
+                   ORDER BY timestamp DESC 
+                   LIMIT ?""",
+                (str(guild_id), limit)
+            )
+            rows = self.cursor.fetchall()
+            # Reverse to get chronological order (oldest first)
+            return [(row[0], row[1]) for row in reversed(rows)]
+        except sqlite3.Error as e:
+            print(f"[Database] Error getting AI memories: {e}")
+            return []
 
     # ===== Fuzzy similarity search (complex logic kept here) =====
     

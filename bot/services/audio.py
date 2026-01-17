@@ -1007,16 +1007,25 @@ class KeywordDetectionSink(sinks.Sink):
         if self.pending_ai_trigger is not None and all_silent:
             trigger_start = self.pending_ai_trigger
             self.pending_ai_trigger = None
-            duration = min(now - trigger_start + 5.0, 30.0)  # Add context, cap at 30s
             
-            print(f"[AutoAI] Silence detected. Triggering (duration={duration:.1f}s)")
-            if hasattr(self.audio_service.bot, 'behavior'):
-                behavior = self.audio_service.bot.behavior
-                if hasattr(behavior, '_ai_commentary_service'):
-                    asyncio.run_coroutine_threadsafe(
-                        behavior._ai_commentary_service.trigger_commentary(self.guild.id, duration=duration),
-                        self.loop
-                    )
+            # SAFETY: If trigger is older than 60s, something went wrong - skip it
+            if now - trigger_start > 60:
+                print(f"[AutoAI] WARNING: Stale trigger detected ({now - trigger_start:.1f}s old). Skipping.")
+            else:
+                duration = min(now - trigger_start + 5.0, 30.0)  # Add context, cap at 30s
+                
+                # Check if already processing before queueing
+                if hasattr(self.audio_service.bot, 'behavior'):
+                    behavior = self.audio_service.bot.behavior
+                    if hasattr(behavior, '_ai_commentary_service'):
+                        if behavior._ai_commentary_service.is_processing:
+                            print(f"[AutoAI] Already processing. Skipping trigger.")
+                        else:
+                            print(f"[AutoAI] Silence detected. Triggering (duration={duration:.1f}s)")
+                            asyncio.run_coroutine_threadsafe(
+                                behavior._ai_commentary_service.trigger_commentary(self.guild.id, duration=duration),
+                                self.loop
+                            )
         
         # Send "listening" notification when cooldown ends
         if hasattr(self.audio_service.bot, 'behavior'):
@@ -1058,14 +1067,18 @@ class KeywordDetectionSink(sinks.Sink):
                     duration = (now - trigger_time) + 5.0
                     duration = min(duration, 30.0) # Cap at 30s
                     
-                    print(f"[VenturaTrigger] Silence detected (2s) for user {user_id}. Triggering AI commentary (duration={duration:.1f}s)")
+                    # Check if already processing before queueing
                     if hasattr(self.audio_service.bot, 'behavior'):
                         behavior = self.audio_service.bot.behavior
                         if hasattr(behavior, '_ai_commentary_service'):
-                            asyncio.run_coroutine_threadsafe(
-                                behavior._ai_commentary_service.trigger_commentary(self.guild.id, force=True, duration=duration),
-                                self.loop
-                            )
+                            if behavior._ai_commentary_service.is_processing:
+                                print(f"[VenturaTrigger] Already processing. Skipping trigger for user {user_id}.")
+                            else:
+                                print(f"[VenturaTrigger] Silence detected (2s) for user {user_id}. Triggering AI commentary (duration={duration:.1f}s)")
+                                asyncio.run_coroutine_threadsafe(
+                                    behavior._ai_commentary_service.trigger_commentary(self.guild.id, force=True, duration=duration),
+                                    self.loop
+                                )
             
         # 3. Cleanup users idle for more than 30 seconds to free memory
         for user_id, last_time in list(self.buffer_last_update.items()):
@@ -1083,6 +1096,9 @@ class KeywordDetectionSink(sinks.Sink):
                     del self.last_partial[user_id]
     def get_buffer_content(self, seconds: int = 10) -> bytes:
         """Get the last N seconds of audio from all users' buffers."""
+        # SAFETY: Hard cap at 30 seconds no matter what is requested
+        seconds = min(seconds, 30)
+        
         now = time.time()
         cutoff = now - seconds
         
@@ -1097,7 +1113,15 @@ class KeywordDetectionSink(sinks.Sink):
                 return bytes()
             
             all_chunks.sort(key=lambda x: x[0])
-            return b''.join(audio for ts, audio in all_chunks)
+            result = b''.join(audio for ts, audio in all_chunks)
+            
+            # SAFETY: Hard cap on bytes (~30 seconds at 48kHz stereo 16-bit)
+            max_bytes = 48000 * 2 * 2 * 30  # 5.76MB max
+            if len(result) > max_bytes:
+                print(f"[AudioBuffer] WARNING: Truncating {len(result)} bytes to {max_bytes} bytes")
+                result = result[-max_bytes:]
+            
+            return result
 
     def get_recent_users(self, seconds: int = 15) -> List[str]:
         """Get the list of usernames who spoke in the last N seconds."""

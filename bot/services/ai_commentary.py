@@ -11,6 +11,7 @@ import random
 from pydub import AudioSegment
 from typing import List, Optional
 from bot.services.llm import LLMService
+from bot.database import Database
 
 class AICommentaryService:
     """
@@ -38,7 +39,7 @@ class AICommentaryService:
 
     def _set_random_cooldown(self):
         """Set a random cooldown between 1 and 3 hours."""
-        self.cooldown_seconds = random.randint(3600, 10800)
+        self.cooldown_seconds = random.randint(60*10, 60*10*3)
         print(f"[AICommentary] Next sighting scheduled with {self.cooldown_seconds/3600:.1f} hour cooldown.")
 
     def should_trigger(self) -> bool:
@@ -164,11 +165,16 @@ class AICommentaryService:
                     description="A enviar para o Gemini... 👁️‍🗨️"
                 )
 
-            # 4. Get LLM response
+            # 4. Get LLM response with memory context
+            memories = Database().get_recent_ai_memories(guild_id, limit=3)
+            if memories:
+                print(f"[AICommentary] Including {len(memories)} past memories in context")
+            
             llm_result = await self.llm_service.prompt_llm(
                 text="Excerpto dos utilizadores que acabaram de falar nos últimos segundos:",
                 active_users=active_users,
-                audio_data=wav_data
+                audio_data=wav_data,
+                memories=memories
             )
 
             llm_response = llm_result.get("response")
@@ -183,7 +189,13 @@ class AICommentaryService:
             # 5. Play Voice (Ventura)
             try:
                 # Play audio using the bot's own member object for logging
-                await self.behavior._voice_transformation_service.tts_EL(guild.me, llm_response, lang="ventura")
+                # Suppress controls here because we send them with the embed below
+                await self.behavior._voice_transformation_service.tts_EL(
+                    guild.me, 
+                    llm_response, 
+                    lang="ventura",
+                    send_controls=False
+                )
                 
                 # Send the final result with formatted audio tags visible
                 await self.behavior.send_message(
@@ -192,6 +204,9 @@ class AICommentaryService:
                     color=discord.Color.red(),
                     channel=channel
                 )
+                
+                # Save memory for next time
+                Database().save_ai_memory(guild_id, transcription, llm_response)
                 
                 # Delete the processing message now that we have the final result
                 if processing_msg:

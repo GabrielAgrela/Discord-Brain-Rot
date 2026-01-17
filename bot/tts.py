@@ -369,7 +369,7 @@ class TTS:
 
         self.locked = False
 
-    async def save_as_mp3_EL(self, text, lang="pt", region=""):
+    async def save_as_mp3_EL(self, text, lang="pt", region="", send_controls=True):
         boost_volume = 0
         self.filename = f"{time.strftime('%d-%m-%y-%H-%M-%S')}-{text[:10]}.mp3"
         if lang == "pt":
@@ -430,7 +430,7 @@ class TTS:
                     if channel is None:
                         await self.behavior.send_error_message("No available voice channel for TTS playback.")
                         return
-                    await self.behavior.play_audio(channel, self.filename, "admin", is_tts=True)
+                    await self.behavior.play_audio(channel, self.filename, "admin", is_tts=True, send_controls=send_controls)
                     self.update_last_request_time()
                     print("Audio stream saved and played successfully.")
                 else:

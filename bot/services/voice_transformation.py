@@ -26,10 +26,10 @@ class VoiceTransformationService:
         self.action_repo.insert(user.name, "tts", speech)
         await self.tts_engine.save_as_mp3(speech, lang, region)
 
-    async def tts_EL(self, user, speech: str, lang: str = "en", region: str = ""):
+    async def tts_EL(self, user, speech: str, lang: str = "en", region: str = "", send_controls=True):
         """ElevenLabs text-to-speech."""
         self.action_repo.insert(user.name, "tts_EL", speech)
-        await self.tts_engine.save_as_mp3_EL(speech, lang, region)
+        await self.tts_engine.save_as_mp3_EL(speech, lang, region, send_controls=send_controls)
 
     async def sts_EL(self, user, sound: str, char: str = "ventura", region: str = ""):
         """ElevenLabs speech-to-speech voice transformation."""
