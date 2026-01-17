@@ -2,7 +2,7 @@ services:
   bot:
     build: .
     container_name: brain-rot-bot
-    restart: on-failure
+    restart: always
     env_file:
       - .env
     environment:

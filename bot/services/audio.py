@@ -193,6 +193,13 @@ class AudioService:
                         print(f"[AudioService] Connection attempt {attempt + 1} failed: {e}")
                         if attempt < 2:
                             await asyncio.sleep(0.5)
+                        else:
+                            # Last attempt failed, but let's try one more time to start detection if voice client exists
+                            voice_client = channel.guild.voice_client
+                            if voice_client and voice_client.is_connected():
+                                print(f"[AudioService] Connection retry failed but voice client exists. Starting keyword detection anyway.")
+                                await self.start_keyword_detection(channel.guild)
+                                return voice_client
                 
                 print("[AudioService] Failed to connect after 3 attempts.")
                 return None
@@ -954,6 +961,30 @@ class KeywordDetectionSink(sinks.Sink):
                 if time.time() - last_heartbeat > 60:
                     qsize = self.queue.qsize()
                     print(f"[VoskWorker] Heartbeat - Queue: {qsize}, Running: {self.running}")
+                    
+                    # Health check: Verify voice connection is actually connected
+                    try:
+                        voice_client = self.guild.voice_client
+                        if voice_client:
+                            if not voice_client.is_connected():
+                                print(f"[VoskWorker] WARNING: Voice client exists but is not connected! Triggering reconnection...")
+                                # Schedule reconnection on the main event loop
+                                asyncio.run_coroutine_threadsafe(
+                                    self.audio_service.ensure_voice_connected(voice_client.channel),
+                                    self.loop
+                                )
+                            elif not hasattr(voice_client, 'ws') or voice_client.ws is None:
+                                print(f"[VoskWorker] WARNING: Voice client has no WebSocket! Triggering reconnection...")
+                                # Schedule reconnection on the main event loop  
+                                asyncio.run_coroutine_threadsafe(
+                                    self.audio_service.ensure_voice_connected(voice_client.channel),
+                                    self.loop
+                                )
+                        else:
+                            print(f"[VoskWorker] WARNING: No voice client found for {self.guild.name}")
+                    except Exception as health_err:
+                        print(f"[VoskWorker] Error during health check: {health_err}")
+                    
                     last_heartbeat = time.time()
                 
                 try:
