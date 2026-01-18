@@ -278,11 +278,9 @@ class AudioService:
                 print(f"[AudioService] Slap sound not found: {audio_file_path}")
                 return False
 
-            ffmpeg_options = '-af "volume=1.0"'
             audio_source = discord.FFmpegPCMAudio(
                 audio_file_path,
-                executable=self.ffmpeg_path,
-                options=ffmpeg_options
+                executable=self.ffmpeg_path
             )
             audio_source = discord.PCMVolumeTransformer(audio_source, volume=self.volume)
             
