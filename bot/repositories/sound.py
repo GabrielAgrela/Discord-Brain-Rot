@@ -221,7 +221,30 @@ class SoundRepository(BaseRepository[Sound]):
             )
             return [tuple(row) for row in rows]
         
-        # Standard filtering
+        # For global favorites, also order by when the sound was most recently favorited
+        if favorite is True:
+            rows = self._execute(
+                """
+                WITH LatestFavorite AS (
+                    SELECT 
+                        CAST(target AS INTEGER) as sound_id,
+                        MAX(timestamp) as last_favorited
+                    FROM actions
+                    WHERE action = 'favorite_sound'
+                    GROUP BY CAST(target AS INTEGER)
+                )
+                SELECT s.*
+                FROM sounds s
+                LEFT JOIN LatestFavorite lf ON lf.sound_id = s.id
+                WHERE s.favorite = 1 AND s.is_elevenlabs = 0
+                ORDER BY lf.last_favorited DESC, s.id DESC
+                LIMIT ?
+                """,
+                (num_sounds,)
+            )
+            return [tuple(row) for row in rows]
+        
+        # Standard filtering (non-favorite queries)
         conditions = ["is_elevenlabs = 0"]  # Always exclude ElevenLabs sounds from listings
         if favorite is not None:
             conditions.append(f"favorite = {1 if favorite else 0}")

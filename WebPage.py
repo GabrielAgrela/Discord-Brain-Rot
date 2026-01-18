@@ -108,16 +108,30 @@ def get_favorites():
     conn = sqlite3.connect('Data/database.db')
     cursor = conn.cursor()
 
-    base_query = "SELECT Filename, originalfilename FROM sounds WHERE favorite = 1 AND is_elevenlabs = 0"
+    # Use CTE to get most recent favorite action timestamp for each sound
+    base_query = """
+        WITH LatestFavorite AS (
+            SELECT 
+                CAST(target AS INTEGER) as sound_id,
+                MAX(timestamp) as last_favorited
+            FROM actions
+            WHERE action = 'favorite_sound'
+            GROUP BY CAST(target AS INTEGER)
+        )
+        SELECT s.Filename, s.originalfilename
+        FROM sounds s
+        LEFT JOIN LatestFavorite lf ON lf.sound_id = s.id
+        WHERE s.favorite = 1 AND s.is_elevenlabs = 0
+    """
     where_clause = ""
     params = []
 
     if search_query:
-        where_clause = " AND (Filename LIKE ? OR originalfilename LIKE ?)"
+        where_clause = " AND (s.Filename LIKE ? OR s.originalfilename LIKE ?)"
         search_term = f"%{search_query}%"
         params.extend([search_term, search_term])
 
-    order_limit_offset = " ORDER BY timestamp DESC, id DESC LIMIT ? OFFSET ?"
+    order_limit_offset = " ORDER BY lf.last_favorited DESC, s.id DESC LIMIT ? OFFSET ?"
     params.extend([per_page, offset])
 
     final_query = base_query + where_clause + order_limit_offset
