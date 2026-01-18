@@ -532,7 +532,7 @@ class AudioService:
                     self.progress_already_updated = False
                     
                     # Re-send controls to keep them at the bottom
-                    if hasattr(self, '_behavior') and self._behavior:
+                    if send_controls and hasattr(self, '_behavior') and self._behavior:
                         await self.message_service.send_controls(self._behavior, guild=channel.guild)
                 else:
                     # Slap sound - minimal message
@@ -541,7 +541,7 @@ class AudioService:
                     self.current_sound_message = sound_message
                     
                     # Re-send controls to keep them at the bottom
-                    if hasattr(self, '_behavior') and self._behavior:
+                    if send_controls and hasattr(self, '_behavior') and self._behavior:
                         await self.message_service.send_controls(self._behavior)
 
             # FFmpeg options

@@ -39,7 +39,7 @@ class AICommentaryService:
 
     def _set_random_cooldown(self):
         """Set a random cooldown between 1 and 3 hours."""
-        self.cooldown_seconds = random.randint(60*10, 60*10*3)
+        self.cooldown_seconds = random.randint(3600, 10800)
         print(f"[AICommentary] Next sighting scheduled with {self.cooldown_seconds/3600:.1f} hour cooldown.")
 
     def should_trigger(self) -> bool:

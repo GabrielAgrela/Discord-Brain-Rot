@@ -8,6 +8,7 @@ This cog handles administrative commands including:
 """
 
 import os
+import sys
 import platform
 import asyncio
 import subprocess
@@ -36,35 +37,38 @@ class AdminCog(commands.Cog):
         """Check if member has admin/mod permissions."""
         return self.behavior.is_admin_or_mod(member)
     
-    @commands.slash_command(name="reboot", description="Reboots the host machine (Admin only)")
+    @commands.slash_command(name="reboot", description="Restart the bot process (Admin only)")
     async def reboot(self, ctx: discord.ApplicationContext):
-        """Reboot the machine the bot is running on."""
+        """Restart the bot process."""
         if not self._is_admin(ctx.author):
             await ctx.respond("You don't have permission to use this command.", ephemeral=True)
             return
         
         await self.behavior._message_service.send_message(
             title="🚨 System Reboot Initiated 🚨",
-            description=f"Rebooting the machine as requested by {ctx.author.mention}..."
+            description=f"Rebooting the host machine as requested by {ctx.author.mention}..."
         )
-        await ctx.respond("Reboot command received...", ephemeral=True, delete_after=1)
-        print(f"Reboot initiated by {ctx.author.name} ({ctx.author.id})")
+        await ctx.respond("Rebooting host machine...", ephemeral=True, delete_after=5)
+        print(f"Restart initiated by {ctx.author.name} ({ctx.author.id})")
         
         await asyncio.sleep(2)
         
         system = platform.system()
         try:
-            if system == "Windows":
-                os.system("shutdown /r /t 1 /f")
-            elif system in ("Linux", "Darwin"):
-                print("Attempting reboot via 'sudo reboot'...")
-                os.system("sudo reboot")
-            else:
-                await ctx.edit_original_response(
-                    content=f"Reboot not supported on {system}."
-                )
+            # We are running in a container with pid:host and privileged:true
+            # so we can use nsenter to escape to the host namespace and run reboot
+            print("Attempting host reboot via nsenter...")
+            # -t 1: Target PID 1 (systemd/init on host)
+            # -m: Mount namespace
+            # -u: UTS namespace
+            # -n: Network namespace
+            # -i: IPC namespace
+            # Note: We don't change PID namespace with -p because we want to execute in the context of the target process namespaces
+            subprocess.run(["nsenter", "-t", "1", "-m", "-u", "-n", "-i", "reboot"], check=True)
+            
         except Exception as e:
             print(f"Error during reboot: {e}")
+            await ctx.followup.send(f"Failed to reboot host: {e}", ephemeral=True)
     
     
     @commands.slash_command(name="lastlogs", description="Show the last service logs")

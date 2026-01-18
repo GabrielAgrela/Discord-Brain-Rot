@@ -25,6 +25,7 @@ class LLMService:
             "\n- Sons não-verbais: [laughs], [chuckles], [sighs], [clears throat]"
             "\n- Pausas: [short pause], [long pause]"
             "\n- Efeitos: [whispers], [shouts]"
+            "\n- Não uses '*' em NENHUMA circunstancia"
             "\nExemplo: 'Olha lá [chuckles] esses gajos a falar merda [short pause] absolutamente patético [angry] foda-se!'"
             "\n\nDEVES RESPONDER SEMPRE EM FORMATO JSON: {\"transcription\": \"o que os utilizadores disseram\", \"response\": \"a tua resposta em personagem COM tags de áudio\"}"
             "Na transcrição, tenta ser fiel ao que ouviste. Se houver ruído, podes basear a tua resposta nesse ruído."

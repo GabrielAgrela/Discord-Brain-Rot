@@ -19,6 +19,8 @@ services:
       - /home/gabi/github/Discord-Brain-Rot/Debug:/app/Debug
       - /home/gabi/github/backups/discord-brainrot:/backups/discord-brainrot
     command: python PersonalGreeter.py
+    privileged: true
+    pid: host
 
   web:
     build: .

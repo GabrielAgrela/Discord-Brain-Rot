@@ -8,6 +8,7 @@ previously scattered across BotBehavior.
 import discord
 from typing import Optional, Any
 import os
+import asyncio
 
 
 class MessageService:
@@ -37,6 +38,7 @@ class MessageService:
         self._last_message: Optional[discord.Message] = None
         self._controls_message: Optional[discord.Message] = None
         self._bot_behavior = None  # Set later to avoid circular dependency
+        self._controls_lock = asyncio.Lock()
 
     def set_behavior(self, behavior):
         """Set bot behavior reference for re-sending controls."""
@@ -274,28 +276,31 @@ class MessageService:
             return False
             
         try:
-            # We only track the controls message per-instance, which is a bit limiting
-            # for multi-guild, but better than nothing for now.
-            if self._controls_message and self._controls_message.channel.id == channel.id:
-                try:
-                    await self._controls_message.delete()
-                except:
-                    pass
-            
-            self._controls_message = await channel.send(view=ControlsView(bot_behavior))
-            return True
+            async with self._controls_lock:
+                # We only track the controls message per-instance, which is a bit limiting
+                # for multi-guild, but better than nothing for now.
+                if self._controls_message and self._controls_message.channel.id == channel.id:
+                    try:
+                        await self._controls_message.delete()
+                    except:
+                        pass
+                
+                self._controls_message = await channel.send(view=ControlsView(bot_behavior))
+                return True
         except Exception as e:
             print(f"[MessageService] Error sending controls: {e}")
             return False
 
     async def delete_controls(self):
         """Delete the current controls message."""
-        if self._controls_message:
-            try:
-                await self._controls_message.delete()
-                self._controls_message = None
-            except:
-                pass
+        """Delete the current controls message."""
+        async with self._controls_lock:
+            if self._controls_message:
+                try:
+                    await self._controls_message.delete()
+                    self._controls_message = None
+                except:
+                    pass
 
     @property
     def last_message(self) -> Optional[discord.Message]:
