@@ -1,5 +1,7 @@
 # Discord Brain Rot - Project Guidelines
 
+> **Note for AI agents**: This file is located at `.gemini/GEMINI.md` (hidden directory). Standard file searches may not find it - look in `.gemini/` directly.
+
 This project follows strict architectural patterns and coding standards. All contributions must adhere to these guidelines.
 
 ## Architecture Patterns

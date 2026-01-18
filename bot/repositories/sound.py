@@ -204,6 +204,7 @@ class SoundRepository(BaseRepository[Sound]):
                     SELECT 
                         target,
                         action,
+                        timestamp as favorited_at,
                         ROW_NUMBER() OVER (PARTITION BY target ORDER BY timestamp DESC) as rn
                     FROM actions
                     WHERE username = ?
@@ -213,7 +214,7 @@ class SoundRepository(BaseRepository[Sound]):
                 FROM sounds s
                 INNER JOIN UserFavorites uf ON CAST(uf.target AS INTEGER) = s.id
                 WHERE uf.rn = 1 AND uf.action = 'favorite_sound'
-                ORDER BY s.timestamp DESC, s.id DESC
+                ORDER BY uf.favorited_at DESC, s.id DESC
                 LIMIT ?
                 """,
                 (user, num_sounds)
