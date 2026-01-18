@@ -87,6 +87,9 @@ class BackgroundService:
                     minutes = round(time_left / 60)
                     if minutes < 1:
                         status_parts.append('🤯')
+                    elif minutes >= 60:
+                        hours = round(minutes / 60)
+                        status_parts.append(f'🤯 in ~{hours}h')
                     else:
                         status_parts.append(f'🤯 in ~{minutes}m')
             
@@ -99,7 +102,11 @@ class BackgroundService:
                     ai_cooldown_seconds = ai_service.get_cooldown_remaining()
                     ai_minutes = round(ai_cooldown_seconds / 60)
                     if ai_cooldown_seconds > 0:
-                        status_parts.append(f'👂🏻 in ~{ai_minutes}m')
+                        if ai_minutes >= 60:
+                            ai_hours = round(ai_minutes / 60)
+                            status_parts.append(f'👂🏻 in ~{ai_hours}h')
+                        else:
+                            status_parts.append(f'👂🏻 in ~{ai_minutes}m')
                     else:
                         status_parts.append('👂🏻')
 
@@ -108,7 +115,11 @@ class BackgroundService:
                 scrape_time_left = self.bot.next_scrape_time - time.time()
                 if scrape_time_left > 0:
                     scrape_minutes = round(scrape_time_left / 60)
-                    status_parts.append(f'🔍 in ~{scrape_minutes}m')
+                    if scrape_minutes >= 60:
+                        scrape_hours = round(scrape_minutes / 60)
+                        status_parts.append(f'🔍 in ~{scrape_hours}h')
+                    else:
+                        status_parts.append(f'🔍 in ~{scrape_minutes}m')
                 else:
                     status_parts.append('🔍')
 
