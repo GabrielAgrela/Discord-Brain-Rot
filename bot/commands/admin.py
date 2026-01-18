@@ -159,6 +159,27 @@ class AdminCog(commands.Cog):
             
         await ctx.followup.send(f"```{formatted}```", ephemeral=True)
 
+    @commands.slash_command(name="ventura", description="Enable or disable the Ventura AI routine (Admin only)")
+    async def ventura(
+        self,
+        ctx: discord.ApplicationContext,
+        state: Option(str, "State", choices=["Enable", "Disable"], required=True)
+    ):
+        """Toggle the Ventura AI commentary routine."""
+        if not self._is_admin(ctx.author):
+            await ctx.respond("You don't have permission to use this command.", ephemeral=True)
+            return
+
+        enabled = (state == "Enable")
+        
+        # Access the service via the private attribute in BotBehavior
+        if hasattr(self.behavior, '_ai_commentary_service'):
+            self.behavior._ai_commentary_service.set_enabled(enabled)
+            status_text = "enabled" if enabled else "disabled"
+            await ctx.respond(f"✅ Ventura AI routine has been **{status_text}**.", ephemeral=True)
+        else:
+            await ctx.respond("❌ AI Commentary service not found.", ephemeral=True)
+
     @commands.slash_command(name="backup", description="Backup the entire project (Admin only)")
     async def backup(self, ctx: discord.ApplicationContext):
         """Backup the project folder."""

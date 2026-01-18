@@ -12,6 +12,7 @@ from pydub import AudioSegment
 from typing import List, Optional
 from bot.services.llm import LLMService
 from bot.database import Database
+from config import ENABLE_VENTURA
 
 class AICommentaryService:
     """
@@ -36,6 +37,15 @@ class AICommentaryService:
         # Track if we've sent the "listening" notification
         self.cooldown_ended_notified = False
         self.listening_msg = None
+        
+        # Enable/Disable flag
+        self.enabled = ENABLE_VENTURA
+
+    def set_enabled(self, enabled: bool):
+        """Enable or disable the AI commentary routine."""
+        self.enabled = enabled
+        status = "enabled" if enabled else "disabled"
+        print(f"[AICommentary] Routine {status}.")
 
     def _set_random_cooldown(self):
         """Set a random cooldown between 1 and 3 hours."""
@@ -44,6 +54,9 @@ class AICommentaryService:
 
     def should_trigger(self) -> bool:
         """Check if the cooldown has passed and we aren't already processing."""
+        if not self.enabled:
+            return False
+            
         if self.is_processing:
             return False
         
@@ -54,6 +67,9 @@ class AICommentaryService:
     
     async def notify_listening_if_ready(self, guild_id: int):
         """Send 'Ventura is listening' message when cooldown ends."""
+        if not self.enabled:
+            return
+
         if self.cooldown_ended_notified or self.is_processing:
             return
         

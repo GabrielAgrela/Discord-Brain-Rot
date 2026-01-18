@@ -42,6 +42,8 @@ class BackgroundService:
                 self.scrape_sounds_loop.start()
             if not self.keyword_detection_health_check.is_running():
                 self.keyword_detection_health_check.start()
+            if not self.check_voice_activity_loop.is_running():
+                self.check_voice_activity_loop.start()
             print("[BackgroundService] Background tasks started.")
 
     @tasks.loop(seconds=30)
@@ -90,12 +92,16 @@ class BackgroundService:
             
             # 2. AI Commentary (Ventura) status
             if self.behavior and hasattr(self.behavior, '_ai_commentary_service'):
-                ai_cooldown_seconds = self.behavior._ai_commentary_service.get_cooldown_remaining()
-                ai_minutes = round(ai_cooldown_seconds / 60)
-                if ai_cooldown_seconds > 0:
-                    status_parts.append(f'👂🏻 in ~{ai_minutes}m')
+                ai_service = self.behavior._ai_commentary_service
+                if not ai_service.enabled:
+                    status_parts.append('👂🏻 ❌')
                 else:
-                    status_parts.append('👂🏻')
+                    ai_cooldown_seconds = ai_service.get_cooldown_remaining()
+                    ai_minutes = round(ai_cooldown_seconds / 60)
+                    if ai_cooldown_seconds > 0:
+                        status_parts.append(f'👂🏻 in ~{ai_minutes}m')
+                    else:
+                        status_parts.append('👂🏻')
 
             # 3. Scraper status
             if hasattr(self.bot, 'next_scrape_time'):
@@ -180,3 +186,36 @@ class BackgroundService:
                 print(f"[BackgroundService] Error in scrape_sounds_loop: {e}")
                 await asyncio.sleep(60)  # Wait a minute before retrying on error
 
+
+    @tasks.loop(seconds=60)
+    async def check_voice_activity_loop(self):
+        """
+        Periodically check if the bot is alone in a voice channel and disconnect if so.
+        This serves as a backup to the event-based auto-disconnect.
+        """
+        try:
+            for guild in self.bot.guilds:
+                if guild.voice_client and guild.voice_client.is_connected():
+                    channel = guild.voice_client.channel
+                    if not channel:
+                        continue
+                        
+                    # Count non-bot members
+                    non_bot_members = [m for m in channel.members if not m.bot]
+                    
+                    if len(non_bot_members) == 0:
+                        print(f"[BackgroundService] Bot is alone in {channel.name} ({guild.name}), disconnecting...")
+                        try:
+                            # Stop keyword detection before disconnecting
+                            if self.behavior and hasattr(self.behavior, '_audio_service'):
+                                await self.behavior._audio_service.stop_keyword_detection(guild)
+                            elif self.audio_service:
+                                await self.audio_service.stop_keyword_detection(guild)
+                                
+                            await guild.voice_client.disconnect()
+                            print(f"[BackgroundService] Disconnected from {channel.name}")
+                        except Exception as e:
+                            print(f"[BackgroundService] Error disconnecting from {channel.name}: {e}")
+
+        except Exception as e:
+            print(f"[BackgroundService] Error in voice activity check: {e}")

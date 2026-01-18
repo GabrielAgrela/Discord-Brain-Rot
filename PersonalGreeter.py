@@ -1,3 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv()
+
 from bot.logger import setup_logging
 setup_logging()
 

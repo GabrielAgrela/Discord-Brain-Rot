@@ -434,4 +434,6 @@ class TTS:
                     self.update_last_request_time()
                     print("Audio stream saved and played successfully.")
                 else:
-                    print(f"Error: {await response.text()}")
+                    error_msg = f"ElevenLabs API Error: {await response.text()}"
+                    print(error_msg)
+                    raise Exception(error_msg)
