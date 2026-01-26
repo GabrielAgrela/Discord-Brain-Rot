@@ -68,6 +68,12 @@ class BackgroundService:
                     is_zombie = ws is None or str(type(ws)) == "<class 'discord.utils._MissingSentinel'>"
                     
                     if is_zombie:
+                        # Check if reconnection is already in progress (grace period)
+                        if self.audio_service.is_reconnection_pending(guild.id):
+                            remaining = self.audio_service.get_reconnection_remaining(guild.id)
+                            print(f"[BackgroundService] Reconnection in progress ({remaining:.1f}s remaining), skipping zombie cleanup for {guild.name}...")
+                            continue  # Skip this guild, let the ongoing reconnection complete
+                        
                         print(f"[BackgroundService] Health check: Zombie voice client detected in {guild.name}, forcing cleanup...")
                         try:
                             await self.audio_service.stop_keyword_detection(guild)

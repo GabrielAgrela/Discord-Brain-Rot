@@ -255,6 +255,9 @@ async def on_resumed():
     After a gateway disconnect/resume, voice clients can end up in a zombie state
     where they appear connected but have a broken WebSocket. This handler detects
     and recovers from such states immediately rather than waiting for a health check.
+    
+    Note: Uses reconnection grace period to prevent competing with discord.py's 
+    built-in voice reconnection and other health checks.
     """
     print("[on_resumed] Bot resumed from gateway disconnect, checking voice connections...")
     await asyncio.sleep(2)  # Allow Discord state to settle
@@ -262,6 +265,12 @@ async def on_resumed():
     for guild in bot.guilds:
         voice_client = guild.voice_client
         if voice_client:
+            # Check if reconnection is already in progress (grace period)
+            if behavior._audio_service.is_reconnection_pending(guild.id):
+                remaining = behavior._audio_service.get_reconnection_remaining(guild.id)
+                print(f"[on_resumed] Reconnection in progress ({remaining:.1f}s remaining) for {guild.name}, skipping...")
+                continue
+            
             # Check for zombie state (broken WebSocket)
             ws = getattr(voice_client, 'ws', None)
             is_zombie = ws is None or str(type(ws)) == "<class 'discord.utils._MissingSentinel'>"
@@ -270,6 +279,8 @@ async def on_resumed():
             if is_zombie or is_disconnected:
                 state_desc = "zombie" if is_zombie else "disconnected"
                 print(f"[on_resumed] Detected {state_desc} voice connection in {guild.name}, triggering reconnection...")
+                # Mark reconnection started to prevent other health checks from interfering
+                behavior._audio_service._mark_reconnection_started(guild.id)
                 try:
                     await behavior._audio_service.stop_keyword_detection(guild)
                     await voice_client.disconnect(force=True)

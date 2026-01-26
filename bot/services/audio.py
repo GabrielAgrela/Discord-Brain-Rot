@@ -63,6 +63,10 @@ class AudioService:
         self._connection_locks: Dict[int, asyncio.Lock] = {}
         self._pending_connections: Dict[int, asyncio.Task] = {}
         
+        # Reconnection debounce: track when reconnection started to avoid competing reconnects
+        self._reconnection_timestamps: Dict[int, float] = {}
+        self.RECONNECTION_GRACE_PERIOD = 15.0  # Seconds to wait before health checks intervene
+        
         # Buffer for /llmdebug (handled via ring buffer in sink)
         self.last_audio_buffer: Dict[int, bytes] = {} 
         
@@ -103,6 +107,33 @@ class AudioService:
             self._connection_locks[guild_id] = asyncio.Lock()
         return self._connection_locks[guild_id]
 
+    def is_reconnection_pending(self, guild_id: int) -> bool:
+        """Check if a reconnection is in progress and within the grace period.
+        
+        Returns True if callers should wait/skip their own reconnection attempt.
+        """
+        if guild_id not in self._reconnection_timestamps:
+            return False
+        elapsed = time.time() - self._reconnection_timestamps[guild_id]
+        return elapsed < self.RECONNECTION_GRACE_PERIOD
+
+    def get_reconnection_remaining(self, guild_id: int) -> float:
+        """Get seconds remaining in the reconnection grace period."""
+        if guild_id not in self._reconnection_timestamps:
+            return 0.0
+        elapsed = time.time() - self._reconnection_timestamps[guild_id]
+        remaining = self.RECONNECTION_GRACE_PERIOD - elapsed
+        return max(0.0, remaining)
+
+    def _mark_reconnection_started(self, guild_id: int):
+        """Mark that a reconnection attempt has started for a guild."""
+        self._reconnection_timestamps[guild_id] = time.time()
+
+    def _clear_reconnection_state(self, guild_id: int):
+        """Clear reconnection state after successful connection."""
+        if guild_id in self._reconnection_timestamps:
+            del self._reconnection_timestamps[guild_id]
+
     async def ensure_voice_connected(self, channel: discord.VoiceChannel) -> Optional[discord.VoiceProtocol]:
         """Ensure the bot is connected to the specified voice channel.
         
@@ -131,6 +162,7 @@ class AudioService:
                     # Check for broken/uninitialized voice client state
                     if not hasattr(voice_client, 'ws') or voice_client.ws is None or str(type(voice_client.ws)) == "<class 'discord.utils._MissingSentinel'>":
                         print(f"[AudioService] Detected broken voice client in {channel.guild.name}, cleaning up")
+                        self._mark_reconnection_started(guild_id)
                         try:
                             await self.stop_keyword_detection(channel.guild)
                             await voice_client.disconnect(force=True)
@@ -141,6 +173,7 @@ class AudioService:
                         
                     elif not voice_client.is_connected():
                         print(f"[AudioService] Voice client in {channel.guild.name} exists but is not connected. Reconnecting...")
+                        self._mark_reconnection_started(guild_id)
                         try:
                             await self.stop_keyword_detection(channel.guild)
                             await voice_client.disconnect(force=True)
@@ -161,10 +194,12 @@ class AudioService:
                             voice_client = None
                         if voice_client:
                             # Successfully moved, restart keyword detection
+                            self._clear_reconnection_state(guild_id)
                             await self.start_keyword_detection(channel.guild)
                             return voice_client
                     else:
                         # Already connected to the right channel, ensure keyword detection is running
+                        self._clear_reconnection_state(guild_id)
                         await self.start_keyword_detection(channel.guild)
                         return voice_client
                 
@@ -184,6 +219,7 @@ class AudioService:
                         # Give the voice connection a moment to fully establish
                         await asyncio.sleep(0.5)
                         # Start keyword detection on new connection
+                        self._clear_reconnection_state(guild_id)
                         await self.start_keyword_detection(channel.guild)
                         return voice_client
                     except asyncio.CancelledError:
@@ -946,7 +982,11 @@ class KeywordDetectionSink(sinks.Sink):
                     try:
                         voice_client = self.guild.voice_client
                         if voice_client:
-                            if not voice_client.is_connected():
+                            # Check if reconnection is already in progress (grace period)
+                            if self.audio_service.is_reconnection_pending(self.guild.id):
+                                remaining = self.audio_service.get_reconnection_remaining(self.guild.id)
+                                print(f"[VoskWorker] Reconnection in progress ({remaining:.1f}s remaining), skipping health check...")
+                            elif not voice_client.is_connected():
                                 print(f"[VoskWorker] WARNING: Voice client exists but is not connected! Triggering reconnection...")
                                 # Schedule reconnection on the main event loop
                                 asyncio.run_coroutine_threadsafe(

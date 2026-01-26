@@ -131,3 +131,23 @@ bot/
 - Repository unit tests don't catch integration errors with Discord or BotBehavior
 - Attribute name mismatches and service access patterns are only caught at runtime
 - When adding new commands/UI, manually test the full flow to catch integration issues
+
+## Deployment
+
+### Restarting the Bot
+After making code changes, **always restart the Docker containers** to deploy:
+
+```bash
+cd /home/gabi/github/Discord-Brain-Rot
+docker-compose restart
+```
+
+This restarts both the bot and web containers. The bot runs in Docker, so changes to Python files won't take effect until the container is restarted.
+
+### Viewing Logs
+To monitor the bot after restart:
+```bash
+docker-compose logs -f bot
+```
+
+Or check the log files directly in `Logs/` (named by date, e.g., `2026-01-26.log`).
