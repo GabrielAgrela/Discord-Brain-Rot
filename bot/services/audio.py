@@ -262,7 +262,7 @@ class AudioService:
                         lines = embed.description.split('\n') if embed.description else []
                         new_lines = []
                         for line in lines:
-                            if line.startswith("Progress:"):
+                            if line.startswith("⏳"):
                                 new_lines.append(f"{line} 👋")
                             else:
                                 new_lines.append(line)
@@ -335,7 +335,7 @@ class AudioService:
                 if self.current_sound_message.embeds:
                     embed = self.current_sound_message.embeds[0]
                     description_lines = embed.description.split('\n') if embed.description else []
-                    progress_line = next((line for line in description_lines if line.startswith("Progress:")), None)
+                    progress_line = next((line for line in description_lines if line.startswith("⏳")), None)
                     
                     if progress_line and not any(emoji in progress_line for emoji in ["👋", "⏭️"]):
                         description = []
@@ -347,7 +347,7 @@ class AudioService:
                         interrupt_emoji = "👋" if is_slap_sound else "⏭️"
                         
                         for line in description_lines:
-                            if line.startswith("Progress:"):
+                            if line.startswith("⏳"):
                                 description.append(f"{line} {interrupt_emoji}")
                             else:
                                 description.append(line)
@@ -465,7 +465,7 @@ class AudioService:
                     
                     if duration > 0:
                         description.append(f"⏱️ Duration: {duration_str}")
-                        description.append("Progress: Loading...")
+                        description.append("⏳ Loading...")
                     
                     # Add lists containing this sound
                     if sound_filename:
@@ -668,8 +668,8 @@ class AudioService:
                     lines = embed.description.split('\n') if embed.description else []
                     new_lines = []
                     for line in lines:
-                        if line.startswith("Progress:"):
-                            new_lines.append(f"Progress: {bar}")
+                        if line.startswith("⏳"):
+                            new_lines.append(f"⏳ {bar}")
                         else:
                             new_lines.append(line)
                     
@@ -691,8 +691,8 @@ class AudioService:
                     new_lines = []
                     bar = "█" * bar_length
                     for line in lines:
-                        if line.startswith("Progress:"):
-                            new_lines.append(f"Progress: {bar} ✅")
+                        if line.startswith("⏳"):
+                            new_lines.append(f"⏳ {bar} ✅")
                         else:
                             new_lines.append(line)
                     embed.description = "\n".join(new_lines)

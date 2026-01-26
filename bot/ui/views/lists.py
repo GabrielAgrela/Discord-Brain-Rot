@@ -37,7 +37,10 @@ class PaginatedSoundListView(View):
             return
             
         current_sounds = self.pages[self.current_page]
-        for i, (filename, original_name) in enumerate(current_sounds):
+        for i, sound in enumerate(current_sounds):
+            # Sound is a full database tuple: (id, originalfilename, Filename, favorite, blacklist, ...)
+            filename = sound[2]  # Filename column
+            original_name = sound[1]  # originalfilename column
             display_name = original_name if original_name else filename
             if len(display_name) > 80:
                 display_name = display_name[:77] + "..."

@@ -168,11 +168,11 @@ class AddToListSelect(ui.Select):
         if not list_info:
             await interaction.followup.send("List not found.", ephemeral=True)
             return
-        success, message = Database().add_sound_to_list(list_id, self.sound_filename)
+        success = Database().add_sound_to_list(list_id, self.sound_filename)
         if success:
             await interaction.followup.send(f"Added to list '{list_info[1]}'.", ephemeral=True)
         else:
-            await interaction.followup.send(f"Failed: {message}", ephemeral=True)
+            await interaction.followup.send(f"Sound is already in list '{list_info[1]}'.", ephemeral=True)
 
 
 class STSCharacterSelect(ui.Select):

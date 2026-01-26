@@ -248,6 +248,42 @@ async def on_ready():
     # --- End Auto-join ---
 
 
+@bot.event
+async def on_resumed():
+    """Handle gateway reconnection - check and fix voice connections.
+    
+    After a gateway disconnect/resume, voice clients can end up in a zombie state
+    where they appear connected but have a broken WebSocket. This handler detects
+    and recovers from such states immediately rather than waiting for a health check.
+    """
+    print("[on_resumed] Bot resumed from gateway disconnect, checking voice connections...")
+    await asyncio.sleep(2)  # Allow Discord state to settle
+    
+    for guild in bot.guilds:
+        voice_client = guild.voice_client
+        if voice_client:
+            # Check for zombie state (broken WebSocket)
+            ws = getattr(voice_client, 'ws', None)
+            is_zombie = ws is None or str(type(ws)) == "<class 'discord.utils._MissingSentinel'>"
+            is_disconnected = not voice_client.is_connected()
+            
+            if is_zombie or is_disconnected:
+                state_desc = "zombie" if is_zombie else "disconnected"
+                print(f"[on_resumed] Detected {state_desc} voice connection in {guild.name}, triggering reconnection...")
+                try:
+                    await behavior._audio_service.stop_keyword_detection(guild)
+                    await voice_client.disconnect(force=True)
+                    await asyncio.sleep(1)
+                    
+                    # Reconnect to largest populated channel
+                    channel = behavior.get_largest_voice_channel(guild)
+                    if channel and len([m for m in channel.members if not m.bot]) > 0:
+                        await behavior._audio_service.ensure_voice_connected(channel)
+                        print(f"[on_resumed] Successfully reconnected to {channel.name}")
+                    else:
+                        print(f"[on_resumed] No populated voice channel to reconnect in {guild.name}")
+                except Exception as e:
+                    print(f"[on_resumed] Error during voice recovery in {guild.name}: {e}")
 
 
 

@@ -54,11 +54,35 @@ class BackgroundService:
         This handles the case where the bot disconnects randomly and the STT stops
         but never gets restarted. It also checks if the worker thread is alive,
         since Discord voice reconnections can stop the worker without removing the sink.
+        
+        Additionally detects and cleans up zombie voice connections (broken WebSocket
+        state after shard reconnection) that cause 'Already connected' errors.
         """
         try:
             for guild in self.bot.guilds:
                 voice_client = guild.voice_client
-                # If bot is connected to voice, check keyword detection status
+                
+                # Check for zombie/broken voice client (e.g., after shard reconnect)
+                if voice_client:
+                    ws = getattr(voice_client, 'ws', None)
+                    is_zombie = ws is None or str(type(ws)) == "<class 'discord.utils._MissingSentinel'>"
+                    
+                    if is_zombie:
+                        print(f"[BackgroundService] Health check: Zombie voice client detected in {guild.name}, forcing cleanup...")
+                        try:
+                            await self.audio_service.stop_keyword_detection(guild)
+                            await voice_client.disconnect(force=True)
+                            await asyncio.sleep(1)
+                            # Reconnect to largest populated channel
+                            channel = self.audio_service.get_largest_voice_channel(guild)
+                            if channel and len([m for m in channel.members if not m.bot]) > 0:
+                                await self.audio_service.ensure_voice_connected(channel)
+                                print(f"[BackgroundService] Health check: Reconnected to {channel.name} after zombie cleanup")
+                        except Exception as e:
+                            print(f"[BackgroundService] Error cleaning up zombie connection: {e}")
+                        continue  # Skip normal checks for this guild since we just reconnected
+                
+                # Normal health checks - only if voice client is actually connected
                 if voice_client and voice_client.is_connected():
                     sink = self.audio_service.keyword_sinks.get(guild.id)
                     
@@ -147,6 +171,12 @@ class BackgroundService:
                 for guild in self.bot.guilds:
                     channel = self.audio_service.get_largest_voice_channel(guild)
                     if channel:
+                        # Skip if channel is empty (no non-bot members)
+                        non_bot_members = [m for m in channel.members if not m.bot]
+                        if not non_bot_members:
+                            print(f"[BackgroundService] Skipping periodic sound in {guild.name} - no users in channel")
+                            continue
+                        
                         random_sounds = self.sound_repo.get_random_sounds(num_sounds=1)
                         if random_sounds:
                             sound = random_sounds[0]

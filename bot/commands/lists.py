@@ -146,7 +146,7 @@ class ListCog(commands.Cog):
         soundid = similar[0][1]  # Filename from similarity result
         
         # Add the sound to the list
-        success, message = self.list_repo.add_sound(sound_list[0], soundid)
+        success = self.list_repo.add_sound(sound_list[0], soundid)
         
         if success:
             list_creator = sound_list[2]
@@ -161,7 +161,7 @@ class ListCog(commands.Cog):
             else:
                 await ctx.respond(f"Added sound '{sound}' to your list '{actual_name}'.", ephemeral=True)
         else:
-            await ctx.respond(f"Failed to add sound to list: {message}", ephemeral=True)
+            await ctx.respond(f"Sound is already in list '{actual_name}'.", ephemeral=True)
             
     @commands.slash_command(name="removefromlist", description="Remove a sound from one of your lists")
     async def remove_from_list(
