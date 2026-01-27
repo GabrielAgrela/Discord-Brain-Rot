@@ -364,36 +364,10 @@ class AudioService:
                     return
         self.last_played_time = datetime.now()
 
-        # Stop updating the previous sound's progress
-        if self.current_sound_message and not self.progress_already_updated:
-            self.stop_progress_update = True
-            try:
-                if self.current_sound_message.embeds:
-                    embed = self.current_sound_message.embeds[0]
-                    description_lines = embed.description.split('\n') if embed.description else []
-                    progress_line = next((line for line in description_lines if line.startswith("⏳")), None)
-                    
-                    if progress_line and not any(emoji in progress_line for emoji in ["👋", "⏭️"]):
-                        description = []
-                        if extra != "":
-                            description.append(f"Similarity: {extra}%")
-                        
-                        sound_info = self.sound_repo.get_sound(audio_file, True)
-                        is_slap_sound = sound_info and sound_info[6] == 1
-                        interrupt_emoji = "👋" if is_slap_sound else "⏭️"
-                        
-                        for line in description_lines:
-                            if line.startswith("⏳"):
-                                description.append(f"{line} {interrupt_emoji}")
-                            else:
-                                description.append(line)
-                        description_text = "\n".join(description)
-                        
-                        embed.description = description_text
-                        await self.current_sound_message.edit(embed=embed)
-                        self.progress_already_updated = True
-            except Exception as e:
-                print(f"[AudioService] Error updating previous sound message: {e}")
+        # We'll update the previous sound's message only if we actually interrupt it
+        # This flag will be set below if we detect we're interrupting playback
+        previous_sound_message = self.current_sound_message
+        was_interrupted = False
 
         try:
             self.current_similar_sounds = None
@@ -401,9 +375,33 @@ class AudioService:
             if not voice_client:
                 return False
 
-            # Stop any currently playing audio to allow instant skip
+            # Check if we're actually interrupting playback
             if voice_client.is_playing():
+                was_interrupted = True
+                self.stop_progress_update = True
                 voice_client.stop()
+                
+                # Update the previous sound's message with skip emoji
+                if previous_sound_message and not self.progress_already_updated:
+                    try:
+                        if previous_sound_message.embeds:
+                            embed = previous_sound_message.embeds[0]
+                            description_lines = embed.description.split('\n') if embed.description else []
+                            progress_line = next((line for line in description_lines if line.startswith("⏳")), None)
+                            
+                            if progress_line and not any(emoji in progress_line for emoji in ["👋", "⏭️", "✅"]):
+                                new_lines = []
+                                for line in description_lines:
+                                    if line.startswith("⏳"):
+                                        new_lines.append(f"{line} ⏭️")
+                                    else:
+                                        new_lines.append(line)
+                                
+                                embed.description = "\n".join(new_lines)
+                                await previous_sound_message.edit(embed=embed)
+                                self.progress_already_updated = True
+                    except Exception as e:
+                        print(f"[AudioService] Error updating previous sound message: {e}")
 
             if not isinstance(audio_file, str):
                 print(f"[AudioService] WARNING: audio_file is not a string! Type: {type(audio_file)}, Value: {audio_file}")
