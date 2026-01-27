@@ -296,6 +296,17 @@ class Database:
     # ===== Fuzzy similarity search (complex logic kept here) =====
     
     def normalize_text(self, text):
+        """Normalize text for fuzzy matching.
+        
+        Handles:
+        - Leet-speak substitutions (0->o, 1->i, etc.)
+        - File extensions (.mp3)
+        - Special characters (hyphens, underscores -> spaces)
+        - Multiple spaces collapsed to single space
+        """
+        import re
+        
+        # Leet-speak substitutions
         substitutions = {
             '0': 'o',
             '1': 'i',
@@ -309,6 +320,16 @@ class Database:
         }
         for key, value in substitutions.items():
             text = text.replace(key, value)
+        
+        # Remove .mp3 extension
+        text = text.replace('.mp3', '')
+        
+        # Replace hyphens and underscores with spaces (improves tokenization)
+        text = re.sub(r'[-_]+', ' ', text)
+        
+        # Collapse multiple spaces to single space
+        text = re.sub(r'\s+', ' ', text).strip()
+        
         return text.lower()
 
     def get_sounds_by_similarity(self, req_sound, num_results=5, sleep_interval=0.0):
