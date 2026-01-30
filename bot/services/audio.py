@@ -552,7 +552,8 @@ class AudioService:
                     from bot.ui import SoundBeingPlayedView
                     # Pass behavior reference if available
                     behavior_ref = self._behavior if hasattr(self, '_behavior') else None
-                    view = SoundBeingPlayedView(behavior_ref, audio_file, include_add_to_list_select=True)
+                    # Don't include selects initially - they'll be added all at once when suggestions load
+                    view = SoundBeingPlayedView(behavior_ref, audio_file, include_add_to_list_select=False, include_sts_select=False)
                     
                     embed = discord.Embed(title=embed_title, description=description_text, color=discord.Color.red())
                     embed.set_footer(text=footer_text)

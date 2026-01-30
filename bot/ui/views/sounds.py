@@ -3,7 +3,7 @@ from discord.ui import View
 from bot.database import Database
 
 class SoundBeingPlayedView(View):
-    def __init__(self, bot_behavior, audio_file, user_id=None, include_add_to_list_select: bool = False):
+    def __init__(self, bot_behavior, audio_file, user_id=None, include_add_to_list_select: bool = False, include_sts_select: bool = True):
         super().__init__(timeout=None)
         self.bot_behavior = bot_behavior
         self.audio_file = audio_file
@@ -26,10 +26,13 @@ class SoundBeingPlayedView(View):
         self.add_item(ChangeSoundNameButton(bot_behavior=bot_behavior, sound_name=audio_file, emoji="📝", style=discord.ButtonStyle.primary, row=1))
         self.add_item(AssignUserEventButton(bot_behavior=bot_behavior, audio_file=audio_file, emoji="📢", style=discord.ButtonStyle.primary, row=1))
         
-        # Row 2: Voice Transformation
-        self.add_item(STSCharacterSelect(bot_behavior=bot_behavior, audio_file=audio_file, row=2))
+        current_row = 2
+        
+        # Row 2: Voice Transformation (conditionally)
+        if include_sts_select:
+            self.add_item(STSCharacterSelect(bot_behavior=bot_behavior, audio_file=audio_file, row=current_row))
+            current_row += 1
 
-        current_row = 3
         if include_add_to_list_select:
             lists = Database().get_sound_lists()
             if lists:
