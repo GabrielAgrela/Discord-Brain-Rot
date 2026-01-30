@@ -450,24 +450,31 @@ async def play_audio_for_event(member, member_str, event, channel):
             behavior.last_channel[member_str] = channel
             if channel:
                 print(f"Playing {sound_name} for {member_str} on {event}")
-                # Get sound info only once
-                similar_sounds = db.get_sounds_by_similarity(sound_name, 1)
-                if similar_sounds:
-                    sound_row = similar_sounds[0][0]  # (row, score) -> row
-                    # Convert Row to dict if needed
-                    if isinstance(sound_row, sqlite3.Row):
-                        sound_row = dict(sound_row)
-                    # Access by column name or index depending on type
-                    if isinstance(sound_row, dict):
-                        filename = sound_row['Filename']
-                        sound_id = sound_row['id']
-                    else:
-                        filename = sound_row[2]
-                        sound_id = sound_row[0]
-                    await behavior.play_audio(channel, filename, member_str)
-                    db.insert_action(member_str, event, sound_id)
+                # Try exact match first, fall back to fuzzy search
+                from bot.repositories import SoundRepository
+                exact_match = SoundRepository().get_by_filename(sound_name)
+                if exact_match:
+                    await behavior.play_audio(channel, exact_match.filename, member_str)
+                    db.insert_action(member_str, event, exact_match.id)
                 else:
-                    print(f"Sound {sound_name} not found for user event")
+                    # Fall back to fuzzy search
+                    similar_sounds = db.get_sounds_by_similarity(sound_name, 1)
+                    if similar_sounds:
+                        sound_row = similar_sounds[0][0]  # (row, score) -> row
+                        # Convert Row to dict if needed
+                        if isinstance(sound_row, sqlite3.Row):
+                            sound_row = dict(sound_row)
+                        # Access by column name or index depending on type
+                        if isinstance(sound_row, dict):
+                            filename = sound_row['Filename']
+                            sound_id = sound_row['id']
+                        else:
+                            filename = sound_row[2]
+                            sound_id = sound_row[0]
+                        await behavior.play_audio(channel, filename, member_str)
+                        db.insert_action(member_str, event, sound_id)
+                    else:
+                        print(f"Sound {sound_name} not found for user event")
                     
         elif event == "join":
             await behavior.play_audio(channel, "gay-echo.mp3", "admin")

@@ -112,20 +112,21 @@ class SoundService:
 
     async def play_request(self, sound_id_or_name: str, user: str, exact: bool = False, effects: Optional[dict] = None, guild: Optional[discord.Guild] = None):
         """Play a specific sound requested by a user, with fuzzy matching support."""
-        if exact:
-            # First try exact match from DB
-            sound_info = self.sound_repo.get_sound_by_name(sound_id_or_name)
-            if not sound_info:
-                # Fallback to direct file check if not in DB
-                if not sound_id_or_name.endswith('.mp3'):
-                    sound_id_or_name += '.mp3'
-                filenames = [sound_id_or_name]
-            else:
-                filenames = [sound_info[2]]
+        filenames = []
+        
+        # Always try exact match first (before fuzzy search)
+        exact_match = self.sound_repo.get_by_filename(sound_id_or_name)
+        if exact_match:
+            filenames = [exact_match.filename]
+        elif exact:
+            # User requested exact match only, but no exact match found
+            # Fallback to direct file check if not in DB
+            if not sound_id_or_name.endswith('.mp3'):
+                sound_id_or_name += '.mp3'
+            filenames = [sound_id_or_name]
         else:
-            # Find the best match using similarity
+            # No exact match found, use fuzzy search
             results = self.db.get_sounds_by_similarity(sound_id_or_name, 1)
-            filenames = []
             for r in results:
                 sound_data = r[0]
                 # Robustly get filename from Row, dict, or tuple

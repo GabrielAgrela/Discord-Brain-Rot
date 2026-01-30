@@ -30,18 +30,25 @@ class UserEventService:
     async def add_user_event(self, username: str, event: str, sound_name: str) -> bool:
         """Add a join/leave event sound for a user."""
         try:
-            # Find the most similar sound in the database
-            results = self.db.get_sounds_by_similarity(sound_name, 1)
-            if not results:
-                return False
+            from bot.repositories import SoundRepository
             
-            # Get the most similar sound
-            # results[0] is (sound_data, score)
-            sound_data = results[0][0]
-            if isinstance(sound_data, (sqlite3.Row, dict)):
-                most_similar_sound = sound_data['Filename'].replace('.mp3', '')
+            # Try exact match first
+            exact_match = SoundRepository().get_by_filename(sound_name)
+            if exact_match:
+                most_similar_sound = exact_match.filename.replace('.mp3', '')
             else:
-                most_similar_sound = sound_data[2].replace('.mp3', '')
+                # Fall back to fuzzy search
+                results = self.db.get_sounds_by_similarity(sound_name, 1)
+                if not results:
+                    return False
+                
+                # Get the most similar sound
+                # results[0] is (sound_data, score)
+                sound_data = results[0][0]
+                if isinstance(sound_data, (sqlite3.Row, dict)):
+                    most_similar_sound = sound_data['Filename'].replace('.mp3', '')
+                else:
+                    most_similar_sound = sound_data[2].replace('.mp3', '')
             
             # Add the event sound to the database
             success = self.event_repo.toggle(username, event, most_similar_sound)
