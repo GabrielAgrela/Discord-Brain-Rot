@@ -115,10 +115,6 @@ class MessageService:
             message = await channel.send(**kwargs)
             self._last_message = message
             
-            # Re-send controls to keep them at the bottom
-            if self._bot_behavior and self._controls_message:
-                await self.send_controls(self._bot_behavior)
-            
             return message
             
         except Exception as e:
@@ -267,7 +263,7 @@ class MessageService:
             print(f"[MessageService] Error updating message: {e}")
             return False
     
-    async def send_controls(self, bot_behavior, guild: Optional[discord.Guild] = None) -> bool:
+    async def send_controls(self, bot_behavior, guild: Optional[discord.Guild] = None, delete_after: Optional[int] = None) -> bool:
         """Send the main bot controls view."""
         from bot.ui.views.controls import ControlsView
         channel = self.get_bot_channel(guild)
@@ -285,7 +281,7 @@ class MessageService:
                     except:
                         pass
                 
-                self._controls_message = await channel.send(view=ControlsView(bot_behavior))
+                self._controls_message = await channel.send(view=ControlsView(bot_behavior), delete_after=delete_after)
                 return True
         except Exception as e:
             print(f"[MessageService] Error sending controls: {e}")
@@ -347,7 +343,8 @@ class MessageService:
         try:
             async for message in channel.history(limit=count):
                 if message.components:
-                    if message.embeds:
+                    is_sound_msg = message.embeds or (message.attachments and any(a.filename.endswith('.png') for a in message.attachments))
+                    if is_sound_msg:
                         await message.edit(view=None)
                     else:
                         await message.delete()

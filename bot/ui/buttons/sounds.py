@@ -13,6 +13,7 @@ class ReplayButton(Button):
         
 
     async def callback(self, interaction):
+        print(f"DEBUG: ReplayButton.callback called by {interaction.user.name} for {self.audio_file}")
         try:
             await interaction.response.defer()
             channel = interaction.user.voice.channel if interaction.user.voice else None
@@ -71,6 +72,7 @@ class FavoriteButton(Button):
         super().__init__(label="", emoji="⭐", style=discord.ButtonStyle.primary, **kwargs)
 
     async def callback(self, interaction: discord.Interaction):
+        print(f"DEBUG: FavoriteButton.callback called by {interaction.user.name} for {self.audio_file}")
         await interaction.response.defer()
         sound = Database().get_sound(self.audio_file, False)
         if not sound:
@@ -184,6 +186,7 @@ class SlapButton(Button):
             super().__init__(label="", emoji="👋", style=discord.ButtonStyle.primary, **self.kwargs)
 
     async def callback(self, interaction: discord.Interaction):
+        print(f"DEBUG: SlapButton.callback called by {interaction.user.name} for {self.audio_file}")
         await interaction.response.defer()
         
         # Check if user has admin/mod permissions
@@ -297,3 +300,43 @@ class STSCharacterSelectButton(Button):
         sound = Database().get_sound(self.audio_file, False)
         if sound:
             Database().insert_action(interaction.user.name, "sts_character_select", sound[0])
+class ToggleControlsButton(Button):
+    def __init__(self, **kwargs):
+        # Extract initial state from view if possible
+        label = kwargs.pop('label', "")
+        emoji = kwargs.pop('emoji', "👁️")
+        super().__init__(label="", emoji=emoji, style=discord.ButtonStyle.secondary, **kwargs)
+
+    async def callback(self, interaction: discord.Interaction):
+        # Toggle the state in the view
+        view = self.view
+        if not hasattr(view, 'show_controls'):
+            view.show_controls = False
+        
+        view.show_controls = not view.show_controls
+        
+        # Update button appearance (Icon only ✅)
+        if view.show_controls:
+            self.emoji = "🙈" # Hide icon
+        else:
+            self.emoji = "👁️" # Show icon
+            
+        # Re-setup the view items based on the new state
+        if hasattr(view, '_setup_items'):
+            view._setup_items()
+            await interaction.response.edit_message(view=view)
+        else:
+            await interaction.response.defer()
+
+class SendControlsButton(Button):
+    """Button to send main controls as a separate message."""
+    def __init__(self, **kwargs):
+        super().__init__(label="", emoji="📲", style=discord.ButtonStyle.secondary, **kwargs)
+
+    async def callback(self, interaction: discord.Interaction):
+        view = self.view
+        if hasattr(view, 'bot_behavior') and view.bot_behavior:
+            await view.bot_behavior.send_controls(guild=interaction.guild, delete_after=10)
+            await interaction.response.defer(ephemeral=True)
+        else:
+            await interaction.response.send_message("Error: Bot behavior not found.", ephemeral=True)

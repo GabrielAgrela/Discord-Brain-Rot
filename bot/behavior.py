@@ -316,9 +316,9 @@ class BotBehavior:
     async def is_channel_empty(self, channel):
         return self._audio_service.is_channel_empty(channel)
 
-    async def send_controls(self, force=False, guild: Optional[discord.Guild] = None):
+    async def send_controls(self, force=False, guild: Optional[discord.Guild] = None, delete_after: Optional[int] = None):
         """Send main bot controls."""
-        return await self._message_service.send_controls(self, guild=guild)
+        return await self._message_service.send_controls(self, guild=guild, delete_after=delete_after)
         
     async def is_playing_sound(self):
         return self._audio_service.is_playing_sound()

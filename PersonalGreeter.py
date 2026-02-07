@@ -166,7 +166,6 @@ async def check_playback_queue():
         print(f"[Playback Queue] Unexpected error in background task: {e}")
 
 
-@default_permissions(manage_messages=True)
 @bot.event
 async def on_ready():
     # --- Load Opus library ---
@@ -185,7 +184,7 @@ async def on_ready():
     #bot.loop.create_task(behavior.check_if_in_game())
     await behavior.delete_controls_message()
     await behavior.clean_buttons()
-    await behavior.send_controls(force=True)
+    # await behavior.send_controls(force=True)
     
     # Background tasks are handled by BackgroundService (started automatically in BotBehavior)
     bot.loop.create_task(SoundDownloader(behavior, behavior.db, os.getenv("CHROMEDRIVER_PATH")).move_sounds())

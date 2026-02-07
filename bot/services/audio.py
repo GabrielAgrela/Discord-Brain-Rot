@@ -20,6 +20,7 @@ from bot.repositories import (
     SoundRepository, ActionRepository, ListRepository, 
     StatsRepository, KeywordRepository
 )
+from bot.services.image_generator import ImageGeneratorService
 
 class AudioService:
     """
@@ -54,7 +55,14 @@ class AudioService:
         self.current_similar_sounds: Optional[List[Any]] = None
         self.volume = 1.0
         self.playback_done = asyncio.Event()
+        self.volume = 1.0
+        self.playback_done = asyncio.Event()
         self.playback_done.set()
+        
+        # Track current view to update progress button
+        self.current_view: Optional[discord.ui.View] = None
+        
+
         
         # Keyword detection state
         self.keyword_sinks: Dict[int, 'KeywordDetectionSink'] = {}
@@ -89,6 +97,17 @@ class AudioService:
         # Dependency on other services that will be added later
         self.sound_service = None
         self.voice_transformation_service = None
+        
+        # Image generator for sound cards
+        self.image_generator = ImageGeneratorService()
+
+    def _format_duration(self, seconds: float) -> str:
+        """Format seconds into mm:ss string."""
+        if seconds < 0:
+            seconds = 0
+        minutes = int(seconds // 60)
+        secs = int(seconds % 60)
+        return f"{minutes}:{secs:02d}"
 
     def set_sound_service(self, sound_service):
         self.sound_service = sound_service
@@ -292,18 +311,11 @@ class AudioService:
             if voice_client.is_playing():
                 self.stop_progress_update = True  # Stop the progress bar animation
                 # Update the current sound message with slap icon
-                if self.current_sound_message and self.current_sound_message.embeds:
+                if self.current_sound_message and self.current_view:
                     try:
-                        embed = self.current_sound_message.embeds[0]
-                        lines = embed.description.split('\n') if embed.description else []
-                        new_lines = []
-                        for line in lines:
-                            if line.startswith("⏳"):
-                                new_lines.append(f"{line} 👋")
-                            else:
-                                new_lines.append(line)
-                        embed.description = "\n".join(new_lines)
-                        await self.current_sound_message.edit(embed=embed)
+                        if hasattr(self.current_view, 'update_progress_label'):
+                             self.current_view.update_progress_label("👋 Slapped!")
+                             await self.current_sound_message.edit(view=self.current_view)
                     except:
                         pass
                 voice_client.stop()
@@ -316,7 +328,8 @@ class AudioService:
 
             audio_source = discord.FFmpegPCMAudio(
                 audio_file_path,
-                executable=self.ffmpeg_path
+                executable=self.ffmpeg_path,
+                before_options="-analyzeduration 0 -probesize 32"
             )
             audio_source = discord.PCMVolumeTransformer(audio_source, volume=self.volume)
             
@@ -329,7 +342,7 @@ class AudioService:
     async def play_audio(self, channel, audio_file, user, 
                         is_entrance=False, is_tts=False, extra="", 
                         original_message="", 
-                        send_controls=True, retry_count=0, effects=None, 
+                        send_controls=False, retry_count=0, effects=None, 
                         show_suggestions: bool = True, 
                         num_suggestions: int = 25,
                         sts_char: str = None):
@@ -382,43 +395,32 @@ class AudioService:
                 voice_client.stop()
                 
                 # Update the previous sound's message with skip emoji
-                if previous_sound_message and not self.progress_already_updated:
-                    try:
-                        if previous_sound_message.embeds:
-                            embed = previous_sound_message.embeds[0]
-                            description_lines = embed.description.split('\n') if embed.description else []
-                            progress_line = next((line for line in description_lines if line.startswith("⏳")), None)
-                            
-                            if progress_line and not any(emoji in progress_line for emoji in ["👋", "⏭️", "✅"]):
-                                new_lines = []
-                                for line in description_lines:
-                                    if line.startswith("⏳"):
-                                        new_lines.append(f"{line} ⏭️")
-                                    else:
-                                        new_lines.append(line)
-                                
-                                embed.description = "\n".join(new_lines)
-                                await previous_sound_message.edit(embed=embed)
-                                self.progress_already_updated = True
-                    except Exception as e:
-                        print(f"[AudioService] Error updating previous sound message: {e}")
+                if previous_sound_message: 
+                    # Use tracked current_view which corresponds to the sound being stopped
+                    if self.current_view and hasattr(self.current_view, 'update_progress_label'):
+                         try:
+                             self.current_view.update_progress_label("⏭️ Skipped")
+                             await previous_sound_message.edit(view=self.current_view)
+                         except:
+                             pass
+                    pass # Original logic relied on msg content, but now we use view buttons.
+                         # If we don't have the view object, we can't update the button easily without
+                         # retrieving the view from the message components, which is complex.
+                         # For now, relying on self.current_view is the best bet as it points to the 
+                         # sound we are about to stop.
 
             if not isinstance(audio_file, str):
-                print(f"[AudioService] WARNING: audio_file is not a string! Type: {type(audio_file)}, Value: {audio_file}")
                 audio_file = str(audio_file)
 
             audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Sounds", audio_file))
 
             if not os.path.exists(audio_file_path):
-                # Try getting sound info by Filename first
                 sound_info = self.sound_repo.get_sound(audio_file, False)
                 if sound_info:
-                    # Found by Filename, check if original filename exists on disk
                     original_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Sounds", sound_info[1]))
                     if os.path.exists(original_path):
                         audio_file_path = original_path
                     else:
-                        # Try searching by original filename directly (legacy fallback)
                         sound_info_orig = self.sound_repo.get_sound(audio_file, True)
                         if sound_info_orig and len(sound_info_orig) > 2:
                             audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Sounds", sound_info_orig[2]))
@@ -426,7 +428,6 @@ class AudioService:
                             await self.message_service.send_error(f"Sound '{audio_file}' not found on disk or database")
                             return False
                 else:
-                     # Try searching by original filename directly (legacy fallback)
                     sound_info_orig = self.sound_repo.get_sound(audio_file, True)
                     if sound_info_orig and len(sound_info_orig) > 2:
                         audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Sounds", sound_info_orig[2]))
@@ -437,6 +438,8 @@ class AudioService:
                         await self.message_service.send_error(f"Sound '{audio_file}' not found in database")
                         return False
 
+            # Get sound info and duration early
+            sound_info = self.sound_repo.get_sound(audio_file, False)
             try:
                 audio = MP3(audio_file_path)
                 duration = audio.info.length
@@ -446,231 +449,166 @@ class AudioService:
                 duration_str = "Unknown"
                 duration = 0
 
-            bot_channel = self.message_service.get_bot_channel(channel.guild)
-            sound_message = None
-            
-            # Re-check slap sound
-            sound_info = self.sound_repo.get_sound(audio_file, False)
-            is_slap_sound = sound_info and sound_info[6] == 1
-            
-            if bot_channel and not is_entrance:
-                if not is_slap_sound:
-                    description = []
-                    if extra:
-                        description.append(f"Similarity: {extra}%")
-                    
-                    # Get play count for this sound
-                    sound_filename = sound_info[2] if sound_info else audio_file
-                    sound_id = sound_info[0] if sound_info else None
-                    
-                    if sound_id:
-                        play_count = self.action_repo.get_sound_play_count(sound_id)
-                        description.append(f"🔢 Play count: {play_count + 1}")
-                        
-                        # Add download date information
-                        download_date = self.stats_repo.get_sound_download_date(sound_id)
-                        if download_date and download_date != "Unknown date":
-                            try:
-                                if isinstance(download_date, str) and "2023-10-30" in download_date:
-                                    description.append(f"📅 Added: Before Oct 30, 2023")
-                                else:
-                                    if isinstance(download_date, str):
-                                        date_formats = [
-                                            "%Y-%m-%d %H:%M:%S",
-                                            "%Y-%m-%d %H:%M:%S.%f",
-                                            "%Y-%m-%dT%H:%M:%S",
-                                            "%Y-%m-%d"
-                                        ]
-                                        date_obj = None
-                                        for date_format in date_formats:
-                                            try:
-                                                date_obj = datetime.strptime(download_date, date_format)
-                                                break
-                                            except ValueError:
-                                                continue
-                                        if date_obj:
-                                            formatted_date = date_obj.strftime("%b %d, %Y")
-                                            description.append(f"📅 Added: {formatted_date}")
-                                    else:
-                                        formatted_date = download_date.strftime("%b %d, %Y")
-                                        description.append(f"📅 Added: {formatted_date}")
-                            except Exception as e:
-                                print(f"[AudioService] Error formatting date: {e}")
-                    
-                    if duration > 0:
-                        description.append(f"⏱️ Duration: {duration_str}")
-                        description.append("⏳ Loading...")
-                    
-                    # Add lists containing this sound
-                    if sound_filename:
-                        lists_containing = self.list_repo.get_lists_containing_sound(sound_filename)
-                        if lists_containing:
-                            list_names = [lst[1] for lst in lists_containing[:3]]  # Max 3 lists
-                            if len(lists_containing) > 3:
-                                list_names.append(f"+{len(lists_containing) - 3} more")
-                            description.append(f"📁 Lists: {', '.join(list_names)}")
-                    
-                    # Add users who favorited this sound
-                    if sound_id:
-                        favorited_by = self.stats_repo.get_users_who_favorited_sound(sound_id)
-                        if favorited_by:
-                            users_display = favorited_by[:3]  # Max 3 users
-                            if len(favorited_by) > 3:
-                                users_display.append(f"+{len(favorited_by) - 3} more")
-                            description.append(f"❤️ Favorited by: {', '.join(users_display)}")
-                    
-                    description_text = "\n".join(description)
-                    
-                    # Footer with requester
-                    footer_text = f"Requested by {user}"
-                    
-                    embed_title = f"🔊 {audio_file.replace('.mp3', '')} 🔊"
-                    thumbnail_url = None
-                    
-                    if sts_char:
-                        # STS: Show character name as speaker with original sound name
-                        char_names = {
-                            "ventura": "🐷 Ventura",
-                            "tyson": "🐵 Tyson",
-                            "costa": "🐗 Costa"
-                        }
-                        char_thumbnails = {
-                            "ventura": "https://i.imgur.com/JQ8VXZZ.png",
-                            "tyson": "https://i.imgur.com/8QZGZ0x.png",
-                            "costa": "https://i.imgur.com/YQ5VXZZ.png"
-                        }
-                        char_display = char_names.get(sts_char, sts_char.title())
-                        embed_title = f"🗣️ {char_display} says:"
-                        if original_message:
-                            description_text = f"\"{original_message}\"\n" + description_text
-                        thumbnail_url = char_thumbnails.get(sts_char)
-                    elif is_tts:
-                        embed_title = f"🗣️ Gertrudes says:"
-                        if original_message:
-                            description_text = f"\"{original_message}\"\n" + description_text
-                    
-                    from bot.ui import SoundBeingPlayedView
-                    # Pass behavior reference if available
-                    behavior_ref = self._behavior if hasattr(self, '_behavior') else None
-                    # Don't include selects initially - they'll be added all at once when suggestions load
-                    view = SoundBeingPlayedView(behavior_ref, audio_file, include_add_to_list_select=False, include_sts_select=False)
-                    
-                    embed = discord.Embed(title=embed_title, description=description_text, color=discord.Color.red())
-                    embed.set_footer(text=footer_text)
-                    if thumbnail_url:
-                        embed.set_thumbnail(url=thumbnail_url)
-                    sound_message = await bot_channel.send(embed=embed, view=view)
-                    self.current_sound_message = sound_message
-                    self.stop_progress_update = False
-                    self.progress_already_updated = False
-                    
-                    # Re-send controls to keep them at the bottom
-                    if send_controls and hasattr(self, '_behavior') and self._behavior:
-                        await self.message_service.send_controls(self._behavior, guild=channel.guild)
-                else:
-                    # Slap sound - minimal message
-                    embed = discord.Embed(title="👋 Slap!", color=discord.Color.orange())
-                    sound_message = await bot_channel.send(embed=embed)
-                    self.current_sound_message = sound_message
-                    
-                    # Re-send controls to keep them at the bottom
-                    if send_controls and hasattr(self, '_behavior') and self._behavior:
-                        await self.message_service.send_controls(self._behavior)
-
             # FFmpeg options
             vol = effects.get('volume', 1.0) if effects else 1.0
             ffmpeg_options = f'-af "volume={vol}'
             if effects:
                 filters = []
-                if effects.get('pitch'):
-                    filters.append(f"asetrate=44100*{effects['pitch']},aresample=44100")
-                if effects.get('speed'):
-                    filters.append(f"atempo={effects['speed']}")
-                if effects.get('reverb'):
-                    filters.append("aecho=0.8:0.9:1000:0.3")
-                if effects.get('reverse'):
-                    filters.append('areverse')
-                if filters:
-                    ffmpeg_options += "," + ",".join(filters)
+                if effects.get('pitch'): filters.append(f"asetrate=44100*{effects['pitch']},aresample=44100")
+                if effects.get('speed'): filters.append(f"atempo={effects['speed']}")
+                if effects.get('reverb'): filters.append("aecho=0.8:0.9:1000:0.3")
+                if effects.get('reverse'): filters.append('areverse')
+                if filters: ffmpeg_options += "," + ",".join(filters)
             ffmpeg_options += '"'
-
-            def after_playing(error):
-                try:
-                    if error:
-                        error_message = str(error)
-                        print(f'[AudioService] Error in playback: {error_message}')
-                        if retry_count < MAX_RETRIES:
-                            time.sleep(2)
-                            asyncio.run_coroutine_threadsafe(
-                                self.play_audio(
-                                    channel, audio_file, user, is_entrance, is_tts,
-                                    extra, original_message, send_controls,
-                                    retry_count + 1, effects, show_suggestions, num_suggestions
-                                ),
-                                self.bot.loop
-                            )
-                    else:
-                        if sound_message and self.sound_service:
-                            asyncio.run_coroutine_threadsafe(
-                                self.sound_service.delayed_list_selector_update(sound_message, audio_file),
-                                self.bot.loop
-                            )
-                finally:
-                    self.bot.loop.call_soon_threadsafe(self.playback_done.set)
 
             if not self.ffmpeg_path or not os.path.exists(self.ffmpeg_path):
                 await self.message_service.send_error(f"Invalid FFmpeg path: {self.ffmpeg_path}")
                 return False
 
+            is_slap_sound = sound_info and sound_info[6] == 1
+
+            # Start playback immediately
             try:
                 audio_source = discord.FFmpegPCMAudio(
-                    audio_file_path,
-                    executable=self.ffmpeg_path,
-                    options=ffmpeg_options
+                    audio_file_path, 
+                    executable=self.ffmpeg_path, 
+                    options=ffmpeg_options,
+                    before_options="-analyzeduration 0 -probesize 32"
                 )
                 audio_source = discord.PCMVolumeTransformer(audio_source, volume=self.volume)
                 
-                await asyncio.sleep(0.5)
+                def after_playing(error):
+                    try:
+                        if error: print(f'[AudioService] Error in playback: {error}')
+                    finally:
+                        self.bot.loop.call_soon_threadsafe(self.playback_done.set)
+
                 voice_client.play(audio_source, after=after_playing)
                 self.playback_done.clear()
-                
-                if show_suggestions and not is_entrance and not is_tts and not is_slap_sound and self.sound_service:
-                    asyncio.create_task(self.sound_service.find_and_update_similar_sounds(
-                        sound_message=sound_message,
-                        audio_file=audio_file,
-                        original_message=original_message,
-                        send_controls=False,
-                        num_suggestions=num_suggestions
-                    ))
-                
-                if sound_message and not is_slap_sound and duration > 0:
-                    asyncio.create_task(self.update_progress_bar(sound_message, duration))
-
-                return True
             except Exception as e:
-                print(f"[AudioService] Error playing sound: {e}")
-                if "Not connected to voice" in str(e):
-                    try:
-                        print("[AudioService] Detected zombie connection in play loop, forcing disconnect.")
-                        # Stop keyword detection first
-                        await self.stop_keyword_detection(channel.guild)
-                        await voice_client.disconnect(force=True)
-                        await asyncio.sleep(1)
-                        # Reconnect and restart keyword detection
-                        print("[AudioService] Attempting to reconnect after zombie cleanup...")
-                        new_vc = await self.ensure_voice_connected(channel)
-                        if new_vc:
-                            print("[AudioService] Reconnected successfully, retrying sound playback...")
-                            # Retry playing the sound (increment retry count to prevent infinite loop)
-                            return await self.play_audio(
-                                channel, audio_file, user, is_entrance, is_tts,
-                                extra, original_message, send_controls,
-                                retry_count + 1, effects, show_suggestions, num_suggestions
-                            )
-                    except Exception as reconnect_error:
-                        print(f"[AudioService] Error during zombie cleanup/reconnect: {reconnect_error}")
+                print(f"[AudioService] Error starting playback early: {e}")
                 self.playback_done.set()
                 return False
+
+            # Handle UI in background
+            async def handle_ui():
+                try:
+                    bot_channel = self.message_service.get_bot_channel(channel.guild)
+                    if not bot_channel or is_entrance: return
+
+                    sound_message = None
+                    view = None
+
+                    if not is_slap_sound:
+                        sound_filename = sound_info[2] if sound_info else audio_file
+                        sound_id = sound_info[0] if sound_info else None
+                        
+                        play_count = None
+                        download_date_str = None
+                        lists_str = None
+                        favorited_by_str = None
+                        similarity_pct = int(extra) if extra else None
+                        
+                        if sound_id:
+                            play_count = self.action_repo.get_sound_play_count(sound_id) + 1
+                            download_date = self.stats_repo.get_sound_download_date(sound_id)
+                            if download_date and download_date != "Unknown date":
+                                try:
+                                    if isinstance(download_date, str) and "2023-10-30" in download_date:
+                                        download_date_str = "Before Oct 30, 2023"
+                                    else:
+                                        if isinstance(download_date, str):
+                                            for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"]:
+                                                try:
+                                                    date_obj = datetime.strptime(download_date, fmt)
+                                                    download_date_str = date_obj.strftime("%b %d, %Y")
+                                                    break
+                                                except ValueError: continue
+                                        else:
+                                            download_date_str = download_date.strftime("%b %d, %Y")
+                                except Exception: pass
+                            
+                            favorited_by = self.stats_repo.get_users_who_favorited_sound(sound_id)
+                            if favorited_by:
+                                users_display = favorited_by[:3]
+                                if len(favorited_by) > 3: users_display.append(f"+{len(favorited_by) - 3} more")
+                                favorited_by_str = ", ".join(users_display)
+                            elif sound_info and len(sound_info) > 3 and sound_info[3] == 1:
+                                favorited_by_str = "Someone" # Fallback placeholder ✅
+                        
+                        if sound_filename:
+                            lists_containing = self.list_repo.get_lists_containing_sound(sound_filename)
+                            if lists_containing:
+                                list_names = [lst[1] for lst in lists_containing[:3]]
+                                if len(lists_containing) > 3: list_names.append(f"+{len(lists_containing) - 3} more")
+                                lists_str = ", ".join(list_names)
+                        
+                        quote_text = original_message if (is_tts or sts_char) and original_message else None
+                        
+                        image_bytes = self.image_generator.generate_sound_card(
+                            sound_name=audio_file, requester=str(user), play_count=play_count,
+                            duration=duration_str if duration > 0 else None,
+                            download_date=download_date_str, lists=lists_str,
+                            favorited_by=favorited_by_str, similarity=similarity_pct,
+                            quote=quote_text, is_tts=is_tts, sts_char=sts_char
+                        )
+                        
+                        from bot.ui import SoundBeingPlayedView
+                        behavior_ref = self._behavior if hasattr(self, '_behavior') else None
+                        initial_label = "▶️ 0:01"
+                        if duration > 0:
+                            bar_length = 11
+                            # Start dot at index 1 (offset)
+                            bar = "▬🔘" + "▬" * (bar_length - 1)
+                            initial_label = f"▶️ {bar} 0:01"
+                        
+                        view = SoundBeingPlayedView(
+                            behavior_ref, audio_file, 
+                            include_add_to_list_select=not is_tts, 
+                            include_sts_select=True,
+                            progress_label=initial_label,
+                            show_controls=False # Start with controls hidden ✅
+                        )
+                        
+                        if image_bytes:
+                            file = discord.File(io.BytesIO(image_bytes), filename="sound_card.png")
+                            sound_message = await bot_channel.send(file=file, view=view)
+                        else:
+                            embed = discord.Embed(color=discord.Color.red())
+                            if duration > 0:
+                                bar = "▬🔘" + "▬" * 11
+                                embed.description = f"▶️ {bar} 0:01 / {self._format_duration(duration)}"
+                            embed.title = f"🔊 {audio_file.replace('.mp3', '')} 🔊"
+                            embed.set_footer(text=f"Requested by {user}")
+                            sound_message = await bot_channel.send(embed=embed, view=view)
+                        
+                        self.current_sound_message = sound_message
+                        self.current_view = view
+                        self.stop_progress_update = False
+                        
+                        # if send_controls and hasattr(self, '_behavior') and self._behavior:
+                        #     await self.message_service.send_controls(self._behavior, guild=channel.guild)
+                    else:
+                        embed = discord.Embed(title="👋 Slap!", color=discord.Color.orange())
+                        sound_message = await bot_channel.send(embed=embed)
+                        self.current_sound_message = sound_message
+                        # if send_controls and hasattr(self, '_behavior') and self._behavior:
+                        #     await self.message_service.send_controls(self._behavior)
+
+                    if show_suggestions and not is_entrance and not is_tts and not is_slap_sound and self.sound_service:
+                        asyncio.create_task(self.sound_service.find_and_update_similar_sounds(
+                            sound_message=sound_message, audio_file=audio_file,
+                            original_message=original_message, send_controls=False, num_suggestions=num_suggestions
+                        ))
+                    
+                    if sound_message and not is_slap_sound and duration > 0:
+                        asyncio.create_task(self.update_progress_bar(sound_message, duration, view))
+                except Exception as ui_error:
+                    print(f"[AudioService] Error in background UI task: {ui_error}")
+                    traceback.print_exc()
+
+            asyncio.create_task(handle_ui())
+            return True
 
         except Exception as e:
             print(f"[AudioService] Error in play_audio: {e}")
@@ -678,61 +616,70 @@ class AudioService:
             self.playback_done.set()
             return False
 
-    async def update_progress_bar(self, sound_message: discord.Message, duration: float):
+    async def update_progress_bar(self, sound_message: discord.Message, duration: float, view: discord.ui.View = None):
         """Update the progress bar embed for a currently playing sound."""
         if duration <= 0:
             return
 
         start_time = time.time()
-        bar_length = 10
-        duration_int = int(duration)
+        # Shorter bar for button (Wider now, but trimmed to 11 ✅)
+        bar_length = 11 
+        total_time_str = self._format_duration(duration)
         
+        # If view passed, ensure it is set as current
+        if view:
+            self.current_view = view
+
         try:
             while time.time() - start_time < duration:
                 if self.stop_progress_update:
                     break
                     
-                elapsed = time.time() - start_time
-                elapsed_int = int(elapsed)
-                progress = elapsed / duration
-                filled_length = int(bar_length * progress)
-                bar = "█" * filled_length + "░" * (bar_length - filled_length)
+                # Add 1s offset to account for image processing/Discord delay
+                OFFSET = 1.0
+                elapsed = (time.time() - start_time) + OFFSET
+                progress = max(0.0, min(1.0, elapsed / duration))
                 
-                if sound_message.embeds:
-                    embed = sound_message.embeds[0]
-                    lines = embed.description.split('\n') if embed.description else []
-                    new_lines = []
-                    for line in lines:
-                        if line.startswith("⏳"):
-                            new_lines.append(f"⏳ {bar}")
-                        else:
-                            new_lines.append(line)
-                    
-                    embed.description = "\n".join(new_lines)
+                # Calculate dot position
+                filled = int(bar_length * progress)
+                # Ensure dot doesn't go beyond bounds
+                if filled >= bar_length:
+                    filled = bar_length
+                
+                # Construct bar: ▬▬▬▬🔘▬▬▬▬▬
+                bar = "▬" * filled + "🔘" + "▬" * (bar_length - filled)
+                current_time_str = self._format_duration(elapsed)
+                
+                # Format: ▶️ 🔘▬▬▬▬ 0:05
+                seeker_text = f"▶️ {bar} {current_time_str}"
+                
+                # Use self.current_view to handle view replacements
+                current_view = self.current_view
+                if current_view and hasattr(current_view, 'update_progress_label'):
                     try:
-                        await sound_message.edit(embed=embed)
+                        current_view.update_progress_label(seeker_text)
+                        await sound_message.edit(view=current_view)
                     except discord.NotFound:
                         break
                     except Exception:
                         pass
                 
-                await asyncio.sleep(max(1, duration / 10)) # Update roughly 10 times
+                # Fallback for embeds (no view update here to keep simple, or keep old logic if needed)
+                elif sound_message.embeds:
+                    pass
+                
+                await asyncio.sleep(1.0) # Update roughly once per second
 
             # Final update
             if not self.stop_progress_update:
-                if sound_message.embeds:
-                    embed = sound_message.embeds[0]
-                    lines = embed.description.split('\n') if embed.description else []
-                    new_lines = []
-                    bar = "█" * bar_length
-                    for line in lines:
-                        if line.startswith("⏳"):
-                            new_lines.append(f"⏳ {bar} ✅")
-                        else:
-                            new_lines.append(line)
-                    embed.description = "\n".join(new_lines)
+                final_bar = "▬" * bar_length + "🔘"
+                final_text = f"✅ {final_bar} {total_time_str}"
+                
+                current_view = self.current_view
+                if current_view and hasattr(current_view, 'update_progress_label'):
                     try:
-                        await sound_message.edit(embed=embed)
+                        current_view.update_progress_label(final_text)
+                        await sound_message.edit(view=current_view)
                     except:
                         pass
         except Exception as e:
@@ -1355,8 +1302,8 @@ class KeywordDetectionSink(sinks.Sink):
             if sound:
                 print(f"[KeywordDetection] Playing random sound from '{list_name}' list for {requester_name}: {sound[2]}")
                 # Use play_audio instead of play_slap to show the normal message in chat
-                # Disable suggestions for keywords to avoid lag (user request)
-                await self.audio_service.play_audio(channel, sound[2], requester_name, show_suggestions=False)
+                # Suggestions are now enabled because they run in the background
+                await self.audio_service.play_audio(channel, sound[2], requester_name)
                 self.audio_service._behavior.db.insert_action(requester_name, f"keyword_{keyword}", sound[0])
             else:
                 print(f"[KeywordDetection] No sounds found in list '{list_name}'")

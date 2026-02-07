@@ -378,18 +378,29 @@ class SoundService:
             if not similar_sounds_list:
                 return
 
-            # Update the AudioService state
-            self.audio_service.current_similar_sounds = similar_sounds_list
-            
+            # Retrieve current label and toggle state to preserve it
+            current_label = "▶️ 0:00"
+            show_controls = False
+            if self.audio_service.current_view:
+                if hasattr(self.audio_service.current_view, 'progress_button'):
+                    current_label = self.audio_service.current_view.progress_button.label
+                if hasattr(self.audio_service.current_view, 'show_controls'):
+                    show_controls = self.audio_service.current_view.show_controls
+
             from bot.ui import SoundBeingPlayedWithSuggestionsView
             combined_view = SoundBeingPlayedWithSuggestionsView(
                 self.bot_behavior, 
                 audio_file, 
                 similar_sounds_list, 
-                include_add_to_list_select=True
+                include_add_to_list_select=True,
+                progress_label=current_label,
+                show_controls=show_controls
             )
             
             await sound_message.edit(view=combined_view)
+            
+            # Update the current view in AudioService so progress bar continues
+            self.audio_service.current_view = combined_view
             
         except Exception as e:
             import traceback
@@ -426,13 +437,28 @@ class SoundService:
                     if len(similar_sounds) >= 25:
                         break
 
+            # Retrieve current label and toggle state to preserve it (Final state ✅)
+            current_label = "▶️ 0:00"
+            show_controls = False
+            if self.audio_service.current_view:
+                if hasattr(self.audio_service.current_view, 'progress_button'):
+                    current_label = self.audio_service.current_view.progress_button.label
+                if hasattr(self.audio_service.current_view, 'show_controls'):
+                    show_controls = self.audio_service.current_view.show_controls
+
             view = SoundBeingPlayedWithSuggestionsView(
                 self.bot_behavior, 
                 audio_file, 
                 similar_sounds, 
-                include_add_to_list_select=True
+                include_add_to_list_select=True,
+                progress_label=current_label,
+                show_controls=show_controls
             )
             await sound_message.edit(view=view)
+            
+            # Update the current view in AudioService
+            self.audio_service.current_view = view
+            
         except Exception as e:
             import traceback
             print(f"[SoundService] Error in delayed_list_selector_update: {e}")
