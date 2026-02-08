@@ -168,6 +168,10 @@ class PlaySoundButton(Button):
                 channel = self.bot_behavior._audio_service.get_largest_voice_channel(interaction.guild)
             if channel:
                 asyncio.create_task(self.bot_behavior._audio_service.play_audio(channel, self.sound_name, interaction.user.name))
+                # Log the action
+                sound = Database().get_sound(self.sound_name, False)
+                if sound:
+                    Database().insert_action(interaction.user.name, "play_similar_sound", sound[0])
             else:
                 await interaction.followup.send("No voice channel available to play sounds! 😭", ephemeral=True)
         except Exception as e:

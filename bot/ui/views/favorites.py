@@ -6,18 +6,19 @@ class PaginatedFavoritesView(View):
         super().__init__(timeout=None)
         self.bot_behavior = bot_behavior
         self.current_page = 0
-        self.owner = owner 
+        self.owner = owner
+        self.total_favorites = len(favorites)
         
         chunk_size = 20
         self.pages = [favorites[i:i + chunk_size] for i in range(0, len(favorites), chunk_size)]
-        self.update_page_buttons()
+        self.update_buttons()
     
     def update_buttons(self):
         self.clear_items()
         
         from bot.ui.buttons.navigation import PaginationButton
-        self.add_item(PaginationButton("Previous", "⬅️", discord.ButtonStyle.primary, "previous", 0))
-        self.add_item(PaginationButton("Next", "➡️", discord.ButtonStyle.primary, "next", 0))
+        self.add_item(PaginationButton("Previous", "⬅️", discord.ButtonStyle.secondary, "previous", 0))
+        self.add_item(PaginationButton("Next", "➡️", discord.ButtonStyle.secondary, "next", 0))
         
         self.update_page_buttons()
     

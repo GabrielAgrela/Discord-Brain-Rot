@@ -32,7 +32,27 @@ class PaginationButton(Button):
         
         # Update buttons state
         view.update_buttons()
-        await interaction.message.edit(view=view)
+        
+        # Calculate page info for the embed
+        current_page_start = (view.current_page * 20) + 1
+        current_page_end = min((view.current_page + 1) * 20, view.total_favorites)
+        
+        # Determine title based on whether it's user favorites or all favorites
+        if is_user_favorites:
+            title = f"🤩 {view.owner}'s Favorites (Page {view.current_page + 1}/{len(view.pages)}) 🤩"
+            description = f"Showing sounds {current_page_start}-{current_page_end} of {view.total_favorites}"
+        else:
+            title = f"⭐ All Favorite Sounds (Page {view.current_page + 1}/{len(view.pages)}) ⭐"
+            description = f"All favorite sounds in the database\nShowing sounds {current_page_start}-{current_page_end} of {view.total_favorites}"
+        
+        await interaction.message.edit(
+            embed=discord.Embed(
+                title=title,
+                description=description,
+                color=discord.Color.blue()
+            ),
+            view=view
+        )
 
 class SoundListPaginationButton(Button):
     def __init__(self, label, emoji, style, custom_id, row):
