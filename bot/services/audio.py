@@ -557,7 +557,7 @@ class AudioService:
                         behavior_ref = self._behavior if hasattr(self, '_behavior') else None
                         initial_label = "▶️ 0:01"
                         if duration > 0:
-                            bar_length = 8
+                            bar_length = 7
                             # Start dot at index 1 (offset)
                             bar = "▬🔘" + "▬" * (bar_length - 1)
                             initial_label = f"▶️ {bar} 0:01"
@@ -576,7 +576,7 @@ class AudioService:
                         else:
                             embed = discord.Embed(color=discord.Color.red())
                             if duration > 0:
-                                bar = "▬🔘" + "▬" * 8
+                                bar = "▬🔘" + "▬" * 7
                                 embed.description = f"▶️ {bar} 0:01 / {self._format_duration(duration)}"
                             embed.title = f"🔊 {audio_file.replace('.mp3', '')} 🔊"
                             embed.set_footer(text=f"Requested by {user}")
@@ -622,8 +622,8 @@ class AudioService:
             return
 
         start_time = time.time()
-        # Shorter bar for button (Wider now, but trimmed to 11 ✅)
-        bar_length = 11 
+        # Shorter bar for button (Wider now, but trimmed to 6 ✅)
+        bar_length = 7
         total_time_str = self._format_duration(duration)
         
         # If view passed, ensure it is set as current
