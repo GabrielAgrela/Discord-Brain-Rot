@@ -29,10 +29,10 @@ class SoundBeingPlayedView(View):
 
         # Row 0: Progress Button + Toggle Button + Remote Button
         current_label = self.progress_button.label if self.progress_button else self.initial_progress_label
-        self.progress_button = discord.ui.Button(style=discord.ButtonStyle.secondary, label=current_label, disabled=True, row=0)
+        self.progress_button = discord.ui.Button(style=discord.ButtonStyle.primary, label=current_label, disabled=True, row=0)
         self.add_item(self.progress_button)
         
-        toggle_emoji = "🙈" if self.show_controls else "👁️"
+        toggle_emoji = "🔼" if self.show_controls else "🔽"
         self.add_item(ToggleControlsButton(emoji=toggle_emoji, row=0))
         self.add_item(SendControlsButton(row=0)) # Always visible in Row 0 next to the eye ✅
         
@@ -100,10 +100,10 @@ class SoundBeingPlayedWithSuggestionsView(View):
 
         # Row 0: Progress Button + Toggle Button + Remote Button
         current_label = self.progress_button.label if self.progress_button else self.initial_progress_label
-        self.progress_button = discord.ui.Button(style=discord.ButtonStyle.secondary, label=current_label, disabled=True, row=0)
+        self.progress_button = discord.ui.Button(style=discord.ButtonStyle.primary, label=current_label, disabled=True, row=0)
         self.add_item(self.progress_button)
         
-        toggle_emoji = "🙈" if self.show_controls else "👁️"
+        toggle_emoji = "🔼" if self.show_controls else "🔽"
         self.add_item(ToggleControlsButton(emoji=toggle_emoji, row=0))
         self.add_item(SendControlsButton(row=0)) # Always visible in Row 0 next to the eye ✅
         

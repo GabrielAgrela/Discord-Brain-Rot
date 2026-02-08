@@ -32,7 +32,7 @@ class PaginatedFavoritesView(View):
             self.add_item(PlaySoundButton(
                 self.bot_behavior,
                 sound[1],
-                style=discord.ButtonStyle.danger,
+                style=discord.ButtonStyle.primary,
                 label=sound[2].split('/')[-1].replace('.mp3', ''),
                 row=row
             ))

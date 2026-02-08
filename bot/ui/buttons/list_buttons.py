@@ -24,7 +24,7 @@ class ListLastScrapedSoundsButton(Button):
 
 class SoundListButton(Button):
     def __init__(self, bot_behavior, list_id, list_name, label, **kwargs):
-        super().__init__(label=label, style=discord.ButtonStyle.secondary, **kwargs)
+        super().__init__(label=label, style=discord.ButtonStyle.primary, **kwargs)
         self.bot_behavior = bot_behavior
         self.list_id = list_id
         self.list_name = list_name
@@ -111,7 +111,7 @@ class AddToListButton(Button):
 
 class SoundListItemButton(Button):
     def __init__(self, bot_behavior, sound_filename, display_name, **kwargs):
-        super().__init__(label=display_name, style=discord.ButtonStyle.secondary, **kwargs)
+        super().__init__(label=display_name, style=discord.ButtonStyle.primary, **kwargs)
         self.bot_behavior = bot_behavior
         self.sound_filename = sound_filename
 

@@ -59,7 +59,7 @@ class PaginatedSoundListView(View):
                 list_name=self.list_name,
                 sound_filename=filename,
                 label="❌",
-                style=discord.ButtonStyle.blurple,
+                style=discord.ButtonStyle.primary,
                 row=row
             ))
 

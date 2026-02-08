@@ -22,7 +22,9 @@ class ReplayButton(Button):
                 
             if channel:
                 asyncio.create_task(self.bot_behavior._audio_service.play_audio(channel, self.audio_file, interaction.user.name))
-                Database().insert_action(interaction.user.name, "replay_sound", Database().get_sounds_by_similarity(self.audio_file)[0][0][0])
+                sound_data = Database().get_sounds_by_similarity(self.audio_file)
+                if sound_data and sound_data[0]:
+                    Database().insert_action(interaction.user.name, "replay_sound", sound_data[0][0]['id'])
             else:
                 await interaction.followup.send("No voice channel available! 😭", ephemeral=True)
         except Exception as e:
@@ -245,6 +247,7 @@ class AssignUserEventButton(Button):
         self.audio_file = audio_file
 
     async def callback(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
         # Fetch non-bot members from the current guild
         guild_members = [
             m for m in interaction.guild.members
@@ -252,7 +255,7 @@ class AssignUserEventButton(Button):
         ]
         
         if not guild_members:
-            await interaction.response.send_message("No users available in this server to assign an event to.", ephemeral=True)
+            await interaction.followup.send("No users available in this server to assign an event to.", ephemeral=True)
             return
 
         from bot.ui.views.events import UserEventSelectView
@@ -266,7 +269,7 @@ class AssignUserEventButton(Button):
         )
         initial_message_content = await view.get_initial_message_content()
         
-        await interaction.response.send_message(
+        await interaction.followup.send(
             content=initial_message_content, 
             view=view, 
             ephemeral=True
@@ -305,7 +308,7 @@ class ToggleControlsButton(Button):
         # Extract initial state from view if possible
         label = kwargs.pop('label', "")
         emoji = kwargs.pop('emoji', "👁️")
-        super().__init__(label="", emoji=emoji, style=discord.ButtonStyle.secondary, **kwargs)
+        super().__init__(label="", emoji=emoji, style=discord.ButtonStyle.primary, **kwargs)
 
     async def callback(self, interaction: discord.Interaction):
         # Toggle the state in the view
@@ -316,10 +319,8 @@ class ToggleControlsButton(Button):
         view.show_controls = not view.show_controls
         
         # Update button appearance (Icon only ✅)
-        if view.show_controls:
-            self.emoji = "🙈" # Hide icon
-        else:
-            self.emoji = "👁️" # Show icon
+        # Update emoji
+        self.emoji = "🔼" if view.show_controls else "🔽"
             
         # Re-setup the view items based on the new state
         if hasattr(view, '_setup_items'):
@@ -331,12 +332,12 @@ class ToggleControlsButton(Button):
 class SendControlsButton(Button):
     """Button to send main controls as a separate message."""
     def __init__(self, **kwargs):
-        super().__init__(label="", emoji="📲", style=discord.ButtonStyle.secondary, **kwargs)
+        super().__init__(label="", emoji="⚙️", style=discord.ButtonStyle.primary, **kwargs)
 
     async def callback(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
         view = self.view
         if hasattr(view, 'bot_behavior') and view.bot_behavior:
             await view.bot_behavior.send_controls(guild=interaction.guild, delete_after=10)
-            await interaction.response.defer(ephemeral=True)
         else:
-            await interaction.response.send_message("Error: Bot behavior not found.", ephemeral=True)
+            await interaction.followup.send("Error: Bot behavior not found.", ephemeral=True)
