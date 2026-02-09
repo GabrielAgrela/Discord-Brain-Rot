@@ -319,6 +319,7 @@ class AudioService:
                     except:
                         pass
                 voice_client.stop()
+                await asyncio.sleep(0.1)  # Allow FFmpeg process to terminate cleanly
 
 
             audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Sounds", audio_file))
@@ -393,6 +394,7 @@ class AudioService:
                 was_interrupted = True
                 self.stop_progress_update = True
                 voice_client.stop()
+                await asyncio.sleep(0.1)  # Allow FFmpeg process to terminate cleanly
                 
                 # Update the previous sound's message with skip emoji
                 if previous_sound_message: 
