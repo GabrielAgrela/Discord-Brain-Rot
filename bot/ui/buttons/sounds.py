@@ -342,6 +342,12 @@ class SendControlsButton(Button):
         await interaction.response.defer(ephemeral=True)
         view = self.view
         if hasattr(view, 'bot_behavior') and view.bot_behavior:
-            await view.bot_behavior.send_controls(guild=interaction.guild, delete_after=10)
+            from bot.ui.views.controls import ControlsView
+            # Send controls as standalone ephemeral message - only visible to the user who clicked
+            await interaction.followup.send(
+                view=ControlsView(view.bot_behavior),
+                ephemeral=True,
+                delete_after=10
+            )
         else:
             await interaction.followup.send("Error: Bot behavior not found.", ephemeral=True)

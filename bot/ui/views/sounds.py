@@ -64,6 +64,17 @@ class SoundBeingPlayedView(View):
         if self.progress_button:
             self.progress_button.label = label
 
+    def update_progress_emoji(self, emoji: str):
+        """Update only the emoji prefix of the progress button, preserving bar and time."""
+        if self.progress_button and self.progress_button.label:
+            current = self.progress_button.label
+            # Label format: "▶️ {bar} {time}" or similar - replace first emoji
+            parts = current.split(" ", 1)
+            if len(parts) == 2:
+                self.progress_button.label = f"{emoji} {parts[1]}"
+            else:
+                self.progress_button.label = emoji
+
     async def on_error(self, interaction: discord.Interaction, error: Exception, item: discord.ui.Item):
         print(f"DEBUG: SoundBeingPlayedView ERROR: {error} | Item: {item}")
         import traceback
@@ -135,3 +146,14 @@ class SoundBeingPlayedWithSuggestionsView(View):
         """Update the label of the progress button."""
         if self.progress_button:
             self.progress_button.label = label
+
+    def update_progress_emoji(self, emoji: str):
+        """Update only the emoji prefix of the progress button, preserving bar and time."""
+        if self.progress_button and self.progress_button.label:
+            current = self.progress_button.label
+            # Label format: "▶️ {bar} {time}" or similar - replace first emoji
+            parts = current.split(" ", 1)
+            if len(parts) == 2:
+                self.progress_button.label = f"{emoji} {parts[1]}"
+            else:
+                self.progress_button.label = emoji

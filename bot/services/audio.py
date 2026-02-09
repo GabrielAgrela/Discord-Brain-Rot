@@ -313,8 +313,8 @@ class AudioService:
                 # Update the current sound message with slap icon
                 if self.current_sound_message and self.current_view:
                     try:
-                        if hasattr(self.current_view, 'update_progress_label'):
-                             self.current_view.update_progress_label("👋 Slapped!")
+                        if hasattr(self.current_view, 'update_progress_emoji'):
+                             self.current_view.update_progress_emoji('👋')
                              await self.current_sound_message.edit(view=self.current_view)
                     except:
                         pass
@@ -330,7 +330,7 @@ class AudioService:
             audio_source = discord.FFmpegPCMAudio(
                 audio_file_path,
                 executable=self.ffmpeg_path,
-                before_options="-analyzeduration 0 -probesize 32"
+                before_options="-nostdin -fflags nobuffer -flags low_delay -analyzeduration 0 -probesize 32"
             )
             audio_source = discord.PCMVolumeTransformer(audio_source, volume=self.volume)
             
@@ -399,9 +399,9 @@ class AudioService:
                 # Update the previous sound's message with skip emoji
                 if previous_sound_message: 
                     # Use tracked current_view which corresponds to the sound being stopped
-                    if self.current_view and hasattr(self.current_view, 'update_progress_label'):
+                    if self.current_view and hasattr(self.current_view, 'update_progress_emoji'):
                          try:
-                             self.current_view.update_progress_label("⏭️ Skipped")
+                             self.current_view.update_progress_emoji('⏭️')
                              await previous_sound_message.edit(view=self.current_view)
                          except:
                              pass
@@ -475,7 +475,7 @@ class AudioService:
                     audio_file_path, 
                     executable=self.ffmpeg_path, 
                     options=ffmpeg_options,
-                    before_options="-analyzeduration 0 -probesize 32"
+                    before_options="-nostdin -fflags nobuffer -flags low_delay -analyzeduration 0 -probesize 32"
                 )
                 audio_source = discord.PCMVolumeTransformer(audio_source, volume=self.volume)
                 
