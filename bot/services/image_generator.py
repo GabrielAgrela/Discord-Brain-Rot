@@ -86,7 +86,7 @@ class ImageGeneratorService:
             print(f"[ImageGeneratorService] Jinja2 render error: {e}")
             return template_str
     
-    def generate_sound_card(
+    async def generate_sound_card(
         self,
         sound_name: str,
         requester: str,
@@ -104,7 +104,38 @@ class ImageGeneratorService:
         event_data: Optional[str] = None
     ) -> Optional[bytes]:
         """
-        Generate a sound card image.
+        Async wrapper for generating sound card image in a separate thread.
+        This prevents blocking the main event loop during audio playback.
+        """
+        import asyncio
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None,
+            self._generate_sound_card_sync,
+            sound_name, requester, play_count, duration, download_date,
+            lists, favorited_by, similarity, quote, is_tts, sts_char,
+            requester_avatar_url, sts_thumbnail_url, event_data
+        )
+
+    def _generate_sound_card_sync(
+        self,
+        sound_name: str,
+        requester: str,
+        play_count: Optional[int] = None,
+        duration: Optional[str] = None,
+        download_date: Optional[str] = None,
+        lists: Optional[str] = None,
+        favorited_by: Optional[str] = None,
+        similarity: Optional[int] = None,
+        quote: Optional[str] = None,
+        is_tts: bool = False,
+        sts_char: Optional[str] = None,
+        requester_avatar_url: Optional[str] = None,
+        sts_thumbnail_url: Optional[str] = None,
+        event_data: Optional[str] = None
+    ) -> Optional[bytes]:
+        """
+        Generate a sound card image (Synchronous implementation).
         
         Args:
             sound_name: Name of the sound being played

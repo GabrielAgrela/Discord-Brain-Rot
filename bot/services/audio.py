@@ -638,7 +638,7 @@ class AudioService:
                         except Exception as e:
                             print(f"[AudioService] Error fetching event data: {e}")
 
-                        image_bytes = self.image_generator.generate_sound_card(
+                        image_bytes = await self.image_generator.generate_sound_card(
                             sound_name=audio_file, requester=str(user), play_count=play_count,
                             duration=duration_str if duration > 0 else None,
                             download_date=download_date_str, lists=lists_str,
