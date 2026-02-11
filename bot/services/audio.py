@@ -231,13 +231,22 @@ class AudioService:
                     else:
                         # Already connected to the right channel
                         # Perform one final check on the socket just to be safe
+                        is_socket_healthy = False
                         if hasattr(voice_client, 'socket') and voice_client.socket:
+                             try:
+                                 # Check if socket file descriptor is valid (not -1)
+                                 if voice_client.socket.fileno() != -1:
+                                     is_socket_healthy = True
+                             except Exception:
+                                 pass
+                        
+                        if is_socket_healthy:
                              # Current connection is good
                              self._clear_reconnection_state(guild_id)
                              await self.start_keyword_detection(channel.guild)
                              return voice_client
                         else:
-                             print(f"[AudioService] Voice client has no socket in {channel.guild.name}, reconnecting...")
+                             print(f"[AudioService] Voice client has invalid socket (fd=-1) in {channel.guild.name}, reconnecting...")
                              self._mark_reconnection_started(guild_id)
                              try:
                                  await self.stop_keyword_detection(channel.guild)
@@ -523,6 +532,8 @@ class AudioService:
             # Handle UI in background
             async def handle_ui():
                 try:
+                    handle_ui_start = time.time()
+                    print(f"[AudioService] [DEBUG] handle_ui started for {audio_file}")
                     bot_channel = self.message_service.get_bot_channel(channel.guild)
                     if not bot_channel or is_entrance: return
 
@@ -581,9 +592,12 @@ class AudioService:
                         favorited_by_str = None
                         similarity_pct = int(extra) if extra else None
                         
+                        db_start_time = time.time()
+                        print(f"[AudioService] [DEBUG] Starting DB operations for {audio_file}...")
+                        
                         if sound_id:
-                            play_count = self.action_repo.get_sound_play_count(sound_id) + 1
-                            download_date = self.stats_repo.get_sound_download_date(sound_id)
+                            play_count = (await asyncio.to_thread(self.action_repo.get_sound_play_count, sound_id)) + 1
+                            download_date = await asyncio.to_thread(self.stats_repo.get_sound_download_date, sound_id)
                             if download_date and download_date != "Unknown date":
                                 try:
                                     if isinstance(download_date, str) and "2023-10-30" in download_date:
@@ -600,7 +614,7 @@ class AudioService:
                                             download_date_str = download_date.strftime("%b %d, %Y")
                                 except Exception: pass
                             
-                            favorited_by = self.stats_repo.get_users_who_favorited_sound(sound_id)
+                            favorited_by = await asyncio.to_thread(self.stats_repo.get_users_who_favorited_sound, sound_id)
                             if favorited_by:
                                 users_display = favorited_by[:3]
                                 if len(favorited_by) > 3: users_display.append(f"+{len(favorited_by) - 3} more")
@@ -609,7 +623,7 @@ class AudioService:
                                 favorited_by_str = "Someone" # Fallback placeholder ✅
                         
                         if sound_filename:
-                            lists_containing = self.list_repo.get_lists_containing_sound(sound_filename)
+                            lists_containing = await asyncio.to_thread(self.list_repo.get_lists_containing_sound, sound_filename)
                             if lists_containing:
                                 list_names = [lst[1] for lst in lists_containing[:3]]
                                 if len(lists_containing) > 3: list_names.append(f"+{len(lists_containing) - 3} more")
@@ -617,11 +631,11 @@ class AudioService:
                         
                         quote_text = original_message if (is_tts or sts_char) and original_message else None
                         
-                        
                         # Fetch event data
                         event_data_str = None
                         try:
-                            events = self.event_repo.get_events_for_sound(sound_filename)
+                            print(f"[AudioService] [DEBUG] Fetching event data for {sound_filename}...")
+                            events = await asyncio.to_thread(self.event_repo.get_events_for_sound, sound_filename)
                             if events:
                                 # Format: "Join: User1, User2 | Leave: User3"
                                 joins = [e[0] for e in events if e[1] == 'join']
@@ -629,14 +643,16 @@ class AudioService:
                                 
                                 parts = []
                                 if joins:
-                                    parts.append("Join")
+                                    parts.append(f"Join: {', '.join(joins)}")
                                 if leaves:
-                                    parts.append("Leave")
+                                    parts.append(f"Leave: {', '.join(leaves)}")
                                 
                                 if parts:
-                                    event_data_str = " & ".join(parts)
+                                    event_data_str = " | ".join(parts)
                         except Exception as e:
                             print(f"[AudioService] Error fetching event data: {e}")
+                            
+                        print(f"[AudioService] [DEBUG] DB operations finished in {time.time() - db_start_time:.4f}s")
 
                         image_bytes = await self.image_generator.generate_sound_card(
                             sound_name=audio_file, requester=str(user), play_count=play_count,
@@ -648,6 +664,7 @@ class AudioService:
                             sts_thumbnail_url=sts_thumbnail_url,
                             event_data=event_data_str
                         )
+                        print(f"[AudioService] [DEBUG] Image generation finished in {time.time() - handle_ui_start:.4f}s")
                         
                         from bot.ui import SoundBeingPlayedView
                         behavior_ref = self._behavior if hasattr(self, '_behavior') else None
