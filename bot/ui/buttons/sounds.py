@@ -40,8 +40,35 @@ class STSButton(Button):
 
     async def callback(self, interaction):
         await interaction.response.defer()
-        # Start the STS process - sts_EL expects (user, sound, char, region)
-        asyncio.create_task(self.bot_behavior._voice_transformation_service.sts_EL(interaction.user, self.audio_file, self.char))
+        
+        # Get avatar URL and character thumbnail
+        avatar = getattr(interaction.user, "display_avatar", None)
+        requester_avatar_url = str(avatar.url) if avatar else None
+        
+        from config import TTS_PROFILES
+        profile = TTS_PROFILES.get(self.char, {})
+        sts_thumbnail_url = profile.get("thumbnail")
+        
+        # Send loading card
+        import io
+        bot_channel = self.bot_behavior._message_service.get_bot_channel(interaction.guild)
+        loading_message = None
+        if bot_channel:
+            image_bytes = self.bot_behavior._audio_service.image_generator.generate_loading_card(
+                title="Processing...",
+                subtitle="Generating audio, please wait"
+            )
+            if image_bytes:
+                file = discord.File(io.BytesIO(image_bytes), filename="loading_card.png")
+                loading_message = await bot_channel.send(file=file)
+        
+        # Start the STS process
+        asyncio.create_task(self.bot_behavior._voice_transformation_service.sts_EL(
+            interaction.user, self.audio_file, self.char,
+            loading_message=loading_message,
+            requester_avatar_url=requester_avatar_url,
+            sts_thumbnail_url=sts_thumbnail_url
+        ))
         # Record the action
         sound = Database().get_sound(self.audio_file, False)
         if sound:

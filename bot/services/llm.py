@@ -2,8 +2,11 @@ import os
 import aiohttp
 import json
 import base64
+import logging
 import time
 from typing import Optional, List
+
+logger = logging.getLogger(__name__)
 
 class LLMService:
     """
@@ -40,7 +43,7 @@ class LLMService:
         memories: List of (transcription, response) tuples from previous interactions.
         """
         if not self.api_key:
-            print("[LLMService] Error: OPENROUTER_API_KEY not found in environment.")
+            logger.error("OPENROUTER_API_KEY not found in environment.")
             return {"response": "Erro: Chave da API do OpenRouter não encontrada. Ventura está offline.", "transcription": ""}
 
         headers = {
@@ -69,7 +72,7 @@ class LLMService:
         content.append({"type": "text", "text": full_text})
             
         if audio_data:
-            print(f"[LLMService] Preparing single audio segment ({len(audio_data)} bytes)...")
+            logger.info(f"Preparing single audio segment ({len(audio_data)} bytes)...")
             base64_audio = base64.b64encode(audio_data).decode('utf-8')
             content.append({
                 "type": "input_audio",
@@ -96,25 +99,25 @@ class LLMService:
                 for item in msg["content"]:
                     if item.get("type") == "input_audio":
                         item["input_audio"]["data"] = f"<BASE64_DATA_LEN_{len(item['input_audio']['data'])}>"
-        print(f"[LLMService] Final Payload Structure: {json.dumps(debug_data, indent=2)}")
+        logger.info(f"Final Payload Structure: {json.dumps(debug_data, indent=2)}")
 
         try:
             async with aiohttp.ClientSession() as session:
-                print(f"[LLMService] Sending request to OpenRouter ({self.model})...")
+                logger.info(f"Sending request to OpenRouter ({self.model})...")
                 start_time = time.time()
                 async with session.post(self.base_url, headers=headers, data=json.dumps(data)) as response:
                     duration = time.time() - start_time
                     if response.status == 200:
                         result = await response.json()
                         llm_out = result['choices'][0]['message']['content'].strip()
-                        print(f"[LLMService] Success ({duration:.2f}s): {llm_out[:100]}...")
+                        logger.info(f"Success ({duration:.2f}s): {llm_out[:100]}...")
                         return self._parse_structured_response(llm_out)
                     else:
                         error_text = await response.text()
-                        print(f"[LLMService] Error from primary model ({self.model}) after {duration:.2f}s: {response.status} - {error_text}")
+                        logger.error(f"Error from primary model ({self.model}) after {duration:.2f}s: {response.status} - {error_text}")
                         
                         # Fallback logic
-                        print(f"[LLMService] Attempting fallback to {self.fallback_model}...")
+                        logger.info(f"Attempting fallback to {self.fallback_model}...")
                         data["model"] = self.fallback_model
                         
                         start_fallback = time.time()
@@ -123,14 +126,14 @@ class LLMService:
                             if fallback_resp.status == 200:
                                 result = await fallback_resp.json()
                                 llm_out = result['choices'][0]['message']['content'].strip()
-                                print(f"[LLMService] Fallback Success ({fb_duration:.2f}s): {llm_out[:100]}...")
+                                logger.info(f"Fallback Success ({fb_duration:.2f}s): {llm_out[:100]}...")
                                 return self._parse_structured_response(llm_out)
                             else:
                                 fb_error = await fallback_resp.text()
-                                print(f"[LLMService] Fallback failed after {fb_duration:.2f}s: {fallback_resp.status} - {fb_error}")
+                                logger.error(f"Fallback failed after {fb_duration:.2f}s: {fallback_resp.status} - {fb_error}")
                                 return {"response": "Fodasse, a minha cabeça está a dar o berro. Tentem mais tarde.", "transcription": ""}
         except Exception as e:
-            print(f"[LLMService] Exception during LLM prompt: {e}")
+            logger.exception(f"Exception during LLM prompt: {e}")
             return {"response": "Ouve lá, não consigo falar agora. Estou ocupado a beber uma mini.", "transcription": ""}
 
     def _parse_structured_response(self, text: str) -> dict:
@@ -149,3 +152,61 @@ class LLMService:
         
         # Fallback if LLM didn't return JSON
         return {"response": text, "transcription": "O LLM não devolveu uma transcrição estruturada."}
+
+    async def process_text_for_tts(self, text: str) -> str:
+        """
+        Process text to add Ventura/Brain Rot style and ElevenLabs V3 tags.
+        """
+        if not self.api_key:
+            return text
+
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "HTTP-Referer": "https://github.com/GabrielAgrela/Discord-Brain-Rot",
+            "X-Title": "Discord Brain Rot Bot",
+            "Content-Type": "application/json"
+        }
+
+        system_prompt = (
+            "Tu és um assistente especializado em TTS (Text-to-Speech) da ElevenLabs."
+            "O teu objetivo é receber um texto e adicionar tags de áudio ElevenLabs V3 para o tornar mais expressivo e realista."
+            "NÃO alteres o texto original. NÃO mudes as palavras."
+            "CRITICO: Deves devolver o texto COMPLETO. NÃO cortes o texto. NÃO pares a meio."
+            "Apenas insere tags como [shouts], [whispers], [laughs], [breaths], [pause], [sad], [happy], etc. nos locais apropriados."
+            "A resposta deve ser APENAS o texto original com as tags inseridas."
+        )
+
+        data = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": text}
+            ],
+            "temperature": 0.8,
+            "max_tokens": 25000
+        }
+
+        logger.info(f"Processing TTS text. Payload: {json.dumps(data, indent=2)}")
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(self.base_url, headers=headers, data=json.dumps(data)) as response:
+                    if response.status == 200:
+                        result = await response.json()
+                        logger.info(f"TTS Response Full: {json.dumps(result)}")
+                        processed_text = result['choices'][0]['message']['content'].strip()
+                        logger.info(f"TTS Processed: {len(text)} chars in -> {len(processed_text)} chars out")
+                        
+                        # Safety check: if result is shorter than input (accounting for tags adding length), it's likely truncated
+                        # We use 0.9 as a buffer in case some minor rephrasing happened, but generally it should be longer
+                        if len(processed_text) < len(text) * 0.9:
+                            logger.warning(f"Processed text seems truncated. Falling back to original. Input: {len(text)}, Output: {len(processed_text)}")
+                            return text
+                            
+                        return processed_text
+                    else:
+                        logger.error(f"TTS processing failed: {response.status} - {await response.text()}")
+                        return text
+        except Exception as e:
+            logger.exception(f"TTS processing error: {e}")
+            return text

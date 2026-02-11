@@ -90,3 +90,30 @@ class EventRepository(BaseRepository):
         else:
             self.insert(user_id, event_type, sound)
             return True
+
+    def get_events_for_sound(self, sound_filename: str) -> List[Tuple[str, str]]:
+        """
+        Get all (user_id, event_type) tuples for a specific sound.
+        
+        Args:
+            sound_filename: The sound filename (e.g., 'sound.mp3')
+            
+        Returns:
+            List of (user_id, event_type) tuples
+        """
+        # Search for both exact filename and filename without extension if needed,
+        # but the DB stores 'sound' column. Usually it's the filename without extension or with?
+        # Based on current usage in toggle:
+        # self.insert(user_id, event_type, sound) where sound is `most_similar_sound` (no extension usually)
+        # Let's check `add_user_event` in `user_event.py`:
+        # most_similar_sound = exact_match.filename.replace('.mp3', '')
+        # So it stores proper names without extensions.
+        
+        # We need to handle potential .mp3 mismatch
+        clean_name = sound_filename.replace('.mp3', '')
+        
+        rows = self._execute(
+            "SELECT id, event FROM users WHERE sound = ? OR sound = ?",
+            (clean_name, sound_filename)
+        )
+        return [(row['id'], row['event']) for row in rows]

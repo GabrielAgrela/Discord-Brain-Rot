@@ -170,7 +170,7 @@ class TTS:
     def update_last_request_time(self):
         self.last_request_time = time.time()
 
-    async def save_as_mp3(self, text, lang, region=""):
+    async def save_as_mp3(self, text, lang, region="", loading_message=None, requester_avatar_url=None, requester_name="admin"):
         if region == "":
             tts = gTTS(text=text, lang=lang)
         else:
@@ -183,17 +183,29 @@ class TTS:
         if channel is None:
             await self.behavior.send_error_message("No available voice channel for TTS playback.")
             return
-        await self.behavior.play_audio(channel, self.filename, "admin", is_tts=True)
+        await self.behavior.play_audio(
+            channel, self.filename, requester_name, is_tts=True,
+            original_message=text,
+            loading_message=loading_message,
+            requester_avatar_url=requester_avatar_url
+        )
         self.update_last_request_time()
 
-    async def speech_to_speech(self, input_audio_name, char="en", region=""):
+    async def speech_to_speech(self, input_audio_name, char="en", region="",
+                               loading_message=None, requester_avatar_url=None, sts_thumbnail_url=None,
+                               requester_name="admin"):
         boost_volume = 0
         
         filenames = Database().get_sounds_by_similarity(input_audio_name)
         
-        # get_sounds_by_similarity returns [(sound_tuple, score), ...]
-        # sound_tuple[2] is the filename
-        filename = filenames[0][0][2] if filenames else None
+        # get_sounds_by_similarity returns [(sound_data, score), ...]
+        # sound_data is a sqlite3.Row or dict; use 'Filename' key
+        if filenames:
+            sound_data = filenames[0][0]
+            sound_dict = sound_data if isinstance(sound_data, dict) else dict(sound_data)
+            filename = sound_dict.get('Filename')
+        else:
+            filename = None
 
         tmp_filename = f"{filename}-{char}.mp3"
          # Check if the file already exists
@@ -258,9 +270,6 @@ class TTS:
         form.add_field('audio', open(audio_file_path, 'rb'), filename=os.path.basename(audio_file_path))
         form.add_field('data', json.dumps(data), content_type='application/json')
 
-        # send a message to chat, in a new thread to avoid blocking the main thread and then delete it after 5 seconds
-        await self.behavior.send_message(view=None, title="Processing", description="Wait like 5s 🦍", delete_time=5)
-
         async with aiohttp.ClientSession() as session:
             async with session.post(url, headers=headers, data=form) as response:
                 if response.status == 200:
@@ -280,7 +289,13 @@ class TTS:
                         return
                     # Pass character and original sound name for proper STS embed
                     original_sound_name = filename.replace('.mp3', '') if filename else ''
-                    await self.behavior.play_audio(channel, self.filename, "admin", is_tts=True, original_message=original_sound_name, sts_char=char)
+                    await self.behavior.play_audio(
+                        channel, self.filename, requester_name, is_tts=True,
+                        original_message=original_sound_name, sts_char=char,
+                        loading_message=loading_message,
+                        requester_avatar_url=requester_avatar_url,
+                        sts_thumbnail_url=sts_thumbnail_url
+                    )
 
                     self.update_last_request_time()
                     print("Audio stream saved and played successfully.")
@@ -293,7 +308,12 @@ class TTS:
         boost_volume = 0
         
         filenames = Database().get_sounds_by_similarity(input_audio_name)
-        filename = filenames[0][2] if filenames else None  # Index 2 is Filename
+        if filenames:
+            sound_data = filenames[0][0]
+            sound_dict = sound_data if isinstance(sound_data, dict) else dict(sound_data)
+            filename = sound_dict.get('Filename')
+        else:
+            filename = None
         audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", filename))
 
         self.filename = f"{filename}-isolated-{time.strftime('%d-%m-%y-%H-%M-%S')}.mp3"
@@ -369,9 +389,13 @@ class TTS:
 
         self.locked = False
 
-    async def save_as_mp3_EL(self, text, lang="pt", region="", send_controls=True):
+    async def save_as_mp3_EL(self, text, lang="pt", region="", send_controls=True,
+                             loading_message=None, requester_avatar_url=None, sts_thumbnail_url=None,
+                             requester_name="admin"):
         boost_volume = 0
-        self.filename = f"{time.strftime('%d-%m-%y-%H-%M-%S')}-{text[:10]}.mp3"
+        # Sanitize filename-safe text (keep it reasonably short for FS, but image gen will use full text)
+        safe_text = "".join(x for x in text[:30] if x.isalnum() or x in " -_")
+        self.filename = f"{time.strftime('%d-%m-%y-%H-%M-%S')}-{safe_text}.mp3"
         if lang == "pt":
             self.voice_id = self.voice_id_pt
             boost_volume = 0
@@ -430,7 +454,14 @@ class TTS:
                     if channel is None:
                         await self.behavior.send_error_message("No available voice channel for TTS playback.")
                         return
-                    await self.behavior.play_audio(channel, self.filename, "admin", is_tts=True, send_controls=send_controls)
+                    await self.behavior.play_audio(
+                        channel, self.filename, requester_name, is_tts=True,
+                        original_message=text,
+                        send_controls=send_controls,
+                        loading_message=loading_message,
+                        requester_avatar_url=requester_avatar_url,
+                        sts_thumbnail_url=sts_thumbnail_url
+                    )
                     self.update_last_request_time()
                     print("Audio stream saved and played successfully.")
                 else:

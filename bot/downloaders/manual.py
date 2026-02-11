@@ -47,8 +47,14 @@ class ManualSoundDownloader:
                 return title[:27] + '...' + str(uuid.uuid4())[:3]
             return title
 
+        # Cookie options for authenticated platforms (e.g. Instagram)
+        cookies_file = os.path.join(os.path.dirname(__file__), '..', '..', 'Data', 'cookies.txt')
+        cookie_opts = {}
+        if os.path.exists(cookies_file):
+            cookie_opts['cookiefile'] = cookies_file
+
         # Download the video and extract audio
-        with yt_dlp.YoutubeDL() as ydl:
+        with yt_dlp.YoutubeDL(cookie_opts) as ydl:
             info_dict = ydl.extract_info(url, download=False)
             
             # Check if it's a YouTube video and its duration
@@ -69,6 +75,7 @@ class ManualSoundDownloader:
                 'preferredcodec': 'mp3',
                 'preferredquality': '192',
             }],
+            **cookie_opts,
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:

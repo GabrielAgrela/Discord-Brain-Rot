@@ -10,7 +10,6 @@ import discord
 import random
 from pydub import AudioSegment
 from typing import List, Optional
-from bot.services.llm import LLMService
 from bot.database import Database
 from config import ENABLE_VENTURA
 
@@ -20,7 +19,7 @@ class AICommentaryService:
     """
     def __init__(self, behavior):
         self.behavior = behavior
-        self.llm_service = LLMService()
+        self.llm_service = behavior._llm_service
         self.last_trigger_time = 0
         self.min_speech_duration = 2.0
         self.is_processing = False
@@ -45,12 +44,12 @@ class AICommentaryService:
         """Enable or disable the AI commentary routine."""
         self.enabled = enabled
         status = "enabled" if enabled else "disabled"
-        print(f"[AICommentary] Routine {status}.")
+        print(f"[AICommentary] Routine {status}. (enabled={self.enabled})")
 
     def _set_random_cooldown(self):
-        """Set a random cooldown between 1 and 3 hours."""
-        self.cooldown_seconds = random.randint(3600, 10800)
-        print(f"[AICommentary] Next sighting scheduled with {self.cooldown_seconds/3600:.1f} hour cooldown.")
+        """Set a random cooldown between 5 and 15 minutes."""
+        self.cooldown_seconds = random.randint(300, 900)
+        print(f"[AICommentary] Next sighting scheduled with {self.cooldown_seconds/60:.1f} minute cooldown.")
 
     def should_trigger(self) -> bool:
         """Check if the cooldown has passed and we aren't already processing."""
@@ -103,7 +102,7 @@ class AICommentaryService:
     async def trigger_commentary(self, guild_id: int, force: bool = False, duration: float = 10.0):
         """Orchestrate the AI commentary flow."""
         if not force and not self.should_trigger():
-            # print(f"[AICommentary] Trigger skipped (cooldown or processing).")
+            print(f"[AICommentary] Trigger skipped (enabled={self.enabled}, processing={self.is_processing}, cooldown_remaining={self.get_cooldown_remaining():.1f}s).")
             return
         
         if self.is_processing:
@@ -130,10 +129,11 @@ class AICommentaryService:
                 return
 
             # 1. Get audio and user context
+            print(f"[AICommentary] Step 1: Getting audio segment ({int(duration)}s)...")
             audio_pcm, active_users = self.behavior._audio_service.get_last_audio_segment_with_users(guild_id, seconds=int(duration))
             
             if not audio_pcm or not active_users:
-                print("[AICommentary] No audio or users found for trigger.")
+                print(f"[AICommentary] No audio or users found for trigger. (audio={len(audio_pcm) if audio_pcm else 0} bytes, users={active_users})")
                 self.is_processing = False
                 return
 
@@ -182,6 +182,7 @@ class AICommentaryService:
                 )
 
             # 4. Get LLM response with memory context
+            print(f"[AICommentary] Step 4: Calling LLM with {len(wav_data)} bytes of audio...")
             memories = Database().get_recent_ai_memories(guild_id, limit=3)
             if memories:
                 print(f"[AICommentary] Including {len(memories)} past memories in context")
@@ -192,6 +193,7 @@ class AICommentaryService:
                 audio_data=wav_data,
                 memories=memories
             )
+            print(f"[AICommentary] Step 4: LLM response received.")
 
             llm_response = llm_result.get("response")
             transcription = llm_result.get("transcription", "Sem transcrição.")

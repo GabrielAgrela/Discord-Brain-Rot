@@ -7,6 +7,7 @@ This cog handles all TTS commands including:
 - /isolate - Isolate voice from a sound
 """
 
+import io
 import discord
 from discord.ext import commands
 from discord.commands import Option
@@ -28,44 +29,94 @@ class TTSCog(commands.Cog):
         self.bot = bot
         self.behavior = behavior
     
+    async def _send_loading_card(self, guild) -> 'discord.Message':
+        """Send a loading card image (GIF) to the bot channel and return the message.
+        
+        Args:
+            guild: The Discord guild to send to
+            
+        Returns:
+            The sent message or None
+        """
+        bot_channel = self.behavior._message_service.get_bot_channel(guild)
+        if not bot_channel:
+            return None
+        
+        # Try to generate/load GIF
+        image_bytes = self.behavior._audio_service.image_generator.generate_loading_gif()
+        
+        if image_bytes:
+            file = discord.File(io.BytesIO(image_bytes), filename="loading.gif")
+            return await bot_channel.send(file=file)
+        else:
+            # Fallback: simple embed
+            embed = discord.Embed(
+                title="⏳ Processing...",
+                description="Generating audio, please wait",
+                color=discord.Color.dark_blue()
+            )
+            return await bot_channel.send(embed=embed)
+    
     @commands.slash_command(name="tts", description="Generate TTS with Google or ElevenLabs voices")
     async def tts(
         self, 
         ctx: discord.ApplicationContext, 
         message: Option(str, "What you want to say", required=True),
-        language: Option(str, "Select a voice or language", choices=list(TTS_PROFILES.keys()), required=True)
+        language: Option(str, "Select a voice or language", choices=list(TTS_PROFILES.keys()), required=True),
+        expressive: Option(bool, "Use AI to add emotional tags (ElevenLabs)", required=False, default=True)
     ):
         """Generate text-to-speech audio."""
         await ctx.respond("Processing your request...", delete_after=0)
         
+        # Send loading card instead of character embed
+        loading_message = await self._send_loading_card(ctx.guild)
+
+        if expressive:
+            # Pass loading_message to process_text_for_tts if needed, or just let it process
+            # Note: process_text_for_tts might take a few seconds
+            processed = await self.behavior._llm_service.process_text_for_tts(message)
+            if processed and processed.strip():
+                message = processed
+            else:
+                print(f"[TTSCog] Warning: LLM returned empty text for TTS. Falling back to original.")
+
+        
         profile = TTS_PROFILES.get(language, TTS_PROFILES["en"])
-        flag = profile.get("flag", ":speech_balloon:")
         
         discord_user = ctx.author if isinstance(ctx.author, (discord.Member, discord.User)) else ctx.user
         user = discord_user
         
         self.behavior.color = discord.Color.dark_blue()
         
-        # Get thumbnail
-        url = profile.get("thumbnail")
-        if not url:
-            avatar = getattr(discord_user, "display_avatar", None)
-            url = avatar.url if avatar else DEFAULT_TTS_THUMBNAIL
+        # Get avatar URL
+        avatar = getattr(discord_user, "display_avatar", None)
+        requester_avatar_url = str(avatar.url) if avatar else None
         
-        await self.behavior._message_service.send_message(
-            title=f"TTS • {profile.get('display', language.title())} {flag}",
-            description=f"'{message}'",
-            thumbnail=url
-        )
+        # Get TTS profile thumbnail for the sound card
+        sts_thumbnail_url = profile.get("thumbnail")
         
         try:
             if profile.get("provider") == "elevenlabs":
-                await self.behavior._voice_transformation_service.tts_EL(user, message, profile.get("voice", "en"))
+                await self.behavior._voice_transformation_service.tts_EL(
+                    user, message, profile.get("voice", "en"),
+                    loading_message=loading_message,
+                    requester_avatar_url=requester_avatar_url,
+                    sts_thumbnail_url=sts_thumbnail_url
+                )
             else:
                 lang = profile.get("lang", "en")
                 region = profile.get("region", "")
-                await self.behavior._voice_transformation_service.tts(user, message, lang, region)
+                await self.behavior._voice_transformation_service.tts(
+                    user, message, lang, region,
+                    loading_message=loading_message,
+                    requester_avatar_url=requester_avatar_url
+                )
         except Exception as e:
+            if loading_message:
+                try:
+                    await loading_message.delete()
+                except:
+                    pass
             await self.behavior._message_service.send_error(str(e))
 
     @commands.slash_command(name="sts", description="Speech-To-Speech conversion")
@@ -84,20 +135,28 @@ class TTSCog(commands.Cog):
         self.behavior.color = discord.Color.dark_blue()
         
         profile = TTS_PROFILES.get(char, TTS_PROFILES["tyson"])
-        url = profile.get("thumbnail")
-        if not url:
-            avatar = getattr(discord_user, "display_avatar", None)
-            url = avatar.url if avatar else DEFAULT_TTS_THUMBNAIL
         
-        await self.behavior._message_service.send_message(
-            title=f"{sound} to {profile.get('display', char.title())}",
-            description=f"'{profile.get('display', char.title())}'",
-            thumbnail=url
-        )
+        # Get avatar URL and character thumbnail
+        avatar = getattr(discord_user, "display_avatar", None)
+        requester_avatar_url = str(avatar.url) if avatar else None
+        sts_thumbnail_url = profile.get("thumbnail")
+        
+        # Send loading card instead of character embed
+        loading_message = await self._send_loading_card(ctx.guild)
         
         try:
-            await self.behavior._voice_transformation_service.sts_EL(user, sound, char)
+            await self.behavior._voice_transformation_service.sts_EL(
+                user, sound, char,
+                loading_message=loading_message,
+                requester_avatar_url=requester_avatar_url,
+                sts_thumbnail_url=sts_thumbnail_url
+            )
         except Exception as e:
+            if loading_message:
+                try:
+                    await loading_message.delete()
+                except:
+                    pass
             await self.behavior._message_service.send_error(str(e))
     
     @commands.slash_command(name="isolate", description="Isolate voice from a sound")

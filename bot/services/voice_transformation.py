@@ -21,19 +21,42 @@ class VoiceTransformationService:
         # We pass self to satisfy those dependencies.
         self.tts_engine = TTS(self, bot)
     
-    async def tts(self, user, speech: str, lang: str = "en", region: str = ""):
+    async def tts(self, user, speech: str, lang: str = "en", region: str = "",
+                  loading_message=None, requester_avatar_url=None):
         """Standard gTTS text-to-speech."""
         self.action_repo.insert(user.name, "tts", speech)
-        await self.tts_engine.save_as_mp3(speech, lang, region)
+        requester_name = getattr(user, 'display_name', getattr(user, 'name', str(user)))
+        await self.tts_engine.save_as_mp3(
+            speech, lang, region,
+            loading_message=loading_message,
+            requester_avatar_url=requester_avatar_url,
+            requester_name=requester_name
+        )
 
-    async def tts_EL(self, user, speech: str, lang: str = "en", region: str = "", send_controls=True):
+    async def tts_EL(self, user, speech: str, lang: str = "en", region: str = "", send_controls=True,
+                     loading_message=None, requester_avatar_url=None, sts_thumbnail_url=None):
         """ElevenLabs text-to-speech."""
         self.action_repo.insert(user.name, "tts_EL", speech)
-        await self.tts_engine.save_as_mp3_EL(speech, lang, region, send_controls=send_controls)
+        requester_name = getattr(user, 'display_name', getattr(user, 'name', str(user)))
+        await self.tts_engine.save_as_mp3_EL(
+            speech, lang, region, send_controls=send_controls,
+            loading_message=loading_message,
+            requester_avatar_url=requester_avatar_url,
+            sts_thumbnail_url=sts_thumbnail_url,
+            requester_name=requester_name
+        )
 
-    async def sts_EL(self, user, sound: str, char: str = "ventura", region: str = ""):
+    async def sts_EL(self, user, sound: str, char: str = "ventura", region: str = "",
+                     loading_message=None, requester_avatar_url=None, sts_thumbnail_url=None):
         """ElevenLabs speech-to-speech voice transformation."""
-        await self.tts_engine.speech_to_speech(sound, char, region)
+        requester_name = getattr(user, 'display_name', getattr(user, 'name', str(user)))
+        await self.tts_engine.speech_to_speech(
+            sound, char, region,
+            loading_message=loading_message,
+            requester_avatar_url=requester_avatar_url,
+            sts_thumbnail_url=sts_thumbnail_url,
+            requester_name=requester_name
+        )
         
     async def isolate_voice(self, sound_name: str):
         """ElevenLabs voice isolation feature."""

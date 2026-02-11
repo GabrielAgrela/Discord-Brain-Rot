@@ -18,7 +18,7 @@ import vosk
 from discord import sinks
 from bot.repositories import (
     SoundRepository, ActionRepository, ListRepository, 
-    StatsRepository, KeywordRepository
+    StatsRepository, KeywordRepository, EventRepository
 )
 from bot.services.image_generator import ImageGeneratorService
 
@@ -45,6 +45,7 @@ class AudioService:
         self.list_repo = ListRepository()
         self.stats_repo = StatsRepository()
         self.keyword_repo = KeywordRepository()
+        self.event_repo = EventRepository()
         
         # Audio state moved from BotBehavior
         self.last_played_time: Optional[datetime] = None
@@ -190,6 +191,17 @@ class AudioService:
                         voice_client = None
                         await asyncio.sleep(0.5)
                         
+                    elif voice_client.is_connected() and (voice_client.average_latency == float('inf') or voice_client.average_latency is None):
+                        print(f"[AudioService] Detected zombie voice client (infinite latency) in {channel.guild.name}, cleaning up")
+                        self._mark_reconnection_started(guild_id)
+                        try:
+                            await self.stop_keyword_detection(channel.guild)
+                            await voice_client.disconnect(force=True)
+                            await asyncio.sleep(0.5)
+                        except Exception as e:
+                            print(f"[AudioService] Error cleaning up zombie voice client: {e}")
+                        voice_client = None
+
                     elif not voice_client.is_connected():
                         print(f"[AudioService] Voice client in {channel.guild.name} exists but is not connected. Reconnecting...")
                         self._mark_reconnection_started(guild_id)
@@ -217,10 +229,23 @@ class AudioService:
                             await self.start_keyword_detection(channel.guild)
                             return voice_client
                     else:
-                        # Already connected to the right channel, ensure keyword detection is running
-                        self._clear_reconnection_state(guild_id)
-                        await self.start_keyword_detection(channel.guild)
-                        return voice_client
+                        # Already connected to the right channel
+                        # Perform one final check on the socket just to be safe
+                        if hasattr(voice_client, 'socket') and voice_client.socket:
+                             # Current connection is good
+                             self._clear_reconnection_state(guild_id)
+                             await self.start_keyword_detection(channel.guild)
+                             return voice_client
+                        else:
+                             print(f"[AudioService] Voice client has no socket in {channel.guild.name}, reconnecting...")
+                             self._mark_reconnection_started(guild_id)
+                             try:
+                                 await self.stop_keyword_detection(channel.guild)
+                                 await voice_client.disconnect(force=True)
+                                 await asyncio.sleep(0.5)
+                             except Exception as e:
+                                 print(f"[AudioService] Error cleaning up socket-less client: {e}")
+                             voice_client = None
                 
                 # Connect with retry logic
                 for attempt in range(3):
@@ -346,7 +371,10 @@ class AudioService:
                         send_controls=False, retry_count=0, effects=None, 
                         show_suggestions: bool = True, 
                         num_suggestions: int = 25,
-                        sts_char: str = None):
+                        sts_char: str = None,
+                        requester_avatar_url: str = None,
+                        sts_thumbnail_url: str = None,
+                        loading_message: 'discord.Message' = None):
         """Play an audio file in the specified voice channel."""
         print(f"[AudioService] play_audio(file={audio_file}, user={user}, guild={channel.guild.name})")
         MAX_RETRIES = 3
@@ -500,6 +528,48 @@ class AudioService:
 
                     sound_message = None
                     view = None
+                    
+                    # Resolve requester avatar URL if not provided
+                    resolved_avatar_url = requester_avatar_url
+                    
+                    # 1. Check for system/bot users -> Use bot's avatar
+                    system_users = ["admin", "periodic function", "startup", "webpage", "scheduler", "auto-join"]
+                    if isinstance(user, str) and any(s in user.lower() for s in system_users):
+                        if self.bot.user and self.bot.user.display_avatar:
+                            resolved_avatar_url = str(self.bot.user.display_avatar.url)
+                    
+                    # 2. If no avatar yet, try to resolve user object or string name
+                    if not resolved_avatar_url:
+                        if hasattr(user, 'display_avatar') and user.display_avatar:
+                            resolved_avatar_url = str(user.display_avatar.url)
+                        elif isinstance(user, str):
+                            # Try to find member in guild
+                            # Handle "Name#Discriminator" format from PersonalGreeter
+                            target_name = user
+                            target_discriminator = None
+                            
+                            if "#" in user:
+                                parts = user.split("#")
+                                target_name = parts[0]
+                                if len(parts) > 1 and parts[1].isdigit():
+                                    target_discriminator = parts[1]
+                            
+                            found_member = None
+                            if target_discriminator and target_discriminator != '0':
+                                # Precise match with discriminator
+                                found_member = discord.utils.get(channel.guild.members, name=target_name, discriminator=target_discriminator)
+                            else:
+                                # Match by name or display_name
+                                found_member = discord.utils.get(channel.guild.members, name=target_name)
+                                if not found_member:
+                                    found_member = discord.utils.get(channel.guild.members, display_name=target_name)
+
+                            if found_member and found_member.display_avatar:
+                                resolved_avatar_url = str(found_member.display_avatar.url)
+                        
+                        # 3. Fallback to bot avatar if still nothing (e.g., user left guild)
+                        if not resolved_avatar_url and self.bot.user and self.bot.user.display_avatar:
+                             resolved_avatar_url = str(self.bot.user.display_avatar.url)
 
                     if not is_slap_sound:
                         sound_filename = sound_info[2] if sound_info else audio_file
@@ -547,12 +617,36 @@ class AudioService:
                         
                         quote_text = original_message if (is_tts or sts_char) and original_message else None
                         
+                        
+                        # Fetch event data
+                        event_data_str = None
+                        try:
+                            events = self.event_repo.get_events_for_sound(sound_filename)
+                            if events:
+                                # Format: "Join: User1, User2 | Leave: User3"
+                                joins = [e[0] for e in events if e[1] == 'join']
+                                leaves = [e[0] for e in events if e[1] == 'leave']
+                                
+                                parts = []
+                                if joins:
+                                    parts.append("Join")
+                                if leaves:
+                                    parts.append("Leave")
+                                
+                                if parts:
+                                    event_data_str = " & ".join(parts)
+                        except Exception as e:
+                            print(f"[AudioService] Error fetching event data: {e}")
+
                         image_bytes = self.image_generator.generate_sound_card(
                             sound_name=audio_file, requester=str(user), play_count=play_count,
                             duration=duration_str if duration > 0 else None,
                             download_date=download_date_str, lists=lists_str,
                             favorited_by=favorited_by_str, similarity=similarity_pct,
-                            quote=quote_text, is_tts=is_tts, sts_char=sts_char
+                            quote=quote_text, is_tts=is_tts, sts_char=sts_char,
+                            requester_avatar_url=resolved_avatar_url,
+                            sts_thumbnail_url=sts_thumbnail_url,
+                            event_data=event_data_str
                         )
                         
                         from bot.ui import SoundBeingPlayedView
@@ -574,6 +668,12 @@ class AudioService:
                         
                         if image_bytes:
                             file = discord.File(io.BytesIO(image_bytes), filename="sound_card.png")
+                            if loading_message:
+                                # Delete loading message and send sound card in its place
+                                try:
+                                    await loading_message.delete()
+                                except Exception:
+                                    pass
                             sound_message = await bot_channel.send(file=file, view=view)
                         else:
                             embed = discord.Embed(color=discord.Color.red())
@@ -582,6 +682,11 @@ class AudioService:
                                 embed.description = f"▶️ {bar} 0:01 / {self._format_duration(duration)}"
                             embed.title = f"🔊 {audio_file.replace('.mp3', '')} 🔊"
                             embed.set_footer(text=f"Requested by {user}")
+                            if loading_message:
+                                try:
+                                    await loading_message.delete()
+                                except Exception:
+                                    pass
                             sound_message = await bot_channel.send(embed=embed, view=view)
                         
                         self.current_sound_message = sound_message
@@ -1008,19 +1113,21 @@ class KeywordDetectionSink(sinks.Sink):
                             print(f"[AutoAI] Already processing. Skipping trigger.")
                         else:
                             print(f"[AutoAI] Silence detected. Triggering (duration={duration:.1f}s)")
-                            asyncio.run_coroutine_threadsafe(
+                            future = asyncio.run_coroutine_threadsafe(
                                 behavior._ai_commentary_service.trigger_commentary(self.guild.id, duration=duration),
                                 self.loop
                             )
+                            future.add_done_callback(lambda f: print(f"[AutoAI] ERROR in trigger_commentary: {f.exception()}") if f.exception() else None)
         
         # Send "listening" notification when cooldown ends
         if hasattr(self.audio_service.bot, 'behavior'):
             behavior = self.audio_service.bot.behavior
             if hasattr(behavior, '_ai_commentary_service'):
-                asyncio.run_coroutine_threadsafe(
+                future = asyncio.run_coroutine_threadsafe(
                     behavior._ai_commentary_service.notify_listening_if_ready(self.guild.id),
                     self.loop
                 )
+                future.add_done_callback(lambda f: print(f"[AutoAI] ERROR in notify_listening: {f.exception()}") if f.exception() else None)
         
         # Handle Vosk flushing for speech-to-text (1s threshold)
         for user_id, last_time in list(self.last_audio_time.items()):
@@ -1061,10 +1168,11 @@ class KeywordDetectionSink(sinks.Sink):
                                 print(f"[VenturaTrigger] Already processing. Skipping trigger for user {user_id}.")
                             else:
                                 print(f"[VenturaTrigger] Silence detected (2s) for user {user_id}. Triggering AI commentary (duration={duration:.1f}s)")
-                                asyncio.run_coroutine_threadsafe(
+                                future = asyncio.run_coroutine_threadsafe(
                                     behavior._ai_commentary_service.trigger_commentary(self.guild.id, force=True, duration=duration),
                                     self.loop
                                 )
+                                future.add_done_callback(lambda f: print(f"[VenturaTrigger] ERROR in trigger_commentary: {f.exception()}") if f.exception() else None)
             
         # 3. Cleanup users idle for more than 30 seconds to free memory
         for user_id, last_time in list(self.buffer_last_update.items()):

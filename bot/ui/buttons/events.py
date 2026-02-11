@@ -39,11 +39,11 @@ class ConfirmUserEventButton(Button):
             return
 
         sound_name = self.audio_file.split('/')[-1].replace('.mp3', '')
-        is_set = Database().get_user_event_sound(selected_user_id_for_db, selected_event_type, sound_name)
-        success = Database().toggle_user_event_sound(selected_user_id_for_db, selected_event_type, sound_name)
+        try:
+            # toggle returns True if added, False if removed
+            is_added = Database().toggle_user_event_sound(selected_user_id_for_db, selected_event_type, sound_name)
 
-        if success:
-            action_message = "Removed" if is_set else "Added"
+            action_message = "Added" if is_added else "Removed"
             user_display_name = selected_user_id_for_db.split('#')[0]
             final_content_message = f"{action_message} '{sound_name}' as {selected_event_type} sound for {user_display_name}."
             if self.view.message_to_edit: 
@@ -51,7 +51,8 @@ class ConfirmUserEventButton(Button):
                     await self.view.message_to_edit.edit(content=final_content_message, view=None)
                 except:
                     pass
-        else:
+        except Exception as e:
+            print(f"Error toggling event sound: {e}")
             await interaction.followup.send("Failed to update event sound. Please try again.", ephemeral=True)
             user_display_name = selected_user_id_for_db.split('#')[0]
             final_content_message = f"Failed to process event assignment for '{sound_name}' to {user_display_name}."

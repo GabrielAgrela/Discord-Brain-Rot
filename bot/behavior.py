@@ -44,6 +44,7 @@ from bot.services.voice_transformation import VoiceTransformationService
 from bot.services.stats import StatsService
 from bot.services.background import BackgroundService
 from bot.services.backup import BackupService
+from bot.services.llm import LLMService
 
 
 
@@ -66,6 +67,7 @@ class BotBehavior:
         self._stats_service = StatsService(bot, self._message_service, self._sound_service)
         self._background_service = BackgroundService(bot, self._audio_service, self._sound_service, self)
         self._backup_service = BackupService(bot, self._message_service)
+        self._llm_service = LLMService()
         
         from bot.services.ai_commentary import AICommentaryService
         self._ai_commentary_service = AICommentaryService(self)
@@ -274,14 +276,14 @@ class BotBehavior:
     async def change_filename(self, oldfilename, newfilename, user):
         return await self._sound_service.change_filename(oldfilename, newfilename, user)
                     
-    async def tts(self, user, speech, lang="en", region=""):
-        return await self._voice_transformation_service.tts(user, speech, lang, region)
+    async def tts(self, user, speech, lang="en", region="", **kwargs):
+        return await self._voice_transformation_service.tts(user, speech, lang, region, **kwargs)
 
-    async def tts_EL(self, user, speech, lang="en", region="", send_controls=True):
-        return await self._voice_transformation_service.tts_EL(user, speech, lang, region, send_controls)
+    async def tts_EL(self, user, speech, lang="en", region="", send_controls=True, **kwargs):
+        return await self._voice_transformation_service.tts_EL(user, speech, lang, region, send_controls, **kwargs)
 
-    async def sts_EL(self, user, sound, char="ventura", region=""):
-        return await self._voice_transformation_service.sts_EL(user, sound, char, region)
+    async def sts_EL(self, user, sound, char="ventura", region="", **kwargs):
+        return await self._voice_transformation_service.sts_EL(user, sound, char, region, **kwargs)
 
 
     

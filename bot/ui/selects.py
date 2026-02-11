@@ -197,8 +197,51 @@ class STSCharacterSelect(ui.Select):
     async def callback(self, interaction):
         await interaction.response.defer()
         char = self.values[0]
-        asyncio.create_task(self.bot_behavior._voice_transformation_service.sts_EL(interaction.user, self.audio_file, char))
-        Database().insert_action(interaction.user.name, "sts_EL", Database().get_sound(self.audio_file, True)[0])
+        
+        # Get profile and images
+        from config import TTS_PROFILES
+        import io
+        
+        profile = TTS_PROFILES.get(char, {})
+        sts_thumbnail_url = profile.get("thumbnail")
+        
+        # Get avatar URL
+        avatar = getattr(interaction.user, "display_avatar", None)
+        requester_avatar_url = str(avatar.url) if avatar else None
+        
+        # Send loading card
+        loading_message = None
+        try:
+            # Access image generator from audio service
+            image_generator = self.bot_behavior._audio_service.image_generator
+            
+            # Use animated GIF
+            image_bytes = image_generator.generate_loading_gif()
+            
+            if image_bytes:
+                loading_message = await interaction.channel.send(
+                    file=discord.File(io.BytesIO(image_bytes), filename="loading.gif")
+                )
+            else:
+                loading_message = await interaction.channel.send("⏳ Processing your request...")
+        except Exception as e:
+            print(f"Error creating loading card in STS select: {e}")
+            loading_message = await interaction.channel.send("⏳ Processing...")
+
+        # Call STS logic with new params
+        asyncio.create_task(self.bot_behavior._voice_transformation_service.sts_EL(
+            interaction.user, 
+            self.audio_file, 
+            char,
+            loading_message=loading_message,
+            requester_avatar_url=requester_avatar_url,
+            sts_thumbnail_url=sts_thumbnail_url
+        ))
+        
+        try:
+            Database().insert_action(interaction.user.name, "sts_EL", Database().get_sound(self.audio_file, True)[0])
+        except:
+            pass
 
 
 class SimilarSoundsSelect(ui.Select):
