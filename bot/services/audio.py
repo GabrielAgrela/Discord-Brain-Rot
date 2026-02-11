@@ -56,14 +56,10 @@ class AudioService:
         self.current_similar_sounds: Optional[List[Any]] = None
         self.volume = 1.0
         self.playback_done = asyncio.Event()
-        self.volume = 1.0
-        self.playback_done = asyncio.Event()
         self.playback_done.set()
         
         # Track current view to update progress button
         self.current_view: Optional[discord.ui.View] = None
-        
-
         
         # Keyword detection state
         self.keyword_sinks: Dict[int, 'KeywordDetectionSink'] = {}
@@ -101,6 +97,11 @@ class AudioService:
         
         # Image generator for sound cards
         self.image_generator = ImageGeneratorService()
+
+    def _log_perf(self, operation: str, start_time: float, extra: str = ""):
+        """Log performance metrics for an operation."""
+        duration = time.time() - start_time
+        print(f"[AudioService] [PERF] {operation} finished in {duration:.4f}s {extra}")
 
     def _format_duration(self, seconds: float) -> str:
         """Format seconds into mm:ss string."""
@@ -388,6 +389,7 @@ class AudioService:
                         sts_thumbnail_url: str = None,
                         loading_message: 'discord.Message' = None):
         """Play an audio file in the specified voice channel."""
+        play_start_time = time.time()
         print(f"[AudioService] play_audio(file={audio_file}, user={user}, guild={channel.guild.name})")
         MAX_RETRIES = 3
 
@@ -481,7 +483,10 @@ class AudioService:
                         return False
 
             # Get sound info and duration early
-            sound_info = self.sound_repo.get_sound(audio_file, False)
+            sound_info_start = time.time()
+            sound_info = await asyncio.to_thread(self.sound_repo.get_sound, audio_file, False)
+            self._log_perf("get_sound (DB Read)", sound_info_start)
+
             try:
                 audio = MP3(audio_file_path)
                 duration = audio.info.length
@@ -521,6 +526,7 @@ class AudioService:
                     options=ffmpeg_options,
                     before_options="-nostdin"
                 )
+                self._log_perf("FFmpeg Source Creation", play_start_time) # Rough estimate including setup
                 
                 def after_playing(error):
                     try:
@@ -538,10 +544,11 @@ class AudioService:
             async def handle_ui():
                 try:
                     # Defer UI generation to prevent CPU contention/stutter during audio startup
-                    await asyncio.sleep(5)
+                    # await asyncio.sleep(5) # Removed per user request
                     
                     handle_ui_start = time.time()
                     print(f"[AudioService] [DEBUG] handle_ui started for {audio_file}")
+                    
                     bot_channel = self.message_service.get_bot_channel(channel.guild)
                     if not bot_channel or is_entrance: return
 
@@ -604,6 +611,7 @@ class AudioService:
                         print(f"[AudioService] [DEBUG] Starting DB operations for {audio_file}...")
                         
                         if sound_id:
+                            # Wrap DB calls in to_thread to prevent blocking main thread
                             play_count = (await asyncio.to_thread(self.action_repo.get_sound_play_count, sound_id)) + 1
                             download_date = await asyncio.to_thread(self.stats_repo.get_sound_download_date, sound_id)
                             if download_date and download_date != "Unknown date":
@@ -660,8 +668,10 @@ class AudioService:
                         except Exception as e:
                             print(f"[AudioService] Error fetching event data: {e}")
                             
-                        print(f"[AudioService] [DEBUG] DB operations finished in {time.time() - db_start_time:.4f}s")
+                        self._log_perf("handle_ui DB operations", db_start_time)
+                        # print(f"[AudioService] [DEBUG] DB operations finished in {time.time() - db_start_time:.4f}s")
 
+                        img_start_time = time.time()
                         image_bytes = await self.image_generator.generate_sound_card(
                             sound_name=audio_file, requester=str(user), play_count=play_count,
                             duration=duration_str if duration > 0 else None,
@@ -672,7 +682,10 @@ class AudioService:
                             sts_thumbnail_url=sts_thumbnail_url,
                             event_data=event_data_str
                         )
-                        print(f"[AudioService] [DEBUG] Image generation finished in {time.time() - handle_ui_start:.4f}s")
+                        self._log_perf("Image Generation", img_start_time)
+                        # print(f"[AudioService] [DEBUG] Image generation finished in {time.time() - handle_ui_start:.4f}s")
+                        
+                        self._log_perf("Total handle_ui", handle_ui_start)
                         
                         from bot.ui import SoundBeingPlayedView
                         behavior_ref = self._behavior if hasattr(self, '_behavior') else None
@@ -728,10 +741,13 @@ class AudioService:
                         #     await self.message_service.send_controls(self._behavior)
 
                     if show_suggestions and not is_entrance and not is_tts and not is_slap_sound and self.sound_service:
-                        asyncio.create_task(self.sound_service.find_and_update_similar_sounds(
-                            sound_message=sound_message, audio_file=audio_file,
-                            original_message=original_message, send_controls=False, num_suggestions=num_suggestions
-                        ))
+                        # Eager loading disabled in favor of lazy loading via ToggleControlsButton
+                        # asyncio.create_task(self.sound_service.find_and_update_similar_sounds(
+                        #    sound_message, 
+                        #    audio_file, 
+                        #    original_message or audio_file
+                        # ))
+                        pass
                     
                     if sound_message and not is_slap_sound and duration > 0:
                         asyncio.create_task(self.update_progress_bar(sound_message, duration, view))

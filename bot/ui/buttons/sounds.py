@@ -344,11 +344,47 @@ class ToggleControlsButton(Button):
     async def callback(self, interaction: discord.Interaction):
         # Toggle the state in the view
         view = self.view
+        if view is None:
+            return
+            
         if not hasattr(view, 'show_controls'):
             view.show_controls = False
         
         view.show_controls = not view.show_controls
         
+        # Lazy load similar sounds if expanding
+        if view.show_controls:
+            # Initialize similar_sounds if not present
+            if not hasattr(view, 'similar_sounds'):
+                view.similar_sounds = None
+                
+            # Fetch if not cached
+            if not view.similar_sounds:
+                try:
+                    # Use asyncio.to_thread for database operation
+                    # Note: We need to import the Database class here or ensure it's available
+                    from bot.database import Database
+                    # Request slightly more than we display to have variety if needed, but select component uses its own limit
+                    similar_data = await asyncio.to_thread(Database().get_sounds_by_similarity, view.audio_file)
+                    
+                    # Filter out the current sound itself
+                    import sqlite3
+                    filtered_data = []
+                    for s in similar_data:
+                         sound_data = s[0]
+                         if isinstance(sound_data, (sqlite3.Row, dict)):
+                             filename = sound_data['Filename']
+                         else:
+                             filename = sound_data[2]
+                             
+                         if filename != view.audio_file:
+                             filtered_data.append(s)
+                             
+                    view.similar_sounds = filtered_data
+                except Exception as e:
+                     print(f"[ToggleControlsButton] Error lazy loading similar sounds: {e}")
+                     view.similar_sounds = []
+
         # Update button appearance (Icon only ✅)
         # Update emoji
         self.emoji = "🔼" if view.show_controls else "🔽"

@@ -250,6 +250,7 @@ class SimilarSoundsSelect(ui.Select):
     def __init__(self, bot_behavior, similar_sounds, row: int = 3):
         self.bot_behavior = bot_behavior
         options = []
+        seen = set()
         for sound, similarity in similar_sounds:
             # sound is the sound_data (already unpacked from tuple)
             # Check if it's a Row/dict or a tuple
@@ -258,6 +259,11 @@ class SimilarSoundsSelect(ui.Select):
             else:
                 # It's a tuple, filename is at index 2
                 sound_name = sound[2]
+            
+            if sound_name in seen:
+                continue
+            seen.add(sound_name)
+
             label = f"{sound_name.replace('.mp3', '')} ({int(similarity)}%)"
             if len(label) > 80:
                 # Truncate while keeping the similarity percentage
@@ -267,6 +273,8 @@ class SimilarSoundsSelect(ui.Select):
                 label=label,
                 value=sound_name
             ))
+            if len(options) >= 25:
+                break
         super().__init__(
             placeholder="Try similar sounds...",
             options=options,

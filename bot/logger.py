@@ -37,6 +37,9 @@ def setup_logging():
 
     logger = logging.getLogger()
     logger.setLevel(logging.INFO)
+    
+    # Suppress noisy discord.player errors (fallback probe works fine, tracebacks are spam)
+    logging.getLogger('discord.player').setLevel(logging.CRITICAL)
 
     # Prevent duplicate handlers if setup_logging is called multiple times
     if logger.handlers:

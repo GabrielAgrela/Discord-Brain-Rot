@@ -51,6 +51,12 @@ class SoundBeingPlayedView(View):
                 self.add_item(STSCharacterSelect(bot_behavior=self.bot_behavior, audio_file=self.audio_file, row=current_row))
                 current_row += 1
 
+            # Lazy-loaded Similar Sounds
+            if hasattr(self, 'similar_sounds') and self.similar_sounds:
+                from bot.ui.selects import SimilarSoundsSelect
+                self.add_item(SimilarSoundsSelect(self.bot_behavior, self.similar_sounds, row=current_row))
+                current_row += 1
+
             if self.include_add_to_list_select:
                 lists = Database().get_sound_lists()
                 if lists:
@@ -75,7 +81,7 @@ class SoundBeingPlayedView(View):
             else:
                 self.progress_button.label = emoji
 
-    async def on_error(self, interaction: discord.Interaction, error: Exception, item: discord.ui.Item):
+    async def on_error(self, error: Exception, item: discord.ui.Item, interaction: discord.Interaction):
         print(f"DEBUG: SoundBeingPlayedView ERROR: {error} | Item: {item}")
         import traceback
         traceback.print_exc()
