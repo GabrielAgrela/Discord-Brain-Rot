@@ -191,6 +191,7 @@ class AudioService:
                         voice_client = None
                         await asyncio.sleep(0.5)
                         
+                    # Also check for infinite or missing latency which indicates a zombie connection
                     elif voice_client.is_connected() and (voice_client.average_latency == float('inf') or voice_client.average_latency is None):
                         print(f"[AudioService] Detected zombie voice client (infinite latency) in {channel.guild.name}, cleaning up")
                         self._mark_reconnection_started(guild_id)
@@ -361,12 +362,14 @@ class AudioService:
                 print(f"[AudioService] Slap sound not found: {audio_file_path}")
                 return False
 
-            audio_source = discord.FFmpegPCMAudio(
+            # Use FFmpegOpusAudio for stability and bypassing Python-side encoding
+            audio_source = await discord.FFmpegOpusAudio.from_probe(
                 audio_file_path,
                 executable=self.ffmpeg_path,
-                before_options="-nostdin -fflags nobuffer -flags low_delay -analyzeduration 0 -probesize 32"
+                before_options="-nostdin -fflags nobuffer -flags low_delay -analyzeduration 0 -probesize 32",
+                options=f'-filter:a "volume={self.volume}"'
             )
-            audio_source = discord.PCMVolumeTransformer(audio_source, volume=self.volume)
+            # Volume is handled by ffmpeg filter now
             
             voice_client.play(audio_source)
             return True
@@ -489,8 +492,11 @@ class AudioService:
                 duration = 0
 
             # FFmpeg options
-            vol = effects.get('volume', 1.0) if effects else 1.0
-            ffmpeg_options = f'-af "volume={vol}'
+            # Combine effect volume with global volume
+            effect_vol = effects.get('volume', 1.0) if effects else 1.0
+            total_vol = effect_vol * self.volume
+            
+            ffmpeg_options = f'-filter:a "volume={total_vol}'
             if effects:
                 filters = []
                 if effects.get('pitch'): filters.append(f"asetrate=44100*{effects['pitch']},aresample=44100")
@@ -508,13 +514,13 @@ class AudioService:
 
             # Start playback immediately
             try:
-                audio_source = discord.FFmpegPCMAudio(
+                # Use FFmpegOpusAudio for stability
+                audio_source = await discord.FFmpegOpusAudio.from_probe(
                     audio_file_path, 
                     executable=self.ffmpeg_path, 
                     options=ffmpeg_options,
-                    before_options="-nostdin -fflags nobuffer -flags low_delay -analyzeduration 0 -probesize 32"
+                    before_options="-nostdin"
                 )
-                audio_source = discord.PCMVolumeTransformer(audio_source, volume=self.volume)
                 
                 def after_playing(error):
                     try:
@@ -529,9 +535,11 @@ class AudioService:
                 self.playback_done.set()
                 return False
 
-            # Handle UI in background
             async def handle_ui():
                 try:
+                    # Defer UI generation to prevent CPU contention/stutter during audio startup
+                    await asyncio.sleep(5)
+                    
                     handle_ui_start = time.time()
                     print(f"[AudioService] [DEBUG] handle_ui started for {audio_file}")
                     bot_channel = self.message_service.get_bot_channel(channel.guild)

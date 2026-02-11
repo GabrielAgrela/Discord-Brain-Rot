@@ -68,7 +68,7 @@ class ImageGeneratorService:
                         '--headless=new',
                         '--default-background-color=00000000',
                         '--hide-scrollbars',
-                        '--force-device-scale-factor=2'
+                        '--force-device-scale-factor=1.5'
                     ]
                 )
             except ImportError:
@@ -292,7 +292,8 @@ class ImageGeneratorService:
                 bbox = img.getbbox()
                 if bbox:
                     cropped = img.crop(bbox)
-                    cropped.save(image_path)
+                    # Optimize PNG to reduce file size
+                    cropped.save(image_path, optimize=True, quality=85)
         except Exception as e:
             print(f"[ImageGeneratorService] Error cropping image: {e}")
         

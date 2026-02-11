@@ -270,13 +270,30 @@ async def on_resumed():
                 print(f"[on_resumed] Reconnection in progress ({remaining:.1f}s remaining) for {guild.name}, skipping...")
                 continue
             
-            # Check for zombie state (broken WebSocket)
+            # Check for zombie state (broken WebSocket, invalid socket, or infinite latency)
             ws = getattr(voice_client, 'ws', None)
-            is_zombie = ws is None or str(type(ws)) == "<class 'discord.utils._MissingSentinel'>"
+            is_ws_zombie = ws is None or str(type(ws)) == "<class 'discord.utils._MissingSentinel'>"
+            
+            # Check for invalid socket (fileno == -1)
+            is_socket_zombie = False
+            if hasattr(voice_client, 'socket') and voice_client.socket:
+                try:
+                    if voice_client.socket.fileno() == -1:
+                        is_socket_zombie = True
+                        print(f"[on_resumed] Detected invalid socket (fileno=-1) in {guild.name}")
+                except Exception:
+                    is_socket_zombie = True
+            
+            # Check for infinite/missing latency
+            is_latency_zombie = False
+            if voice_client.average_latency is None or voice_client.average_latency == float('inf'):
+                 is_latency_zombie = True
+                 print(f"[on_resumed] Detected invalid latency ({voice_client.average_latency}) in {guild.name}")
+
             is_disconnected = not voice_client.is_connected()
             
-            if is_zombie or is_disconnected:
-                state_desc = "zombie" if is_zombie else "disconnected"
+            if is_ws_zombie or is_socket_zombie or is_latency_zombie or is_disconnected:
+                state_desc = "zombie" if (is_ws_zombie or is_socket_zombie or is_latency_zombie) else "disconnected"
                 print(f"[on_resumed] Detected {state_desc} voice connection in {guild.name}, triggering reconnection...")
                 # Mark reconnection started to prevent other health checks from interfering
                 behavior._audio_service._mark_reconnection_started(guild.id)
