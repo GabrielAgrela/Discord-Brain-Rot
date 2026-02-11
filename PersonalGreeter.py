@@ -430,33 +430,12 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
 
 async def play_audio_for_event(member, member_str, event, channel):
     try:
-        # Check if bot is in the correct voice channel
-        voice_client = channel.guild.voice_client
+        # Use robust connection handling from AudioService
+        voice_client = await behavior.ensure_voice_connected(channel)
         
-        # Wait a bit if bot is currently connecting/moving channels
-        for _ in range(10):  # Wait up to 1 second
-            if voice_client and voice_client.channel == channel and voice_client.is_connected():
-                break  # Bot is in the right channel and connected
-            await asyncio.sleep(0.1)
-            voice_client = channel.guild.voice_client  # Refresh the client reference
-        
-        # If still not in the right channel, try to connect/move
-        if not voice_client or not voice_client.is_connected() or voice_client.channel != channel:
-            print(f"[EventSound] Bot not in {channel.name}, attempting to join for {member_str}'s {event}")
-            try:
-                if voice_client and voice_client.is_connected():
-                    # Bot is connected but in wrong channel, move it
-                    await voice_client.move_to(channel)
-                else:
-                    # Bot not connected at all, connect
-                    await channel.connect()
-                # Restart keyword detection after reconnecting/moving
-                await behavior._audio_service.start_keyword_detection(channel.guild)
-                # Small delay to ensure connection is stable
-                await asyncio.sleep(0.5)
-            except Exception as e:
-                print(f"[EventSound] Failed to join {channel.name} for {event} sound: {e}")
-                return
+        if not voice_client:
+            print(f"[EventSound] Failed to join {channel.name} for {event} sound: Connection failed according to ensure_voice_connected")
+            return
         
         user_events = db.get_user_events(member_str, event)
         if user_events:

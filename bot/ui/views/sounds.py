@@ -1,3 +1,4 @@
+import asyncio
 import discord
 from discord.ui import View
 from bot.database import Database
@@ -13,8 +14,32 @@ class SoundBeingPlayedView(View):
         self.initial_progress_label = progress_label
         self.show_controls = show_controls
         self.progress_button = None
+        self.auto_close_task = None
         
         self._setup_items()
+
+    def start_auto_close_task(self):
+        """Start a timer to close controls automatically."""
+        if self.auto_close_task:
+            self.auto_close_task.cancel()
+        self.auto_close_task = asyncio.create_task(self._auto_close_coro())
+
+    async def _auto_close_coro(self):
+        await asyncio.sleep(5)
+        if self.show_controls:
+            self.show_controls = False
+            self._setup_items()
+            try:
+                # We need a message to edit. The view is attached to a message.
+                # However, views don't implicitly store the message unless we set it.
+                # AudioService sets `self.current_sound_message`.
+                # But here inside the view, `self.message` might be set by Discord if bound, 
+                # or we rely on the interaction that opened it?
+                # Actually, `self.message` is available if the view was sent.
+                if hasattr(self, 'message') and self.message:
+                    await self.message.edit(view=self)
+            except Exception as e:
+                print(f"[SoundBeingPlayedView] Error in auto-close: {e}")
 
     def _setup_items(self):
         self.clear_items()

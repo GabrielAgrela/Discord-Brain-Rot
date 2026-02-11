@@ -70,6 +70,7 @@ class AudioService:
         
         # Reconnection debounce: track when reconnection started to avoid competing reconnects
         self._reconnection_timestamps: Dict[int, float] = {}
+        self._connection_timestamps: Dict[int, float] = {}  # Track when a connection was fully established
         self.RECONNECTION_GRACE_PERIOD = 15.0  # Seconds to wait before health checks intervene
         
         # Buffer for /llmdebug (handled via ring buffer in sink)
@@ -167,12 +168,15 @@ class AudioService:
         if guild_id in self._pending_connections:
             pending_task = self._pending_connections[guild_id]
             if not pending_task.done():
-                print(f"[AudioService] Cancelling pending connection for {channel.guild.name}")
+                print(f"[AudioService] Cancelling existing pending connection for {channel.guild.name}")
                 pending_task.cancel()
                 try:
                     await pending_task
-                except asyncio.CancelledError:
+                except (asyncio.CancelledError, Exception):
                     pass
+        
+        # Track this connection attempt as the new pending task
+        self._pending_connections[guild_id] = asyncio.current_task()
         
         async with lock:
             try:
@@ -193,16 +197,26 @@ class AudioService:
                         await asyncio.sleep(0.5)
                         
                     # Also check for infinite or missing latency which indicates a zombie connection
+                    # CRITICAL: Average latency is inf/None immediately after connection. 
+                    # Only treat as zombie if enough time has passed (20s) for it to heartheat.
                     elif voice_client.is_connected() and (voice_client.average_latency == float('inf') or voice_client.average_latency is None):
-                        print(f"[AudioService] Detected zombie voice client (infinite latency) in {channel.guild.name}, cleaning up")
-                        self._mark_reconnection_started(guild_id)
-                        try:
-                            await self.stop_keyword_detection(channel.guild)
-                            await voice_client.disconnect(force=True)
-                            await asyncio.sleep(0.5)
-                        except Exception as e:
-                            print(f"[AudioService] Error cleaning up zombie voice client: {e}")
-                        voice_client = None
+                        conn_time = self._connection_timestamps.get(guild_id, 0)
+                        how_long = time.time() - conn_time
+                        
+                        if how_long > 20:
+                            print(f"[AudioService] Detected zombie voice client (infinite latency for {how_long:.1f}s) in {channel.guild.name}, cleaning up")
+                            self._mark_reconnection_started(guild_id)
+                            try:
+                                await self.stop_keyword_detection(channel.guild)
+                                await voice_client.disconnect(force=True)
+                                await asyncio.sleep(0.5)
+                            except Exception as e:
+                                print(f"[AudioService] Error cleaning up zombie voice client: {e}")
+                            voice_client = None
+                        else:
+                            # Connection is new, give it more time to stabilize
+                            self._clear_reconnection_state(guild_id)
+                            # Fall through to channel check / detection start
 
                     elif not voice_client.is_connected():
                         print(f"[AudioService] Voice client in {channel.guild.name} exists but is not connected. Reconnecting...")
@@ -226,9 +240,10 @@ class AudioService:
                             await asyncio.sleep(0.5)
                             voice_client = None
                         if voice_client:
-                            # Successfully moved, restart keyword detection
+                            # Successfully moved
                             self._clear_reconnection_state(guild_id)
-                            await self.start_keyword_detection(channel.guild)
+                            self._connection_timestamps[guild_id] = time.time()
+                            # start_keyword_detection called below outside lock
                             return voice_client
                     else:
                         # Already connected to the right channel
@@ -245,7 +260,7 @@ class AudioService:
                         if is_socket_healthy:
                              # Current connection is good
                              self._clear_reconnection_state(guild_id)
-                             await self.start_keyword_detection(channel.guild)
+                             # start_keyword_detection called below outside lock
                              return voice_client
                         else:
                              print(f"[AudioService] Voice client has invalid socket (fd=-1) in {channel.guild.name}, reconnecting...")
@@ -273,9 +288,10 @@ class AudioService:
                         voice_client = await channel.connect(timeout=10.0)
                         # Give the voice connection a moment to fully establish
                         await asyncio.sleep(0.5)
-                        # Start keyword detection on new connection
+                        # Mark connection time and clear reconnection state
                         self._clear_reconnection_state(guild_id)
-                        await self.start_keyword_detection(channel.guild)
+                        self._connection_timestamps[guild_id] = time.time()
+                        # start_keyword_detection called below outside lock
                         return voice_client
                     except asyncio.CancelledError:
                         print(f"[AudioService] Connection cancelled for {channel.name}")
@@ -304,6 +320,21 @@ class AudioService:
                 if self.bot.voice_clients:
                     return self.bot.voice_clients[0]
                 return None
+            finally:
+                # Cleanup connection task tracking if it's still us
+                if guild_id in self._pending_connections and self._pending_connections[guild_id] == asyncio.current_task():
+                    del self._pending_connections[guild_id]
+
+        # Always start/refresh keyword detection outside the connection lock
+        # to prevent blocking other sounds if STT initialization is slow
+        voice_client = channel.guild.voice_client
+        if voice_client and voice_client.is_connected() and voice_client.channel.id == channel.id:
+            try:
+                await self.start_keyword_detection(channel.guild)
+            except Exception as e:
+                print(f"[AudioService] Warning: Failed to restart keyword detection: {e}")
+        
+        return voice_client
 
     def get_largest_voice_channel(self, guild: discord.Guild) -> Optional[discord.VoiceChannel]:
         """Find the voice channel with the most members in the given guild."""
@@ -342,6 +373,8 @@ class AudioService:
             voice_client = await self.ensure_voice_connected(channel)
             if not voice_client:
                 return False
+            
+            slap_start_time = time.time()
 
             # Stop any currently playing audio and mark as slapped
             if voice_client.is_playing():
@@ -373,6 +406,7 @@ class AudioService:
             # Volume is handled by ffmpeg filter now
             
             voice_client.play(audio_source)
+            self._log_perf(f"play_slap ({audio_file})", slap_start_time)
             return True
         except Exception as e:
             print(f"[AudioService] Error playing slap: {e}")

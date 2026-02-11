@@ -393,6 +393,19 @@ class ToggleControlsButton(Button):
         if hasattr(view, '_setup_items'):
             view._setup_items()
             await interaction.response.edit_message(view=view)
+            
+            # Ensure view has message reference for auto-close
+            if not getattr(view, 'message', None):
+                view.message = interaction.message
+                
+            # Manage auto-close timer
+            if view.show_controls:
+                if hasattr(view, 'start_auto_close_task'):
+                    view.start_auto_close_task()
+            else:
+                 # Cancel task if manually closed
+                 if hasattr(view, 'auto_close_task') and view.auto_close_task:
+                     view.auto_close_task.cancel()
         else:
             await interaction.response.defer()
 
