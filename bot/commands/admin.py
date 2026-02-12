@@ -189,6 +189,25 @@ class AdminCog(commands.Cog):
 
         await self.behavior.perform_backup(ctx)
 
+    config = discord.SlashCommandGroup("config", "Bot configuration commands (Admin only)")
+
+    @config.command(name="image_cards", description="Enable or disable image sound cards")
+    async def config_image_cards(
+        self,
+        ctx: discord.ApplicationContext,
+        state: Option(str, "State", choices=["Enabled", "Disabled"], required=True)
+    ):
+        """Toggle the use of image cards for sounds."""
+        if not self._is_admin(ctx.author):
+            await ctx.respond("You don't have permission to use this command.", ephemeral=True)
+            return
+
+        enabled = (state == "Enabled")
+        self.behavior._audio_service.settings_repo.set_setting('use_image_cards', enabled)
+        
+        status_text = "enabled" if enabled else "disabled"
+        await ctx.respond(f"✅ Image sound cards have been **{status_text}**.", ephemeral=True)
+
 
 
 def setup(bot: discord.Bot, behavior=None):

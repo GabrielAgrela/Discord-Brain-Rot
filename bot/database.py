@@ -59,6 +59,19 @@ class Database:
         self.cursor = self.conn.cursor()
         self.behavior = behavior
         
+        # Ensure all tables exist (simple migration)
+        try:
+            self.cursor.execute('''
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+            ''')
+            self.cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('use_image_cards', 'True')")
+            self.conn.commit()
+        except sqlite3.Error as e:
+            print(f"[Database] Error ensuring settings table: {e}")
+        
         # Set row_factory so repositories can use dict-style access
         self.conn.row_factory = sqlite3.Row
         
@@ -207,6 +220,18 @@ class Database:
             );
             '''
             cursor.execute(create_ai_memory_table)
+
+            # Create settings table
+            create_settings_table = '''
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+            '''
+            cursor.execute(create_settings_table)
+
+            # Insert default settings
+            cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('use_image_cards', 'True')")
 
             # Populate default keywords if empty
             cursor.execute("SELECT COUNT(*) FROM keywords")

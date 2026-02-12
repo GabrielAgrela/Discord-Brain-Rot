@@ -18,7 +18,8 @@ import vosk
 from discord import sinks
 from bot.repositories import (
     SoundRepository, ActionRepository, ListRepository, 
-    StatsRepository, KeywordRepository, EventRepository
+    StatsRepository, KeywordRepository, EventRepository,
+    SettingsRepository
 )
 from bot.services.image_generator import ImageGeneratorService
 
@@ -46,6 +47,7 @@ class AudioService:
         self.stats_repo = StatsRepository()
         self.keyword_repo = KeywordRepository()
         self.event_repo = EventRepository()
+        self.settings_repo = SettingsRepository()
         
         # Audio state moved from BotBehavior
         self.last_played_time: Optional[datetime] = None
@@ -691,18 +693,23 @@ class AudioService:
                         self._log_perf("handle_ui DB operations", db_start_time)
                         # print(f"[AudioService] [DEBUG] DB operations finished in {time.time() - db_start_time:.4f}s")
 
-                        img_start_time = time.time()
-                        image_bytes = await self.image_generator.generate_sound_card(
-                            sound_name=audio_file, requester=str(user), play_count=play_count,
-                            duration=duration_str if duration > 0 else None,
-                            download_date=download_date_str, lists=lists_str,
-                            favorited_by=favorited_by_str, similarity=similarity_pct,
-                            quote=quote_text, is_tts=is_tts, sts_char=sts_char,
-                            requester_avatar_url=resolved_avatar_url,
-                            sts_thumbnail_url=sts_thumbnail_url,
-                            event_data=event_data_str
-                        )
-                        self._log_perf("Image Generation", img_start_time)
+                        # Check if we should use image cards
+                        use_image_cards = await asyncio.to_thread(self.settings_repo.get_setting, 'use_image_cards', True)
+                        
+                        image_bytes = None
+                        if use_image_cards:
+                            img_start_time = time.time()
+                            image_bytes = await self.image_generator.generate_sound_card(
+                                sound_name=audio_file, requester=str(user), play_count=play_count,
+                                duration=duration_str if duration > 0 else None,
+                                download_date=download_date_str, lists=lists_str,
+                                favorited_by=favorited_by_str, similarity=similarity_pct,
+                                quote=quote_text, is_tts=is_tts, sts_char=sts_char,
+                                requester_avatar_url=resolved_avatar_url,
+                                sts_thumbnail_url=sts_thumbnail_url,
+                                event_data=event_data_str
+                            )
+                            self._log_perf("Image Generation", img_start_time)
                         # print(f"[AudioService] [DEBUG] Image generation finished in {time.time() - handle_ui_start:.4f}s")
                         
                         self._log_perf("Total handle_ui", handle_ui_start)
