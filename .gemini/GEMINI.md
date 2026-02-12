@@ -98,11 +98,30 @@ bot/
 
 - Tests are located in `tests/` and use pytest
 - Run tests with `pytest tests/ -v`
+- Preferred local command: `./venv/bin/python -m pytest -q tests/`
 - Run with coverage: `pytest tests/ --cov=bot --cov-report=term`
 - Use in-memory SQLite for repository tests (see `conftest.py` fixtures)
 - Mock Discord dependencies for service tests
 - Follow existing test patterns when adding new tests
 - Testing artifacts (`.pytest_cache/`, `.coverage`, `htmlcov/`) are in `.gitignore`
+
+## Agent Definition Of Done (Mandatory)
+
+This section is mandatory for AI agents working in this repository.
+
+- After code changes, agents must run `./scripts/verify_and_deploy.sh` unless the user explicitly says to skip tests or skip deployment.
+- Agents must execute deployment themselves when tool permissions allow it. Do not ask the user to run deploy commands on the agent's behalf.
+- If a step fails, agents must report the exact failing command and error summary, and stop claiming completion.
+- Final response must include:
+  - test result summary
+  - deploy/restart result summary
+  - post-restart bot log health summary
+
+Canonical completion command:
+
+```bash
+./scripts/verify_and_deploy.sh
+```
 
 ## Logging
 - Use the project's logger from `bot/logger.py`

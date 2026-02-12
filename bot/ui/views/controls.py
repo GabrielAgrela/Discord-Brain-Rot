@@ -30,7 +30,7 @@ class DownloadedSoundView(View):
     def __init__(self, bot_behavior, sound):
         super().__init__(timeout=None)
         from bot.ui.buttons.sounds import PlaySoundButton
-        self.add_item(PlaySoundButton(bot_behavior, sound, style=discord.ButtonStyle.danger, label=sound.split('/')[-1].replace('.mp3', '')))
+        self.add_item(PlaySoundButton(bot_behavior, sound, style=discord.ButtonStyle.primary, label=sound.split('/')[-1].replace('.mp3', '')))
                           
 class SoundView(View):
     def __init__(self, bot_behavior, similar_sounds):

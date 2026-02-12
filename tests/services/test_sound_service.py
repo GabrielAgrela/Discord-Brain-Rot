@@ -103,6 +103,16 @@ class TestSoundServiceFilename:
                 # Test the repository was accessed
                 assert mock_service.sound_repo is not None
 
+    def test_sanitize_mp3_filename_preserves_spaces(self, mock_service):
+        """Test filename sanitizer keeps spaces instead of replacing with underscores."""
+        sanitized = mock_service._sanitize_mp3_filename("natal do cactus cat", "fallback")
+        assert sanitized == "natal do cactus cat.mp3"
+
+    def test_sanitize_mp3_filename_cleans_invalid_characters(self, mock_service):
+        """Test filename sanitizer removes unsupported characters but keeps readable spacing."""
+        sanitized = mock_service._sanitize_mp3_filename("  bad:/name*?  ", "fallback")
+        assert sanitized == "badname.mp3"
+
 
 class TestSoundServiceValidation:
     """Tests for input validation in SoundService."""

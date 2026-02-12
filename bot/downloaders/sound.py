@@ -309,7 +309,11 @@ class SoundDownloader:
                         sound_view = DownloadedSoundView(self.bot, os.path.basename(file))
                         await self.bot.send_message(
                             title=f"I stole {os.path.basename(file)} to our database hehe",
-                            view=sound_view
+                            view=sound_view,
+                            message_format="image",
+                            image_requester="Sound Thief",
+                            image_show_footer=False,
+                            image_show_sound_icon=False
                         )
                         shutil.move(file, os.path.join(destination_folder, os.path.basename(file)))
                         self.db.insert_sound(os.path.basename(file), os.path.basename(file))

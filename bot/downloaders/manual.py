@@ -81,12 +81,9 @@ class ManualSoundDownloader:
             
             target_name = custom_filename if custom_filename else title
             
-            # Replace non-alphanumeric chars with underscore
-            safe_name = re.sub(r'[^\w\-.]', '_', target_name)
-            # Collapse multiple underscores
-            safe_name = re.sub(r'_+', '_', safe_name)
-            # Strip leading/trailing underscores
-            safe_name = safe_name.strip('_')
+            # Keep spaces in filenames; remove unsupported characters.
+            safe_name = re.sub(r'[^\w\-. ]+', '', target_name or "")
+            safe_name = re.sub(r'\s+', ' ', safe_name).strip(" .")
             
             if not safe_name:
                 safe_name = f"audio_{uuid.uuid4().hex[:8]}"

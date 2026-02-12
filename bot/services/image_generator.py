@@ -101,7 +101,9 @@ class ImageGeneratorService:
         sts_char: Optional[str] = None,
         requester_avatar_url: Optional[str] = None,
         sts_thumbnail_url: Optional[str] = None,
-        event_data: Optional[str] = None
+        event_data: Optional[str] = None,
+        show_footer: bool = True,
+        show_sound_icon: bool = True,
     ) -> Optional[bytes]:
         """
         Async wrapper for generating sound card image in a separate thread.
@@ -114,7 +116,7 @@ class ImageGeneratorService:
             self._generate_sound_card_sync,
             sound_name, requester, play_count, duration, download_date,
             lists, favorited_by, similarity, quote, is_tts, sts_char,
-            requester_avatar_url, sts_thumbnail_url, event_data
+            requester_avatar_url, sts_thumbnail_url, event_data, show_footer, show_sound_icon
         )
 
     def _generate_sound_card_sync(
@@ -132,7 +134,9 @@ class ImageGeneratorService:
         sts_char: Optional[str] = None,
         requester_avatar_url: Optional[str] = None,
         sts_thumbnail_url: Optional[str] = None,
-        event_data: Optional[str] = None
+        event_data: Optional[str] = None,
+        show_footer: bool = True,
+        show_sound_icon: bool = True,
     ) -> Optional[bytes]:
         """
         Generate a sound card image (Synchronous implementation).
@@ -150,6 +154,8 @@ class ImageGeneratorService:
             is_tts: Whether this is a TTS message
             sts_char: STS character name (ventura, tyson, costa)
             event_data: String describing events (e.g. "Join: Gabi | Leave: Someone")
+            show_footer: Whether to render the footer row
+            show_sound_icon: Whether to render the leading sound/speaker icon
             
         Returns:
             PNG image bytes or None if generation failed
@@ -190,7 +196,10 @@ class ImageGeneratorService:
             svg_event = '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="#6366f1"><path d="M18 16v-5c0-3.07-1.63-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.64 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2zm-2 0H8v-5c0-2.48 1.51-4.5 4-4.5s4 2.02 4 4.5v5zm-4 5c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2z"/></svg>'
             
             # Determine speaker icon (only used when no character thumbnail)
-            if sts_char:
+            if not show_sound_icon:
+                speaker_icon = None
+                card_class = "sts-mode" if (sts_char or is_tts) else ""
+            elif sts_char:
                 speaker_icon = encode_svg(svg_face)
                 card_class = "sts-mode"
             elif is_tts:
@@ -233,6 +242,16 @@ class ImageGeneratorService:
             else:
                 title_font_size = 26
 
+            has_stats = any([
+                duration,
+                play_count is not None,
+                lists,
+                favorited_by,
+                event_data,
+            ])
+            has_leading_icon = bool(sts_thumbnail_b64 or speaker_icon)
+            notification_only = (not has_stats) and (not show_footer)
+
             # Build template data with Base64 icons
             data = {
                 "sound_name": display_name,
@@ -256,6 +275,10 @@ class ImageGeneratorService:
                 "requester_avatar_b64": requester_avatar_b64,
                 "sts_thumbnail_b64": sts_thumbnail_b64,
                 "event_data": event_data,
+                "show_footer": show_footer,
+                "has_stats": has_stats,
+                "has_leading_icon": has_leading_icon,
+                "notification_only": notification_only,
             }
             
             # Render template

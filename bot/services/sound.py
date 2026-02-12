@@ -43,6 +43,21 @@ class SoundService:
         os.makedirs(self.sounds_dir, exist_ok=True)
         os.makedirs(self.downloads_dir, exist_ok=True)
 
+    def _sanitize_mp3_filename(self, name: str, default_base: str) -> str:
+        """Sanitize an mp3 filename while preserving spaces."""
+        cleaned = (name or "").strip()
+        if cleaned.lower().endswith(".mp3"):
+            cleaned = cleaned[:-4]
+
+        # Keep letters/numbers/underscore/dot/hyphen/spaces, drop everything else.
+        cleaned = re.sub(r"[^\w\-. ]+", "", cleaned)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip(" .")
+
+        if not cleaned:
+            cleaned = default_base
+
+        return f"{cleaned}.mp3"
+
     async def play_random_sound(self, user: str = "admin", effects: Optional[dict] = None, guild: Optional[discord.Guild] = None):
         """Pick a random sound and play it in the user's or largest channel."""
         sounds = self.sound_repo.get_random_sounds(num_sounds=1)
@@ -175,12 +190,8 @@ class SoundService:
         if attachment.size > max_mb * 1024 * 1024:
             return False, f"File too large! Max {max_mb}MB."
 
-        # Sanitize filename
-        final_filename = custom_filename or attachment.filename
-        if not final_filename.endswith('.mp3'):
-            final_filename += '.mp3'
-            
-        final_filename = re.sub(r'[^\w\-.]', '_', final_filename)
+        # Sanitize filename while preserving spaces.
+        final_filename = self._sanitize_mp3_filename(custom_filename or attachment.filename, "uploaded_sound")
         save_path = os.path.join(self.sounds_dir, final_filename)
 
         if os.path.exists(save_path):
@@ -292,25 +303,20 @@ class SoundService:
 
     async def save_sound_from_url(self, url: str, custom_filename: Optional[str] = None, max_mb: int = 20) -> str:
         """Download an MP3 file directly from a URL."""
-        # Sanitization logic from behavior.py
+        # Build candidate base name from custom name or URL path.
         if custom_filename:
-            base = custom_filename
+            candidate_name = custom_filename
         else:
-            base = os.path.basename(url.split('?')[0])
-            if base.endswith('.mp3'):
-                base = base[:-4]
-        
-        base = re.sub(r'[^A-Za-z0-9_\-\. ]+', '', base).strip()
-        base = re.sub(r'\s+', '_', base)
-        if not base: base = 'url_sound'
-        
-        filename = f"{base}.mp3"
+            candidate_name = os.path.basename(url.split('?')[0])
+
+        filename = self._sanitize_mp3_filename(candidate_name, "url_sound")
+        base = filename[:-4]
         final_path = os.path.join(self.sounds_dir, filename)
         
         # Avoid collisions
         counter = 1
         while os.path.exists(final_path):
-            final_path = os.path.join(self.sounds_dir, f"{base}_{counter}.mp3")
+            final_path = os.path.join(self.sounds_dir, f"{base} {counter}.mp3")
             counter += 1
 
         async with aiohttp.ClientSession() as session:

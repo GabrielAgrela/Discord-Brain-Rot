@@ -6,7 +6,8 @@ previously scattered across BotBehavior.
 """
 
 import discord
-from typing import Optional, Any
+import io
+from typing import Optional, Any, Literal
 import os
 import asyncio
 
@@ -73,9 +74,13 @@ class MessageService:
         view: Optional[discord.ui.View] = None,
         delete_time: Optional[int] = None,
         channel: Optional[discord.TextChannel] = None,
+        message_format: Literal["embed", "image"] = "embed",
+        image_requester: str = "Gertrudes",
+        image_show_footer: bool = True,
+        image_show_sound_icon: bool = True,
     ) -> Optional[discord.Message]:
         """
-        Send an embed message to the bot channel.
+        Send a message to the bot channel as an embed or image card.
         
         Args:
             title: Embed title
@@ -85,6 +90,10 @@ class MessageService:
             view: Discord UI view to attach
             delete_time: Auto-delete after N seconds
             channel: Specific channel (uses bot channel if None)
+            message_format: "embed" (default) or "image"
+            image_requester: Requester label used for image cards
+            image_show_footer: Whether image card should include footer row
+            image_show_sound_icon: Whether image card should include the leading sound icon
             
         Returns:
             The sent message or None on failure
@@ -95,31 +104,75 @@ class MessageService:
         if channel is None:
             print("[MessageService] No bot channel found")
             return None
-        
-        embed = discord.Embed(
-            title=title,
-            description=description,
-            color=color or self.color,
-        )
-        
-        if thumbnail:
-            embed.set_thumbnail(url=thumbnail)
-        
+
         try:
-            kwargs = {"embed": embed}
+            kwargs = {}
             if view:
                 kwargs["view"] = view
             if delete_time:
                 kwargs["delete_after"] = delete_time
-            
+
+            if message_format == "image":
+                image_bytes = await self._generate_message_image(
+                    title=title,
+                    description=description,
+                    thumbnail=thumbnail,
+                    requester=image_requester,
+                    show_footer=image_show_footer,
+                    show_sound_icon=image_show_sound_icon,
+                )
+                if image_bytes:
+                    kwargs["file"] = discord.File(io.BytesIO(image_bytes), filename="message_card.png")
+                    message = await channel.send(**kwargs)
+                    self._last_message = message
+                    return message
+                print("[MessageService] Image generation failed, falling back to embed")
+
+            embed = discord.Embed(
+                title=title,
+                description=description,
+                color=color or self.color,
+            )
+            if thumbnail:
+                embed.set_thumbnail(url=thumbnail)
+
+            kwargs["embed"] = embed
             message = await channel.send(**kwargs)
             self._last_message = message
-            
             return message
-            
+
         except Exception as e:
             print(f"[MessageService] Error sending message: {e}")
             return None
+
+    async def _generate_message_image(
+        self,
+        title: str,
+        description: str,
+        thumbnail: Optional[str],
+        requester: str,
+        show_footer: bool,
+        show_sound_icon: bool,
+    ) -> Optional[bytes]:
+        """Build an image card for generic notifications."""
+        if not self._bot_behavior:
+            return None
+
+        audio_service = getattr(self._bot_behavior, "_audio_service", None)
+        image_generator = getattr(audio_service, "image_generator", None)
+        if not image_generator:
+            return None
+
+        text = (title or description or "Notification").strip()
+        event_data = description.strip() if description and title else None
+        return await image_generator.generate_sound_card(
+            sound_name=text,
+            requester=requester,
+            requester_avatar_url=thumbnail,
+            event_data=event_data,
+            show_footer=show_footer,
+            show_sound_icon=show_sound_icon,
+        )
     
     async def send_error(
         self,
