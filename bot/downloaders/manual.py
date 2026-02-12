@@ -49,13 +49,22 @@ class ManualSoundDownloader:
 
         # Cookie options for authenticated platforms (e.g. Instagram)
         cookies_file = os.path.join(os.path.dirname(__file__), '..', '..', 'Data', 'cookies.txt')
+        
         cookie_opts = {}
         if os.path.exists(cookies_file):
             cookie_opts['cookiefile'] = cookies_file
 
         # Download the video and extract audio
-        with yt_dlp.YoutubeDL(cookie_opts) as ydl:
-            info_dict = ydl.extract_info(url, download=False)
+        print(f"[ManualSoundDownloader] Starting download for url='{url}', custom_filename='{custom_filename}'")
+        # Use a copy to prevent yt-dlp from mutating our original options dict with defaults
+        with yt_dlp.YoutubeDL(cookie_opts.copy()) as ydl:
+            try:
+                info_dict = ydl.extract_info(url, download=False)
+                # print(f"[ManualSoundDownloader] extract_info info_dict keys: {info_dict.keys()}")
+            except Exception as e:
+                # Fallback for some TikTok URLs that might fail initial extraction
+                print(f"[ManualSoundDownloader] extracting info failed: {e}, trying direct download...")
+                info_dict = {'title': f'tiktok_audio_{uuid.uuid4().hex[:8]}'}
             
             # Check if it's a YouTube video and its duration
             if 'youtube.com' in url or 'youtu.be' in url:
@@ -63,22 +72,46 @@ class ManualSoundDownloader:
                 if duration > 600:  # 600 seconds = 10 minutes
                     raise ValueError("YouTube video is longer than 10 minutes. Please choose a shorter video.")
 
-            title = sanitize_title(info_dict.get('title', ''))
-            mp3_filename = f"{custom_filename}.mp3" if custom_filename else f"{title}.mp3"
+            title = sanitize_title(info_dict.get('title', f'audio_{uuid.uuid4().hex[:8]}'))
+            print(f"[ManualSoundDownloader] Raw title from yt-dlp: '{info_dict.get('title')}'")
+            print(f"[ManualSoundDownloader] Sanitized title: '{title}'")
+            
+            # Sanitize title OR custom_filename to match filesystem safe characters
+            import re
+            
+            target_name = custom_filename if custom_filename else title
+            
+            # Replace non-alphanumeric chars with underscore
+            safe_name = re.sub(r'[^\w\-.]', '_', target_name)
+            # Collapse multiple underscores
+            safe_name = re.sub(r'_+', '_', safe_name)
+            # Strip leading/trailing underscores
+            safe_name = safe_name.strip('_')
+            
+            if not safe_name:
+                safe_name = f"audio_{uuid.uuid4().hex[:8]}"
+            
+            mp3_filename = f"{safe_name}.mp3"
             mp3_filepath = os.path.join(output_dir, mp3_filename)
+            print(f"[ManualSoundDownloader] Determined mp3_filepath: '{mp3_filepath}'")
 
         ydl_opts = {
             'format': 'bestaudio/best',
-            'outtmpl': mp3_filepath.replace('.mp3', ''),  # yt-dlp will add .mp3 extension
+            **cookie_opts, # Unpack first so we can override any potential defaults if cookie_opts was dirty
+            # Force the output template. Using a dict with 'default' is more explicit for recent yt-dlp versions.
+            'outtmpl': {'default': mp3_filepath.replace('.mp3', '')},
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': 'mp3',
                 'preferredquality': '192',
             }],
-            **cookie_opts,
+            'noconfig': True, # Disable loading config files that might override settings
         }
 
+        print(f"[ManualSoundDownloader] FULL ydl_opts: {ydl_opts}")
+        
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            print(f"[ManualSoundDownloader] Calling download...")
             ydl.download([url])
 
         # If time_limit is provided, trim the audio
@@ -86,6 +119,16 @@ class ManualSoundDownloader:
             audio = AudioSegment.from_mp3(mp3_filepath)
             trimmed_audio = audio[:time_limit * 1000]  # time_limit is in seconds, pydub uses milliseconds
             trimmed_audio.export(mp3_filepath, format="mp3")
+        
+        if os.path.exists(mp3_filepath):
+             print(f"[ManualSoundDownloader] Success! File exists at {mp3_filepath}")
+        else:
+             print(f"[ManualSoundDownloader] FAILURE! yt-dlp finished but file NOT found at {mp3_filepath}")
+             # Print directory listing to see what *was* created
+             try:
+                 print(f"[ManualSoundDownloader] Contents of {output_dir}: {os.listdir(output_dir)}")
+             except:
+                 pass
         
         return mp3_filename
 

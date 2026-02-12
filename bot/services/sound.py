@@ -13,6 +13,7 @@ from bot.repositories import SoundRepository, ActionRepository, ListRepository
 from bot.database import Database  # Keep for get_sounds_by_similarity until migrated
 from moviepy.editor import VideoFileClip
 from bot.downloaders.manual import ManualSoundDownloader
+from mutagen.mp3 import MP3
 
 class SoundService:
     """

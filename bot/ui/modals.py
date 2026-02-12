@@ -68,12 +68,17 @@ class UploadSoundModal(discord.ui.Modal):
                     elif is_tiktok_url or is_youtube_url or is_instagram_url:
                         await interaction.followup.send("Downloading video... 🤓", ephemeral=True, delete_after=5)
                         try:
+                            print(f"[UploadSoundModal] Calling save_sound_from_video with url='{url_content}', custom_filename='{custom_filename}'")
                             file_path = await self.bot_behavior.save_sound_from_video(url_content, custom_filename, time_limit=time_limit)
+                            print(f"[UploadSoundModal] save_sound_from_video returned: '{file_path}'")
                         except ValueError as e:
                             await interaction.followup.send(f"Error: {str(e)}", ephemeral=True)
                             return
                     
                     if not os.path.exists(file_path):
+                        print(f"[UploadSoundModal] CRITICAL ERROR: File verification failed. Path '{file_path}' does not exist.")
+                        print(f"[UploadSoundModal] Current CWD: {os.getcwd()}")
+                        print(f"[UploadSoundModal] File exists check: {os.path.exists(file_path)}")
                         await interaction.followup.send("Upload completed but file verification failed. Please try again.", ephemeral=True)
                         return
                     
@@ -81,7 +86,9 @@ class UploadSoundModal(discord.ui.Modal):
                     await interaction.followup.send("Sound uploaded successfully! (may take up to 10s to be available)", ephemeral=True, delete_after=10)
                     
                 except Exception as e:
-                    print(f"Upload error details: {e}")
+                    print(f"[UploadSoundModal] Exception during upload processing: {e}")
+                    import traceback
+                    traceback.print_exc()
                     await interaction.followup.send(f"An error occurred during upload: {str(e)}", ephemeral=True)
         except Exception as e:
             print(f"Error in UploadSoundModal.callback: {e}")
