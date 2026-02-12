@@ -221,7 +221,7 @@ class SoundDownloader:
         Browses all country pages on MyInstants concurrently and downloads
         any sounds that aren't already in the database using multiple threads.
         """
-        countries = ["pt", "us", "br","es"]
+        countries = ["pt", "us", "br"]
         all_sounds_to_download = []
         
         # Scrape all sites concurrently using threads
@@ -307,40 +307,10 @@ class SoundDownloader:
                     if not self.db.get_sound(os.path.basename(file), original_filename=True):
                         print(self.__class__.__name__, " MOVER: Moving file to " + destination_folder)
                         sound_view = DownloadedSoundView(self.bot, os.path.basename(file))
-                        
-                        # Use image card if enabled
-                        use_image_cards = self.bot._audio_service.settings_repo.get_setting('use_image_cards', True)
-                        
-                        if use_image_cards:
-                            # Use behavior's bot reference if self.bot is behavior
-                            bot_instance = self.bot.bot if hasattr(self.bot, 'bot') else self.bot
-                            
-                            image_bytes = await self.bot._audio_service.image_generator.generate_sound_card(
-                                sound_name=os.path.basename(file),
-                                requester="I stole this",
-                                play_count=0,
-                                duration=None,
-                                download_date="Just now",
-                                requester_avatar_url=str(bot_instance.user.display_avatar.url) if bot_instance.user and bot_instance.user.display_avatar else None
-                            )
-                            
-                            if image_bytes:
-                                image_file = discord.File(io.BytesIO(image_bytes), filename="stolen_sound.png")
-                                await self.bot.send_message(
-                                    title=f"I stole {os.path.basename(file)} to our database hehe",
-                                    view=sound_view,
-                                    file=image_file
-                                )
-                            else:
-                                await self.bot.send_message(
-                                    title=f"I stole {os.path.basename(file)} to our database hehe",
-                                    view=sound_view
-                                )
-                        else:
-                            await self.bot.send_message(
-                                title=f"I stole {os.path.basename(file)} to our database hehe",
-                                view=sound_view
-                            )
+                        await self.bot.send_message(
+                            title=f"I stole {os.path.basename(file)} to our database hehe",
+                            view=sound_view
+                        )
                         shutil.move(file, os.path.join(destination_folder, os.path.basename(file)))
                         self.db.insert_sound(os.path.basename(file), os.path.basename(file))
                         self.db.insert_action("admin", "scrape_sound", os.path.basename(file))

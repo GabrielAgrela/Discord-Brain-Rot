@@ -14,7 +14,6 @@ from bot.repositories.list import ListRepository
 from bot.repositories.event import EventRepository
 from bot.repositories.stats import StatsRepository
 from bot.repositories.keyword import KeywordRepository
-from bot.repositories.settings import SettingsRepository
 
 __all__ = [
     "BaseRepository",
@@ -24,5 +23,4 @@ __all__ = [
     "EventRepository",
     "StatsRepository",
     "KeywordRepository",
-    "SettingsRepository",
 ]
