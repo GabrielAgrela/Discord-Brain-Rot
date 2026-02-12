@@ -4,7 +4,7 @@ from discord.ui import View
 from bot.database import Database
 
 class SoundBeingPlayedView(View):
-    def __init__(self, bot_behavior, audio_file, user_id=None, include_add_to_list_select: bool = False, include_sts_select: bool = True, progress_label: str = "▶️ 0:01", show_controls: bool = False):
+    def __init__(self, bot_behavior, audio_file, user_id=None, include_add_to_list_select: bool = False, include_sts_select: bool = True, progress_label: str = "▶️ 0:01", show_controls: bool = False, is_tts: bool = False, original_message: str = "", sts_char: str = None):
         super().__init__(timeout=None)
         self.bot_behavior = bot_behavior
         self.audio_file = audio_file
@@ -13,6 +13,9 @@ class SoundBeingPlayedView(View):
         self.include_sts_select = include_sts_select
         self.initial_progress_label = progress_label
         self.show_controls = show_controls
+        self.is_tts = is_tts
+        self.original_message = original_message
+        self.sts_char = sts_char
         self.progress_button = None
         self.auto_close_task = None
         
@@ -63,7 +66,16 @@ class SoundBeingPlayedView(View):
         
         if self.show_controls:
             # Row 1: Common Actions (5 buttons)
-            self.add_item(ReplayButton(bot_behavior=self.bot_behavior, audio_file=self.audio_file, emoji="🔁", style=discord.ButtonStyle.primary, row=1))
+            self.add_item(ReplayButton(
+                bot_behavior=self.bot_behavior, 
+                audio_file=self.audio_file, 
+                is_tts=self.is_tts, 
+                original_message=self.original_message, 
+                sts_char=self.sts_char, 
+                emoji="🔁", 
+                style=discord.ButtonStyle.primary, 
+                row=1
+            ))
             self.add_item(FavoriteButton(bot_behavior=self.bot_behavior, audio_file=self.audio_file, row=1))
             self.add_item(SlapButton(bot_behavior=self.bot_behavior, audio_file=self.audio_file, row=1))
             self.add_item(ChangeSoundNameButton(bot_behavior=self.bot_behavior, sound_name=self.audio_file, emoji="📝", style=discord.ButtonStyle.primary, row=1))
@@ -116,7 +128,7 @@ class SoundBeingPlayedView(View):
             await interaction.followup.send("An error occurred. 😭", ephemeral=True)
 
 class SoundBeingPlayedWithSuggestionsView(View):
-    def __init__(self, bot_behavior, audio_file, similar_sounds, user_id=None, include_add_to_list_select: bool = False, progress_label: str = "▶️ 0:01", show_controls: bool = False):
+    def __init__(self, bot_behavior, audio_file, similar_sounds, user_id=None, include_add_to_list_select: bool = False, progress_label: str = "▶️ 0:01", show_controls: bool = False, is_tts: bool = False, original_message: str = "", sts_char: str = None):
         super().__init__(timeout=None)
         self.bot_behavior = bot_behavior
         self.audio_file = audio_file
@@ -125,6 +137,9 @@ class SoundBeingPlayedWithSuggestionsView(View):
         self.include_add_to_list_select = include_add_to_list_select
         self.initial_progress_label = progress_label
         self.show_controls = show_controls
+        self.is_tts = is_tts
+        self.original_message = original_message
+        self.sts_char = sts_char
         self.progress_button = None
         
         self._setup_items()
@@ -151,7 +166,16 @@ class SoundBeingPlayedWithSuggestionsView(View):
         
         if self.show_controls:
             # Row 1: Common Actions (5 buttons)
-            self.add_item(ReplayButton(bot_behavior=self.bot_behavior, audio_file=self.audio_file, emoji="🔁", style=discord.ButtonStyle.primary, row=1))
+            self.add_item(ReplayButton(
+                bot_behavior=self.bot_behavior, 
+                audio_file=self.audio_file, 
+                is_tts=self.is_tts, 
+                original_message=self.original_message, 
+                sts_char=self.sts_char, 
+                emoji="🔁", 
+                style=discord.ButtonStyle.primary, 
+                row=1
+            ))
             self.add_item(FavoriteButton(bot_behavior=self.bot_behavior, audio_file=self.audio_file, row=1))
             self.add_item(SlapButton(bot_behavior=self.bot_behavior, audio_file=self.audio_file, row=1))
             self.add_item(ChangeSoundNameButton(bot_behavior=self.bot_behavior, sound_name=self.audio_file, emoji="📝", style=discord.ButtonStyle.primary, row=1))

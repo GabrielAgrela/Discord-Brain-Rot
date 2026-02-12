@@ -487,48 +487,24 @@ class AudioService:
                          # For now, relying on self.current_view is the best bet as it points to the 
                          # sound we are about to stop.
 
-            if not isinstance(audio_file, str):
-                audio_file = str(audio_file)
-
+            # Resolve file path immediately to avoid pre-playback DB reads
             audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Sounds", audio_file))
-
             if not os.path.exists(audio_file_path):
-                sound_info = self.sound_repo.get_sound(audio_file, False)
+                # Fallback to DB lookup only if file not found directly
+                sound_info = await asyncio.to_thread(self.sound_repo.get_sound, audio_file, False)
                 if sound_info:
-                    original_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Sounds", sound_info[1]))
-                    if os.path.exists(original_path):
-                        audio_file_path = original_path
-                    else:
-                        sound_info_orig = self.sound_repo.get_sound(audio_file, True)
-                        if sound_info_orig and len(sound_info_orig) > 2:
-                            audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Sounds", sound_info_orig[2]))
-                        else:
-                            await self.message_service.send_error(f"Sound '{audio_file}' not found on disk or database")
-                            return False
-                else:
-                    sound_info_orig = self.sound_repo.get_sound(audio_file, True)
+                    audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Sounds", sound_info[1]))
+                
+                # Double check existence
+                if not os.path.exists(audio_file_path):
+                    # Try original name lookup
+                    sound_info_orig = await asyncio.to_thread(self.sound_repo.get_sound, audio_file, True)
                     if sound_info_orig and len(sound_info_orig) > 2:
                         audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Sounds", sound_info_orig[2]))
-                        if not os.path.exists(audio_file_path):
-                             await self.message_service.send_error(f"Audio file not found: {audio_file_path}")
-                             return False
-                    else:
-                        await self.message_service.send_error(f"Sound '{audio_file}' not found in database")
+                    
+                    if not os.path.exists(audio_file_path):
+                        await self.message_service.send_error(f"Audio file not found: {audio_file}")
                         return False
-
-            # Get sound info and duration early
-            sound_info_start = time.time()
-            sound_info = await asyncio.to_thread(self.sound_repo.get_sound, audio_file, False)
-            self._log_perf("get_sound (DB Read)", sound_info_start)
-
-            try:
-                audio = MP3(audio_file_path)
-                duration = audio.info.length
-                duration_str = f"{int(duration // 60)}:{int(duration % 60):02d}"
-            except Exception as e:
-                print(f"[AudioService] Error getting audio duration: {e}")
-                duration_str = "Unknown"
-                duration = 0
 
             # FFmpeg options
             # Combine effect volume with global volume
@@ -549,9 +525,7 @@ class AudioService:
                 await self.message_service.send_error(f"Invalid FFmpeg path: {self.ffmpeg_path}")
                 return False
 
-            is_slap_sound = sound_info and sound_info[6] == 1
-
-            # Start playback immediately
+            # START PLAYBACK IMMEDIATELY
             try:
                 # Use FFmpegOpusAudio for stability
                 audio_source = await discord.FFmpegOpusAudio.from_probe(
@@ -560,7 +534,7 @@ class AudioService:
                     options=ffmpeg_options,
                     before_options="-nostdin"
                 )
-                self._log_perf("FFmpeg Source Creation", play_start_time) # Rough estimate including setup
+                self._log_perf("FFmpeg Source Creation", play_start_time)
                 
                 def after_playing(error):
                     try:
@@ -571,17 +545,29 @@ class AudioService:
                 voice_client.play(audio_source, after=after_playing)
                 self.playback_done.clear()
             except Exception as e:
-                print(f"[AudioService] Error starting playback early: {e}")
+                print(f"[AudioService] Error starting playback: {e}")
                 self.playback_done.set()
                 return False
 
             async def handle_ui():
                 try:
-                    # Defer UI generation to prevent CPU contention/stutter during audio startup
-                    # await asyncio.sleep(5) # Removed per user request
-                    
+                    # Metadata and UI work starts AFTER audio is playing
                     handle_ui_start = time.time()
-                    print(f"[AudioService] [DEBUG] handle_ui started for {audio_file}")
+                    print(f"[AudioService] [DEBUG] handle_ui background task started for {audio_file}")
+
+                    # 1. Fetch sound info and metadata in background
+                    sound_info = await asyncio.to_thread(self.sound_repo.get_sound, audio_file, False)
+                    
+                    duration = 0
+                    duration_str = "Unknown"
+                    try:
+                        audio = await asyncio.to_thread(MP3, audio_file_path)
+                        duration = audio.info.length
+                        duration_str = f"{int(duration // 60)}:{int(duration % 60):02d}"
+                    except Exception as e:
+                        print(f"[AudioService] Error getting audio duration in background: {e}")
+
+                    is_slap_sound = sound_info and sound_info[6] == 1
                     
                     bot_channel = self.message_service.get_bot_channel(channel.guild)
                     if not bot_channel or is_entrance: return
@@ -735,7 +721,10 @@ class AudioService:
                             include_add_to_list_select=not is_tts, 
                             include_sts_select=True,
                             progress_label=initial_label,
-                            show_controls=False # Start with controls hidden ✅
+                            show_controls=False, # Start with controls hidden ✅
+                            is_tts=is_tts,
+                            original_message=original_message,
+                            sts_char=sts_char
                         )
                         
                         if image_bytes:

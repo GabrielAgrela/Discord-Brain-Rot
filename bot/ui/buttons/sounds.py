@@ -6,10 +6,13 @@ import random
 from bot.database import Database
 
 class ReplayButton(Button):
-    def __init__(self, bot_behavior, audio_file, **kwargs):
+    def __init__(self, bot_behavior, audio_file, is_tts=False, original_message="", sts_char=None, **kwargs):
         super().__init__(**kwargs)
         self.bot_behavior = bot_behavior
         self.audio_file = audio_file
+        self.is_tts = is_tts
+        self.original_message = original_message
+        self.sts_char = sts_char
         
 
     async def callback(self, interaction):
@@ -21,7 +24,25 @@ class ReplayButton(Button):
                 channel = self.bot_behavior._audio_service.get_largest_voice_channel(interaction.guild)
                 
             if channel:
-                asyncio.create_task(self.bot_behavior._audio_service.play_audio(channel, self.audio_file, interaction.user.name))
+                # Get avatar URL for the card
+                avatar = getattr(interaction.user, "display_avatar", None)
+                requester_avatar_url = str(avatar.url) if avatar else None
+                
+                # If STS, we might want the STS thumbnail too
+                sts_thumbnail_url = None
+                if self.sts_char:
+                    from config import TTS_PROFILES
+                    profile = TTS_PROFILES.get(self.sts_char, {})
+                    sts_thumbnail_url = profile.get("thumbnail")
+
+                asyncio.create_task(self.bot_behavior._audio_service.play_audio(
+                    channel, self.audio_file, interaction.user.name,
+                    is_tts=self.is_tts,
+                    original_message=self.original_message,
+                    sts_char=self.sts_char,
+                    requester_avatar_url=requester_avatar_url,
+                    sts_thumbnail_url=sts_thumbnail_url
+                ))
                 sound_data = Database().get_sounds_by_similarity(self.audio_file)
                 if sound_data and sound_data[0]:
                     Database().insert_action(interaction.user.name, "replay_sound", sound_data[0][0]['id'])

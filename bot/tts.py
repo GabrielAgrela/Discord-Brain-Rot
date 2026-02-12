@@ -175,6 +175,11 @@ class TTS:
             tts = gTTS(text=text, lang=lang)
         else:
             tts = gTTS(text=text, lang=lang, tld=region)
+            
+        # Sanitize filename-safe text (keep it reasonably short for FS)
+        safe_text = "".join(x for x in text[:30] if x.isalnum() or x in " -_")
+        self.filename = f"tts-{time.strftime('%d-%m-%y-%H-%M-%S')}-{safe_text}.mp3"
+        
         path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", self.filename))
         tts.save(path)
         # Apply integrated loudness normalization for consistent perceived volume
@@ -183,6 +188,10 @@ class TTS:
         if channel is None:
             await self.behavior.send_error_message("No available voice channel for TTS playback.")
             return
+            
+        # Record in database so it can be replayed or processed
+        Database().insert_sound(os.path.basename(self.filename), os.path.basename(self.filename), is_elevenlabs=0)
+        
         await self.behavior.play_audio(
             channel, self.filename, requester_name, is_tts=True,
             original_message=text,
