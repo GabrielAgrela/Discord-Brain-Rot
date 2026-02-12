@@ -28,7 +28,7 @@ class SoundBeingPlayedView(View):
         self.auto_close_task = asyncio.create_task(self._auto_close_coro())
 
     async def _auto_close_coro(self):
-        await asyncio.sleep(5)
+        await asyncio.sleep(10)
         if self.show_controls:
             self.show_controls = False
             self._setup_items()
