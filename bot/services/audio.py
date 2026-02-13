@@ -123,6 +123,30 @@ class AudioService:
         self._behavior = behavior
         self.bot.behavior = behavior
 
+    async def _notify_tts_busy(self, channel, user, original_message: str = "", audio_file: str = "", loading_message: 'discord.Message' = None):
+        """Send a plain-text message when a TTS request is rejected due to active playback."""
+        if loading_message:
+            try:
+                await loading_message.delete()
+            except Exception:
+                pass
+
+        bot_channel = self.message_service.get_bot_channel(channel.guild)
+        if not bot_channel:
+            return
+
+        requested_text = (original_message or audio_file or "").strip()
+        if len(requested_text) > 500:
+            requested_text = requested_text[:500] + "..."
+
+        requester = str(user)
+        message = (
+            "Another TTS is already running, so this request was not played.\n"
+            f"Requester: {requester}\n"
+            f"Requested text: {requested_text or '[empty]'}"
+        )
+        await bot_channel.send(message)
+
     def _get_connection_lock(self, guild_id: int) -> asyncio.Lock:
         """Get or create a connection lock for the given guild."""
         if guild_id not in self._connection_locks:
@@ -438,7 +462,7 @@ class AudioService:
             return
 
         # Check cooldown first
-        if self.last_played_time and (datetime.now() - self.last_played_time).total_seconds() < 2:
+        if not is_tts and self.last_played_time and (datetime.now() - self.last_played_time).total_seconds() < 2:
             if self.cooldown_message is None and not is_entrance:
                 bot_channel = self.message_service.get_bot_channel(channel.guild)
                 if bot_channel:
@@ -466,7 +490,19 @@ class AudioService:
                 return False
 
             # Check if we're actually interrupting playback
-            if voice_client.is_playing():
+            is_currently_playing = voice_client.is_playing() or (hasattr(voice_client, "is_paused") and voice_client.is_paused())
+
+            if is_currently_playing:
+                if is_tts:
+                    await self._notify_tts_busy(
+                        channel=channel,
+                        user=user,
+                        original_message=original_message,
+                        audio_file=audio_file,
+                        loading_message=loading_message
+                    )
+                    return False
+
                 was_interrupted = True
                 self.stop_progress_update = True
                 voice_client.stop()

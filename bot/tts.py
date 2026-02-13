@@ -11,6 +11,7 @@ import subprocess
 import tempfile
 import re
 import aiohttp
+from datetime import datetime
 from bot.database import Database
 
 class TTS:
@@ -170,6 +171,10 @@ class TTS:
     def update_last_request_time(self):
         self.last_request_time = time.time()
 
+    def _timestamp_token(self) -> str:
+        """Generate a high-resolution timestamp token for unique filenames."""
+        return datetime.now().strftime('%d-%m-%y-%H-%M-%S-%f')
+
     async def save_as_mp3(self, text, lang, region="", loading_message=None, requester_avatar_url=None, requester_name="admin"):
         if region == "":
             tts = gTTS(text=text, lang=lang)
@@ -178,9 +183,10 @@ class TTS:
             
         # Sanitize filename-safe text (keep it reasonably short for FS)
         safe_text = "".join(x for x in text[:30] if x.isalnum() or x in " -_")
-        self.filename = f"tts-{time.strftime('%d-%m-%y-%H-%M-%S')}-{safe_text}.mp3"
+        filename = f"tts-{self._timestamp_token()}-{safe_text}.mp3"
+        self.filename = filename
         
-        path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", self.filename))
+        path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", filename))
         tts.save(path)
         # Apply integrated loudness normalization for consistent perceived volume
         self._loudnorm_inplace(path)
@@ -190,10 +196,10 @@ class TTS:
             return
             
         # Record in database so it can be replayed or processed
-        Database().insert_sound(os.path.basename(self.filename), os.path.basename(self.filename), is_elevenlabs=0)
+        Database().insert_sound(os.path.basename(filename), os.path.basename(filename), is_elevenlabs=0)
         
         await self.behavior.play_audio(
-            channel, self.filename, requester_name, is_tts=True,
+            channel, filename, requester_name, is_tts=True,
             original_message=text,
             loading_message=loading_message,
             requester_avatar_url=requester_avatar_url
@@ -216,12 +222,14 @@ class TTS:
         else:
             filename = None
 
-        tmp_filename = f"{filename}-{char}.mp3"
-         # Check if the file already exists
+        if not filename:
+            await self.behavior.send_error_message("No matching source sound found for speech-to-speech.")
+            return
 
         audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", filename))
-
-        self.filename = f"{filename}-{char}-{time.strftime('%d-%m-%y-%H-%M-%S')}.mp3"
+        source_stem = os.path.splitext(os.path.basename(filename))[0]
+        output_filename = f"{source_stem}-{char}-{self._timestamp_token()}.mp3"
+        self.filename = output_filename
         
         if char == "ventura":
             self.voice_id = self.voice_id_pt
@@ -255,63 +263,64 @@ class TTS:
             return
         
         self.locked = True
+        try:
+            url = f"https://api.elevenlabs.io/v1/speech-to-speech/{self.voice_id}/stream"
+            headers = {
+                "Accept": "application/json",
+                "xi-api-key": self.api_key
+            }
+            data = {
+                "model_id": "eleven_v3",
+                # remove_background_noise leverages ElevenLabs' isolation model to
+                # strip background noise from the input audio. According to the
+                # official API specification this boolean enables vocal isolation
+                # during the speech-to-speech request.
+                "voice_settings": json.dumps({
+                    "stability": 0.5,
+                    "similarity_boost": 0.9,
+                    "style": 1,
+                    "use_speaker_boost": True
+                })
+            }
 
-        url = f"https://api.elevenlabs.io/v1/speech-to-speech/{self.voice_id}/stream"
-        headers = {
-            "Accept": "application/json",
-            "xi-api-key": self.api_key
-        }
-        data = {
-            "model_id": "eleven_v3",
-            # remove_background_noise leverages ElevenLabs' isolation model to
-            # strip background noise from the input audio. According to the
-            # official API specification this boolean enables vocal isolation
-            # during the speech-to-speech request.
-            "voice_settings": json.dumps({
-                "stability": 0.5,
-                "similarity_boost": 0.9,
-                "style": 1,
-                "use_speaker_boost": True
-            })
-        }
+            async with aiohttp.ClientSession() as session:
+                with open(audio_file_path, 'rb') as source_audio:
+                    form = aiohttp.FormData()
+                    form.add_field('audio', source_audio, filename=os.path.basename(audio_file_path))
+                    form.add_field('data', json.dumps(data), content_type='application/json')
 
-        form = aiohttp.FormData()
-        form.add_field('audio', open(audio_file_path, 'rb'), filename=os.path.basename(audio_file_path))
-        form.add_field('data', json.dumps(data), content_type='application/json')
+                    async with session.post(url, headers=headers, data=form) as response:
+                        if response.status == 200:
+                            audio_data = await response.read()
+                            audio = AudioSegment.from_mp3(io.BytesIO(audio_data))
+                            final_audio = audio
 
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=headers, data=form) as response:
-                if response.status == 200:
-                    audio_data = await response.read()
-                    audio = AudioSegment.from_mp3(io.BytesIO(audio_data))
-                    final_audio = audio
+                            path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", output_filename))
+                            Database().insert_sound(os.path.basename(output_filename), os.path.basename(output_filename), is_elevenlabs=1)
+                            final_audio.export(path, format="mp3")
+                            # Integrated loudness normalization (EBU R128)
+                            self._loudnorm_inplace(path)
 
-                    path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", self.filename))
-                    Database().insert_sound(os.path.basename(self.filename), os.path.basename(self.filename), is_elevenlabs=1)
-                    final_audio.export(path, format="mp3")
-                    # Integrated loudness normalization (EBU R128)
-                    self._loudnorm_inplace(path)
+                            channel = self._get_default_voice_channel()
+                            if channel is None:
+                                await self.behavior.send_error_message("No available voice channel for TTS playback.")
+                                return
+                            # Pass character and original sound name for proper STS embed
+                            original_sound_name = source_stem
+                            await self.behavior.play_audio(
+                                channel, output_filename, requester_name, is_tts=True,
+                                original_message=original_sound_name, sts_char=char,
+                                loading_message=loading_message,
+                                requester_avatar_url=requester_avatar_url,
+                                sts_thumbnail_url=sts_thumbnail_url
+                            )
 
-                    channel = self._get_default_voice_channel()
-                    if channel is None:
-                        await self.behavior.send_error_message("No available voice channel for TTS playback.")
-                        return
-                    # Pass character and original sound name for proper STS embed
-                    original_sound_name = filename.replace('.mp3', '') if filename else ''
-                    await self.behavior.play_audio(
-                        channel, self.filename, requester_name, is_tts=True,
-                        original_message=original_sound_name, sts_char=char,
-                        loading_message=loading_message,
-                        requester_avatar_url=requester_avatar_url,
-                        sts_thumbnail_url=sts_thumbnail_url
-                    )
-
-                    self.update_last_request_time()
-                    print("Audio stream saved and played successfully.")
-                else:
-                    print(f"Error: {await response.text()}")
-
-        self.locked = False
+                            self.update_last_request_time()
+                            print("Audio stream saved and played successfully.")
+                        else:
+                            print(f"Error: {await response.text()}")
+        finally:
+            self.locked = False
 
     async def isolate_voice(self, input_audio_name):
         boost_volume = 0
@@ -323,9 +332,15 @@ class TTS:
             filename = sound_dict.get('Filename')
         else:
             filename = None
-        audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", filename))
 
-        self.filename = f"{filename}-isolated-{time.strftime('%d-%m-%y-%H-%M-%S')}.mp3"
+        if not filename:
+            await self.behavior.send_error_message("No matching source sound found for isolation.")
+            return
+
+        audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", filename))
+        source_stem = os.path.splitext(os.path.basename(filename))[0]
+        output_filename = f"{source_stem}-isolated-{self._timestamp_token()}.mp3"
+        self.filename = output_filename
 
         if self.is_on_cooldown():
             print("Cooldown active. Please wait before making another request.")
@@ -349,54 +364,55 @@ class TTS:
             return
         
         self.locked = True
-
-        url = "https://api.elevenlabs.io/v1/audio-isolation"
-        headers = {
-            "Accept": "audio/mpeg",
-            "xi-api-key": self.api_key
-        }
-        data = {
-            "model_id": "eleven_v3",
-            "voice_settings": {
-                "stability": 0.5,
-                "similarity_boost": 0.9,
-                "style": 1,
-                "use_speaker_boost": True
+        try:
+            url = "https://api.elevenlabs.io/v1/audio-isolation"
+            headers = {
+                "Accept": "audio/mpeg",
+                "xi-api-key": self.api_key
             }
-        }
+            data = {
+                "model_id": "eleven_v3",
+                "voice_settings": {
+                    "stability": 0.5,
+                    "similarity_boost": 0.9,
+                    "style": 1,
+                    "use_speaker_boost": True
+                }
+            }
 
-        form = aiohttp.FormData()
-        form.add_field('audio', open(audio_file_path, 'rb'), filename=os.path.basename(audio_file_path))
-        form.add_field('data', json.dumps(data), content_type='application/json')
+            asyncio.create_task(self.behavior.send_message(view=None, title="Processing", description="Wait like 5s 🦍", delete_time=5))
 
-        asyncio.create_task(self.behavior.send_message(view=None, title="Processing", description="Wait like 5s 🦍", delete_time=5))
+            async with aiohttp.ClientSession() as session:
+                with open(audio_file_path, 'rb') as source_audio:
+                    form = aiohttp.FormData()
+                    form.add_field('audio', source_audio, filename=os.path.basename(audio_file_path))
+                    form.add_field('data', json.dumps(data), content_type='application/json')
 
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=headers, data=form) as response:
-                if response.status == 200:
-                    audio_data = await response.read()
-                    audio = AudioSegment.from_mp3(io.BytesIO(audio_data))
-                    louder_audio = audio + boost_volume
-                    final_audio = louder_audio
+                    async with session.post(url, headers=headers, data=form) as response:
+                        if response.status == 200:
+                            audio_data = await response.read()
+                            audio = AudioSegment.from_mp3(io.BytesIO(audio_data))
+                            louder_audio = audio + boost_volume
+                            final_audio = louder_audio
 
-                    path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", self.filename))
-                    Database().insert_sound(os.path.basename(self.filename), os.path.basename(self.filename), is_elevenlabs=1)
+                            path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", output_filename))
+                            Database().insert_sound(os.path.basename(output_filename), os.path.basename(output_filename), is_elevenlabs=1)
 
-                    final_audio.export(path, format="mp3")
-                    # Integrated loudness normalization (EBU R128)
-                    self._loudnorm_inplace(path)
+                            final_audio.export(path, format="mp3")
+                            # Integrated loudness normalization (EBU R128)
+                            self._loudnorm_inplace(path)
 
-                    channel = self._get_default_voice_channel()
-                    if channel is None:
-                        await self.behavior.send_error_message("No available voice channel for TTS playback.")
-                        return
-                    await self.behavior.play_audio(channel, self.filename, "admin", is_tts=True)
-                    self.update_last_request_time()
-                    print("Audio stream saved and played successfully.")
-                else:
-                    print(f"Error: {await response.text()}")
-
-        self.locked = False
+                            channel = self._get_default_voice_channel()
+                            if channel is None:
+                                await self.behavior.send_error_message("No available voice channel for TTS playback.")
+                                return
+                            await self.behavior.play_audio(channel, output_filename, "admin", is_tts=True)
+                            self.update_last_request_time()
+                            print("Audio stream saved and played successfully.")
+                        else:
+                            print(f"Error: {await response.text()}")
+        finally:
+            self.locked = False
 
     async def save_as_mp3_EL(self, text, lang="pt", region="", send_controls=True,
                              loading_message=None, requester_avatar_url=None, sts_thumbnail_url=None,
@@ -404,7 +420,8 @@ class TTS:
         boost_volume = 0
         # Sanitize filename-safe text (keep it reasonably short for FS, but image gen will use full text)
         safe_text = "".join(x for x in text[:30] if x.isalnum() or x in " -_")
-        self.filename = f"{time.strftime('%d-%m-%y-%H-%M-%S')}-{safe_text}.mp3"
+        filename = f"{self._timestamp_token()}-{safe_text}.mp3"
+        self.filename = filename
         if lang == "pt":
             self.voice_id = self.voice_id_pt
             boost_volume = 0
@@ -451,8 +468,8 @@ class TTS:
                     louder_audio = audio + boost_volume
                     final_audio = louder_audio
 
-                    path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", self.filename))
-                    Database().insert_sound(os.path.basename(self.filename), os.path.basename(self.filename), is_elevenlabs=1)
+                    path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", filename))
+                    Database().insert_sound(os.path.basename(filename), os.path.basename(filename), is_elevenlabs=1)
                     #self.db.add_entry(os.path.basename(self.filename))
 
                     final_audio.export(path, format="mp3")
@@ -464,7 +481,7 @@ class TTS:
                         await self.behavior.send_error_message("No available voice channel for TTS playback.")
                         return
                     await self.behavior.play_audio(
-                        channel, self.filename, requester_name, is_tts=True,
+                        channel, filename, requester_name, is_tts=True,
                         original_message=text,
                         send_controls=send_controls,
                         loading_message=loading_message,
