@@ -699,7 +699,7 @@ class AudioService:
                                 if len(favorited_by) > 3: users_display.append(f"+{len(favorited_by) - 3} more")
                                 favorited_by_str = ", ".join(users_display)
                             elif sound_info and len(sound_info) > 3 and sound_info[3] == 1:
-                                favorited_by_str = "Someone" # Fallback placeholder ✅
+                                favorited_by_str = "Unknown" # Fallback placeholder ✅
                         
                         if sound_filename:
                             lists_containing = await asyncio.to_thread(self.list_repo.get_lists_containing_sound, sound_filename)
