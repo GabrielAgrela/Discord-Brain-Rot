@@ -112,10 +112,18 @@ This section is mandatory for AI agents working in this repository.
 - After code changes, agents must run `./scripts/verify_and_deploy.sh` unless the user explicitly says to skip tests or skip deployment.
 - Agents must execute deployment themselves when tool permissions allow it. Do not ask the user to run deploy commands on the agent's behalf.
 - If a step fails, agents must report the exact failing command and error summary, and stop claiming completion.
+- For any implemented change (feature, bugfix, refactor, or behavior tweak), agents must explicitly perform a test-gap analysis before finishing.
+- Test-gap analysis must consider: regression risk, edge cases, affected service/repository/UI boundaries, and whether existing tests already cover the changed behavior.
+- If tests are missing or coverage is weak, agents must add/update tests in the same task when feasible.
+- If agents choose not to add tests, they must provide a concrete reason in the final response (not just "not needed").
+- Before finalizing any task, agents must explicitly reflect on whether they learned anything that should be added to this file (`AGENTS.md` / `.gemini/GEMINI.md`) for future agents.
+- If such guidance exists (pattern, pitfall, fix, workflow note), agents must update this file in the same task.
 - Final response must include:
   - test result summary
+  - test-gap analysis summary and why tests were added or not added
   - deploy/restart result summary
   - post-restart bot log health summary
+  - whether an `AGENTS.md` knowledge update was made (and why, if not)
 
 Canonical completion command:
 

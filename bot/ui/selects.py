@@ -170,7 +170,7 @@ class AddToListSelect(ui.Select):
             return
         success = Database().add_sound_to_list(list_id, self.sound_filename)
         if success:
-            await interaction.followup.send(f"Added to list '{list_info[1]}'.", ephemeral=True)
+            return
         else:
             await interaction.followup.send(f"Sound is already in list '{list_info[1]}'.", ephemeral=True)
 
@@ -304,4 +304,3 @@ class LoadingSimilarSoundsSelect(ui.Select):
             disabled=True,
             row=3,
         )
-
