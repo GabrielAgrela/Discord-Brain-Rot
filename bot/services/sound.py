@@ -490,6 +490,7 @@ class SoundService:
                     image_requester=user.name,
                     image_show_footer=False,
                     image_show_sound_icon=False,
+                    image_border_color="#ED4245",
                 )
             
             await asyncio.sleep(120)
