@@ -3,89 +3,366 @@ Service for generating images from HTML templates.
 
 Uses html2image to render HTML to PNG for Discord messages.
 """
-import os
-import io
-import re
 import base64
+import io
+import os
+import re
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Dict, Optional, Tuple
+
 import requests
-from typing import Optional, Dict, Any
+
 
 class ImageGeneratorService:
     """
     Service to generate images from HTML templates.
-    
+
     Used to create visually rich sound cards for Discord messages.
     """
-    
+
     def __init__(self):
         """Initialize the image generator with template path."""
         self.template_path = os.path.abspath(
             os.path.join(os.path.dirname(__file__), "..", "..", "templates", "sound_card.html")
-        )
-        self.loading_template_path = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "..", "..", "templates", "loading_card.html")
         )
         self._hti = None
         self._temp_dir = os.path.abspath(
             os.path.join(os.path.dirname(__file__), "..", "..", "Debug", "sound_cards")
         )
         os.makedirs(self._temp_dir, exist_ok=True)
-    
+
+        self._template_content = self._load_template(self.template_path)
+        self._jinja_template_class = None
+        self._sound_card_template = None
+
+        self._render_lock = threading.Lock()
+        self._driver = None
+        self._driver_init_attempted = False
+        self._request_headers = {"User-Agent": "Mozilla/5.0 (compatible; DiscordBot/1.0)"}
+        self._avatar_cache: Dict[str, Tuple[float, str]] = {}
+        self._avatar_cache_lock = threading.Lock()
+        self._avatar_cache_ttl_seconds = 300
+        self._avatar_cache_max_entries = 256
+        self._download_pool = ThreadPoolExecutor(max_workers=4)
+
+        self._icons = self._build_encoded_icons()
+
+    def _load_template(self, path: str) -> str:
+        """Load template text from disk."""
+        with open(path, "r", encoding="utf-8") as template_file:
+            return template_file.read()
+
+    def _build_encoded_icons(self) -> Dict[str, str]:
+        """Pre-encode static SVG icons once for reuse."""
+        svg_map = {
+            "volume": '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="#5865F2"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>',
+            "voice": '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="#5865F2"><path d="M9 9c1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3 1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V16h9v-2.5h-2.1c.07-.15.1-.32.1-.5 0-1.83 2.53-3 4-3 .5 0 .97.14 1.4.37l1.52-1.52C14.49 11.23 12.03 11 9 11zm10.77 5.76-2.6-2.63-.88.88 2.62 2.63-2.6 2.63.88.88 2.6-2.62 2.62 2.62.88-.88-2.62-2.63 2.6-2.62-.88-.88z"/></svg>',
+            "face": '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="#5865F2"><path d="M9 11.75c-.69 0-1.25.56-1.25 1.25s.56 1.25 1.25 1.25 1.25-.56 1.25-1.25-.56-1.25-1.25-1.25zm6 0c-.69 0-1.25.56-1.25 1.25s.56 1.25 1.25 1.25 1.25-.56 1.25-1.25-.56-1.25-1.25-1.25zM12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8 0-.29.02-.58.05-.86 2.36-1.05 4.23-2.98 5.21-5.37C11.07 8.33 14.05 10 17.42 10c.78 0 1.53-.09 2.25-.26.21 7.17-5.3 12.26-7.67 12.26z"/></svg>',
+            "timer": '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="#5865F2"><path d="M15 1H9v2h6V1zm-4 13h2V8h-2v6zm8.03-6.61l1.42-1.42c-.43-.51-.9-.99-1.41-1.41l-1.42 1.42C16.07 4.74 14.12 4 12 4c-4.97 0-9 4.03-9 9s4.02 9 9 9 9-4.03 9-9c0-2.12-.74-4.07-1.97-5.61zM12 20c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></svg>',
+            "chart": '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="#6366f1"><path d="M5 9.2h3V19H5zM10.6 5h2.8v14h-2.8zm5.6 8H19v6h-2.8z"/></svg>',
+            "calendar": '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="#6366f1"><path d="M19 3h-1V1h-2v2H8V1H6v2H5c-1.11 0-1.99.9-1.99 2L3 19c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V8h14v11zM7 10h5v5H7z"/></svg>',
+            "folder": '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="#6366f1"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>',
+            "heart": '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="#6366f1"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>',
+            "event": '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="#6366f1"><path d="M18 16v-5c0-3.07-1.63-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.64 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2zm-2 0H8v-5c0-2.48 1.51-4.5 4-4.5s4 2.02 4 4.5v5zm-4 5c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2z"/></svg>',
+        }
+        return {name: self._encode_svg(svg) for name, svg in svg_map.items()}
+
+    def _encode_svg(self, svg_data: str) -> str:
+        """Encode SVG text to a base64 string."""
+        return base64.b64encode(svg_data.encode("utf-8")).decode("utf-8")
+
     def _download_image_as_base64(self, url: str) -> Optional[str]:
-        """Download an image from a URL and return it as a base64-encoded string.
-        
-        Args:
-            url: The image URL to download
-            
-        Returns:
-            Base64-encoded string or None if download failed
-        """
+        """Download an image from URL and return base64, with short-lived cache."""
         if not url:
             return None
+
+        now = time.time()
+        with self._avatar_cache_lock:
+            cached = self._avatar_cache.get(url)
+            if cached and cached[0] > now:
+                return cached[1]
+            if cached and cached[0] <= now:
+                del self._avatar_cache[url]
+
         try:
-            headers = {"User-Agent": "Mozilla/5.0 (compatible; DiscordBot/1.0)"}
-            resp = requests.get(url, timeout=5, headers=headers)
-            if resp.status_code == 200:
-                return base64.b64encode(resp.content).decode('utf-8')
-            else:
-                print(f"[ImageGeneratorService] Download failed ({resp.status_code}) from {url}")
+            response = requests.get(
+                url,
+                timeout=(1.0, 2.0),
+                headers=self._request_headers,
+            )
+            if response.status_code != 200 or not response.content:
+                print(f"[ImageGeneratorService] Download failed ({response.status_code}) from {url}")
+                return None
+
+            image_b64 = base64.b64encode(response.content).decode("utf-8")
+            with self._avatar_cache_lock:
+                if len(self._avatar_cache) >= self._avatar_cache_max_entries:
+                    oldest_key = next(iter(self._avatar_cache))
+                    del self._avatar_cache[oldest_key]
+                self._avatar_cache[url] = (now + self._avatar_cache_ttl_seconds, image_b64)
+            return image_b64
         except Exception as e:
             print(f"[ImageGeneratorService] Error downloading image from {url}: {e}")
-        return None
-    
+            return None
+
+    def _download_images_parallel(
+        self,
+        requester_avatar_url: Optional[str],
+        sts_thumbnail_url: Optional[str],
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """Download requester avatar and STS thumbnail concurrently."""
+        futures = {}
+        if requester_avatar_url:
+            futures["requester"] = self._download_pool.submit(
+                self._download_image_as_base64,
+                requester_avatar_url,
+            )
+        if sts_thumbnail_url:
+            futures["thumbnail"] = self._download_pool.submit(
+                self._download_image_as_base64,
+                sts_thumbnail_url,
+            )
+
+        requester_avatar_b64 = None
+        sts_thumbnail_b64 = None
+
+        for key, future in futures.items():
+            try:
+                if key == "requester":
+                    requester_avatar_b64 = future.result()
+                else:
+                    sts_thumbnail_b64 = future.result()
+            except Exception as e:
+                print(f"[ImageGeneratorService] Error resolving image future ({key}): {e}")
+
+        return requester_avatar_b64, sts_thumbnail_b64
+
+    def _get_driver(self):
+        """Get a persistent Selenium driver for fast repeated screenshots."""
+        if self._driver is not None:
+            return self._driver
+        if self._driver_init_attempted:
+            return None
+
+        with self._render_lock:
+            if self._driver is not None:
+                return self._driver
+            if self._driver_init_attempted:
+                return None
+
+            self._driver_init_attempted = True
+            try:
+                from selenium import webdriver
+                from selenium.webdriver.chrome.options import Options
+
+                options = Options()
+                options.add_argument("--headless=new")
+                options.add_argument("--no-sandbox")
+                options.add_argument("--disable-gpu")
+                options.add_argument("--disable-dev-shm-usage")
+                options.add_argument("--disable-background-networking")
+                options.add_argument("--disable-features=Translate,BackForwardCache")
+                options.add_argument("--hide-scrollbars")
+                options.add_argument("--window-size=1200,1000")
+
+                self._driver = webdriver.Chrome(options=options)
+                self._driver.set_page_load_timeout(5)
+                # Keep compositor background transparent so rounded corners preserve alpha.
+                self._driver.execute_cdp_cmd("Page.enable", {})
+                self._driver.execute_cdp_cmd(
+                    "Emulation.setDefaultBackgroundColorOverride",
+                    {"color": {"r": 0, "g": 0, "b": 0, "a": 0}},
+                )
+            except Exception as e:
+                print(f"[ImageGeneratorService] Selenium renderer unavailable: {e}")
+                self._driver = None
+
+        return self._driver
+
+    def _invalidate_driver(self):
+        """Dispose the current Selenium driver after a renderer failure."""
+        with self._render_lock:
+            if self._driver is not None:
+                try:
+                    self._driver.quit()
+                except Exception:
+                    pass
+            self._driver = None
+            self._driver_init_attempted = False
+
     def _get_hti(self):
         """Lazy-load html2image instance."""
         if self._hti is None:
             try:
                 from html2image import Html2Image
-                # Use chromium from system (installed in Docker)
+
                 self._hti = Html2Image(
                     output_path=self._temp_dir,
                     custom_flags=[
-                        '--no-sandbox',
-                        '--disable-gpu',
-                        '--disable-dev-shm-usage',
-                        '--headless=new',
-                        '--default-background-color=00000000',
-                        '--hide-scrollbars',
-                        '--force-device-scale-factor=1.5'
-                    ]
+                        "--no-sandbox",
+                        "--disable-gpu",
+                        "--disable-dev-shm-usage",
+                        "--headless=new",
+                        "--default-background-color=00000000",
+                        "--hide-scrollbars",
+                        "--force-device-scale-factor=1.0",
+                    ],
                 )
             except ImportError:
                 print("[ImageGeneratorService] html2image not installed")
                 return None
         return self._hti
-    
+
     def _render_template(self, template_str: str, data: Dict[str, Any]) -> str:
         """Render template using Jinja2."""
         try:
-            from jinja2 import Template
-            template = Template(template_str)
+            if self._jinja_template_class is None:
+                from jinja2 import Template
+
+                self._jinja_template_class = Template
+
+            if template_str == self._template_content:
+                if self._sound_card_template is None:
+                    self._sound_card_template = self._jinja_template_class(template_str)
+                template = self._sound_card_template
+            else:
+                template = self._jinja_template_class(template_str)
+
             return template.render(**data)
         except Exception as e:
             print(f"[ImageGeneratorService] Jinja2 render error: {e}")
             return template_str
-    
+
+    def _render_with_selenium(
+        self,
+        html_content: str,
+        size: Tuple[int, int],
+        selector: Optional[str] = ".card",
+    ) -> Optional[bytes]:
+        """Render HTML to PNG using a persistent Selenium browser session."""
+        driver = self._get_driver()
+        if driver is None:
+            return None
+
+        try:
+            from selenium.webdriver.common.by import By
+            from selenium.webdriver.support import expected_conditions as EC
+            from selenium.webdriver.support.ui import WebDriverWait
+
+            with self._render_lock:
+                width, height = size
+                driver.set_window_size(max(900, width), max(640, height))
+                driver.get("about:blank")
+                driver.execute_script(
+                    "document.open();document.write(arguments[0]);document.close();",
+                    html_content,
+                )
+                driver.execute_script(
+                    "document.documentElement.style.background='transparent';"
+                    "document.body.style.background='transparent';"
+                )
+                WebDriverWait(driver, 2.0).until(
+                    lambda d: d.execute_script("return document.readyState") == "complete"
+                )
+                if selector:
+                    WebDriverWait(driver, 2.0).until(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, selector))
+                    )
+                    clip = driver.execute_script(
+                        """
+                        const el = document.querySelector(arguments[0]);
+                        if (!el) return null;
+                        const rect = el.getBoundingClientRect();
+                        return {
+                            x: Math.max(0, rect.x),
+                            y: Math.max(0, rect.y),
+                            width: Math.max(1, rect.width),
+                            height: Math.max(1, rect.height),
+                            scale: window.devicePixelRatio || 1
+                        };
+                        """,
+                        selector,
+                    )
+                    if not clip:
+                        return None
+                    result = driver.execute_cdp_cmd(
+                        "Page.captureScreenshot",
+                        {
+                            "format": "png",
+                            "omitBackground": True,
+                            "fromSurface": True,
+                            "clip": clip,
+                        },
+                    )
+                else:
+                    result = driver.execute_cdp_cmd(
+                        "Page.captureScreenshot",
+                        {"format": "png", "omitBackground": True, "fromSurface": True},
+                    )
+                return base64.b64decode(result["data"])
+        except Exception as e:
+            print(f"[ImageGeneratorService] Selenium render failed: {e}")
+            self._invalidate_driver()
+            return None
+
+    def _screenshot_with_html2image(
+        self,
+        html_content: str,
+        size: Tuple[int, int] = (900, 900),
+    ) -> Optional[bytes]:
+        """Fallback renderer using html2image."""
+        hti = self._get_hti()
+        if not hti:
+            return None
+
+        filename = f"sound_card_{int(time.time() * 1000)}.png"
+        hti.screenshot(
+            html_str=html_content,
+            save_as=filename,
+            size=size,
+        )
+
+        image_path = os.path.join(self._temp_dir, filename)
+        image_bytes = None
+        try:
+            from PIL import Image
+
+            with Image.open(image_path) as image:
+                bbox = image.getbbox()
+                cropped = image.crop(bbox) if bbox else image.copy()
+                output_buffer = io.BytesIO()
+                cropped.save(output_buffer, format="PNG", optimize=False, compress_level=3)
+                image_bytes = output_buffer.getvalue()
+        except Exception as e:
+            print(f"[ImageGeneratorService] Error cropping image: {e}")
+            try:
+                with open(image_path, "rb") as image_file:
+                    image_bytes = image_file.read()
+            except Exception as read_error:
+                print(f"[ImageGeneratorService] Error reading image bytes: {read_error}")
+                image_bytes = None
+        finally:
+            try:
+                os.remove(image_path)
+            except Exception:
+                pass
+
+        return image_bytes
+
+    def _render_html_to_png(
+        self,
+        html_content: str,
+        size: Tuple[int, int] = (900, 900),
+        selector: Optional[str] = ".card",
+    ) -> Optional[bytes]:
+        """Render HTML to PNG using Selenium first and html2image as fallback."""
+        selenium_bytes = self._render_with_selenium(html_content, size=size, selector=selector)
+        if selenium_bytes is not None:
+            return selenium_bytes
+        return self._screenshot_with_html2image(html_content, size=size)
+
     async def generate_sound_card(
         self,
         sound_name: str,
@@ -111,13 +388,28 @@ class ImageGeneratorService:
         This prevents blocking the main event loop during audio playback.
         """
         import asyncio
+
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             None,
             self._generate_sound_card_sync,
-            sound_name, requester, play_count, duration, download_date,
-            lists, favorited_by, similarity, quote, is_tts, sts_char,
-            requester_avatar_url, sts_thumbnail_url, event_data, show_footer, show_sound_icon, accent_color
+            sound_name,
+            requester,
+            play_count,
+            duration,
+            download_date,
+            lists,
+            favorited_by,
+            similarity,
+            quote,
+            is_tts,
+            sts_char,
+            requester_avatar_url,
+            sts_thumbnail_url,
+            event_data,
+            show_footer,
+            show_sound_icon,
+            accent_color,
         )
 
     def _generate_sound_card_sync(
@@ -142,7 +434,7 @@ class ImageGeneratorService:
     ) -> Optional[bytes]:
         """
         Generate a sound card image (Synchronous implementation).
-        
+
         Args:
             sound_name: Name of the sound being played
             requester: Username who requested the sound
@@ -159,82 +451,43 @@ class ImageGeneratorService:
             show_footer: Whether to render the footer row
             show_sound_icon: Whether to render the leading sound/speaker icon
             accent_color: Optional hex color for card border (default Discord blurple)
-            
+
         Returns:
             PNG image bytes or None if generation failed
         """
-        hti = self._get_hti()
-        if not hti:
-            return None
-        
         try:
-            # Read template
-            with open(self.template_path, 'r', encoding='utf-8') as f:
-                template_content = f.read()
-            
-            import base64
+            requester_avatar_b64, sts_thumbnail_b64 = self._download_images_parallel(
+                requester_avatar_url,
+                sts_thumbnail_url,
+            )
 
-            # Helper to encode SVG to base64
-            def encode_svg(svg_data):
-                # Ensure we return a clean base64 string
-                return base64.b64encode(svg_data.encode('utf-8')).decode('utf-8')
-            
-            # Download requester avatar and STS thumbnail
-            requester_avatar_b64 = self._download_image_as_base64(requester_avatar_url)
-            sts_thumbnail_b64 = self._download_image_as_base64(sts_thumbnail_url)
-
-            # Define SVG icons (full SVG content)
-            svg_volume = '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="#5865F2"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>'
-            svg_voice = '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="#5865F2"><path d="M9 9c1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3 1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V16h9v-2.5h-2.1c.07-.15.1-.32.1-.5 0-1.83 2.53-3 4-3 .5 0 .97.14 1.4.37l1.52-1.52C14.49 11.23 12.03 11 9 11zm10.77 5.76-2.6-2.63-.88.88 2.62 2.63-2.6 2.63.88.88 2.6-2.62 2.62 2.62.88-.88-2.62-2.63 2.6-2.62-.88-.88z"/></svg>'
-            svg_face = '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="#5865F2"><path d="M9 11.75c-.69 0-1.25.56-1.25 1.25s.56 1.25 1.25 1.25 1.25-.56 1.25-1.25-.56-1.25-1.25-1.25zm6 0c-.69 0-1.25.56-1.25 1.25s.56 1.25 1.25 1.25 1.25-.56 1.25-1.25-.56-1.25-1.25-1.25zM12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8 0-.29.02-.58.05-.86 2.36-1.05 4.23-2.98 5.21-5.37C11.07 8.33 14.05 10 17.42 10c.78 0 1.53-.09 2.25-.26.21 7.17-5.3 12.26-7.67 12.26z"/></svg>'
-            
-            # Static icons (Stopwatch, Chart, Calendar, Folder, Heart)
-            # Fills are color #5865F2 for primary, #6366f1 for meta
-            svg_timer = '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="#5865F2"><path d="M15 1H9v2h6V1zm-4 13h2V8h-2v6zm8.03-6.61l1.42-1.42c-.43-.51-.9-.99-1.41-1.41l-1.42 1.42C16.07 4.74 14.12 4 12 4c-4.97 0-9 4.03-9 9s4.02 9 9 9 9-4.03 9-9c0-2.12-.74-4.07-1.97-5.61zM12 20c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></svg>'
-            svg_chart = '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="#6366f1"><path d="M5 9.2h3V19H5zM10.6 5h2.8v14h-2.8zm5.6 8H19v6h-2.8z"/></svg>'
-            svg_calendar = '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="#6366f1"><path d="M19 3h-1V1h-2v2H8V1H6v2H5c-1.11 0-1.99.9-1.99 2L3 19c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V8h14v11zM7 10h5v5H7z"/></svg>'
-            svg_folder = '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="#6366f1"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>'
-            svg_folder = '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="#6366f1"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>'
-            svg_heart = '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="#6366f1"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>'
-            svg_event = '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="#6366f1"><path d="M18 16v-5c0-3.07-1.63-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.64 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2zm-2 0H8v-5c0-2.48 1.51-4.5 4-4.5s4 2.02 4 4.5v5zm-4 5c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2z"/></svg>'
-            
-            # Determine speaker icon (only used when no character thumbnail)
             if not show_sound_icon:
                 speaker_icon = None
                 card_class = "sts-mode" if (sts_char or is_tts) else ""
             elif sts_char:
-                speaker_icon = encode_svg(svg_face)
+                speaker_icon = self._icons["face"]
                 card_class = "sts-mode"
             elif is_tts:
-                speaker_icon = encode_svg(svg_voice)
+                speaker_icon = self._icons["voice"]
                 card_class = "sts-mode"
             else:
-                speaker_icon = encode_svg(svg_volume)
+                speaker_icon = self._icons["volume"]
                 card_class = ""
-            
-            # Clean up sound name for TTS/STS display
-            import re
-            display_name = sound_name.replace('.mp3', '')
-            
+
+            display_name = sound_name.replace(".mp3", "")
             if sts_char or is_tts:
-                # Strip date prefix like "11-02-26-14-25-17-" from TTS filenames
-                cleaned = re.sub(r'^\d{2}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}-', '', display_name)
+                cleaned = re.sub(r"^\d{2}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}-", "", display_name)
                 if cleaned:
                     display_name = cleaned
-                
-                # Build "says: text" format (character photo provides the identity)
-                if sts_char or is_tts:
-                    if quote:
-                        display_name = f"says: {quote}"
-                    else:
-                        display_name = f"says: {display_name}"
-                
-                if quote:
-                     print(f"[ImageGeneratorService] Generating card with quote length: {len(quote)}")
 
-            
-            # Calculate dynamic font size based on name length
-            # Default is 26px
+                if quote:
+                    display_name = f"says: {quote}"
+                else:
+                    display_name = f"says: {display_name}"
+
+                if quote:
+                    print(f"[ImageGeneratorService] Generating card with quote length: {len(quote)}")
+
             name_len = len(display_name)
             if name_len > 45:
                 title_font_size = 16
@@ -255,18 +508,17 @@ class ImageGeneratorService:
             has_leading_icon = bool(sts_thumbnail_b64 or speaker_icon)
             notification_only = (not has_stats) and (not show_footer)
 
-            # Build template data with Base64 icons
             data = {
                 "sound_name": display_name,
                 "title_font_size": title_font_size,
                 "requester": requester,
                 "speaker_icon": speaker_icon,
-                "icon_timer": encode_svg(svg_timer),
-                "icon_chart": encode_svg(svg_chart),
-                "icon_calendar": encode_svg(svg_calendar),
-                "icon_folder": encode_svg(svg_folder),
-                "icon_heart": encode_svg(svg_heart),
-                "icon_event": encode_svg(svg_event),
+                "icon_timer": self._icons["timer"],
+                "icon_chart": self._icons["chart"],
+                "icon_calendar": self._icons["calendar"],
+                "icon_folder": self._icons["folder"],
+                "icon_heart": self._icons["heart"],
+                "icon_event": self._icons["event"],
                 "card_class": card_class,
                 "play_count": play_count,
                 "duration": duration,
@@ -284,144 +536,89 @@ class ImageGeneratorService:
                 "notification_only": notification_only,
                 "accent_color": accent_color or "#5865F2",
             }
-            
-            # Render template
-            html_content = self._render_template(template_content, data)
-            
-            return self._screenshot_and_crop(html_content)
-            
+
+            html_content = self._render_template(self._template_content, data)
+
+            canvas_height = 640
+            if has_stats:
+                canvas_height = 820
+            if has_stats and show_footer:
+                canvas_height = 900
+
+            return self._render_html_to_png(
+                html_content,
+                size=(900, canvas_height),
+                selector=".card",
+            )
+
         except Exception as e:
             print(f"[ImageGeneratorService] Error generating sound card: {e}")
             import traceback
+
             traceback.print_exc()
             return None
-    
-    def _screenshot_and_crop(self, html_content: str) -> Optional[bytes]:
-        """Take a screenshot of HTML content, crop to content, and return PNG bytes."""
-        hti = self._get_hti()
-        if not hti:
-            return None
-        
-        import time
-        filename = f"sound_card_{int(time.time() * 1000)}.png"
-        
-        hti.screenshot(
-            html_str=html_content,
-            save_as=filename,
-            size=(1160, 2000)
-        )
-        
-        image_path = os.path.join(self._temp_dir, filename)
-        
-        try:
-            from PIL import Image
-            with Image.open(image_path) as img:
-                bbox = img.getbbox()
-                if bbox:
-                    cropped = img.crop(bbox)
-                    # Optimize PNG to reduce file size
-                    cropped.save(image_path, optimize=True, quality=85)
-        except Exception as e:
-            print(f"[ImageGeneratorService] Error cropping image: {e}")
-        
-        with open(image_path, 'rb') as f:
-            image_bytes = f.read()
-        
-        try:
-            os.remove(image_path)
-        except:
-            pass
-        
-        return image_bytes
-    
+
     def generate_loading_gif(self) -> Optional[bytes]:
         """Generate (or load cached) animated loading GIF.
-        
+
         Returns:
             GIF image bytes or None if generation failed
         """
-        # Cache path
         cache_path = os.path.abspath(
             os.path.join(os.path.dirname(__file__), "..", "..", "Data", "loading.gif")
         )
-        
-        # Return cached if exists
+
         if os.path.exists(cache_path):
-            with open(cache_path, 'rb') as f:
-                return f.read()
+            with open(cache_path, "rb") as gif_file:
+                return gif_file.read()
 
         print("[ImageGeneratorService] Generating loading.gif (one-time process)...")
-        hti = self._get_hti()
-        if not hti:
-            return None
-        
+
         try:
             from PIL import Image
+
             frames = []
-            
-            # Base HTML template for frames
             template_content = self._get_loading_html()
-            
-            # Generate 12 frames (30 degree steps)
+
             for angle in range(0, 360, 30):
-                # Render frame with rotation
                 data = {
                     "title": "Processing...",
                     "subtitle": "Generating audio, please wait",
-                    "rotation": angle
+                    "rotation": angle,
                 }
                 html_content = self._render_template(template_content, data)
-                
-                # Screenshot
-                match = re.search(r'width:\s*(\d+)px', html_content)
-                width = int(match.group(1)) if match else 580
-                
-                # Use a unique temp filename for the frame
-                import time
-                frame_filename = f"frame_{angle}_{int(time.time()*1000)}.png"
-                
-                hti.screenshot(
-                    html_str=html_content,
-                    save_as=frame_filename,
-                    size=(800, 800) # Use large canvas to avoid clipping, let crop() handle it
+                frame_bytes = self._render_html_to_png(
+                    html_content,
+                    size=(320, 220),
+                    selector=".card",
                 )
-                
-                frame_path = os.path.join(self._temp_dir, frame_filename)
-                
-                # Crop and append
-                with Image.open(frame_path) as img:
-                    bbox = img.getbbox()
-                    if bbox:
-                        cropped = img.crop(bbox)
-                        frames.append(cropped.copy()) # Copy to keep in memory after file close
-                
-                # Clean up frame file
-                try: 
-                    os.remove(frame_path)
-                except: pass
-            
+                if not frame_bytes:
+                    continue
+                with Image.open(io.BytesIO(frame_bytes)) as image:
+                    frames.append(image.copy())
+
             if not frames:
                 return None
-                
-            # Save GIF
+
             os.makedirs(os.path.dirname(cache_path), exist_ok=True)
             frames[0].save(
                 cache_path,
                 save_all=True,
                 append_images=frames[1:],
                 optimize=False,
-                duration=80, # 80ms per frame ~ 12.5 fps
-                loop=0
+                duration=80,
+                loop=0,
             )
-            
+
             print(f"[ImageGeneratorService] Saved loading.gif to {cache_path}")
-            
-            with open(cache_path, 'rb') as f:
-                return f.read()
-                
+
+            with open(cache_path, "rb") as gif_file:
+                return gif_file.read()
+
         except Exception as e:
             print(f"[ImageGeneratorService] Error generating loading GIF: {e}")
             import traceback
+
             traceback.print_exc()
             return None
 
@@ -431,9 +628,13 @@ class ImageGeneratorService:
 <html>
 <head>
     <meta charset="UTF-8">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+        }
         html, body {
             background: transparent !important;
             width: 800px;
@@ -465,14 +666,15 @@ class ImageGeneratorService:
             transform: rotate({{rotation|default(0)}}deg);
         }
         .title {
-            font-size: 12px; font-weight: 700; color: #ffffff;
-            font-family: "Inter", sans-serif;
+            font-size: 12px;
+            font-weight: 700;
+            color: #ffffff;
             text-align: center;
             white-space: nowrap;
         }
         .subtitle {
-            font-size: 8px; color: #6b7280;
-            font-family: "Inter", sans-serif;
+            font-size: 8px;
+            color: #6b7280;
             text-align: center;
             white-space: nowrap;
         }

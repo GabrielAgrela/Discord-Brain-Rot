@@ -98,7 +98,7 @@ class AudioService:
         
         # Image generator for sound cards
         self.image_generator = ImageGeneratorService()
-        self.progress_display_delay_seconds = 3.0
+        self.progress_display_delay_seconds = 2.0
 
     def _log_perf(self, operation: str, start_time: float, extra: str = ""):
         """Log performance metrics for an operation."""
