@@ -78,6 +78,7 @@ class MessageService:
         image_requester: str = "Gertrudes",
         image_show_footer: bool = True,
         image_show_sound_icon: bool = True,
+        image_border_color: Optional[str] = None,
     ) -> Optional[discord.Message]:
         """
         Send a message to the bot channel as an embed or image card.
@@ -94,6 +95,7 @@ class MessageService:
             image_requester: Requester label used for image cards
             image_show_footer: Whether image card should include footer row
             image_show_sound_icon: Whether image card should include the leading sound icon
+            image_border_color: Optional hex color (e.g. "#ED4245") for image card border
             
         Returns:
             The sent message or None on failure
@@ -120,6 +122,7 @@ class MessageService:
                     requester=image_requester,
                     show_footer=image_show_footer,
                     show_sound_icon=image_show_sound_icon,
+                    border_color=image_border_color,
                 )
                 if image_bytes:
                     kwargs["file"] = discord.File(io.BytesIO(image_bytes), filename="message_card.png")
@@ -153,6 +156,7 @@ class MessageService:
         requester: str,
         show_footer: bool,
         show_sound_icon: bool,
+        border_color: Optional[str] = None,
     ) -> Optional[bytes]:
         """Build an image card for generic notifications."""
         if not self._bot_behavior:
@@ -172,6 +176,7 @@ class MessageService:
             event_data=event_data,
             show_footer=show_footer,
             show_sound_icon=show_sound_icon,
+            accent_color=border_color,
         )
     
     async def send_error(

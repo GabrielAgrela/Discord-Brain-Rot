@@ -196,7 +196,8 @@ async def on_ready():
                         message_format="image",
                         image_requester="System",
                         image_show_footer=False,
-                        image_show_sound_icon=False
+                        image_show_sound_icon=False,
+                        image_border_color="#ED4245"
                     )
             except Exception as e:
                 print(f"Failed to send startup message in {guild.name}: {e}")

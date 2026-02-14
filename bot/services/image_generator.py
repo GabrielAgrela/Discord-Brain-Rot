@@ -104,6 +104,7 @@ class ImageGeneratorService:
         event_data: Optional[str] = None,
         show_footer: bool = True,
         show_sound_icon: bool = True,
+        accent_color: Optional[str] = None,
     ) -> Optional[bytes]:
         """
         Async wrapper for generating sound card image in a separate thread.
@@ -116,7 +117,7 @@ class ImageGeneratorService:
             self._generate_sound_card_sync,
             sound_name, requester, play_count, duration, download_date,
             lists, favorited_by, similarity, quote, is_tts, sts_char,
-            requester_avatar_url, sts_thumbnail_url, event_data, show_footer, show_sound_icon
+            requester_avatar_url, sts_thumbnail_url, event_data, show_footer, show_sound_icon, accent_color
         )
 
     def _generate_sound_card_sync(
@@ -137,6 +138,7 @@ class ImageGeneratorService:
         event_data: Optional[str] = None,
         show_footer: bool = True,
         show_sound_icon: bool = True,
+        accent_color: Optional[str] = None,
     ) -> Optional[bytes]:
         """
         Generate a sound card image (Synchronous implementation).
@@ -156,6 +158,7 @@ class ImageGeneratorService:
             event_data: String describing events (e.g. "Join: Gabi | Leave: Someone")
             show_footer: Whether to render the footer row
             show_sound_icon: Whether to render the leading sound/speaker icon
+            accent_color: Optional hex color for card border (default Discord blurple)
             
         Returns:
             PNG image bytes or None if generation failed
@@ -279,6 +282,7 @@ class ImageGeneratorService:
                 "has_stats": has_stats,
                 "has_leading_icon": has_leading_icon,
                 "notification_only": notification_only,
+                "accent_color": accent_color or "#5865F2",
             }
             
             # Render template
