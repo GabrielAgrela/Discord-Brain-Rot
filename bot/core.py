@@ -17,6 +17,7 @@ class Bot(commands.Bot):
         token: Discord bot token for authentication.
         ffmpeg_path: Path to FFmpeg executable for audio processing.
         startup_sound_played: Flag to track if startup sound has been played.
+        startup_announcement_sent: Flag to prevent duplicate startup messages.
     """
     
     def __init__(self, command_prefix: str, intents: discord.Intents, 
@@ -34,6 +35,7 @@ class Bot(commands.Bot):
         self.token = token
         self.ffmpeg_path = ffmpeg_path
         self.startup_sound_played = False
+        self.startup_announcement_sent = False
 
     def run_bot(self) -> None:
         """Start the bot using the configured token."""

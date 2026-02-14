@@ -98,6 +98,7 @@ class AudioService:
         
         # Image generator for sound cards
         self.image_generator = ImageGeneratorService()
+        self.progress_display_delay_seconds = 3.0
 
     def _log_perf(self, operation: str, start_time: float, extra: str = ""):
         """Log performance metrics for an operation."""
@@ -111,6 +112,12 @@ class AudioService:
         minutes = int(seconds // 60)
         secs = int(seconds % 60)
         return f"{minutes}:{secs:02d}"
+
+    def _get_progress_start_offset(self, duration: float) -> float:
+        """Return the initial displayed playback offset, clamped for short sounds."""
+        if duration <= self.progress_display_delay_seconds:
+            return 0.0
+        return self.progress_display_delay_seconds
 
     def set_sound_service(self, sound_service):
         self.sound_service = sound_service
@@ -748,9 +755,15 @@ class AudioService:
                         initial_label = "▶️ 0:01"
                         if duration > 0:
                             bar_length = 7
-                            # Start dot at index 1 (offset)
-                            bar = "▬🔘" + "▬" * (bar_length - 1)
-                            initial_label = f"▶️ {bar} 0:01"
+                            progress_offset = self._get_progress_start_offset(duration)
+                            progress = max(0.0, min(1.0, progress_offset / duration))
+                            filled = int(bar_length * progress)
+                            if filled < 0:
+                                filled = 0
+                            if filled > bar_length:
+                                filled = bar_length
+                            bar = "▬" * filled + "🔘" + "▬" * (bar_length - filled)
+                            initial_label = f"▶️ {bar} {self._format_duration(progress_offset)}"
                         
                         view = SoundBeingPlayedView(
                             behavior_ref, audio_file, 
@@ -775,8 +788,16 @@ class AudioService:
                         else:
                             embed = discord.Embed(color=discord.Color.red())
                             if duration > 0:
-                                bar = "▬🔘" + "▬" * 7
-                                embed.description = f"▶️ {bar} 0:01 / {self._format_duration(duration)}"
+                                bar_length = 7
+                                progress_offset = self._get_progress_start_offset(duration)
+                                progress = max(0.0, min(1.0, progress_offset / duration))
+                                filled = int(bar_length * progress)
+                                if filled < 0:
+                                    filled = 0
+                                if filled > bar_length:
+                                    filled = bar_length
+                                bar = "▬" * filled + "🔘" + "▬" * (bar_length - filled)
+                                embed.description = f"▶️ {bar} {self._format_duration(progress_offset)} / {self._format_duration(duration)}"
                             embed.title = f"🔊 {audio_file.replace('.mp3', '')} 🔊"
                             embed.set_footer(text=f"Requested by {user}")
                             if loading_message:
@@ -842,9 +863,9 @@ class AudioService:
                 if self.stop_progress_update:
                     break
                     
-                # Add 1s offset to account for image processing/Discord delay
-                OFFSET = 1.0
-                elapsed = (time.time() - start_time) + OFFSET
+                # Add delay offset to account for image processing/Discord send delay.
+                offset = self._get_progress_start_offset(duration)
+                elapsed = min(duration, (time.time() - start_time) + offset)
                 progress = max(0.0, min(1.0, elapsed / duration))
                 
                 # Calculate dot position

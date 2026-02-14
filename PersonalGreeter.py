@@ -184,6 +184,23 @@ async def on_ready():
     #bot.loop.create_task(behavior.check_if_in_game())
     await behavior.disable_controls_message()
     await behavior.clean_buttons()
+    if not bot.startup_announcement_sent:
+        for guild in bot.guilds:
+            try:
+                bot_channel = await behavior.get_bot_channel(guild)
+                if bot_channel:
+                    await behavior.send_message(
+                        channel=bot_channel,
+                        title="Bot Started: Gertrudes is online and ready.",
+                        description="",
+                        message_format="image",
+                        image_requester="System",
+                        image_show_footer=False,
+                        image_show_sound_icon=False
+                    )
+            except Exception as e:
+                print(f"Failed to send startup message in {guild.name}: {e}")
+        bot.startup_announcement_sent = True
     # await behavior.send_controls(force=True)
     
     # Background tasks are handled by BackgroundService (started automatically in BotBehavior)
