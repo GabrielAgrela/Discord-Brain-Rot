@@ -93,6 +93,12 @@ bot/
    - Use existing fixtures from `tests/conftest.py`
 7. **Update `.gitignore`** if the new feature generates artifacts that shouldn't be tracked (cache files, build outputs, logs, etc.)
 8. **Update this file (GEMINI.md)** if you discover patterns, gotchas, or fixes that future agents should know about - this prevents the same mistakes from recurring
+9. **Update `README.md` whenever needed** if user-facing behavior changed:
+   - slash commands, command options, or UI controls
+   - setup/deployment/runtime requirements
+   - environment variables or external integrations (LLM/TTS/APIs)
+   - web routes, dashboards, or operational workflows
+   - If no README update is required, explicitly state why in the final response
 
 ## Testing
 
@@ -158,6 +164,16 @@ Canonical completion command:
 - Repository unit tests don't catch integration errors with Discord or BotBehavior
 - Attribute name mismatches and service access patterns are only caught at runtime
 - When adding new commands/UI, manually test the full flow to catch integration issues
+
+### Sound Card Template Tracking
+- The sound card UI used by `ImageGeneratorService` lives in `templates/sound_card.html`
+- `templates/sound_card.html` is currently gitignored, so edits there will not appear in normal `git status`/`git diff`
+- When changing sound-card layout/styling, verify behavior by running the bot and checking generated cards after deploy
+
+### Voice Session Analytics Tracking
+- Voice analytics for `/top` and year-review now depend on `voice_activity` session rows written from `on_voice_state_update` in `PersonalGreeter.py`
+- AFK transitions are intentionally handled as session boundaries for active channels only (joining AFK is not counted as active voice time)
+- Voice session rows currently store `member.name` (not `name#discriminator`) to align with existing stats queries
 
 ## Deployment
 

@@ -27,6 +27,7 @@ from bot.commands.stats import StatsCog
 from bot.commands.keywords import KeywordCog
 from bot.commands.debug import DebugCog
 from bot.commands.onthisday import OnThisDayCog
+from bot.repositories import VoiceActivityRepository
 import random
 import time
 from collections import defaultdict
@@ -60,6 +61,7 @@ bot.add_cog(KeywordCog(bot, behavior))
 bot.add_cog(DebugCog(bot, behavior))
 bot.add_cog(OnThisDayCog(bot, behavior))
 db = Database(behavior=behavior)
+voice_activity_repo = VoiceActivityRepository()
 
 
 # --- Background Task to Handle Web Playback Requests ---
@@ -331,20 +333,28 @@ async def on_resumed():
                     print(f"[on_resumed] Error during voice recovery in {guild.name}: {e}")
 
 
+def _track_voice_session(
+    member: discord.Member, before: discord.VoiceState, after: discord.VoiceState
+) -> None:
+    """Track voice session boundaries for analytics."""
+    username = member.name
+    afk_channel = member.guild.afk_channel if member.guild else None
 
+    before_channel = before.channel
+    after_channel = after.channel
 
+    # Ignore non-channel voice state updates (mute/deafen/etc).
+    if before_channel == after_channel:
+        return
 
+    before_is_trackable = before_channel is not None and before_channel != afk_channel
+    after_is_trackable = after_channel is not None and after_channel != afk_channel
 
+    if before_is_trackable:
+        voice_activity_repo.log_leave(username, str(before_channel.id))
 
-
-
-
-
-
-
-
-
-
+    if after_is_trackable:
+        voice_activity_repo.log_join(username, str(after_channel.id))
 
 
 @bot.event
@@ -353,6 +363,11 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
     
     if member == bot.user:
         return
+
+    try:
+        _track_voice_session(member, before, after)
+    except Exception as e:
+        print(f"[VoiceActivity] Failed to track session for {member_str}: {e}")
 
     # Determine the event type
     if before.channel is None and after.channel is not None:

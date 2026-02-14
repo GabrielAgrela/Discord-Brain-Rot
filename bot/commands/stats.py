@@ -11,6 +11,7 @@ import discord
 from discord.ext import commands
 from discord.commands import Option
 import datetime
+from typing import Optional
 
 from bot.repositories import ActionRepository, StatsRepository
 
@@ -28,7 +29,12 @@ class StatsCog(commands.Cog):
     async def top(
         self, 
         ctx: discord.ApplicationContext, 
-        option: Option(str, "users or sounds", choices=["users", "sounds"], required=True),
+        option: Option(
+            str,
+            "Leaderboard type",
+            choices=["users", "sounds", "voice users", "voice channels"],
+            required=True,
+        ),
         number: Option(int, "number of users/sounds", default=5),
         numberdays: Option(int, "number of days", default=7)
     ):
@@ -63,7 +69,7 @@ class StatsCog(commands.Cog):
                 description=description
             )
             
-        else:
+        elif option == "users":
             top_users = self.action_repo.get_top_users(numberdays, number)
             
             description = ""
@@ -77,6 +83,64 @@ class StatsCog(commands.Cog):
                 title=f"Top {number} Users (Last {numberdays} days)",
                 description=description
             )
+
+        elif option == "voice users":
+            top_voice_users = self.stats_repo.get_top_voice_users(days=numberdays, limit=number)
+
+            description = ""
+            for i, user_data in enumerate(top_voice_users, 1):
+                description += (
+                    f"**{i}. {user_data['username']}** - "
+                    f"{user_data['total_hours']:.2f}h "
+                    f"({user_data['session_count']} sessions)\n"
+                )
+
+            if not description:
+                description = "No voice activity found!"
+
+            await self.behavior.send_message(
+                title=f"Top {number} Voice Users (Last {numberdays} days)",
+                description=description
+            )
+
+        elif option == "voice channels":
+            top_voice_channels = self.stats_repo.get_top_voice_channels(days=numberdays, limit=number)
+
+            description = ""
+            for i, channel_data in enumerate(top_voice_channels, 1):
+                channel_label = self._resolve_voice_channel_label(ctx.guild, channel_data["channel_id"])
+                description += (
+                    f"**{i}. {channel_label}** - "
+                    f"{channel_data['total_hours']:.2f}h "
+                    f"({channel_data['session_count']} sessions)\n"
+                )
+
+            if not description:
+                description = "No voice channel activity found!"
+
+            await self.behavior.send_message(
+                title=f"Top {number} Voice Channels (Last {numberdays} days)",
+                description=description
+            )
+
+    def _resolve_voice_channel_label(self, guild: Optional[discord.Guild], channel_id: str) -> str:
+        """Resolve voice channel ID to a readable label."""
+        try:
+            channel_int = int(channel_id)
+        except (TypeError, ValueError):
+            return f"Channel {channel_id}"
+
+        if guild:
+            channel = guild.get_channel(channel_int)
+            if channel:
+                return channel.name
+
+        for known_guild in self.bot.guilds:
+            channel = known_guild.get_channel(channel_int)
+            if channel:
+                return f"{known_guild.name} / {channel.name}"
+
+        return f"Channel {channel_id}"
 
     @commands.slash_command(name="yearreview", description="Show yearly stats wrapped!")
     async def year_review(

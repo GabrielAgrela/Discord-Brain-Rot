@@ -2,7 +2,7 @@ import discord
 from typing import Optional
 import asyncio
 from datetime import datetime
-from bot.repositories import ActionRepository
+from bot.repositories import ActionRepository, StatsRepository
 
 
 class StatsService:
@@ -15,6 +15,7 @@ class StatsService:
         self.message_service = message_service
         self.sound_service = sound_service
         self.action_repo = ActionRepository()
+        self.stats_repo = StatsRepository()
 
     async def display_stats(self, requesting_user, number_users=20, number_sounds=5, days=700, by="plays", guild: Optional[discord.Guild] = None):
         """
@@ -76,7 +77,42 @@ class StatsService:
                 sounds_text += f"**#{i}** {sound_name} — {play_count} plays\n"
             embed.add_field(name="🔥 Top 10 Sounds", value=sounds_text, inline=False)
 
+        top_voice_users = self.stats_repo.get_top_voice_users(days=days, limit=5)
+        if top_voice_users:
+            users_text = ""
+            for i, user_data in enumerate(top_voice_users, 1):
+                users_text += (
+                    f"**#{i}** {user_data['username']} — "
+                    f"{user_data['total_hours']:.2f}h ({user_data['session_count']} sessions)\n"
+                )
+            embed.add_field(name="🎤 Top Voice Users", value=users_text, inline=False)
+
+        top_voice_channels = self.stats_repo.get_top_voice_channels(days=days, limit=3)
+        if top_voice_channels:
+            channels_text = ""
+            for i, channel_data in enumerate(top_voice_channels, 1):
+                channel_label = self._resolve_voice_channel_label(channel_data["channel_id"])
+                channels_text += (
+                    f"**#{i}** {channel_label} — "
+                    f"{channel_data['total_hours']:.2f}h ({channel_data['session_count']} sessions)\n"
+                )
+            embed.add_field(name="🗣️ Top Voice Channels", value=channels_text, inline=False)
+
         return embed
+
+    def _resolve_voice_channel_label(self, channel_id: str) -> str:
+        """Resolve a voice channel ID to a readable label."""
+        try:
+            channel_int = int(channel_id)
+        except (TypeError, ValueError):
+            return f"Channel {channel_id}"
+
+        for guild in self.bot.guilds:
+            channel = guild.get_channel(channel_int)
+            if channel and isinstance(channel, (discord.VoiceChannel, discord.StageChannel)):
+                return f"{guild.name} / {channel.name}"
+
+        return f"Channel {channel_id}"
 
     # Keep the old method for backwards compatibility
     async def display_top_users(self, requesting_user, number_users=5, number_sounds=5, days=7, by="plays", guild: Optional[discord.Guild] = None):

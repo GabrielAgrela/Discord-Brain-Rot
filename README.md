@@ -1,272 +1,322 @@
-# 🧠 Discord Brain Rot
+# Discord Brain Rot
 
-A feature-rich Discord bot that transforms your server into an interactive soundboard experience with AI-powered commentary, real-time voice keyword detection, and automatic sound scraping.
+Discord bot + web dashboard for soundboard playback, live voice keyword triggers, TTS/STS, AI commentary, and analytics.
 
----
+This README is based on the current codebase behavior (not historical README assumptions).
 
-## ✨ Features
+## What The Bot Does Today
 
-### 🔊 **Soundboard**
-- **10,000+ sounds** automatically scraped from MyInstants (PT, BR, US)
-- Smart fuzzy search with autocomplete suggestions
-- Playback controls: speed, volume, reverse, progress bar
-- Similar sounds suggestions using AI audio embeddings
-- Personal sound lists and favorites
+### Sound Playback and In-Chat UI
+- Slash playback with fuzzy matching: `/toca`.
+- Playback effects on demand: `speed`, `volume`, `reverse`.
+- Fast playback start with deferred image/UI work.
+- Image-based sound cards rendered from `templates/sound_card.html`.
+- Playback card controls (expand/collapse with auto-close):
+  - progress button (click to slap while playing, replay when stopped)
+  - replay
+  - favorite toggle
+  - slap toggle
+  - rename
+  - assign join/leave event
+  - STS character select
+  - similar sounds (lazy-loaded)
+  - add-to-list select
+- Separate quick controls button (`⚙️`) sends an ephemeral controls panel.
 
-### 🗣️ **Text-to-Speech & Voice Cloning**
-- **Google TTS**: English, Portuguese, Spanish, French, German, Russian, Arabic, Chinese
-- **ElevenLabs voices**: Ventura, Costa, Tyson (custom character voices)
-- **Speech-to-Speech (STS)**: Convert any sound to a different voice
-- **Voice isolation**: Extract vocals from audio
+### Controls Panel (Non-Slash UI)
+- Random sound
+- Random favorite
+- Global favorites list
+- Personal favorites list
+- Random slap
+- Brain rot trigger
+- Stats view
+- Unified upload modal
+- Last downloaded sounds
+- 30-minute mute toggle
 
-### 🎤 **Real-time Voice Detection**
-- **Vosk STT engine** for real-time speech recognition
-- Keyword triggers that play sounds or lists
-- Confidence-based filtering to prevent false positives
+### Upload and Sound Ingestion
+- Unified upload modal supports:
+  - direct MP3 file upload
+  - URL ingestion (MP3, TikTok, YouTube, Instagram)
+- Filename sanitization preserves spaces and avoids collisions.
+- Secure MP3 validation before insertion.
+- Periodic MyInstants scraping (background task).
 
-### 🤖 **AI Commentary**
-- Automatic AI commentary using **Gemini** via OpenRouter
-- Listens to voice conversations and provides humorous Portuguese commentary
-- Configurable cooldowns and trigger phrases
+### Voice Connection and STT Resilience
+- `ensure_voice_connected` with per-guild locks and retry logic.
+- Zombie voice client detection/recovery (websocket/socket/latency checks).
+- Reconnection grace period to avoid competing reconnects.
+- Auto-follow users when they switch channels.
+- Auto-disconnect when bot is alone (event-based + safety loop).
+- Startup auto-join of the largest populated voice channel per guild.
 
-### 🎬 **Brain Rot Content**
-- Random Subway Surfers gameplay clips
-- Family Guy clips  
-- Slice All gameplay clips
-- Sends video directly to chat while audio plays
+### Real-Time Keyword Detection (Vosk)
+- Live transcription via Vosk + Discord voice sinks.
+- Keywords stored in DB and reloadable at runtime.
+- Supported keyword actions:
+  - `slap`
+  - `list:<list_name>`
+- Grammar + confidence filtering for better trigger precision.
+- Worker/health checks to restart stalled keyword detection.
 
-### 📊 **Analytics & Web Interface**
-- Flask-powered web dashboard
-- Activity heatmaps (day × hour)
-- Top users and sounds leaderboards
-- Timeline charts and recent activity feed
-- Remote sound playback queue
-- **Status Icons**:
-    - 🤯: Time until next random periodic sound
-    - 👂🏻: AI Commentary (Ventura) cooldown status
-    - 🔍: Next MyInstants sound scraper run
+### TTS, STS, and Voice Isolation
+- `/tts` supports Google and ElevenLabs profiles.
+- `/sts` performs ElevenLabs speech-to-speech conversion.
+- `/isolate` performs ElevenLabs voice isolation.
+- High-resolution timestamped filenames for generated outputs.
+- Loudness normalization in TTS pipeline.
+- ElevenLabs outputs are tagged (`is_elevenlabs=1`) and excluded from normal random/listing flows.
 
-### ⚡ **Event System**
-- Custom sounds for user join/leave events
-- Per-user sound assignments
-- "On This Day" - hear what played exactly one year ago
+### AI Commentary (Ventura Routine)
+- Auto commentary with cooldown scheduling and runtime enable/disable.
+- Captures recent voice audio context and active speakers.
+- LLM provider abstraction with profile config in `bot/data/llm_profiles.json`.
+- Current default profile: OpenRouter (primary + fallback model).
+- Persists short memory in `ai_commentary_memory` for contextual follow-up.
 
----
+### Lists, Events, and Historical Features
+- Sound list CRUD via slash commands.
+- Add/remove sounds with autocomplete and ownership checks.
+- Join/leave event sound assignment UI and paginated event browsing.
+- `/onthisday` returns sounds from 1 month or 1 year ago.
 
-## 🏗️ Architecture
+### Stats and Analytics
+- `/top` leaderboard options:
+  - users
+  - sounds
+  - voice users
+  - voice channels
+- `/yearreview` yearly wrap-up with rank, play habits, streaks, and voice metrics.
+- Voice session analytics backed by `voice_activity` rows from `on_voice_state_update`.
+- Web analytics dashboard includes:
+  - summary cards
+  - top users/sounds
+  - activity heatmap
+  - timeline
+  - recent activity feed
 
-```
-bot/
-├── commands/       # Discord slash commands (Cogs)
-├── downloaders/    # Sound scrapers (MyInstants, yt-dlp)
-├── models/         # Data models/entities
-├── repositories/   # Database access layer (SQLite)
-├── services/       # Business logic layer
-└── ui/             # Discord UI components (Views, Buttons, Modals)
-```
+### Web Soundboard
+- `GET /` shows recent actions, favorites, and all sounds.
+- Queue playback from web via `POST /api/play_sound` into `playback_queue`.
+- Bot background task consumes queued playback requests.
 
-The project follows **SOLID principles** with a clean separation of concerns:
-- **Repository Pattern** for all database access
-- **Service Layer** for business logic
-- **Dependency Injection** throughout
+### Operations and Admin
+- Daily rotating logs in `Logs/YYYY-MM-DD.log` (+ `Logs/errors.log`).
+- Admin slash commands:
+  - `/reboot`
+  - `/lastlogs`
+  - `/commands`
+  - `/ventura`
+  - `/backup`
+- Backup service creates compressed project backups with exclusions.
 
----
+### Background Automations
+- Random periodic sound playback loop.
+- MyInstants scraping loop.
+- Keyword detection health check loop.
+- Voice-activity auto-disconnect safety loop.
+- Web playback queue consumer loop.
 
-## 🚀 Quick Start (Docker)
+## Recent Updates (Last Months)
 
-The fastest way to get the bot running is using **Docker Compose**.
+### Sep-Oct 2025
+- Secure MP3 upload flow added and expanded.
+- Mute feature introduced and evolved to the current 30-minute toggle behavior.
+- TTS voice/profile and thumbnail improvements.
 
-### 1. Prerequisites
-- [Docker](https://docs.docker.com/get-docker/)
-- [Docker Compose](https://docs.docker.com/compose/install/)
+### Dec 2025 to Jan 2026
+- Major architecture refactor into `commands/`, `services/`, `repositories/`, and `ui/` layers.
+- Repository pattern rollout + larger pytest coverage.
+- Real-time Vosk keyword detection and admin keyword management.
+- On This Day feature and yearly review flow added.
+- Dockerized runtime and deployment workflow consolidation.
+- AI commentary routine introduced and then expanded with buffering, memory, and cooldown controls.
+- Multi-guild and voice-connection resilience improvements.
+- Analytics dashboard and backup command added.
 
-### 2. Setup
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/GabrielAgrela/Discord-Brain-Rot.git
-   cd Discord-Brain-Rot
-   ```
+### Feb 2026
+- Image-first playback/message cards and startup announcement cards.
+- Persistent Selenium renderer, image caching, and parallel avatar downloads.
+- Faster audio startup by deferring heavy card/UI operations.
+- Clickable progress button behavior (slap while playing, replay when stopped).
+- Auto-hide/expand playback controls and lazy similar-sounds loading.
+- Pluggable LLM provider architecture with profile-based configuration.
+- Voice session analytics (`voice_activity`) integrated into `/top` and `/yearreview`.
+- Accent border color support for generated image cards.
 
-2. **Configure your environment**
-   Create a `.env` file in the root directory:
-   ```env
-   # Required
-   DISCORD_BOT_TOKEN=your-discord-bot-token
+## Slash Commands (Current)
 
-   # ElevenLabs TTS (Optional)
-   EL_key=your-elevenlabs-api-key
-   EL_voice_id_pt=...
-   
-   # AI Commentary (Optional)
-   OPENROUTER_API_KEY=your-openrouter-api-key
-   ```
+### Sound
+- `/toca message:<sound|random> speed:<0.5-3.0> volume:<0.1-5.0> reverse:<bool>`
+- `/change current:<name> new:<name>`
+- `/lastsounds number:<int>`
+- `/subwaysurfers`
+- `/familyguy`
+- `/slice`
 
-3. **Launch**
-   ```bash
-   # Build and start services in the background
-   docker-compose up --build -d
-   ```
+### TTS / Voice
+- `/tts message:<text> language:<profile> expressive:<bool>`
+- `/sts sound:<sound> char:<ventura|tyson|costa>`
+- `/isolate sound:<sound>`
 
-### 3. Usage
-- **Discord Bot**: Once the container is running and logs show "Bot is ready", it will respond to commands in your server.
-- **Web Dashboard**: Accessible at [http://localhost:8080](http://localhost:8080).
+### Lists
+- `/createlist list_name:<name>`
+- `/addtolist sound:<sound> list_name:<list>`
+- `/removefromlist sound:<sound> list_name:<list>`
+- `/deletelist list_name:<list>`
+- `/showlist list_name:<list>`
 
-### 4. Management
+### Events
+- `/addevent username:<user> event:<join|leave> sound:<sound>`
+- `/listevents username:<optional>`
+
+### Keywords
+- `/keyword add keyword:<word> action:<slap|list> list_name:<optional>`
+- `/keyword remove keyword:<word>`
+- `/keyword list`
+
+### Stats
+- `/top option:<users|sounds|voice users|voice channels> number:<int> numberdays:<int>`
+- `/yearreview user:<optional> year:<optional>`
+- `/sendyearreview user:<required> year:<optional>` (admin-gated placeholder DM flow)
+
+### Admin
+- `/reboot`
+- `/lastlogs lines:<int> service:<optional>`
+- `/commands`
+- `/ventura state:<Enable|Disable>`
+- `/backup`
+
+### Historical
+- `/onthisday period:<1 year ago|1 month ago>`
+
+## Web Routes
+
+- `GET /`
+- `GET /analytics`
+- `GET /api/actions`
+- `GET /api/favorites`
+- `GET /api/all_sounds`
+- `POST /api/play_sound`
+- `GET /api/analytics/summary`
+- `GET /api/analytics/top_users`
+- `GET /api/analytics/top_sounds`
+- `GET /api/analytics/activity_heatmap`
+- `GET /api/analytics/activity_timeline`
+- `GET /api/analytics/recent_activity`
+
+## Runtime Requirements
+
+- Docker + Docker Compose (recommended)
+- FFmpeg
+- Chromium + chromedriver (image rendering/scraping)
+- Vosk model at `Data/models/vosk-model-small-pt-0.3`
+
+## Environment Variables
+
+### Required
+- `DISCORD_BOT_TOKEN`
+
+### Core Optional
+- `FFMPEG_PATH` (local run default: `ffmpeg`; Docker sets `/usr/bin/ffmpeg`)
+- `CHROMEDRIVER_PATH` (Docker sets `/usr/bin/chromedriver`)
+- `ENABLE_VENTURA` (`true`/`false`, default `true`)
+
+### ElevenLabs
+- `EL_key`
+- `EL_voice_id_pt`
+- `EL_voice_id_en`
+- `EL_voice_id_costa`
+
+### LLM Providers
+- `OPENROUTER_API_KEY` (default profile path)
+- `OPENAI_API_KEY` (if using OpenAI profile)
+- `ANTHROPIC_API_KEY` (if using Anthropic profile)
+
+### Optional TTS Loudness Tuning
+- `TTS_LUFS_TARGET`
+- `TTS_TP_LIMIT`
+- `TTS_LRA_TARGET`
+
+## Quick Start (Docker)
+
 ```bash
-# View logs
-docker-compose logs -f
+git clone https://github.com/GabrielAgrela/Discord-Brain-Rot.git
+cd Discord-Brain-Rot
 
-# Stop and remove containers
+# Create .env with at least DISCORD_BOT_TOKEN
+docker-compose up --build -d
+```
+
+Useful commands:
+
+```bash
+# Follow bot logs
+docker-compose logs -f bot
+
+# Follow web logs
+docker-compose logs -f web
+
+# Restart services
+docker-compose restart
+
+# Stop everything
 docker-compose down
 ```
 
----
+## Verify, Test, Deploy
 
----
-
-## 📋 Commands
-
-### Sound Playback
-| Command | Description |
-|---------|-------------|
-| `/toca [sound]` | Play a sound (use `random` for random) |
-| `/toca [sound] speed:[0.5-3.0] volume:[0.1-5.0] reverse:[true/false]` | Play with effects |
-| `/lastsounds [n]` | Show last N downloaded sounds |
-| `/change [current] [new]` | Rename a sound |
-
-### Text-to-Speech
-| Command | Description |
-|---------|-------------|
-| `/tts [message] [language]` | Generate TTS audio |
-| `/sts [sound] [character]` | Convert sound to different voice |
-| `/isolate [sound]` | Isolate vocals from audio |
-
-### Sound Lists
-| Command | Description |
-|---------|-------------|
-| `/createlist [name]` | Create a personal sound list |
-| `/addtolist [sound] [list]` | Add sound to a list |
-| `/removefromlist [sound] [list]` | Remove sound from list |
-| `/deletelist [name]` | Delete a list |
-| `/showlist [name]` | Display list with play buttons |
-
-### Keywords
-| Command | Description |
-|---------|-------------|
-| `/keyword add [word] [action]` | Add trigger keyword |
-| `/keyword remove [word]` | Remove keyword |
-| `/keyword list` | Show all keywords |
-
-### Events
-| Command | Description |
-|---------|-------------|
-| `/addevent [user] [join/leave] [sound]` | Set entrance/exit sound |
-| `/listevents [user]` | Show user's event sounds |
-| `/onthisday` | Hear what played one year ago today |
-
-### Statistics
-| Command | Description |
-|---------|-------------|
-| `/top users [n] [days]` | Top users leaderboard |
-| `/top sounds [n] [days]` | Top sounds leaderboard |
-
-### Brain Rot
-| Command | Description |
-|---------|-------------|
-| `/subwaysurfers` | Random Subway Surfers clip |
-| `/familyguy` | Random Family Guy clip |
-| `/slice` | Random Slice All clip |
-
-### Admin
-| Command | Description |
-|---------|-------------|
-| `/reboot` | Reboot host machine |
-| `/lastlogs [n]` | View service logs |
-| `/commands` | Show recent bot commands from logs |
-
----
-
-## 📱 Adding Sounds via DM
-
-Send the bot a DM with a video URL:
-```
-https://www.tiktok.com/@user/video/123456789
-```
-
-Optional parameters:
-```
-<url> [time_limit_seconds] [custom_filename]
-```
-
-Supported platforms: **TikTok**, **Instagram Reels**, **YouTube**
-
----
-
-## 🧪 Testing
+Preferred one-shot command:
 
 ```bash
-# Run all tests
-pytest tests/ -v
-
-# Run with coverage
-pytest tests/ --cov=bot --cov-report=term
+./scripts/verify_and_deploy.sh
 ```
 
----
+It runs:
+1. `pytest`
+2. `docker-compose restart`
+3. `docker-compose ps`
+4. recent bot logs
 
-## 🗂️ Project Structure
+## Local Development (Without Docker)
 
+```bash
+./venv/bin/python -m pytest -q tests/
+./venv/bin/python PersonalGreeter.py
+./venv/bin/python WebPage.py
 ```
+
+## Project Layout
+
+```text
 Discord-Brain-Rot/
-├── PersonalGreeter.py    # Main entry point
-├── WebPage.py            # Flask web interface
-├── config.py             # Centralized configuration
-├── bot/                  # Core bot package
-│   ├── commands/         # Slash command Cogs
-│   ├── services/         # Business logic
-│   ├── repositories/     # Data access
-│   ├── models/           # Domain entities
-│   ├── ui/               # Discord components
-│   └── downloaders/      # Sound scrapers
-├── Sounds/               # Sound files (auto-populated)
-├── Data/                 # Video clips (SubwaySurfers, FamilyGuy, etc.)
-├── Downloads/            # Temporary download directory
-├── Logs/                 # Daily log files
-└── tests/                # Test suite
+├── PersonalGreeter.py
+├── WebPage.py
+├── config.py
+├── bot/
+│   ├── commands/
+│   ├── services/
+│   ├── repositories/
+│   ├── models/
+│   ├── ui/
+│   └── downloaders/
+├── templates/
+├── static/
+├── Data/
+├── Sounds/
+├── Downloads/
+├── Logs/
+├── Debug/
+└── tests/
 ```
 
----
+## Notes
 
-## 🔧 Configuration
+- Bot auto-messaging expects a text channel named `bot`.
+- `POST /api/play_sound` currently uses a fixed guild ID constant in `WebPage.py`.
+- `templates/sound_card.html` is runtime-critical and currently gitignored.
 
-Key settings in `config.py`:
+## License
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `DEFAULT_SPEED` | 1.0 | Default playback speed |
-| `DEFAULT_VOLUME` | 1.0 | Default volume |
-| `MIN_SPEED` / `MAX_SPEED` | 0.5 / 3.0 | Speed limits |
-| `MIN_VOLUME` / `MAX_VOLUME` | 0.1 / 5.0 | Volume limits |
-| `DEFAULT_MUTE_DURATION` | 1800 | Mute duration (seconds) |
-
----
-
-## 📄 License
-
-[MIT](https://choosealicense.com/licenses/mit/)
-
----
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Follow the architecture patterns in the codebase
-4. Write tests for new functionality
-5. Submit a Pull Request
-
----
-
-<p align="center">
-  <i>Made with 🧠 and lots of brain rot</i>
-</p>
+MIT

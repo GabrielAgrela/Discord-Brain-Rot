@@ -57,6 +57,17 @@ def db_connection():
             sound TEXT NOT NULL
         )
     """)
+
+    # Create voice_activity table
+    cursor.execute("""
+        CREATE TABLE voice_activity (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL,
+            channel_id TEXT NOT NULL,
+            join_time TEXT NOT NULL,
+            leave_time TEXT
+        )
+    """)
     
     # Create keywords table
     cursor.execute("""
@@ -179,6 +190,21 @@ def stats_repository(db_connection):
     BaseRepository.set_shared_connection(db_connection, ":memory:")
     
     repo = StatsRepository(use_shared=True)
+    yield repo
+    
+    BaseRepository._shared_connection = None
+    BaseRepository._shared_db_path = None
+
+
+@pytest.fixture
+def voice_activity_repository(db_connection):
+    """Create a VoiceActivityRepository with the test database."""
+    from bot.repositories.voice_activity import VoiceActivityRepository
+    from bot.repositories.base import BaseRepository
+    
+    BaseRepository.set_shared_connection(db_connection, ":memory:")
+    
+    repo = VoiceActivityRepository(use_shared=True)
     yield repo
     
     BaseRepository._shared_connection = None

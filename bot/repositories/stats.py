@@ -7,6 +7,7 @@ import sqlite3
 from datetime import datetime
 
 from bot.repositories.base import BaseRepository
+from bot.repositories.voice_activity import VoiceActivityRepository
 
 
 class StatsRepository(BaseRepository):
@@ -295,6 +296,7 @@ class StatsRepository(BaseRepository):
         stats['total_active_days'] = len(active_dates)
         
         # Calculate longest streak
+        longest_streak = 0
         if active_dates:
             longest_streak = current_streak = 1
             prev_date = None
@@ -307,8 +309,68 @@ class StatsRepository(BaseRepository):
                 longest_streak = max(longest_streak, current_streak)
                 prev_date = current_date
         stats['longest_streak'] = longest_streak
+
+        # Voice activity stats
+        voice_metrics = VoiceActivityRepository().get_user_voice_metrics(
+            username=username,
+            period_start=year_start,
+            period_end=year_end,
+        )
+        stats['voice_joins'] = voice_metrics['joins']
+        stats['voice_leaves'] = voice_metrics['leaves']
+
+        total_voice_hours = voice_metrics['total_seconds'] / 3600.0
+        stats['total_voice_hours'] = round(total_voice_hours, 1)
+
+        longest_session_minutes = int(round(voice_metrics['longest_seconds'] / 60.0))
+        stats['longest_session_minutes'] = longest_session_minutes
+        stats['longest_session_hours'] = round(longest_session_minutes / 60.0, 1) if longest_session_minutes > 0 else 0
         
         return stats
+
+    def get_top_voice_users(self, days: int = 7, limit: int = 10) -> List[Dict[str, Any]]:
+        """
+        Get users ranked by total voice session time.
+
+        Args:
+            days: Number of days to look back (0 = all-time).
+            limit: Maximum number of users.
+
+        Returns:
+            List of dictionaries with username, total_seconds, total_hours, and session_count.
+        """
+        voice_rows = VoiceActivityRepository().get_top_users_by_voice_time(days=days, limit=limit)
+        return [
+            {
+                "username": username,
+                "total_seconds": total_seconds,
+                "total_hours": round(total_seconds / 3600.0, 2),
+                "session_count": session_count,
+            }
+            for username, total_seconds, session_count in voice_rows
+        ]
+
+    def get_top_voice_channels(self, days: int = 7, limit: int = 10) -> List[Dict[str, Any]]:
+        """
+        Get channels ranked by total voice session time.
+
+        Args:
+            days: Number of days to look back (0 = all-time).
+            limit: Maximum number of channels.
+
+        Returns:
+            List of dictionaries with channel_id, total_seconds, total_hours, and session_count.
+        """
+        voice_rows = VoiceActivityRepository().get_top_channels_by_voice_time(days=days, limit=limit)
+        return [
+            {
+                "channel_id": channel_id,
+                "total_seconds": total_seconds,
+                "total_hours": round(total_seconds / 3600.0, 2),
+                "session_count": session_count,
+            }
+            for channel_id, total_seconds, session_count in voice_rows
+        ]
     
     # ===== Analytics Dashboard Methods =====
     
@@ -395,7 +457,9 @@ class StatsRepository(BaseRepository):
             'total_sounds': 0,
             'total_plays': 0,
             'active_users': 0,
-            'sounds_this_week': 0
+            'sounds_this_week': 0,
+            'total_voice_hours': 0.0,
+            'active_voice_users': 0,
         }
         
         # Total sounds
@@ -441,6 +505,13 @@ class StatsRepository(BaseRepository):
             (week_ago,)
         )
         stats['sounds_this_week'] = row['count'] if row else 0
+
+        # Voice totals
+        top_voice_users = self.get_top_voice_users(days=days, limit=1000)
+        stats['active_voice_users'] = len(top_voice_users)
+        stats['total_voice_hours'] = round(
+            sum(user['total_seconds'] for user in top_voice_users) / 3600.0,
+            1,
+        )
         
         return stats
-

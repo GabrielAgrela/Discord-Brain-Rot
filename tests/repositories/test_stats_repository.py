@@ -84,3 +84,140 @@ class TestStatsRepositoryEdgeCases:
         
         assert isinstance(stats, dict)
         assert stats["total_sounds"] == 0
+
+
+class TestStatsRepositoryVoiceAnalytics:
+    """Voice analytics tests for StatsRepository."""
+
+    def test_get_user_year_stats_populates_voice_metrics(
+        self, stats_repository, db_connection
+    ):
+        """Test year stats include voice session aggregates."""
+        cursor = db_connection.cursor()
+
+        rows = [
+            ("user1", "10", "2025-01-01 10:00:00", "2025-01-01 11:00:00"),  # 1h
+            ("user1", "10", "2025-06-01 12:00:00", "2025-06-01 14:00:00"),  # 2h
+            ("user1", "10", "2024-12-31 23:00:00", "2025-01-01 00:30:00"),  # 0.5h overlap
+        ]
+        cursor.executemany(
+            """
+            INSERT INTO voice_activity (username, channel_id, join_time, leave_time)
+            VALUES (?, ?, ?, ?)
+            """,
+            rows,
+        )
+        db_connection.commit()
+
+        stats = stats_repository.get_user_year_stats("user1", 2025)
+
+        assert stats["voice_joins"] == 2
+        assert stats["voice_leaves"] == 3
+        assert stats["total_voice_hours"] == 3.5
+        assert stats["longest_session_minutes"] == 120
+        assert stats["longest_session_hours"] == 2.0
+
+    def test_get_top_voice_users(self, stats_repository, db_connection):
+        """Test top voice users mapping and ordering."""
+        now = datetime.now().replace(microsecond=0)
+        cursor = db_connection.cursor()
+
+        rows = [
+            (
+                "alice",
+                "10",
+                (now - timedelta(hours=4)).strftime("%Y-%m-%d %H:%M:%S"),
+                (now - timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S"),
+            ),  # 2h
+            (
+                "bob",
+                "10",
+                (now - timedelta(hours=3)).strftime("%Y-%m-%d %H:%M:%S"),
+                (now - timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S"),
+            ),  # 1h
+        ]
+        cursor.executemany(
+            """
+            INSERT INTO voice_activity (username, channel_id, join_time, leave_time)
+            VALUES (?, ?, ?, ?)
+            """,
+            rows,
+        )
+        db_connection.commit()
+
+        top_users = stats_repository.get_top_voice_users(days=7, limit=5)
+
+        assert len(top_users) == 2
+        assert top_users[0]["username"] == "alice"
+        assert top_users[1]["username"] == "bob"
+        assert top_users[0]["total_hours"] > top_users[1]["total_hours"]
+
+    def test_get_top_voice_channels(self, stats_repository, db_connection):
+        """Test top voice channels mapping and ordering."""
+        now = datetime.now().replace(microsecond=0)
+        cursor = db_connection.cursor()
+
+        rows = [
+            (
+                "alice",
+                "100",
+                (now - timedelta(hours=5)).strftime("%Y-%m-%d %H:%M:%S"),
+                (now - timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S"),
+            ),  # 3h
+            (
+                "bob",
+                "200",
+                (now - timedelta(hours=4)).strftime("%Y-%m-%d %H:%M:%S"),
+                (now - timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S"),
+            ),  # 2h
+        ]
+        cursor.executemany(
+            """
+            INSERT INTO voice_activity (username, channel_id, join_time, leave_time)
+            VALUES (?, ?, ?, ?)
+            """,
+            rows,
+        )
+        db_connection.commit()
+
+        top_channels = stats_repository.get_top_voice_channels(days=7, limit=5)
+
+        assert len(top_channels) == 2
+        assert top_channels[0]["channel_id"] == "100"
+        assert top_channels[1]["channel_id"] == "200"
+        assert top_channels[0]["total_hours"] > top_channels[1]["total_hours"]
+
+    def test_get_summary_stats_includes_voice_totals(
+        self, stats_repository, db_connection
+    ):
+        """Test summary stats include voice user and hour totals."""
+        now = datetime.now().replace(microsecond=0)
+        cursor = db_connection.cursor()
+
+        rows = [
+            (
+                "alice",
+                "10",
+                (now - timedelta(hours=3)).strftime("%Y-%m-%d %H:%M:%S"),
+                (now - timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S"),
+            ),  # 1h
+            (
+                "bob",
+                "10",
+                (now - timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S"),
+                (now - timedelta(hours=1, minutes=30)).strftime("%Y-%m-%d %H:%M:%S"),
+            ),  # 0.5h
+        ]
+        cursor.executemany(
+            """
+            INSERT INTO voice_activity (username, channel_id, join_time, leave_time)
+            VALUES (?, ?, ?, ?)
+            """,
+            rows,
+        )
+        db_connection.commit()
+
+        summary = stats_repository.get_summary_stats(days=7)
+
+        assert summary["active_voice_users"] == 2
+        assert summary["total_voice_hours"] == 1.5
