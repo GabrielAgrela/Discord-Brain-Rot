@@ -17,39 +17,14 @@ class ReplayButton(Button):
 
     async def callback(self, interaction):
         print(f"DEBUG: ReplayButton.callback called by {interaction.user.name} for {self.audio_file}")
-        try:
-            await interaction.response.defer()
-            channel = interaction.user.voice.channel if interaction.user.voice else None
-            if not channel:
-                channel = self.bot_behavior._audio_service.get_largest_voice_channel(interaction.guild)
-                
-            if channel:
-                # Get avatar URL for the card
-                avatar = getattr(interaction.user, "display_avatar", None)
-                requester_avatar_url = str(avatar.url) if avatar else None
-                
-                # If STS, we might want the STS thumbnail too
-                sts_thumbnail_url = None
-                if self.sts_char:
-                    from config import TTS_PROFILES
-                    profile = TTS_PROFILES.get(self.sts_char, {})
-                    sts_thumbnail_url = profile.get("thumbnail")
-
-                asyncio.create_task(self.bot_behavior._audio_service.play_audio(
-                    channel, self.audio_file, interaction.user.name,
-                    is_tts=self.is_tts,
-                    original_message=self.original_message,
-                    sts_char=self.sts_char,
-                    requester_avatar_url=requester_avatar_url,
-                    sts_thumbnail_url=sts_thumbnail_url
-                ))
-                sound_data = Database().get_sounds_by_similarity(self.audio_file)
-                if sound_data and sound_data[0]:
-                    Database().insert_action(interaction.user.name, "replay_sound", sound_data[0][0]['id'])
-            else:
-                await interaction.followup.send("No voice channel available! 😭", ephemeral=True)
-        except Exception as e:
-            print(f"[ReplayButton] Error in callback: {e}")
+        await replay_sound(
+            bot_behavior=self.bot_behavior,
+            interaction=interaction,
+            audio_file=self.audio_file,
+            is_tts=self.is_tts,
+            original_message=self.original_message,
+            sts_char=self.sts_char
+        )
  
 class STSButton(Button):
     def __init__(self, bot_behavior, audio_file, char, **kwargs):
@@ -270,27 +245,112 @@ class PlaySlapButton(Button):
         self.bot_behavior = bot_behavior
 
     async def callback(self, interaction):
-        try:
-            await interaction.response.defer()
-            # Get a random slap sound from the database
-            slap_sounds = Database().get_sounds(slap=True, num_sounds=100)
-            if slap_sounds:
-                random_slap = random.choice(slap_sounds)
-                # Use fast silent slap path - stops current audio, plays immediately, no embed
-                channel = self.bot_behavior._audio_service.get_user_voice_channel(interaction.guild, interaction.user.name)
-                if not channel:
-                    channel = self.bot_behavior._audio_service.get_largest_voice_channel(interaction.guild)
-                if channel:
-                    asyncio.create_task(self.bot_behavior._audio_service.play_slap(
-                        channel, random_slap[2], interaction.user.name
-                    ))
-                    Database().insert_action(interaction.user.name, "play_slap", random_slap[0])
-                else:
-                    await interaction.followup.send("Join a voice channel first! 👋", ephemeral=True)
+        await play_random_slap(self.bot_behavior, interaction)
+
+
+async def play_random_slap(bot_behavior, interaction: discord.Interaction):
+    """Play a random slap sound using the standard slap button flow."""
+    try:
+        await interaction.response.defer()
+        # Get a random slap sound from the database
+        slap_sounds = Database().get_sounds(slap=True, num_sounds=100)
+        if slap_sounds:
+            random_slap = random.choice(slap_sounds)
+            # Use fast silent slap path - stops current audio, plays immediately, no embed
+            channel = bot_behavior._audio_service.get_user_voice_channel(interaction.guild, interaction.user.name)
+            if not channel:
+                channel = bot_behavior._audio_service.get_largest_voice_channel(interaction.guild)
+            if channel:
+                asyncio.create_task(bot_behavior._audio_service.play_slap(
+                    channel, random_slap[2], interaction.user.name
+                ))
+                Database().insert_action(interaction.user.name, "play_slap", random_slap[0])
             else:
-                await interaction.followup.send("No slap sounds found in the database!", ephemeral=True, delete_after=5)
-        except Exception as e:
-            print(f"[PlaySlapButton] Error in callback: {e}")
+                await interaction.followup.send("Join a voice channel first! 👋", ephemeral=True)
+        else:
+            await interaction.followup.send("No slap sounds found in the database!", ephemeral=True, delete_after=5)
+    except Exception as e:
+        print(f"[PlaySlapButton] Error in callback: {e}")
+
+
+async def replay_sound(
+    bot_behavior,
+    interaction: discord.Interaction,
+    audio_file: str,
+    is_tts: bool = False,
+    original_message: str = "",
+    sts_char: str = None
+):
+    """Replay a specific sound using the same behavior as ReplayButton."""
+    try:
+        await interaction.response.defer()
+        channel = interaction.user.voice.channel if interaction.user.voice else None
+        if not channel:
+            channel = bot_behavior._audio_service.get_largest_voice_channel(interaction.guild)
+
+        if channel:
+            # Get avatar URL for the card
+            avatar = getattr(interaction.user, "display_avatar", None)
+            requester_avatar_url = str(avatar.url) if avatar else None
+
+            # If STS, include the STS thumbnail
+            sts_thumbnail_url = None
+            if sts_char:
+                from config import TTS_PROFILES
+                profile = TTS_PROFILES.get(sts_char, {})
+                sts_thumbnail_url = profile.get("thumbnail")
+
+            asyncio.create_task(bot_behavior._audio_service.play_audio(
+                channel, audio_file, interaction.user.name,
+                is_tts=is_tts,
+                original_message=original_message,
+                sts_char=sts_char,
+                requester_avatar_url=requester_avatar_url,
+                sts_thumbnail_url=sts_thumbnail_url
+            ))
+            sound_data = Database().get_sounds_by_similarity(audio_file)
+            if sound_data and sound_data[0]:
+                Database().insert_action(interaction.user.name, "replay_sound", sound_data[0][0]['id'])
+        else:
+            await interaction.followup.send("No voice channel available! 😭", ephemeral=True)
+    except Exception as e:
+        print(f"[ReplayButton] Error in callback: {e}")
+
+
+class ProgressSlapButton(Button):
+    """Progress bar button that keeps color and triggers a slap when clicked."""
+    def __init__(
+        self,
+        bot_behavior,
+        audio_file: str,
+        is_tts: bool = False,
+        original_message: str = "",
+        sts_char: str = None,
+        **kwargs
+    ):
+        super().__init__(**kwargs)
+        self.bot_behavior = bot_behavior
+        self.audio_file = audio_file
+        self.is_tts = is_tts
+        self.original_message = original_message
+        self.sts_char = sts_char
+
+    async def callback(self, interaction: discord.Interaction):
+        label = self.label or ""
+        is_stopped_state = label.startswith(("✅", "⏭️", "👋", "⏹️", "⏸️"))
+
+        if is_stopped_state:
+            await replay_sound(
+                bot_behavior=self.bot_behavior,
+                interaction=interaction,
+                audio_file=self.audio_file,
+                is_tts=self.is_tts,
+                original_message=self.original_message,
+                sts_char=self.sts_char
+            )
+            return
+
+        await play_random_slap(self.bot_behavior, interaction)
 
 class AssignUserEventButton(Button):
     def __init__(self, bot_behavior, audio_file, emoji="👤", style=discord.ButtonStyle.primary, **kwargs):

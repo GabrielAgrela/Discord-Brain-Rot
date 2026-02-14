@@ -387,8 +387,32 @@ class MessageService:
         except Exception as e:
             print(f"[MessageService] Error deleting control messages: {e}")
 
+    async def disable_controls_message(self, disable_all: bool = True):
+        """Find and disable control messages in the bot channel history."""
+        channel = self.get_bot_channel()
+        if not channel:
+            return
+
+        try:
+            if disable_all:
+                async for message in channel.history(limit=100):
+                    if message.components and not message.embeds:
+                        try:
+                            first_label = message.components[0].children[0].label or ""
+                        except Exception:
+                            first_label = ""
+
+                        if "Play Random" in first_label:
+                            await self._disable_message_components(message)
+            else:
+                if self._controls_message:
+                    await self._disable_message_components(self._controls_message)
+                    self._controls_message = None
+        except Exception as e:
+            print(f"[MessageService] Error disabling control messages: {e}")
+
     async def clean_buttons(self, count=5):
-        """Remove components/buttons from recent messages."""
+        """Disable components/buttons from recent messages."""
         channel = self.get_bot_channel()
         if not channel:
             return
@@ -396,10 +420,25 @@ class MessageService:
         try:
             async for message in channel.history(limit=count):
                 if message.components:
-                    is_sound_msg = message.embeds or (message.attachments and any(a.filename.endswith('.png') for a in message.attachments))
-                    if is_sound_msg:
-                        await message.edit(view=None)
-                    else:
-                        await message.delete()
+                    await self._disable_message_components(message)
         except Exception as e:
             print(f"[MessageService] Error cleaning buttons: {e}")
+
+    async def _disable_message_components(self, message: discord.Message) -> bool:
+        """Disable all interactive items in a message view."""
+        try:
+            view = discord.ui.View.from_message(message)
+            updated = False
+            for item in view.children:
+                if hasattr(item, "disabled") and not item.disabled:
+                    item.disabled = True
+                    updated = True
+
+            if not updated:
+                return True
+
+            await message.edit(view=view)
+            return True
+        except Exception as e:
+            print(f"[MessageService] Error disabling message components: {e}")
+            return False

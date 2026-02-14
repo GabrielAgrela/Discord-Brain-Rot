@@ -51,13 +51,23 @@ class SoundBeingPlayedView(View):
             ReplayButton, FavoriteButton, 
             SlapButton, ChangeSoundNameButton,
             AssignUserEventButton, ToggleControlsButton,
+            ProgressSlapButton,
             SendControlsButton
         )
         from bot.ui.selects import STSCharacterSelect, AddToListSelect
 
         # Row 0: Progress Button + Toggle Button + Remote Button
         current_label = self.progress_button.label if self.progress_button else self.initial_progress_label
-        self.progress_button = discord.ui.Button(style=discord.ButtonStyle.primary, label=current_label, disabled=True, row=0)
+        self.progress_button = ProgressSlapButton(
+            bot_behavior=self.bot_behavior,
+            audio_file=self.audio_file,
+            is_tts=self.is_tts,
+            original_message=self.original_message,
+            sts_char=self.sts_char,
+            style=discord.ButtonStyle.primary,
+            label=current_label,
+            row=0
+        )
         self.add_item(self.progress_button)
         
         toggle_emoji = "🔼" if self.show_controls else "🔽"
@@ -151,13 +161,23 @@ class SoundBeingPlayedWithSuggestionsView(View):
             ReplayButton, FavoriteButton, 
             SlapButton, ChangeSoundNameButton,
             AssignUserEventButton, ToggleControlsButton,
+            ProgressSlapButton,
             SendControlsButton
         )
         from bot.ui.selects import STSCharacterSelect, SimilarSoundsSelect, AddToListSelect
 
         # Row 0: Progress Button + Toggle Button + Remote Button
         current_label = self.progress_button.label if self.progress_button else self.initial_progress_label
-        self.progress_button = discord.ui.Button(style=discord.ButtonStyle.primary, label=current_label, disabled=True, row=0)
+        self.progress_button = ProgressSlapButton(
+            bot_behavior=self.bot_behavior,
+            audio_file=self.audio_file,
+            is_tts=self.is_tts,
+            original_message=self.original_message,
+            sts_char=self.sts_char,
+            style=discord.ButtonStyle.primary,
+            label=current_label,
+            row=0
+        )
         self.add_item(self.progress_button)
         
         toggle_emoji = "🔼" if self.show_controls else "🔽"

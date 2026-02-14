@@ -182,7 +182,7 @@ async def on_ready():
 
     print(f"We have logged in as {bot.user}")
     #bot.loop.create_task(behavior.check_if_in_game())
-    await behavior.delete_controls_message()
+    await behavior.disable_controls_message()
     await behavior.clean_buttons()
     # await behavior.send_controls(force=True)
     

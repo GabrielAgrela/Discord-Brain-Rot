@@ -207,6 +207,10 @@ class BotBehavior:
     async def delete_controls_message(self, delete_all=True):
         return await self._message_service.delete_controls_message(delete_all)
 
+    async def disable_controls_message(self, disable_all: bool = True):
+        """Disable control message components instead of deleting messages."""
+        return await self._message_service.disable_controls_message(disable_all)
+
     async def delete_last_message(self, count=1):
         bot_channel = await self.get_bot_channel()
         if bot_channel:
@@ -339,5 +343,4 @@ class BotBehavior:
 
     async def perform_backup(self, interaction):
         return await self._backup_service.perform_backup(interaction)
-
 
