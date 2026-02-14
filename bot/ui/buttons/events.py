@@ -9,16 +9,17 @@ class ConfirmUserEventButton(Button):
         self.audio_file = audio_file
 
     async def callback(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True) 
-
+        await interaction.response.defer(ephemeral=True)
         selected_event_type = getattr(self.view, 'selected_event_type', None)
         selected_user_id_for_db = getattr(self.view, 'selected_user_id', None) 
 
         if not selected_event_type:
-            await interaction.followup.send("Please select an event type.", ephemeral=True)
+            if self.view.message_to_edit:
+                await self.view.message_to_edit.edit(content="Please select an event type.", view=self.view)
             return
         if not selected_user_id_for_db:
-            await interaction.followup.send("Please select a user.", ephemeral=True)
+            if self.view.message_to_edit:
+                await self.view.message_to_edit.edit(content="Please select a user.", view=self.view)
             return
 
         acting_user_full_name = f"{interaction.user.name}#{interaction.user.discriminator}"
@@ -27,40 +28,29 @@ class ConfirmUserEventButton(Button):
 
         if not (is_self_assign or is_admin):
             user_display_name_target = selected_user_id_for_db.split('#')[0]
-            await interaction.followup.send(
-                f"You do not have permission to assign an event for {user_display_name_target}. Admins can assign to any user, and users can assign to themselves.",
-                ephemeral=True
-            )
-            if self.view.message_to_edit: 
-                try:
-                    await self.view.message_to_edit.edit(content=f"Permission denied for event assignment to {user_display_name_target}.", view=None)
-                except:
-                    pass
+            if self.view.message_to_edit:
+                await self.view.message_to_edit.edit(
+                    content=(
+                        f"You do not have permission to assign an event for {user_display_name_target}. "
+                        "Admins can assign to any user, and users can assign to themselves."
+                    ),
+                    view=None
+                )
             return
 
         sound_name = self.audio_file.split('/')[-1].replace('.mp3', '')
         try:
-            # toggle returns True if added, False if removed
-            is_added = Database().toggle_user_event_sound(selected_user_id_for_db, selected_event_type, sound_name)
-
-            action_message = "Added" if is_added else "Removed"
-            user_display_name = selected_user_id_for_db.split('#')[0]
-            final_content_message = f"{action_message} '{sound_name}' as {selected_event_type} sound for {user_display_name}."
-            if self.view.message_to_edit: 
-                try:
-                    await self.view.message_to_edit.edit(content=final_content_message, view=None)
-                except:
-                    pass
+            Database().toggle_user_event_sound(selected_user_id_for_db, selected_event_type, sound_name)
+            if self.view.message_to_edit:
+                await self.view.message_to_edit.edit(content=self.view._build_message_content(), view=self.view)
         except Exception as e:
             print(f"Error toggling event sound: {e}")
-            await interaction.followup.send("Failed to update event sound. Please try again.", ephemeral=True)
-            user_display_name = selected_user_id_for_db.split('#')[0]
-            final_content_message = f"Failed to process event assignment for '{sound_name}' to {user_display_name}."
-            if self.view.message_to_edit: 
-                try:
-                    await self.view.message_to_edit.edit(content=final_content_message, view=None)
-                except:
-                    pass
+            user_display_name = selected_user_id_for_db.split('#')[0] if selected_user_id_for_db else "user"
+            if self.view.message_to_edit:
+                await self.view.message_to_edit.edit(
+                    content=f"Failed to process event assignment for '{sound_name}' to {user_display_name}.",
+                    view=self.view
+                )
 
 class CancelButton(Button):
     def __init__(self, **kwargs):
@@ -68,11 +58,8 @@ class CancelButton(Button):
 
     async def callback(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
-        if self.view.message_to_edit: 
-            try:
-                await self.view.message_to_edit.delete()
-            except:
-                pass
+        if self.view.message_to_edit:
+            await self.view.message_to_edit.edit(content="Event assignment cancelled.", view=None)
 
 class DeleteEventButton(Button):
     def __init__(self, bot_behavior, user_id, event, sound, **kwargs):

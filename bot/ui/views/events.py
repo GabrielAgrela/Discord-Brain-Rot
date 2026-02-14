@@ -50,10 +50,10 @@ class UserEventSelectView(View):
         self.add_item(self.confirm_button)
         self.add_item(self.cancel_button)
 
-    async def get_initial_message_content(self):
+    def _build_message_content(self) -> str:
+        """Build the event-assignment message content from current selections."""
         base = f"Assigning event for sound: **{self.sound_name_no_ext}**\n"
         if self.selected_user_id and self.selected_event_type:
-            # Check database to show ADD or REMOVE (same logic as update_display_message)
             is_set = Database().get_user_event_sound(self.selected_user_id, self.selected_event_type, self.sound_name_no_ext)
             action_text = "REMOVE" if is_set else "ADD"
             user_display = self.selected_user_id.split('#')[0]
@@ -63,38 +63,20 @@ class UserEventSelectView(View):
             base += f"User **{user_display}** is pre-selected. Select an event type to continue."
         return base
 
+    async def get_initial_message_content(self):
+        """Get initial message content for the event assignment view."""
+        return self._build_message_content()
+
     async def update_display_message(self, interaction_from_select: discord.Interaction):
-        """Update the message content based on current selections.
-        
-        FIX: Must defer the interaction to prevent 'interaction failed' error.
-        Discord requires every interaction to receive a response within 3 seconds.
-        """
-        # CRITICAL: Defer first to acknowledge the interaction
-        if not interaction_from_select.response.is_done():
-            await interaction_from_select.response.defer()
-        
-        new_content = f"Assigning event for sound: **{self.sound_name_no_ext}**\n"
-        
-        if self.selected_event_type and self.selected_user_id:
-            is_set = Database().get_user_event_sound(self.selected_user_id, self.selected_event_type, self.sound_name_no_ext)
-            action_preview_text = "REMOVE" if is_set else "ADD"
-            user_display_name_target = self.selected_user_id.split('#')[0]
-            
-            new_content += (f"\n **{action_preview_text}** this sound "
-                            f"as a **{self.selected_event_type}** event for **{user_display_name_target}**.")
-        else:
-            if not self.selected_event_type and not self.selected_user_id:
-                 new_content += "Please select an event type and a user."
-            elif not self.selected_event_type:
-                new_content += "Please select an event type."
-            elif not self.selected_user_id:
-                new_content += "Please select a user."
+        """Update the assignment message to match the current toggle state."""
+        new_content = self._build_message_content()
+        for option in self.event_type_select.options:
+            option.default = (self.selected_event_type is not None and option.value == self.selected_event_type)
         
         try:
+            if not interaction_from_select.response.is_done():
+                await interaction_from_select.response.defer()
             if self.message_to_edit:
-                for option in self.event_type_select.options:
-                    option.default = (self.selected_event_type is not None and option.value == self.selected_event_type)
-                
                 await self.message_to_edit.edit(content=new_content, view=self)
         except Exception as e:
             print(f"UserEventSelectView.update_display_message: Error editing message: {e}")

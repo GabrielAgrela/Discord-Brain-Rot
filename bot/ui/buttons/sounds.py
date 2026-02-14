@@ -381,13 +381,12 @@ class AssignUserEventButton(Button):
         )
         initial_message_content = await view.get_initial_message_content()
         
-        await interaction.followup.send(
+        view.message_to_edit = await interaction.followup.send(
             content=initial_message_content, 
             view=view, 
-            ephemeral=True
+            ephemeral=True,
+            wait=True
         )
-        message = await interaction.original_response() 
-        view.message_to_edit = message 
 
 class STSCharacterSelectButton(Button):
     def __init__(self, bot_behavior, audio_file, **kwargs):
