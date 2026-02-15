@@ -308,7 +308,7 @@ class SoundDownloader:
                         print(self.__class__.__name__, " MOVER: Moving file to " + destination_folder)
                         sound_view = DownloadedSoundView(self.bot, os.path.basename(file))
                         await self.bot.send_message(
-                            title=f"I stole {os.path.basename(file)}",
+                            title=f"🦝 I stole {os.path.basename(file)}",
                             view=sound_view,
                             message_format="image",
                             image_requester="Sound Thief",

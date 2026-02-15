@@ -193,7 +193,7 @@ async def on_ready():
                 if bot_channel:
                     await behavior.send_message(
                         channel=bot_channel,
-                        title="Bot Started: Gertrudes is online and ready.",
+                        title="🤖 Bot Started: Gertrudes is online and ready.",
                         description="",
                         message_format="image",
                         image_requester="System",

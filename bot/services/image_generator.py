@@ -46,6 +46,7 @@ class ImageGeneratorService:
         self._avatar_cache_ttl_seconds = 300
         self._avatar_cache_max_entries = 256
         self._download_pool = ThreadPoolExecutor(max_workers=4)
+        self._card_image_scale = 0.75
 
         self._icons = self._build_encoded_icons()
 
@@ -363,6 +364,36 @@ class ImageGeneratorService:
             return selenium_bytes
         return self._screenshot_with_html2image(html_content, size=size)
 
+    def _scale_png_bytes(self, image_bytes: Optional[bytes], scale: float) -> Optional[bytes]:
+        """Scale PNG bytes while preserving transparency."""
+        if not image_bytes:
+            return image_bytes
+        if scale <= 0 or scale == 1.0:
+            return image_bytes
+
+        try:
+            from PIL import Image
+
+            with Image.open(io.BytesIO(image_bytes)) as image:
+                width, height = image.size
+                target_width = max(1, int(width * scale))
+                target_height = max(1, int(height * scale))
+                if target_width == width and target_height == height:
+                    return image_bytes
+
+                resample_filter = (
+                    Image.Resampling.LANCZOS
+                    if hasattr(Image, "Resampling")
+                    else Image.LANCZOS
+                )
+                resized = image.resize((target_width, target_height), resample=resample_filter)
+                output_buffer = io.BytesIO()
+                resized.save(output_buffer, format="PNG", optimize=False, compress_level=3)
+                return output_buffer.getvalue()
+        except Exception as e:
+            print(f"[ImageGeneratorService] Error scaling image: {e}")
+            return image_bytes
+
     async def generate_sound_card(
         self,
         sound_name: str,
@@ -545,11 +576,12 @@ class ImageGeneratorService:
             if has_stats and show_footer:
                 canvas_height = 900
 
-            return self._render_html_to_png(
+            rendered = self._render_html_to_png(
                 html_content,
                 size=(900, canvas_height),
                 selector=".card",
             )
+            return self._scale_png_bytes(rendered, scale=self._card_image_scale)
 
         except Exception as e:
             print(f"[ImageGeneratorService] Error generating sound card: {e}")

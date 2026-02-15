@@ -169,7 +169,9 @@ Canonical completion command:
 - The sound card UI used by `ImageGeneratorService` lives in `templates/sound_card.html`
 - `templates/sound_card.html` is currently gitignored, so edits there will not appear in normal `git status`/`git diff`
 - When changing sound-card layout/styling, verify behavior by running the bot and checking generated cards after deploy
-- Unicode emoji in image-card text can render as missing glyphs (`□`) with the current HTML-to-image stack; prefer plain text titles/descriptions and rely on built-in icons/colors for visual cues
+- Image output size is also controlled in `bot/services/image_generator.py` via `_scale_png_bytes` (currently `self._card_image_scale = 0.75` in `ImageGeneratorService.__init__` and used by `_generate_sound_card_sync`), which affects all generated card sends (now-playing cards and `message_format="image"` notifications)
+- Emoji in image-card text depends on container fonts and CSS fallback; keep `fonts-noto-color-emoji` installed in Docker and include emoji-capable families in the template `font-family` stack
+- Keep a normal text font first in the stack (for example `DejaVu Sans`) and place emoji fonts later; if `Noto Color Emoji` is first, normal text can look spaced/odd
 
 ### Voice Session Analytics Tracking
 - Voice analytics for `/top` and year-review now depend on `voice_activity` session rows written from `on_voice_state_update` in `PersonalGreeter.py`
@@ -187,6 +189,12 @@ docker-compose restart
 ```
 
 This restarts both the bot and web containers. The bot runs in Docker, so changes to Python files won't take effect until the container is restarted.
+
+- If system dependencies or fonts change in `Dockerfile`, restart is not enough; rebuild and recreate containers first:
+```bash
+docker-compose build
+docker-compose up -d --force-recreate
+```
 
 ### Viewing Logs
 To monitor the bot after restart:

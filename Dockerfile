@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libopus0 \
     chromium \
     chromium-driver \
+    fonts-noto-color-emoji \
     build-essential \
     libffi-dev \
     libssl-dev \

@@ -484,7 +484,7 @@ class SoundService:
             if count > 0:
                 self.action_repo.insert(user.name, "list_last_sounds", str(count))
                 message = await self.message_service.send_message(
-                    title=f"Last {count} Sounds Downloaded", 
+                    title=f"📦 Last {count} Sounds Downloaded", 
                     view=SoundView(self.bot_behavior, sounds),
                     message_format="image",
                     image_requester=user.name,
