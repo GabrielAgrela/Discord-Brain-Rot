@@ -2,6 +2,7 @@ import asyncio
 import os
 import random
 import time
+from typing import Any
 import discord
 from discord.ext import tasks
 from bot.repositories import SoundRepository, ActionRepository
@@ -62,6 +63,64 @@ class BackgroundService:
             )
         except Exception as e:
             print(f"[BackgroundService] Failed to send scraper start message: {e}")
+
+    async def _notify_scraper_complete(self, summary: dict[str, Any] | None) -> None:
+        """Send a short scraper completion summary to the bot channel."""
+        if not self.behavior:
+            return
+
+        summary = summary or {}
+        countries_scanned = summary.get("countries_scanned", 0)
+        total_sounds_seen = summary.get("total_sounds_seen", 0)
+        detected = summary.get("new_sounds_detected", 0)
+        added = summary.get("sounds_added", 0)
+        invalid = summary.get("sounds_invalid", 0)
+        scrape_errors = summary.get("scrape_errors", 0)
+        duration_seconds = summary.get("duration_seconds", 0)
+
+        description = (
+            f"{countries_scanned} sites checked in {duration_seconds}s | "
+            f"{total_sounds_seen} sounds seen | "
+            f"{detected} new sounds found ({added} downloaded) | "
+            f"{invalid} skipped/invalid"
+        )
+        if scrape_errors:
+            description += f" | {scrape_errors} site errors"
+
+        try:
+            await self.behavior.send_message(
+                title="✅ MyInstants scraper finished",
+                description=description,
+                message_format="image",
+                image_requester="MyInstants Scraper",
+                image_show_footer=False,
+                image_show_sound_icon=False,
+                image_border_color="#ED4245",
+            )
+        except Exception as e:
+            print(f"[BackgroundService] Failed to send scraper completion message: {e}")
+
+    async def _notify_scraper_failure(self, error: Exception) -> None:
+        """Send a short scraper failure summary to the bot channel."""
+        if not self.behavior:
+            return
+
+        error_text = str(error).strip() or "Unknown error"
+        if len(error_text) > 180:
+            error_text = f"{error_text[:177]}..."
+
+        try:
+            await self.behavior.send_message(
+                title="⚠️ MyInstants scraper failed",
+                description=error_text,
+                message_format="image",
+                image_requester="MyInstants Scraper",
+                image_show_footer=False,
+                image_show_sound_icon=False,
+                image_border_color="#ED4245",
+            )
+        except Exception as notify_error:
+            print(f"[BackgroundService] Failed to send scraper failure message: {notify_error}")
 
     @tasks.loop(seconds=30)
     async def keyword_detection_health_check(self):
@@ -244,11 +303,13 @@ class BackgroundService:
                 downloader = SoundDownloader(None, db, os.getenv("CHROMEDRIVER_PATH"))
                 
                 # Run blocking download_sound in executor
-                await loop.run_in_executor(None, downloader.download_sound)
+                summary = await loop.run_in_executor(None, downloader.download_sound)
                 print("[BackgroundService] MyInstants scrape completed")
+                await self._notify_scraper_complete(summary)
                 
             except Exception as e:
                 print(f"[BackgroundService] Error in scrape_sounds_loop: {e}")
+                await self._notify_scraper_failure(e)
                 await asyncio.sleep(60)  # Wait a minute before retrying on error
 
 

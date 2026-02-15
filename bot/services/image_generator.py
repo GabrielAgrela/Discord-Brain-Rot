@@ -74,6 +74,26 @@ class ImageGeneratorService:
         """Encode SVG text to a base64 string."""
         return base64.b64encode(svg_data.encode("utf-8")).decode("utf-8")
 
+    def _hex_to_rgb(self, color: str) -> str:
+        """Convert a hex color string to an ``R, G, B`` string for CSS rgba()."""
+        fallback = "88, 101, 242"
+        if not color:
+            return fallback
+
+        value = color.strip().lstrip("#")
+        if len(value) == 3:
+            value = "".join(ch * 2 for ch in value)
+        if len(value) != 6:
+            return fallback
+
+        try:
+            red = int(value[0:2], 16)
+            green = int(value[2:4], 16)
+            blue = int(value[4:6], 16)
+            return f"{red}, {green}, {blue}"
+        except ValueError:
+            return fallback
+
     def _download_image_as_base64(self, url: str) -> Optional[str]:
         """Download an image from URL and return base64, with short-lived cache."""
         if not url:
@@ -529,15 +549,20 @@ class ImageGeneratorService:
             else:
                 title_font_size = 26
 
-            has_stats = any([
+            has_core_stats = any([
                 duration,
                 play_count is not None,
                 lists,
                 favorited_by,
-                event_data,
             ])
+            has_stats = has_core_stats or bool(event_data)
+            summary_only = bool(event_data) and not has_core_stats
+            if summary_only:
+                card_class = f"{card_class} summary-notification".strip()
             has_leading_icon = bool(sts_thumbnail_b64 or speaker_icon)
             notification_only = (not has_stats) and (not show_footer)
+            resolved_accent_color = accent_color or "#5865F2"
+            accent_rgb = self._hex_to_rgb(resolved_accent_color)
 
             data = {
                 "sound_name": display_name,
@@ -565,7 +590,8 @@ class ImageGeneratorService:
                 "has_stats": has_stats,
                 "has_leading_icon": has_leading_icon,
                 "notification_only": notification_only,
-                "accent_color": accent_color or "#5865F2",
+                "accent_color": resolved_accent_color,
+                "accent_rgb": accent_rgb,
             }
 
             html_content = self._render_template(self._template_content, data)

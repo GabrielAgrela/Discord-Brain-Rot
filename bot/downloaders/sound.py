@@ -13,6 +13,7 @@ import shutil
 import time
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any
 
 import requests
 from pydub import AudioSegment
@@ -139,7 +140,7 @@ class SoundDownloader:
         except Exception as e:
             return (filename, False, str(e))
 
-    def _scrape_single_site(self, country: str) -> list[tuple[str, str]]:
+    def _scrape_single_site(self, country: str) -> tuple[list[tuple[str, str]], int]:
         """
         Scrape a single MyInstants site for sound URLs.
         
@@ -147,10 +148,13 @@ class SoundDownloader:
             country: Country code (pt, us, br).
             
         Returns:
-            List of (url, filename) tuples for sounds to download.
+            Tuple of:
+            - List of (url, filename) tuples for sounds to download
+            - Total number of sound cards seen on the page
         """
         driver = None
         sounds_to_download = []
+        sounds_seen = 0
         
         try:
             print(f"{self.__class__.__name__}: Opening Chrome for {country}")
@@ -175,6 +179,7 @@ class SoundDownloader:
             
             # Get all divs with class instant
             sound_elements = driver.find_elements(By.CSS_SELECTOR, 'div.instant')
+            sounds_seen = len(sound_elements)
             print(f"{self.__class__.__name__}: Found {len(sound_elements)} sounds on {country}")
             
             for sound_element in sound_elements:
@@ -212,17 +217,25 @@ class SoundDownloader:
             if driver:
                 driver.quit()
                 
-        return sounds_to_download
+        return sounds_to_download, sounds_seen
 
-    def download_sound(self) -> None:
+    def download_sound(self) -> dict[str, Any]:
         """
         Scrape and download sounds from MyInstants.
         
         Browses all country pages on MyInstants concurrently and downloads
         any sounds that aren't already in the database using multiple threads.
+
+        Returns:
+            Summary dictionary with scrape and download counters.
         """
+        start_time = time.time()
         countries = ["pt", "us", "br"]
         all_sounds_to_download = []
+        per_country_new_sounds: dict[str, int] = {}
+        per_country_sounds_seen: dict[str, int] = {}
+        total_sounds_seen = 0
+        scrape_errors = 0
         
         # Scrape all sites concurrently using threads
         print(f"{self.__class__.__name__}: Starting scrape of all {len(countries)} sites concurrently")
@@ -233,10 +246,16 @@ class SoundDownloader:
             for future in as_completed(futures):
                 country = futures[future]
                 try:
-                    sounds = future.result()
+                    sounds, seen_count = future.result()
                     all_sounds_to_download.extend(sounds)
+                    per_country_new_sounds[country] = len(sounds)
+                    per_country_sounds_seen[country] = seen_count
+                    total_sounds_seen += seen_count
                     print(f"{self.__class__.__name__}: Got {len(sounds)} new sounds from {country}")
                 except Exception as e:
+                    per_country_new_sounds[country] = 0
+                    per_country_sounds_seen[country] = 0
+                    scrape_errors += 1
                     print(f"{self.__class__.__name__}: Error getting results from {country}: {e}")
         
         # Remove duplicates (same URL might appear on multiple sites)
@@ -246,7 +265,17 @@ class SoundDownloader:
         if not unique_sounds:
             print(f"{self.__class__.__name__}: No new sounds found")
             print("\n-----------------------------------\n")
-            return
+            return {
+                "countries_scanned": len(countries),
+                "per_country_new_sounds": per_country_new_sounds,
+                "per_country_sounds_seen": per_country_sounds_seen,
+                "total_sounds_seen": total_sounds_seen,
+                "new_sounds_detected": 0,
+                "sounds_added": 0,
+                "sounds_invalid": 0,
+                "scrape_errors": scrape_errors,
+                "duration_seconds": round(time.time() - start_time, 1),
+            }
         
         # Download all sounds concurrently using thread pool
         new_sounds_downloaded = 0
@@ -277,6 +306,17 @@ class SoundDownloader:
             f"{new_sounds_downloaded} sounds added, {new_sounds_invalid} sounds invalid"
         )
         print("\n-----------------------------------\n")
+        return {
+            "countries_scanned": len(countries),
+            "per_country_new_sounds": per_country_new_sounds,
+            "per_country_sounds_seen": per_country_sounds_seen,
+            "total_sounds_seen": total_sounds_seen,
+            "new_sounds_detected": len(unique_sounds),
+            "sounds_added": new_sounds_downloaded,
+            "sounds_invalid": new_sounds_invalid,
+            "scrape_errors": scrape_errors,
+            "duration_seconds": round(time.time() - start_time, 1),
+        }
 
     async def move_sounds(self) -> None:
         """

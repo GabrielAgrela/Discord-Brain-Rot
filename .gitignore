@@ -27,9 +27,6 @@ database copy.db
 .coverage
 htmlcov/
 
-templates/sound_card.html
-
-
 # Static and downloaded assets
 # /static/
 # /templates/

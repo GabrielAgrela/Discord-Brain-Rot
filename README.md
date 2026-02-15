@@ -114,6 +114,7 @@ This README is based on the current codebase behavior (not historical README ass
 ### Background Automations
 - Random periodic sound playback loop.
 - MyInstants scraping loop.
+- Scraper start + completion image cards with compact run summary.
 - Keyword detection health check loop.
 - Voice-activity auto-disconnect safety loop.
 - Web playback queue consumer loop.
@@ -315,7 +316,7 @@ Discord-Brain-Rot/
 
 - Bot auto-messaging expects a text channel named `bot`.
 - `POST /api/play_sound` currently uses a fixed guild ID constant in `WebPage.py`.
-- `templates/sound_card.html` is runtime-critical and currently gitignored.
+- `templates/sound_card.html` is runtime-critical and tracked in git.
 
 ## License
 

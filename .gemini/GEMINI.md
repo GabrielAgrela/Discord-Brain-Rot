@@ -167,7 +167,7 @@ Canonical completion command:
 
 ### Sound Card Template Tracking
 - The sound card UI used by `ImageGeneratorService` lives in `templates/sound_card.html`
-- `templates/sound_card.html` is currently gitignored, so edits there will not appear in normal `git status`/`git diff`
+- `templates/sound_card.html` is tracked in git; edits should appear in normal `git status`/`git diff`
 - When changing sound-card layout/styling, verify behavior by running the bot and checking generated cards after deploy
 - Image output size is also controlled in `bot/services/image_generator.py` via `_scale_png_bytes` (currently `self._card_image_scale = 0.75` in `ImageGeneratorService.__init__` and used by `_generate_sound_card_sync`), which affects all generated card sends (now-playing cards and `message_format="image"` notifications)
 - Emoji in image-card text depends on container fonts and CSS fallback; keep `fonts-noto-color-emoji` installed in Docker and include emoji-capable families in the template `font-family` stack
