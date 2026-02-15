@@ -35,8 +35,7 @@ class TestBackgroundService:
         await service._notify_scraper_start()
 
         behavior.send_message.assert_awaited_once_with(
-            title="🔍 MyInstants scraper started",
-            description="Looking for new sounds...",
+            title="MyInstants scraper started",
             message_format="image",
             image_requester="MyInstants Scraper",
             image_show_footer=False,

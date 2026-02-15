@@ -169,6 +169,7 @@ Canonical completion command:
 - The sound card UI used by `ImageGeneratorService` lives in `templates/sound_card.html`
 - `templates/sound_card.html` is currently gitignored, so edits there will not appear in normal `git status`/`git diff`
 - When changing sound-card layout/styling, verify behavior by running the bot and checking generated cards after deploy
+- Unicode emoji in image-card text can render as missing glyphs (`□`) with the current HTML-to-image stack; prefer plain text titles/descriptions and rely on built-in icons/colors for visual cues
 
 ### Voice Session Analytics Tracking
 - Voice analytics for `/top` and year-review now depend on `voice_activity` session rows written from `on_voice_state_update` in `PersonalGreeter.py`
