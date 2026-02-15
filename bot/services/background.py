@@ -46,6 +46,24 @@ class BackgroundService:
                 self.check_voice_activity_loop.start()
             print("[BackgroundService] Background tasks started.")
 
+    async def _notify_scraper_start(self) -> None:
+        """Send a scraper start notification to the bot channel."""
+        if not self.behavior:
+            return
+
+        try:
+            await self.behavior.send_message(
+                title="🔍 MyInstants scraper started",
+                description="Looking for new sounds...",
+                message_format="image",
+                image_requester="MyInstants Scraper",
+                image_show_footer=False,
+                image_show_sound_icon=False,
+                image_border_color="#ED4245",
+            )
+        except Exception as e:
+            print(f"[BackgroundService] Failed to send scraper start message: {e}")
+
     @tasks.loop(seconds=30)
     async def keyword_detection_health_check(self):
         """
@@ -217,6 +235,7 @@ class BackgroundService:
                 
                 # Run the scraper in a thread executor since it uses Selenium (blocking)
                 print("[BackgroundService] Starting MyInstants scraper...")
+                await self._notify_scraper_start()
                 loop = asyncio.get_event_loop()
                 
                 # Create scraper instance - needs behavior reference for db

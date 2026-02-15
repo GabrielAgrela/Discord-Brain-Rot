@@ -194,3 +194,6 @@ docker-compose logs -f bot
 ```
 
 Or check the log files directly in `Logs/` (named by date, e.g., `2026-01-26.log`).
+
+- `docker-compose logs --tail=120 bot` right after `docker-compose restart` may include shutdown-time stack traces from the old container (for example `RuntimeError: Event loop is closed` from voice threads).
+- Treat those as restart noise unless the same errors continue repeating after the new container is up and logging fresh heartbeat/activity lines.
