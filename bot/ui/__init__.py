@@ -38,7 +38,7 @@ from bot.ui.views.lists import (
 
 )
 from bot.ui.views.controls import (
-    ControlsView, DownloadedSoundView, SoundView
+    ControlsView, InlineControlsMessageView, DownloadedSoundView, SoundView
 )
 from bot.ui.views.events import (
     UserEventSelectView, EventView, PaginatedEventView
@@ -86,7 +86,7 @@ __all__ = [
     'SoundBeingPlayedView', 'SoundBeingPlayedWithSuggestionsView',
     'PaginatedSoundListView',
 
-    'ControlsView', 'DownloadedSoundView', 'SoundView',
+    'ControlsView', 'InlineControlsMessageView', 'DownloadedSoundView', 'SoundView',
     'UserEventSelectView', 'EventView', 'PaginatedEventView',
     'PaginatedFavoritesView', 'PaginatedStatsView', 'OnThisDayView', 'UploadChoiceView',
     

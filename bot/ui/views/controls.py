@@ -26,6 +26,17 @@ class ControlsView(View):
         self.add_item(ListLastScrapedSoundsButton(bot_behavior, label="🔽Last Downloaded Sounds🔽", style=discord.ButtonStyle.success))
         self.add_item(MuteToggleButton(bot_behavior))
 
+
+class InlineControlsMessageView(View):
+    """Minimal inline controls view used on generic bot messages."""
+
+    def __init__(self, bot_behavior, style: discord.ButtonStyle = discord.ButtonStyle.primary):
+        super().__init__(timeout=None)
+        self.bot_behavior = bot_behavior
+        from bot.ui.buttons.sounds import SendControlsButton
+
+        self.add_item(SendControlsButton(style=style, row=0))
+
 class DownloadedSoundView(View):
     def __init__(self, bot_behavior, sound):
         super().__init__(timeout=None)

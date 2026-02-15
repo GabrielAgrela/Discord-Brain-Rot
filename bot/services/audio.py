@@ -60,6 +60,8 @@ class AudioService:
         
         # Track current view to update progress button
         self.current_view: Optional[discord.ui.View] = None
+        # Track last message containing inline gear controls per text channel
+        self._last_gear_message_by_channel: Dict[int, discord.Message] = {}
         
         # Keyword detection state
         self.keyword_sinks: Dict[int, 'KeywordDetectionSink'] = {}
@@ -118,6 +120,92 @@ class AudioService:
         if duration <= self.progress_display_delay_seconds:
             return 0.0
         return self.progress_display_delay_seconds
+
+    @staticmethod
+    def _is_send_controls_item(item: discord.ui.Item) -> bool:
+        """Return True when an item matches the inline controls (gear) button."""
+        emoji = getattr(item, "emoji", None)
+        label = (getattr(item, "label", "") or "").strip()
+        return str(emoji) == "⚙️" and label == ""
+
+    async def _remove_send_controls_button_from_message(
+        self,
+        message: Optional[discord.Message],
+    ) -> None:
+        """Remove the inline controls (gear) button from a playback message."""
+        if not message or not getattr(message, "components", None):
+            return
+
+        try:
+            view = discord.ui.View.from_message(message)
+        except Exception:
+            return
+
+        removed = False
+        for item in list(view.children):
+            if self._is_send_controls_item(item):
+                view.remove_item(item)
+                removed = True
+
+        if not removed:
+            return
+
+        try:
+            await message.edit(view=view)
+        except discord.NotFound:
+            return
+        except Exception as e:
+            print(f"[AudioService] Error removing controls button: {e}")
+
+    def _message_has_send_controls_button(self, message: Optional[discord.Message]) -> bool:
+        """Return True when a message currently contains the inline controls (gear) button."""
+        if not message or not getattr(message, "components", None):
+            return False
+
+        try:
+            view = discord.ui.View.from_message(message)
+        except Exception:
+            return False
+
+        return any(self._is_send_controls_item(item) for item in view.children)
+
+    def _is_controls_menu_message(self, message: Optional[discord.Message]) -> bool:
+        """Return True when a message is the standalone controls menu."""
+        if not message or not getattr(message, "components", None):
+            return False
+
+        try:
+            view = discord.ui.View.from_message(message)
+        except Exception:
+            return False
+
+        labels = [(getattr(item, "label", "") or "").strip() for item in view.children]
+        return any("Play Random" in label for label in labels)
+
+    async def handle_new_bot_message_for_controls_cleanup(
+        self,
+        message: Optional[discord.Message],
+    ) -> None:
+        """On new channel message, remove prior message gear button and track the latest one."""
+        if not message:
+            return
+
+        # Keep prior inline gear button intact when the new message is controls menu.
+        if self._is_controls_menu_message(message):
+            return
+
+        channel = getattr(message, "channel", None)
+        channel_id = getattr(channel, "id", None)
+        if channel_id is None:
+            return
+
+        previous_message = self._last_gear_message_by_channel.get(channel_id)
+        if previous_message and previous_message.id != message.id:
+            await self._remove_send_controls_button_from_message(previous_message)
+            self._last_gear_message_by_channel.pop(channel_id, None)
+
+        if self._message_has_send_controls_button(message):
+            self._last_gear_message_by_channel[channel_id] = message
 
     def set_sound_service(self, sound_service):
         self.sound_service = sound_service

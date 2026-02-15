@@ -44,6 +44,70 @@ class MessageService:
     def set_behavior(self, behavior):
         """Set bot behavior reference for re-sending controls."""
         self._bot_behavior = behavior
+
+    def _build_default_inline_controls_view(
+        self,
+        style: discord.ButtonStyle = discord.ButtonStyle.primary,
+    ) -> Optional[discord.ui.View]:
+        """Build the default inline controls view for generic image messages."""
+        if not self._bot_behavior:
+            return None
+
+        from bot.ui.views.controls import InlineControlsMessageView
+        return InlineControlsMessageView(self._bot_behavior, style=style)
+
+    @staticmethod
+    def _hex_to_rgb(color_hex: Optional[str]) -> Optional[tuple[int, int, int]]:
+        """Convert '#RRGGBB' or 'RRGGBB' into an RGB tuple."""
+        if not color_hex:
+            return None
+
+        clean = color_hex.strip().lstrip("#")
+        if len(clean) != 6:
+            return None
+
+        try:
+            value = int(clean, 16)
+        except ValueError:
+            return None
+
+        return ((value >> 16) & 0xFF, (value >> 8) & 0xFF, value & 0xFF)
+
+    @staticmethod
+    def _button_style_from_rgb(rgb: Optional[tuple[int, int, int]]) -> discord.ButtonStyle:
+        """Map a message color to the closest Discord button style."""
+        if rgb is None:
+            return discord.ButtonStyle.primary
+
+        red, green, blue = rgb
+        spread = max(red, green, blue) - min(red, green, blue)
+
+        if spread < 25:
+            return discord.ButtonStyle.secondary
+        if red >= green + 30 and red >= blue + 30:
+            return discord.ButtonStyle.danger
+        if green >= red + 30 and green >= blue + 30:
+            return discord.ButtonStyle.success
+        if blue >= red + 20 and blue >= green + 20:
+            return discord.ButtonStyle.primary
+        return discord.ButtonStyle.secondary
+
+    def _resolve_default_inline_controls_style(
+        self,
+        message_format: Literal["embed", "image"],
+        color: Optional[discord.Color],
+        image_border_color: Optional[str],
+    ) -> discord.ButtonStyle:
+        """Choose a default inline controls button style for the outgoing message."""
+        if message_format == "image":
+            return self._button_style_from_rgb(self._hex_to_rgb(image_border_color))
+
+        embed_color = color or self.color
+        value = getattr(embed_color, "value", None)
+        if value is None:
+            return discord.ButtonStyle.primary
+        rgb = ((value >> 16) & 0xFF, (value >> 8) & 0xFF, value & 0xFF)
+        return self._button_style_from_rgb(rgb)
     
     def get_bot_channel(self, guild: Optional[discord.Guild] = None) -> Optional[discord.TextChannel]:
         """
@@ -109,8 +173,17 @@ class MessageService:
 
         try:
             kwargs = {}
-            if view:
-                kwargs["view"] = view
+            effective_view = view
+            if effective_view is None:
+                style = self._resolve_default_inline_controls_style(
+                    message_format=message_format,
+                    color=color,
+                    image_border_color=image_border_color,
+                )
+                effective_view = self._build_default_inline_controls_view(style=style)
+
+            if effective_view:
+                kwargs["view"] = effective_view
             if delete_time:
                 kwargs["delete_after"] = delete_time
 

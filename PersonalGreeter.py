@@ -539,8 +539,11 @@ async def on_close():
 # --- New DM Video Link Handler ---
 @bot.event
 async def on_message(message):
-    # Ignore messages from the bot itself
     if message.author == bot.user:
+        try:
+            await behavior._audio_service.handle_new_bot_message_for_controls_cleanup(message)
+        except Exception as e:
+            print(f"[on_message] Failed to clean previous gear button: {e}")
         return
     
     # Check if the message is a DM

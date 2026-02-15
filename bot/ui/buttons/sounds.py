@@ -491,8 +491,8 @@ class ToggleControlsButton(Button):
 
 class SendControlsButton(Button):
     """Button to send main controls as a separate message."""
-    def __init__(self, **kwargs):
-        super().__init__(label="", emoji="⚙️", style=discord.ButtonStyle.primary, **kwargs)
+    def __init__(self, style: discord.ButtonStyle = discord.ButtonStyle.primary, **kwargs):
+        super().__init__(label="", emoji="⚙️", style=style, **kwargs)
 
     async def callback(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)

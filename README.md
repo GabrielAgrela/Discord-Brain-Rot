@@ -22,6 +22,7 @@ This README is based on the current codebase behavior (not historical README ass
   - similar sounds (lazy-loaded)
   - add-to-list select
 - Separate quick controls button (`⚙️`) sends an ephemeral controls panel.
+- `send_message` notifications now include an inline `⚙️` button by default when no custom view is provided, and its button style matches the message accent/color when possible.
 
 ### Controls Panel (Non-Slash UI)
 - Random sound
