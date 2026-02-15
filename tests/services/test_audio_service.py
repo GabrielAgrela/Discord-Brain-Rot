@@ -52,6 +52,27 @@ class TestAudioService:
         assert gear_button not in view.children
         assert play_button in view.children
 
+    def test_is_send_controls_item_accepts_normalized_gear_emoji(self, audio_service):
+        """Ensure gear matching works for both emoji representations used by Discord."""
+        item_with_vs = Mock(emoji="⚙️", label="")
+        item_without_vs = Mock(emoji="⚙", label="")
+        item_with_text_vs = Mock(emoji="⚙︎", label="")
+        item_by_custom_id = Mock(custom_id="send_controls_button", emoji="x", label="foo")
+
+        assert audio_service._is_send_controls_item(item_with_vs) is True
+        assert audio_service._is_send_controls_item(item_without_vs) is True
+        assert audio_service._is_send_controls_item(item_with_text_vs) is True
+        assert audio_service._is_send_controls_item(item_by_custom_id) is True
+
+    def test_message_has_send_controls_button_from_raw_components(self, audio_service):
+        """Ensure raw message component scanning finds controls buttons without view reconstruction."""
+        controls_component = Mock(custom_id="send_controls_button")
+        row = Mock(children=[controls_component])
+        message = Mock(components=[row])
+
+        with patch("bot.services.audio.discord.ui.View.from_message", side_effect=RuntimeError("boom")):
+            assert audio_service._message_has_send_controls_button(message) is True
+
     @pytest.mark.asyncio
     async def test_remove_send_controls_button_from_message_no_gear_no_edit(self, audio_service):
         """Ensure no message edit occurs when no gear button exists."""

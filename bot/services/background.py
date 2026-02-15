@@ -2,7 +2,7 @@ import asyncio
 import os
 import random
 import time
-from typing import Any
+from typing import Any, Optional
 import discord
 from discord.ext import tasks
 from bot.repositories import SoundRepository, ActionRepository
@@ -45,7 +45,166 @@ class BackgroundService:
                 self.keyword_detection_health_check.start()
             if not self.check_voice_activity_loop.is_running():
                 self.check_voice_activity_loop.start()
+            if not self.ensure_last_message_controls_button_loop.is_running():
+                self.ensure_last_message_controls_button_loop.start()
             print("[BackgroundService] Background tasks started.")
+
+    @staticmethod
+    def _is_message_from_bot(message: discord.Message, bot_user: Optional[discord.User]) -> bool:
+        """Return True when a message was authored by this bot."""
+        if not message or not bot_user:
+            return False
+        return message.author == bot_user
+
+    @staticmethod
+    def _find_available_component_row(
+        message: discord.Message,
+        view: discord.ui.View,
+    ) -> Optional[int]:
+        """Find an available row using live message component widths first."""
+        rows = getattr(message, "components", None) or []
+        if rows:
+            for row_index, row in enumerate(rows):
+                row_children = getattr(row, "children", None) or []
+                if len(row_children) < 5:
+                    return row_index
+            if len(rows) < 5:
+                return len(rows)
+            return None
+
+        # Fallback when message.components is unavailable.
+        row_counts = {row: 0 for row in range(5)}
+        for item in view.children:
+            row = getattr(item, "row", None)
+            if row is None:
+                continue
+            if row in row_counts:
+                row_counts[row] += 1
+
+        for row, count in row_counts.items():
+            if count < 5:
+                return row
+        return None
+
+    @staticmethod
+    def _message_components_have_send_controls_button(message: discord.Message) -> bool:
+        """Return True when raw message components include the inline controls button."""
+        rows = getattr(message, "components", None) or []
+        for row in rows:
+            components = getattr(row, "children", None) or getattr(row, "components", None) or []
+            for component in components:
+                custom_id = getattr(component, "custom_id", None)
+                if custom_id == "send_controls_button":
+                    return True
+
+                emoji = getattr(component, "emoji", None)
+                if emoji is None:
+                    continue
+                emoji_name = getattr(emoji, "name", None) or str(emoji)
+                emoji_normalized = emoji_name.replace("\ufe0f", "").replace("\ufe0e", "").strip()
+                label = (getattr(component, "label", "") or "").strip()
+                if "⚙" in emoji_normalized and label == "":
+                    return True
+
+        return False
+
+    @staticmethod
+    def _view_has_send_controls_button(view: discord.ui.View) -> bool:
+        """Return True when a reconstructed view already contains a gear button."""
+        for item in getattr(view, "children", []):
+            custom_id = getattr(item, "custom_id", None)
+            if isinstance(custom_id, str) and "send_controls_button" in custom_id:
+                return True
+
+            emoji = getattr(item, "emoji", None)
+            if emoji is None:
+                continue
+
+            emoji_text = (getattr(emoji, "name", None) or str(emoji)).replace("\ufe0f", "").replace("\ufe0e", "").strip()
+            label = (getattr(item, "label", "") or "").strip()
+            if "⚙" in emoji_text and label == "":
+                return True
+        return False
+
+    async def _add_controls_button_to_message(self, message: discord.Message) -> bool:
+        """Attach an inline controls button to a message if component space allows."""
+        if self._message_components_have_send_controls_button(message):
+            return True
+
+        try:
+            view = discord.ui.View.from_message(message)
+        except Exception:
+            return False
+
+        if self._view_has_send_controls_button(view):
+            return True
+
+        row = self._find_available_component_row(message, view)
+        if row is None:
+            return False
+
+        style = discord.ButtonStyle.primary
+        message_service = getattr(self.audio_service, "message_service", None)
+        if message_service and hasattr(message_service, "_resolve_default_inline_controls_style"):
+            message_format = "embed" if message.embeds else "image"
+            embed_color = message.embeds[0].color if message.embeds else None
+            style = message_service._resolve_default_inline_controls_style(
+                message_format=message_format,
+                color=embed_color,
+                image_border_color=None,
+            )
+
+        from bot.ui.buttons.sounds import SendControlsButton
+        try:
+            view.add_item(SendControlsButton(style=style, row=row))
+            await message.edit(view=view)
+            return True
+        except Exception as e:
+            print(f"[BackgroundService] Failed to add controls button: {e}")
+            return False
+
+    async def _ensure_controls_button_on_last_bot_message_for_guild(self, guild: discord.Guild) -> None:
+        """Normalize controls buttons in recent messages for one guild bot channel."""
+        message_service = getattr(self.audio_service, "message_service", None)
+        if not message_service:
+            return
+
+        channel = message_service.get_bot_channel(guild)
+        if not channel:
+            return
+
+        recent_messages = []
+        async for message in channel.history(limit=10):
+            recent_messages.append(message)
+
+        if not recent_messages:
+            return
+
+        bot_messages = [
+            message
+            for message in recent_messages
+            if self._is_message_from_bot(message, self.bot.user)
+        ]
+        if not bot_messages:
+            return
+
+        # Remove controls button from all bot-authored recent messages.
+        for message in bot_messages:
+            if hasattr(self.audio_service, "_remove_send_controls_button_from_message"):
+                await self.audio_service._remove_send_controls_button_from_message(message)
+
+        # Add one controls button back on the newest non-controls bot message.
+        target_candidates = bot_messages
+        if hasattr(self.audio_service, "_is_controls_menu_message"):
+            target_candidates = [
+                message for message in bot_messages
+                if not self.audio_service._is_controls_menu_message(message)
+            ]
+
+        for target_message in target_candidates:
+            added = await self._add_controls_button_to_message(target_message)
+            if added:
+                break
 
     async def _notify_scraper_start(self) -> None:
         """Send a scraper start notification to the bot channel."""
@@ -345,3 +504,12 @@ class BackgroundService:
 
         except Exception as e:
             print(f"[BackgroundService] Error in voice activity check: {e}")
+
+    @tasks.loop(seconds=60)
+    async def ensure_last_message_controls_button_loop(self):
+        """Every minute, normalize controls button presence in the latest 10 messages."""
+        try:
+            for guild in self.bot.guilds:
+                await self._ensure_controls_button_on_last_bot_message_for_guild(guild)
+        except Exception as e:
+            print(f"[BackgroundService] Error ensuring controls button on latest message: {e}")

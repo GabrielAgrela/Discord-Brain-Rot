@@ -15,6 +15,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 class TestBackgroundService:
     """Tests for background service notification behavior."""
 
+    @staticmethod
+    def _history(messages):
+        async def _gen():
+            for message in messages:
+                yield message
+        return _gen()
+
     @pytest.mark.asyncio
     @patch("bot.services.background.ActionRepository")
     @patch("bot.services.background.SoundRepository")
@@ -128,3 +135,154 @@ class TestBackgroundService:
             image_show_sound_icon=False,
             image_border_color="#ED4245",
         )
+
+    @pytest.mark.asyncio
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    async def test_controls_normalizer_removes_recent_controls_and_adds_on_newest_bot_message(
+        self, _mock_sound_repo, _mock_action_repo
+    ):
+        """Ensure the normalizer strips controls from recent bot messages and reapplies to newest one."""
+        from bot.services.background import BackgroundService
+
+        bot_user = Mock()
+        guild = Mock()
+        bot = Mock(user=bot_user)
+        audio_service = Mock()
+        sound_service = Mock()
+        service = BackgroundService(bot=bot, audio_service=audio_service, sound_service=sound_service, behavior=Mock())
+
+        newest_bot_message = Mock(author=bot_user)
+        older_bot_message = Mock(author=bot_user)
+        user_message = Mock(author=Mock())
+
+        channel = Mock()
+        channel.history = Mock(return_value=self._history([newest_bot_message, older_bot_message, user_message]))
+
+        message_service = Mock()
+        message_service.get_bot_channel.return_value = channel
+        audio_service.message_service = message_service
+        audio_service._message_has_send_controls_button = Mock(return_value=True)
+        audio_service._remove_send_controls_button_from_message = AsyncMock()
+        audio_service._is_controls_menu_message = Mock(return_value=False)
+
+        service._add_controls_button_to_message = AsyncMock()
+
+        await service._ensure_controls_button_on_last_bot_message_for_guild(guild)
+
+        assert audio_service._remove_send_controls_button_from_message.await_count == 2
+        service._add_controls_button_to_message.assert_awaited_once_with(newest_bot_message)
+
+    @pytest.mark.asyncio
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    async def test_controls_normalizer_skips_add_when_newest_bot_message_is_controls_menu(
+        self, _mock_sound_repo, _mock_action_repo
+    ):
+        """Ensure controls menu as newest bot message redirects add to next eligible message."""
+        from bot.services.background import BackgroundService
+
+        bot_user = Mock()
+        guild = Mock()
+        bot = Mock(user=bot_user)
+        audio_service = Mock()
+        sound_service = Mock()
+        service = BackgroundService(bot=bot, audio_service=audio_service, sound_service=sound_service, behavior=Mock())
+
+        newest_bot_message = Mock(author=bot_user)
+        older_bot_message = Mock(author=bot_user)
+
+        channel = Mock()
+        channel.history = Mock(return_value=self._history([newest_bot_message, older_bot_message]))
+
+        message_service = Mock()
+        message_service.get_bot_channel.return_value = channel
+        audio_service.message_service = message_service
+        audio_service._message_has_send_controls_button = Mock(return_value=True)
+        audio_service._remove_send_controls_button_from_message = AsyncMock()
+        audio_service._is_controls_menu_message = Mock(side_effect=lambda msg: msg is newest_bot_message)
+
+        service._add_controls_button_to_message = AsyncMock(return_value=True)
+
+        await service._ensure_controls_button_on_last_bot_message_for_guild(guild)
+
+        assert audio_service._remove_send_controls_button_from_message.await_count == 2
+        service._add_controls_button_to_message.assert_awaited_once_with(older_bot_message)
+
+    @pytest.mark.asyncio
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    async def test_controls_normalizer_falls_back_when_newest_candidate_cannot_fit(
+        self, _mock_sound_repo, _mock_action_repo
+    ):
+        """Ensure fallback to older message when newest eligible message cannot receive controls."""
+        from bot.services.background import BackgroundService
+
+        bot_user = Mock()
+        guild = Mock()
+        bot = Mock(user=bot_user)
+        audio_service = Mock()
+        sound_service = Mock()
+        service = BackgroundService(bot=bot, audio_service=audio_service, sound_service=sound_service, behavior=Mock())
+
+        newest_bot_message = Mock(author=bot_user)
+        older_bot_message = Mock(author=bot_user)
+
+        channel = Mock()
+        channel.history = Mock(return_value=self._history([newest_bot_message, older_bot_message]))
+
+        message_service = Mock()
+        message_service.get_bot_channel.return_value = channel
+        audio_service.message_service = message_service
+        audio_service._message_has_send_controls_button = Mock(return_value=True)
+        audio_service._remove_send_controls_button_from_message = AsyncMock()
+        audio_service._is_controls_menu_message = Mock(return_value=False)
+
+        service._add_controls_button_to_message = AsyncMock(side_effect=[False, True])
+
+        await service._ensure_controls_button_on_last_bot_message_for_guild(guild)
+
+        assert audio_service._remove_send_controls_button_from_message.await_count == 2
+        assert service._add_controls_button_to_message.await_count == 2
+        service._add_controls_button_to_message.assert_any_await(newest_bot_message)
+        service._add_controls_button_to_message.assert_any_await(older_bot_message)
+
+    def test_find_available_component_row_uses_message_component_widths(self):
+        """Ensure row selection avoids full row 0 when reconstructed item rows are missing."""
+        from bot.services.background import BackgroundService
+
+        # Simulate real message rows where row 0 is full and row 1 has space.
+        row0 = Mock(children=[Mock(), Mock(), Mock(), Mock(), Mock()])
+        row1 = Mock(children=[Mock(), Mock()])
+        message = Mock(components=[row0, row1])
+
+        # Reconstructed views can have items with row=None, so fallback-only logic is wrong.
+        view = Mock(children=[Mock(row=None), Mock(row=None)])
+
+        selected_row = BackgroundService._find_available_component_row(message, view)
+        assert selected_row == 1
+
+    @pytest.mark.asyncio
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    async def test_add_controls_button_to_message_skips_when_already_present(
+        self, _mock_sound_repo, _mock_action_repo
+    ):
+        """Ensure no edit occurs when the target message already has controls."""
+        from bot.services.background import BackgroundService
+
+        service = BackgroundService(
+            bot=Mock(),
+            audio_service=Mock(),
+            sound_service=Mock(),
+            behavior=Mock(),
+        )
+
+        component = Mock(custom_id="send_controls_button")
+        row = Mock(children=[component])
+        message = AsyncMock(components=[row])
+
+        added = await service._add_controls_button_to_message(message)
+
+        assert added is True
+        message.edit.assert_not_awaited()

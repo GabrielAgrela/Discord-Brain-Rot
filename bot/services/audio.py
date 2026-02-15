@@ -124,9 +124,35 @@ class AudioService:
     @staticmethod
     def _is_send_controls_item(item: discord.ui.Item) -> bool:
         """Return True when an item matches the inline controls (gear) button."""
+        custom_id = getattr(item, "custom_id", None)
+        if custom_id == "send_controls_button":
+            return True
+
         emoji = getattr(item, "emoji", None)
         label = (getattr(item, "label", "") or "").strip()
-        return str(emoji) == "⚙️" and label == ""
+        if emoji is None:
+            return False
+
+        # Discord may normalize this emoji as either "⚙" or "⚙️".
+        emoji_text = getattr(emoji, "name", None) or str(emoji)
+        emoji_normalized = emoji_text.replace("\ufe0f", "").replace("\ufe0e", "").strip()
+        return "⚙" in emoji_normalized and label == ""
+
+    @staticmethod
+    def _component_is_send_controls(component: object) -> bool:
+        """Return True when a raw message component matches the inline controls button."""
+        custom_id = getattr(component, "custom_id", None)
+        if custom_id == "send_controls_button":
+            return True
+
+        emoji = getattr(component, "emoji", None)
+        if emoji is None:
+            return False
+
+        emoji_name = getattr(emoji, "name", None) or str(emoji)
+        emoji_normalized = emoji_name.replace("\ufe0f", "").replace("\ufe0e", "").strip()
+        label = (getattr(component, "label", "") or "").strip()
+        return "⚙" in emoji_normalized and label == ""
 
     async def _remove_send_controls_button_from_message(
         self,
@@ -161,6 +187,13 @@ class AudioService:
         """Return True when a message currently contains the inline controls (gear) button."""
         if not message or not getattr(message, "components", None):
             return False
+
+        rows = getattr(message, "components", None) or []
+        for row in rows:
+            components = getattr(row, "children", None) or getattr(row, "components", None) or []
+            for component in components:
+                if self._component_is_send_controls(component):
+                    return True
 
         try:
             view = discord.ui.View.from_message(message)
