@@ -179,9 +179,16 @@ Canonical completion command:
 - Voice session rows currently store `member.name` (not `name#discriminator`) to align with existing stats queries
 
 ### Inline Controls Button Normalization
-- The minute background normalizer in `bot/services/background.py` is a backup only; keep real-time cleanup in `on_message` (`handle_new_bot_message_for_controls_cleanup`) intact.
+- The minute background normalizer in `bot/services/background.py` is a safety dedupe pass; keep real-time cleanup in `on_message` (`handle_new_bot_message_for_controls_cleanup`) intact.
 - When detecting/removing inline `⚙️` controls, prefer checking both reconstructed views (`discord.ui.View.from_message`) and raw `message.components`; relying on one source can miss existing buttons and cause duplicate `custom_id` edit failures.
 - For row placement when adding buttons to existing messages, use live `message.components` row widths first and only fall back to reconstructed view row metadata.
+- Avoid mass-rewriting recent playback messages in the minute normalizer. Reconstructing and re-saving old views can alter progress-button emoji/label presentation; only touch messages that actually need a controls-button fix.
+- For real-time dedupe, remove old `⚙️` via raw component payload edits (using `message.components` + HTTP edit) instead of rebuilding with `discord.ui.View.from_message`; raw edits preserve existing progress-button labels/emoji better.
+- Tracked `discord.Message` objects can have stale `components` after progress updates; fetch a fresh copy (`channel.fetch_message(message.id)`) before removing gear so current progress label/emoji are preserved.
+
+### Progress Button Updates
+- `AudioService.update_progress_bar` should not rely only on global `self.current_view`/`self.stop_progress_update` for task coordination; stale tasks can overwrite older messages after a new playback starts.
+- Cancel the previous progress task before starting a new one and guard updates by message identity (`current_sound_message.id`) to keep historical progress labels stable.
 
 ## Deployment
 

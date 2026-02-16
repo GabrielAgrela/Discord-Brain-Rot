@@ -116,7 +116,7 @@ This README is based on the current codebase behavior (not historical README ass
 - Random periodic sound playback loop.
 - MyInstants scraping loop.
 - Scraper start + completion image cards with compact run summary.
-- Controls-button normalizer loop (every minute): removes inline `⚙️` from recent messages and reapplies it to the newest eligible bot message in the latest 10 messages.
+- Controls-button normalizer loop (every minute): keeps one recent inline `⚙️` on eligible bot messages by adding if missing and removing extras with safe raw-component edits.
 - Keyword detection health check loop.
 - Voice-activity auto-disconnect safety loop.
 - Web playback queue consumer loop.

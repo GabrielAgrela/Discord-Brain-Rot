@@ -164,7 +164,7 @@ class BackgroundService:
             return False
 
     async def _ensure_controls_button_on_last_bot_message_for_guild(self, guild: discord.Guild) -> None:
-        """Normalize controls buttons in recent messages for one guild bot channel."""
+        """Keep exactly one recent inline controls button on eligible bot messages."""
         message_service = getattr(self.audio_service, "message_service", None)
         if not message_service:
             return
@@ -188,23 +188,46 @@ class BackgroundService:
         if not bot_messages:
             return
 
-        # Remove controls button from all bot-authored recent messages.
-        for message in bot_messages:
-            if hasattr(self.audio_service, "_remove_send_controls_button_from_message"):
-                await self.audio_service._remove_send_controls_button_from_message(message)
+        def _message_has_controls(message: discord.Message) -> bool:
+            if hasattr(self.audio_service, "_message_has_send_controls_button"):
+                try:
+                    return bool(self.audio_service._message_has_send_controls_button(message))
+                except Exception:
+                    return self._message_components_have_send_controls_button(message)
+            return self._message_components_have_send_controls_button(message)
 
-        # Add one controls button back on the newest non-controls bot message.
+        # Pick the newest non-controls-menu bot message first.
         target_candidates = bot_messages
         if hasattr(self.audio_service, "_is_controls_menu_message"):
             target_candidates = [
                 message for message in bot_messages
                 if not self.audio_service._is_controls_menu_message(message)
             ]
+        if not target_candidates:
+            return
 
-        for target_message in target_candidates:
-            added = await self._add_controls_button_to_message(target_message)
-            if added:
+        keeper = None
+        for candidate in target_candidates:
+            if _message_has_controls(candidate):
+                keeper = candidate
                 break
+
+        if keeper is None:
+            for target_message in target_candidates:
+                added = await self._add_controls_button_to_message(target_message)
+                if added:
+                    keeper = target_message
+                    break
+
+        if not keeper:
+            return
+
+        if hasattr(self.audio_service, "_remove_send_controls_button_from_message"):
+            for candidate in target_candidates:
+                if candidate.id == keeper.id:
+                    continue
+                if _message_has_controls(candidate):
+                    await self.audio_service._remove_send_controls_button_from_message(candidate)
 
     async def _notify_scraper_start(self) -> None:
         """Send a scraper start notification to the bot channel."""
@@ -507,7 +530,7 @@ class BackgroundService:
 
     @tasks.loop(seconds=60)
     async def ensure_last_message_controls_button_loop(self):
-        """Every minute, normalize controls button presence in the latest 10 messages."""
+        """Every minute, ensure a recent eligible bot message still has inline controls."""
         try:
             for guild in self.bot.guilds:
                 await self._ensure_controls_button_on_last_bot_message_for_guild(guild)

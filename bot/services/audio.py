@@ -57,6 +57,7 @@ class AudioService:
         self.volume = 1.0
         self.playback_done = asyncio.Event()
         self.playback_done.set()
+        self._progress_update_task: Optional[asyncio.Task] = None
         
         # Track current view to update progress button
         self.current_view: Optional[discord.ui.View] = None
@@ -159,25 +160,72 @@ class AudioService:
         message: Optional[discord.Message],
     ) -> None:
         """Remove the inline controls (gear) button from a playback message."""
-        if not message or not getattr(message, "components", None):
+        if not message:
             return
 
-        try:
-            view = discord.ui.View.from_message(message)
-        except Exception:
+        target_message = message
+        channel = getattr(message, "channel", None)
+        message_id = getattr(message, "id", None)
+
+        # Refresh message before editing because tracked references can be stale
+        # after progress updates and would otherwise overwrite button labels.
+        fetch_message = getattr(channel, "fetch_message", None)
+        if callable(fetch_message) and message_id is not None:
+            try:
+                refreshed = await fetch_message(message_id)
+                if refreshed is not None:
+                    target_message = refreshed
+            except discord.NotFound:
+                return
+            except Exception:
+                target_message = message
+
+        if not getattr(target_message, "components", None):
             return
 
         removed = False
-        for item in list(view.children):
-            if self._is_send_controls_item(item):
-                view.remove_item(item)
-                removed = True
+        updated_rows = []
+
+        rows = getattr(target_message, "components", None) or []
+        for row in rows:
+            components = getattr(row, "children", None) or getattr(row, "components", None) or []
+            kept_components = []
+
+            for component in components:
+                if self._component_is_send_controls(component):
+                    removed = True
+                    continue
+
+                to_dict = getattr(component, "to_dict", None)
+                if callable(to_dict):
+                    kept_components.append(to_dict())
+
+            if not kept_components:
+                continue
+
+            row_payload = {
+                "type": 1,
+                "components": kept_components,
+            }
+            row_id = getattr(row, "id", None)
+            if row_id is not None:
+                row_payload["id"] = row_id
+            updated_rows.append(row_payload)
 
         if not removed:
             return
 
+        http = getattr(getattr(target_message, "_state", None), "http", None)
+        edit_message = getattr(http, "edit_message", None)
+        if not callable(edit_message):
+            return
+
         try:
-            await message.edit(view=view)
+            await edit_message(
+                target_message.channel.id,
+                target_message.id,
+                components=updated_rows,
+            )
         except discord.NotFound:
             return
         except Exception as e:
@@ -219,7 +267,7 @@ class AudioService:
         self,
         message: Optional[discord.Message],
     ) -> None:
-        """On new channel message, remove prior message gear button and track the latest one."""
+        """On new channel message, keep inline controls on only the latest controls-bearing message."""
         if not message:
             return
 
@@ -232,13 +280,19 @@ class AudioService:
         if channel_id is None:
             return
 
-        previous_message = self._last_gear_message_by_channel.get(channel_id)
-        if previous_message and previous_message.id != message.id:
-            await self._remove_send_controls_button_from_message(previous_message)
-            self._last_gear_message_by_channel.pop(channel_id, None)
-
-        if self._message_has_send_controls_button(message):
+        message_has_controls = self._message_has_send_controls_button(message)
+        if message_has_controls:
+            previous_message = self._last_gear_message_by_channel.get(channel_id)
+            if previous_message and previous_message.id != message.id:
+                await self._remove_send_controls_button_from_message(previous_message)
+                self._last_gear_message_by_channel.pop(channel_id, None)
             self._last_gear_message_by_channel[channel_id] = message
+            return
+
+        # Keep the previous controls message tracked until a newer one replaces it.
+        tracked_message = self._last_gear_message_by_channel.get(channel_id)
+        if tracked_message and not self._message_has_send_controls_button(tracked_message):
+            self._last_gear_message_by_channel.pop(channel_id, None)
 
     def set_sound_service(self, sound_service):
         self.sound_service = sound_service
@@ -250,6 +304,13 @@ class AudioService:
         """Set reference to BotBehavior for passing to views."""
         self._behavior = behavior
         self.bot.behavior = behavior
+
+    def _cancel_progress_update_task(self) -> None:
+        """Cancel the active progress update task, if any."""
+        task = self._progress_update_task
+        if task and not task.done():
+            task.cancel()
+        self._progress_update_task = None
 
     async def _notify_tts_busy(self, channel, user, original_message: str = "", audio_file: str = "", loading_message: 'discord.Message' = None):
         """Send a plain-text message when a TTS request is rejected due to active playback."""
@@ -531,6 +592,7 @@ class AudioService:
             # Stop any currently playing audio and mark as slapped
             if voice_client.is_playing():
                 self.stop_progress_update = True  # Stop the progress bar animation
+                self._cancel_progress_update_task()
                 # Update the current sound message with slap icon
                 if self.current_sound_message and self.current_view:
                     try:
@@ -633,6 +695,7 @@ class AudioService:
 
                 was_interrupted = True
                 self.stop_progress_update = True
+                self._cancel_progress_update_task()
                 voice_client.stop()
                 await asyncio.sleep(0.1)  # Allow FFmpeg process to terminate cleanly
                 
@@ -951,7 +1014,10 @@ class AudioService:
                         pass
                     
                     if sound_message and not is_slap_sound and duration > 0:
-                        asyncio.create_task(self.update_progress_bar(sound_message, duration, view))
+                        self._cancel_progress_update_task()
+                        self._progress_update_task = asyncio.create_task(
+                            self.update_progress_bar(sound_message, duration, view)
+                        )
                 except Exception as ui_error:
                     print(f"[AudioService] Error in background UI task: {ui_error}")
                     traceback.print_exc()
@@ -974,14 +1040,22 @@ class AudioService:
         # Shorter bar for button (Wider now, but trimmed to 6 ✅)
         bar_length = 7
         total_time_str = self._format_duration(duration)
-        
-        # If view passed, ensure it is set as current
-        if view:
-            self.current_view = view
+        target_view = view if view is not None else self.current_view
+        target_message_id = getattr(sound_message, "id", None)
 
         try:
             while time.time() - start_time < duration:
                 if self.stop_progress_update:
+                    break
+
+                current_message = self.current_sound_message
+                if (
+                    target_message_id is not None
+                    and (
+                        current_message is None
+                        or getattr(current_message, "id", None) != target_message_id
+                    )
+                ):
                     break
                     
                 # Add delay offset to account for image processing/Discord send delay.
@@ -1002,8 +1076,16 @@ class AudioService:
                 # Format: ▶️ 🔘▬▬▬▬ 0:05
                 seeker_text = f"▶️ {bar} {current_time_str}"
                 
-                # Use self.current_view to handle view replacements
-                current_view = self.current_view
+                current_view = target_view
+                if (
+                    target_message_id is not None
+                    and self.current_sound_message
+                    and getattr(self.current_sound_message, "id", None) == target_message_id
+                    and self.current_view is not None
+                ):
+                    # Keep supporting in-place view replacements for the same active message.
+                    current_view = self.current_view
+
                 if current_view and hasattr(current_view, 'update_progress_label'):
                     try:
                         current_view.update_progress_label(seeker_text)
@@ -1023,16 +1105,39 @@ class AudioService:
             if not self.stop_progress_update:
                 final_bar = "▬" * bar_length + "🔘"
                 final_text = f"✅ {final_bar} {total_time_str}"
-                
-                current_view = self.current_view
+
+                current_message = self.current_sound_message
+                if (
+                    target_message_id is not None
+                    and (
+                        current_message is None
+                        or getattr(current_message, "id", None) != target_message_id
+                    )
+                ):
+                    return
+
+                current_view = target_view
+                if (
+                    target_message_id is not None
+                    and self.current_sound_message
+                    and getattr(self.current_sound_message, "id", None) == target_message_id
+                    and self.current_view is not None
+                ):
+                    current_view = self.current_view
                 if current_view and hasattr(current_view, 'update_progress_label'):
                     try:
                         current_view.update_progress_label(final_text)
                         await sound_message.edit(view=current_view)
                     except:
                         pass
+        except asyncio.CancelledError:
+            return
         except Exception as e:
             print(f"[AudioService] Error updating progress bar: {e}")
+        finally:
+            current_task = asyncio.current_task()
+            if current_task is not None and self._progress_update_task is current_task:
+                self._progress_update_task = None
 
     async def start_keyword_detection(self, guild: discord.Guild):
         """Start background keyword detection in the specified guild."""
