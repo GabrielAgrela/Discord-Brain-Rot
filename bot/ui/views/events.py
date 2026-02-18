@@ -54,7 +54,17 @@ class UserEventSelectView(View):
         """Build the event-assignment message content from current selections."""
         base = f"Assigning event for sound: **{self.sound_name_no_ext}**\n"
         if self.selected_user_id and self.selected_event_type:
-            is_set = Database().get_user_event_sound(self.selected_user_id, self.selected_event_type, self.sound_name_no_ext)
+            guild_id = (
+                self.message_to_edit.guild.id
+                if self.message_to_edit and self.message_to_edit.guild
+                else None
+            )
+            is_set = Database().get_user_event_sound(
+                self.selected_user_id,
+                self.selected_event_type,
+                self.sound_name_no_ext,
+                guild_id=guild_id,
+            )
             action_text = "REMOVE" if is_set else "ADD"
             user_display = self.selected_user_id.split('#')[0]
             base += f"\n **{action_text}** this sound as a **{self.selected_event_type}** event for **{user_display}**."

@@ -2,6 +2,7 @@ from flask import Flask, render_template, jsonify, request
 import sqlite3
 import math
 import datetime
+import os
 
 app = Flask(__name__)
 
@@ -204,13 +205,18 @@ def get_all_sounds():
 def request_play_sound():
     data = request.get_json()
     sound_filename = data.get('sound_filename')
+    requested_guild_id = data.get('guild_id')
 
     if not sound_filename:
         return jsonify({'error': 'Missing sound_filename'}), 400
 
-    # --- IMPORTANT: Replace YOUR_DEFAULT_GUILD_ID with the actual server ID ---
-    guild_id = 359077662742020107 # YOUR_DEFAULT_GUILD_ID 
-    # ----------------------------------------------------------------------
+    guild_id_raw = requested_guild_id or os.getenv("DEFAULT_GUILD_ID", "")
+    if not guild_id_raw:
+        return jsonify({'error': 'Missing guild_id'}), 400
+    try:
+        guild_id = int(guild_id_raw)
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Invalid guild_id'}), 400
 
     try:
         conn = sqlite3.connect('Data/database.db')
@@ -535,4 +541,3 @@ def get_analytics_recent():
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=8080)
-

@@ -34,7 +34,10 @@ class OnThisDayButton(Button):
             
             if channel:
                 # Use the sound repository to get sound info
-                sound = view.sound_service.sound_repo.get_sound_by_name(self.sound_filename)
+                sound = view.sound_service.sound_repo.get_sound_by_name(
+                    self.sound_filename,
+                    guild_id=interaction.guild.id if interaction.guild else None,
+                )
                 if sound:
                     await view.audio_service.play_audio(
                         channel=channel,

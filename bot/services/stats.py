@@ -23,7 +23,8 @@ class StatsService:
         1. Server-wide summary embed
         2. Paginated user stats with navigation buttons
         """
-        self.action_repo.insert(requesting_user.name, "list_top_users", by)
+        guild_id = guild.id if guild else None
+        self.action_repo.insert(requesting_user.name, "list_top_users", by, guild_id=guild_id)
         
         bot_channel = self.message_service.get_bot_channel(guild)
         if not bot_channel:
@@ -32,16 +33,16 @@ class StatsService:
         messages = []
         
         # Phase 1: Send server-wide summary
-        server_embed = self._create_server_stats_embed(days)
+        server_embed = self._create_server_stats_embed(days, guild_id=guild_id)
         server_message = await bot_channel.send(embed=server_embed)
         messages.append(server_message)
         
         # Phase 2: Send paginated user stats
-        top_users = self.action_repo.get_top_users(days, number_users, by)
+        top_users = self.action_repo.get_top_users(days, number_users, by, guild_id=guild_id)
         
         if top_users:
             from bot.ui.views.stats import PaginatedStatsView
-            view = PaginatedStatsView(self.bot, top_users, number_sounds, days)
+            view = PaginatedStatsView(self.bot, top_users, number_sounds, days, guild_id=guild_id)
             user_embed = view.create_user_embed()
             user_message = await bot_channel.send(embed=user_embed, view=view)
             messages.append(user_message)
@@ -57,9 +58,9 @@ class StatsService:
                     
         asyncio.create_task(cleanup())
 
-    def _create_server_stats_embed(self, days: int) -> discord.Embed:
+    def _create_server_stats_embed(self, days: int, guild_id: Optional[int] = None) -> discord.Embed:
         """Create an embed with server-wide statistics."""
-        sound_summary, total_plays = self.action_repo.get_top_sounds(days, 10, None)
+        sound_summary, total_plays = self.action_repo.get_top_sounds(days, 10, None, guild_id=guild_id)
         average_per_day = total_plays / days if days > 0 else total_plays
         
         embed = discord.Embed(
@@ -77,7 +78,7 @@ class StatsService:
                 sounds_text += f"**#{i}** {sound_name} — {play_count} plays\n"
             embed.add_field(name="🔥 Top 10 Sounds", value=sounds_text, inline=False)
 
-        top_voice_users = self.stats_repo.get_top_voice_users(days=days, limit=5)
+        top_voice_users = self.stats_repo.get_top_voice_users(days=days, limit=5, guild_id=guild_id)
         if top_voice_users:
             users_text = ""
             for i, user_data in enumerate(top_voice_users, 1):
@@ -87,7 +88,7 @@ class StatsService:
                 )
             embed.add_field(name="🎤 Top Voice Users", value=users_text, inline=False)
 
-        top_voice_channels = self.stats_repo.get_top_voice_channels(days=days, limit=3)
+        top_voice_channels = self.stats_repo.get_top_voice_channels(days=days, limit=3, guild_id=guild_id)
         if top_voice_channels:
             channels_text = ""
             for i, channel_data in enumerate(top_voice_channels, 1):

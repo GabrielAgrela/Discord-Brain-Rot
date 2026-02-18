@@ -178,6 +178,11 @@ Canonical completion command:
 - AFK transitions are intentionally handled as session boundaries for active channels only (joining AFK is not counted as active voice time)
 - Voice session rows currently store `member.name` (not `name#discriminator`) to align with existing stats queries
 
+### STT Feature Flag Enforcement
+- `AudioService.start_keyword_detection` must enforce guild-level `stt_enabled` from `GuildSettingsService` before starting a sink.
+- `ensure_voice_connected` can be invoked more than once in quick succession during join/event playback flows; without the guard, keyword detection may start even when STT is disabled and then immediately be stopped by background health checks.
+- If Vosk appears to start and stop within seconds, verify `guild_settings.stt_enabled` for that guild first.
+
 ### Inline Controls Button Normalization
 - The minute background normalizer in `bot/services/background.py` is a safety dedupe pass; keep real-time cleanup in `on_message` (`handle_new_bot_message_for_controls_cleanup`) intact.
 - When detecting/removing inline `⚙️` controls, prefer checking both reconstructed views (`discord.ui.View.from_message`) and raw `message.components`; relying on one source can miss existing buttons and cause duplicate `custom_id` edit failures.
@@ -200,7 +205,16 @@ cd /home/gabi/github/Discord-Brain-Rot
 docker-compose restart
 ```
 
-This restarts both the bot and web containers. The bot runs in Docker, so changes to Python files won't take effect until the container is restarted.
+The bot runs in Docker, so changes to Python files won't take effect until the container is restarted.
+
+- The `web` service is now profile-gated (`profiles: ["web"]`) for public launch. In normal production flow, restart only the bot service:
+```bash
+docker-compose restart bot
+```
+- Compose profiles do not auto-stop already running containers. If `web` was previously started, explicitly stop it when launching bot-only mode:
+```bash
+docker-compose stop web
+```
 
 - If system dependencies or fonts change in `Dockerfile`, restart is not enough; rebuild and recreate containers first:
 ```bash

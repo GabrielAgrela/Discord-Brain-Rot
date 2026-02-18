@@ -8,6 +8,7 @@ and enable cleaner interfaces between layers.
 from bot.models.sound import Sound, SoundEffect
 from bot.models.user import User, UserEvent
 from bot.models.action import Action
+from bot.models.guild_settings import GuildSettings
 
 __all__ = [
     "Sound",
@@ -15,4 +16,5 @@ __all__ = [
     "User",
     "UserEvent",
     "Action",
+    "GuildSettings",
 ]

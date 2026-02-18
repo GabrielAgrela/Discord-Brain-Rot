@@ -33,7 +33,11 @@ class VoiceActivityRepository(BaseRepository):
         return [self._row_to_entity(row) for row in rows]
 
     def log_join(
-        self, username: str, channel_id: str, join_time: Optional[str] = None
+        self,
+        username: str,
+        channel_id: str,
+        join_time: Optional[str] = None,
+        guild_id: Optional[int | str] = None,
     ) -> int:
         """
         Log a voice join event by creating an open session.
@@ -49,14 +53,23 @@ class VoiceActivityRepository(BaseRepository):
         timestamp = join_time or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         return self._execute_write(
             """
-            INSERT INTO voice_activity (username, channel_id, join_time, leave_time)
-            VALUES (?, ?, ?, NULL)
+            INSERT INTO voice_activity (username, channel_id, join_time, leave_time, guild_id)
+            VALUES (?, ?, ?, NULL, ?)
             """,
-            (username, str(channel_id), timestamp),
+            (
+                username,
+                str(channel_id),
+                timestamp,
+                str(guild_id) if guild_id is not None else None,
+            ),
         )
 
     def log_leave(
-        self, username: str, channel_id: str, leave_time: Optional[str] = None
+        self,
+        username: str,
+        channel_id: str,
+        leave_time: Optional[str] = None,
+        guild_id: Optional[int | str] = None,
     ) -> bool:
         """
         Close the latest open session for a user/channel pair.
@@ -69,16 +82,29 @@ class VoiceActivityRepository(BaseRepository):
         Returns:
             True when an open session was found and closed.
         """
-        open_session = self._execute_one(
-            """
-            SELECT id
-            FROM voice_activity
-            WHERE username = ? AND channel_id = ? AND leave_time IS NULL
-            ORDER BY join_time DESC, id DESC
-            LIMIT 1
-            """,
-            (username, str(channel_id)),
-        )
+        if guild_id is None:
+            open_session = self._execute_one(
+                """
+                SELECT id
+                FROM voice_activity
+                WHERE username = ? AND channel_id = ? AND leave_time IS NULL
+                ORDER BY join_time DESC, id DESC
+                LIMIT 1
+                """,
+                (username, str(channel_id)),
+            )
+        else:
+            open_session = self._execute_one(
+                """
+                SELECT id
+                FROM voice_activity
+                WHERE username = ? AND channel_id = ? AND leave_time IS NULL
+                AND (guild_id = ? OR guild_id IS NULL)
+                ORDER BY join_time DESC, id DESC
+                LIMIT 1
+                """,
+                (username, str(channel_id), str(guild_id)),
+            )
         if not open_session:
             return False
 
@@ -90,7 +116,11 @@ class VoiceActivityRepository(BaseRepository):
         return True
 
     def get_user_voice_metrics(
-        self, username: str, period_start: str, period_end: str
+        self,
+        username: str,
+        period_start: str,
+        period_end: str,
+        guild_id: Optional[int | str] = None,
     ) -> Dict[str, float]:
         """
         Aggregate user voice metrics for a time window.
@@ -103,8 +133,29 @@ class VoiceActivityRepository(BaseRepository):
         Returns:
             Dict with joins, leaves, total_seconds, longest_seconds.
         """
+        guild_clause = ""
+        params = [
+            period_start,
+            period_end,
+            period_start,
+            period_end,
+            period_end,
+            period_end,
+            period_start,
+            period_end,
+            period_end,
+            period_start,
+            username,
+            period_end,
+            period_end,
+            period_start,
+        ]
+        if guild_id is not None:
+            guild_clause = "AND (guild_id = ? OR guild_id IS NULL)"
+            params.append(str(guild_id))
+
         row = self._execute_one(
-            """
+            f"""
             SELECT
                 COUNT(CASE WHEN join_time BETWEEN ? AND ? THEN 1 END) AS joins_in_period,
                 COUNT(CASE WHEN leave_time BETWEEN ? AND ? THEN 1 END) AS leaves_in_period,
@@ -136,23 +187,9 @@ class VoiceActivityRepository(BaseRepository):
             WHERE username = ?
             AND join_time <= ?
             AND COALESCE(leave_time, ?) >= ?
+            {guild_clause}
             """,
-            (
-                period_start,
-                period_end,
-                period_start,
-                period_end,
-                period_end,
-                period_end,
-                period_start,
-                period_end,
-                period_end,
-                period_start,
-                username,
-                period_end,
-                period_end,
-                period_start,
-            ),
+            tuple(params),
         )
 
         if not row:
@@ -182,7 +219,10 @@ class VoiceActivityRepository(BaseRepository):
         return period_start, period_end
 
     def get_top_users_by_voice_time(
-        self, days: int = 7, limit: int = 10
+        self,
+        days: int = 7,
+        limit: int = 10,
+        guild_id: Optional[int | str] = None,
     ) -> List[Tuple[str, float, int]]:
         """
         Get users ordered by total voice time.
@@ -195,8 +235,21 @@ class VoiceActivityRepository(BaseRepository):
             List of tuples: (username, total_seconds, session_count).
         """
         period_start, period_end = self._get_period_bounds(days)
+        guild_clause = ""
+        params = [
+            period_end,
+            period_end,
+            period_start,
+            period_end,
+            period_end,
+            period_start,
+        ]
+        if guild_id is not None:
+            guild_clause = "AND (guild_id = ? OR guild_id IS NULL)"
+            params.append(str(guild_id))
+        params.append(limit)
         rows = self._execute(
-            """
+            f"""
             WITH SessionDurations AS (
                 SELECT
                     username,
@@ -210,6 +263,7 @@ class VoiceActivityRepository(BaseRepository):
                 FROM voice_activity
                 WHERE join_time <= ?
                 AND COALESCE(leave_time, ?) >= ?
+                {guild_clause}
             )
             SELECT
                 username,
@@ -221,15 +275,7 @@ class VoiceActivityRepository(BaseRepository):
             ORDER BY total_seconds DESC
             LIMIT ?
             """,
-            (
-                period_end,
-                period_end,
-                period_start,
-                period_end,
-                period_end,
-                period_start,
-                limit,
-            ),
+            tuple(params),
         )
         return [
             (row["username"], float(row["total_seconds"]), int(row["session_count"]))
@@ -237,7 +283,10 @@ class VoiceActivityRepository(BaseRepository):
         ]
 
     def get_top_channels_by_voice_time(
-        self, days: int = 7, limit: int = 10
+        self,
+        days: int = 7,
+        limit: int = 10,
+        guild_id: Optional[int | str] = None,
     ) -> List[Tuple[str, float, int]]:
         """
         Get channels ordered by total voice time.
@@ -250,8 +299,21 @@ class VoiceActivityRepository(BaseRepository):
             List of tuples: (channel_id, total_seconds, session_count).
         """
         period_start, period_end = self._get_period_bounds(days)
+        guild_clause = ""
+        params = [
+            period_end,
+            period_end,
+            period_start,
+            period_end,
+            period_end,
+            period_start,
+        ]
+        if guild_id is not None:
+            guild_clause = "AND (guild_id = ? OR guild_id IS NULL)"
+            params.append(str(guild_id))
+        params.append(limit)
         rows = self._execute(
-            """
+            f"""
             WITH SessionDurations AS (
                 SELECT
                     channel_id,
@@ -265,6 +327,7 @@ class VoiceActivityRepository(BaseRepository):
                 FROM voice_activity
                 WHERE join_time <= ?
                 AND COALESCE(leave_time, ?) >= ?
+                {guild_clause}
             )
             SELECT
                 channel_id,
@@ -276,15 +339,7 @@ class VoiceActivityRepository(BaseRepository):
             ORDER BY total_seconds DESC
             LIMIT ?
             """,
-            (
-                period_end,
-                period_end,
-                period_start,
-                period_end,
-                period_end,
-                period_start,
-                limit,
-            ),
+            tuple(params),
         )
         return [
             (str(row["channel_id"]), float(row["total_seconds"]), int(row["session_count"]))

@@ -38,8 +38,11 @@ class MessageService:
         self.color = discord.Color.dark_grey()
         self._last_message: Optional[discord.Message] = None
         self._controls_message: Optional[discord.Message] = None
+        self._controls_messages_by_guild: dict[int, discord.Message] = {}
         self._bot_behavior = None  # Set later to avoid circular dependency
         self._controls_lock = asyncio.Lock()
+        from bot.services.guild_settings import GuildSettingsService
+        self.guild_settings_service = GuildSettingsService()
 
     def set_behavior(self, behavior):
         """Set bot behavior reference for re-sending controls."""
@@ -120,6 +123,15 @@ class MessageService:
             Text channel or None if not found
         """
         if guild:
+            settings = self.guild_settings_service.get(guild.id)
+            configured_channel_id = settings.bot_text_channel_id
+            if configured_channel_id:
+                try:
+                    configured_channel = guild.get_channel(int(configured_channel_id))
+                    if isinstance(configured_channel, discord.TextChannel):
+                        return configured_channel
+                except (TypeError, ValueError):
+                    pass
             return discord.utils.get(guild.text_channels, name=self.bot_channel_name)
         
         # Search across all guilds
@@ -138,6 +150,7 @@ class MessageService:
         view: Optional[discord.ui.View] = None,
         delete_time: Optional[int] = None,
         channel: Optional[discord.TextChannel] = None,
+        guild: Optional[discord.Guild] = None,
         message_format: Literal["embed", "image"] = "embed",
         image_requester: str = "Gertrudes",
         image_show_footer: bool = True,
@@ -155,6 +168,7 @@ class MessageService:
             view: Discord UI view to attach
             delete_time: Auto-delete after N seconds
             channel: Specific channel (uses bot channel if None)
+            guild: Guild context for bot-channel resolution when channel is not provided
             message_format: "embed" (default) or "image"
             image_requester: Requester label used for image cards
             image_show_footer: Whether image card should include footer row
@@ -165,7 +179,7 @@ class MessageService:
             The sent message or None on failure
         """
         if channel is None:
-            channel = self.get_bot_channel()
+            channel = self.get_bot_channel(guild)
         
         if channel is None:
             print("[MessageService] No bot channel found")
@@ -256,6 +270,7 @@ class MessageService:
         self,
         message: str,
         channel: Optional[discord.TextChannel] = None,
+        guild: Optional[discord.Guild] = None,
         delete_time: int = 10,
     ) -> Optional[discord.Message]:
         """
@@ -275,12 +290,14 @@ class MessageService:
             color=discord.Color.red(),
             delete_time=delete_time,
             channel=channel,
+            guild=guild,
         )
     
     async def send_success(
         self,
         message: str,
         channel: Optional[discord.TextChannel] = None,
+        guild: Optional[discord.Guild] = None,
         delete_time: int = 10,
     ) -> Optional[discord.Message]:
         """
@@ -300,6 +317,7 @@ class MessageService:
             color=discord.Color.green(),
             delete_time=delete_time,
             channel=channel,
+            guild=guild,
         )
     
     async def delete_last_message(self) -> bool:
@@ -404,15 +422,17 @@ class MessageService:
             
         try:
             async with self._controls_lock:
-                # We only track the controls message per-instance, which is a bit limiting
-                # for multi-guild, but better than nothing for now.
-                if self._controls_message and self._controls_message.channel.id == channel.id:
+                guild_id = guild.id if guild else getattr(channel.guild, "id", None)
+                existing_controls = self._controls_messages_by_guild.get(guild_id) if guild_id else None
+                if existing_controls and existing_controls.channel.id == channel.id:
                     try:
-                        await self._controls_message.delete()
+                        await existing_controls.delete()
                     except:
                         pass
                 
                 self._controls_message = await channel.send(view=ControlsView(bot_behavior), delete_after=delete_after)
+                if guild_id:
+                    self._controls_messages_by_guild[guild_id] = self._controls_message
                 return True
         except Exception as e:
             print(f"[MessageService] Error sending controls: {e}")
@@ -439,9 +459,9 @@ class MessageService:
         """Get the current controls message."""
         return self._controls_message
 
-    async def delete_controls_message(self, delete_all=True):
+    async def delete_controls_message(self, delete_all=True, guild: Optional[discord.Guild] = None):
         """Find and delete control messages in the bot channel history."""
-        channel = self.get_bot_channel()
+        channel = self.get_bot_channel(guild)
         if not channel:
             return
             
@@ -465,9 +485,9 @@ class MessageService:
         except Exception as e:
             print(f"[MessageService] Error deleting control messages: {e}")
 
-    async def disable_controls_message(self, disable_all: bool = True):
+    async def disable_controls_message(self, disable_all: bool = True, guild: Optional[discord.Guild] = None):
         """Find and disable control messages in the bot channel history."""
-        channel = self.get_bot_channel()
+        channel = self.get_bot_channel(guild)
         if not channel:
             return
 
@@ -489,9 +509,9 @@ class MessageService:
         except Exception as e:
             print(f"[MessageService] Error disabling control messages: {e}")
 
-    async def clean_buttons(self, count=5):
+    async def clean_buttons(self, count=5, guild: Optional[discord.Guild] = None):
         """Disable components/buttons from recent messages."""
-        channel = self.get_bot_channel()
+        channel = self.get_bot_channel(guild)
         if not channel:
             return
             

@@ -123,7 +123,12 @@ class SoundSelect(ui.Select):
             channel = self.bot_behavior._audio_service.get_largest_voice_channel(interaction.guild)
         if channel:
             asyncio.create_task(self.bot_behavior._audio_service.play_audio(channel, sound_filename, interaction.user.name))
-            Database().insert_action(interaction.user.name, "select_play_sound", sound_filename)
+            Database().insert_action(
+                interaction.user.name,
+                "select_play_sound",
+                sound_filename,
+                guild_id=interaction.guild.id if interaction.guild else None,
+            )
 
 
 class AddToListSelect(ui.Select):
@@ -164,7 +169,8 @@ class AddToListSelect(ui.Select):
             
         await interaction.response.defer()
         list_id = int(self.values[0])
-        list_info = Database().get_sound_list(list_id)
+        guild_id = interaction.guild.id if interaction.guild else None
+        list_info = Database().get_sound_list(list_id, guild_id=guild_id)
         if not list_info:
             await interaction.followup.send("List not found.", ephemeral=True)
             return
@@ -239,7 +245,12 @@ class STSCharacterSelect(ui.Select):
         ))
         
         try:
-            Database().insert_action(interaction.user.name, "sts_EL", Database().get_sound(self.audio_file, True)[0])
+            Database().insert_action(
+                interaction.user.name,
+                "sts_EL",
+                Database().get_sound(self.audio_file, True, guild_id=interaction.guild.id if interaction.guild else None)[0],
+                guild_id=interaction.guild.id if interaction.guild else None,
+            )
         except:
             pass
 
@@ -289,7 +300,12 @@ class SimilarSoundsSelect(ui.Select):
             channel = self.bot_behavior._audio_service.get_largest_voice_channel(interaction.guild)
         if channel:
             asyncio.create_task(self.bot_behavior._audio_service.play_audio(channel, sound_name, interaction.user.name))
-            Database().insert_action(interaction.user.name, "select_similar_sound", sound_name)
+            Database().insert_action(
+                interaction.user.name,
+                "select_similar_sound",
+                sound_name,
+                guild_id=interaction.guild.id if interaction.guild else None,
+            )
 
 
 class LoadingSimilarSoundsSelect(ui.Select):

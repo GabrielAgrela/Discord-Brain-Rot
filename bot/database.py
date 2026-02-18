@@ -61,6 +61,9 @@ class Database:
         
         # Set row_factory so repositories can use dict-style access
         self.conn.row_factory = sqlite3.Row
+
+        # Ensure runtime schema is compatible with the current code.
+        self._run_schema_migrations()
         
         # Share connection with repositories for consistency
         from bot.repositories.base import BaseRepository
@@ -100,6 +103,72 @@ class Database:
         Database._sound_cache_normalized = None
         Database._cache_timestamp = None
 
+    def _table_exists(self, table_name: str) -> bool:
+        """Return True if a SQLite table exists."""
+        row = self.conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+            (table_name,),
+        ).fetchone()
+        return row is not None
+
+    def _column_exists(self, table_name: str, column_name: str) -> bool:
+        """Return True if a column exists on a table."""
+        try:
+            rows = self.conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+        except sqlite3.Error:
+            return False
+        for row in rows:
+            # Row format: cid, name, type, notnull, dflt_value, pk
+            if str(row[1]) == column_name:
+                return True
+        return False
+
+    def _ensure_column(self, table_name: str, column_def: str, column_name: str):
+        """Add a column if it does not already exist."""
+        if not self._table_exists(table_name):
+            return
+        if self._column_exists(table_name, column_name):
+            return
+        self.conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_def}")
+        self.conn.commit()
+
+    def _run_schema_migrations(self):
+        """Apply lightweight schema migrations for multi-guild support."""
+        try:
+            # Core guild settings table for per-guild channels + feature flags.
+            self.conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS guild_settings (
+                    guild_id TEXT PRIMARY KEY,
+                    bot_text_channel_id TEXT,
+                    default_voice_channel_id TEXT,
+                    autojoin_enabled INTEGER NOT NULL DEFAULT 0 CHECK (autojoin_enabled IN (0,1)),
+                    periodic_enabled INTEGER NOT NULL DEFAULT 0 CHECK (periodic_enabled IN (0,1)),
+                    stt_enabled INTEGER NOT NULL DEFAULT 0 CHECK (stt_enabled IN (0,1)),
+                    audio_policy TEXT NOT NULL DEFAULT 'low_latency',
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+
+            # Tenant scoping columns (nullable => global/legacy row).
+            self._ensure_column("sounds", "guild_id TEXT", "guild_id")
+            self._ensure_column("actions", "guild_id TEXT", "guild_id")
+            self._ensure_column("users", "guild_id TEXT", "guild_id")
+            self._ensure_column("voice_activity", "guild_id TEXT", "guild_id")
+            self._ensure_column("sound_lists", "guild_id TEXT", "guild_id")
+
+            # Helpful indexes for scoped queries.
+            self.conn.execute("CREATE INDEX IF NOT EXISTS idx_actions_guild_id ON actions(guild_id)")
+            self.conn.execute("CREATE INDEX IF NOT EXISTS idx_sounds_guild_id ON sounds(guild_id)")
+            self.conn.execute("CREATE INDEX IF NOT EXISTS idx_users_guild_event ON users(guild_id, id, event)")
+            self.conn.execute("CREATE INDEX IF NOT EXISTS idx_voice_activity_guild ON voice_activity(guild_id, join_time)")
+            self.conn.execute("CREATE INDEX IF NOT EXISTS idx_sound_lists_guild ON sound_lists(guild_id, list_name)")
+            self.conn.commit()
+        except sqlite3.Error as e:
+            print(f"[Database] Schema migration warning: {e}")
+
     @staticmethod
     def create_database():
         try:
@@ -117,7 +186,8 @@ class Database:
                 username TEXT NOT NULL,
                 action TEXT NOT NULL,
                 target TEXT NOT NULL,
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                guild_id TEXT
             );
             '''
             
@@ -130,7 +200,8 @@ class Database:
                 favorite BOOLEAN NOT NULL CHECK (favorite IN (0, 1)),
                 blacklist BOOLEAN NOT NULL CHECK (blacklist IN (0, 1)),
                 slap BOOLEAN NOT NULL CHECK (slap IN (0, 1)) DEFAULT 0,
-                is_elevenlabs BOOLEAN NOT NULL DEFAULT 0 CHECK (is_elevenlabs IN (0, 1))
+                is_elevenlabs BOOLEAN NOT NULL DEFAULT 0 CHECK (is_elevenlabs IN (0, 1)),
+                guild_id TEXT
             );
             '''
 
@@ -140,7 +211,8 @@ class Database:
                 id TEXT NOT NULL,
                 event TEXT NOT NULL,
                 sound TEXT NOT NULL,
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                guild_id TEXT
             );
             '''
             
@@ -151,7 +223,8 @@ class Database:
                 username TEXT NOT NULL,
                 channel_id TEXT NOT NULL,
                 join_time DATETIME DEFAULT CURRENT_TIMESTAMP,
-                leave_time DATETIME
+                leave_time DATETIME,
+                guild_id TEXT
             );
             '''
 
@@ -161,7 +234,8 @@ class Database:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 list_name TEXT NOT NULL,
                 creator TEXT NOT NULL,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                guild_id TEXT
             );
             '''
 
@@ -208,6 +282,21 @@ class Database:
             '''
             cursor.execute(create_ai_memory_table)
 
+            create_guild_settings_table = '''
+            CREATE TABLE IF NOT EXISTS guild_settings (
+                guild_id TEXT PRIMARY KEY,
+                bot_text_channel_id TEXT,
+                default_voice_channel_id TEXT,
+                autojoin_enabled INTEGER NOT NULL DEFAULT 0 CHECK (autojoin_enabled IN (0,1)),
+                periodic_enabled INTEGER NOT NULL DEFAULT 0 CHECK (periodic_enabled IN (0,1)),
+                stt_enabled INTEGER NOT NULL DEFAULT 0 CHECK (stt_enabled IN (0,1)),
+                audio_policy TEXT NOT NULL DEFAULT 'low_latency',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+            '''
+            cursor.execute(create_guild_settings_table)
+
             # Populate default keywords if empty
             cursor.execute("SELECT COUNT(*) FROM keywords")
             if cursor.fetchone()[0] == 0:
@@ -232,21 +321,24 @@ class Database:
 
     # ===== Core insert methods (used by downloaders) =====
     
-    def insert_action(self, username, action, target):
+    def insert_action(self, username, action, target, guild_id=None):
         username = username.split("#")[0]
         try:
-            self.cursor.execute("INSERT INTO actions (username, action, target) VALUES (?, ?, ?);", (username, action, target))
+            self.cursor.execute(
+                "INSERT INTO actions (username, action, target, guild_id) VALUES (?, ?, ?, ?);",
+                (username, action, target, str(guild_id) if guild_id is not None else None),
+            )
             self.conn.commit()
         except sqlite3.Error as e:
             print(f"An error occurred: {e}")
 
-    def insert_sound(self, originalfilename, filename, favorite=0, date=None, is_elevenlabs=0):
+    def insert_sound(self, originalfilename, filename, favorite=0, date=None, is_elevenlabs=0, guild_id=None):
         if date is None:
             date = datetime.datetime.now()
         try:
             self.cursor.execute(
-                "INSERT INTO sounds (originalfilename, Filename, favorite, blacklist, timestamp, is_elevenlabs) VALUES (?, ?, ?, 0, ?, ?);",
-                (originalfilename, filename, favorite, date, is_elevenlabs)
+                "INSERT INTO sounds (originalfilename, Filename, favorite, blacklist, timestamp, is_elevenlabs, guild_id) VALUES (?, ?, ?, 0, ?, ?, ?);",
+                (originalfilename, filename, favorite, date, is_elevenlabs, str(guild_id) if guild_id is not None else None)
             )
             self.conn.commit()
             self.invalidate_sound_cache()  # Refresh cache for similarity search
@@ -254,9 +346,12 @@ class Database:
         except sqlite3.Error as e:
             print(f"An error occurred: {e}")
     
-    def insert_user(self, event, sound):
+    def insert_user(self, event, sound, guild_id=None):
         try:
-            self.cursor.execute("INSERT INTO users (event, sound) VALUES (?, ?);", (event, sound))
+            self.cursor.execute(
+                "INSERT INTO users (event, sound, guild_id) VALUES (?, ?, ?);",
+                (event, sound, str(guild_id) if guild_id is not None else None),
+            )
             self.conn.commit()
             print("User inserted successfully")
         except sqlite3.Error as e:
@@ -332,7 +427,7 @@ class Database:
         
         return text.lower()
 
-    def get_sounds_by_similarity(self, req_sound, num_results=5, sleep_interval=0.0):
+    def get_sounds_by_similarity(self, req_sound, num_results=5, sleep_interval=0.0, guild_id=None):
         """Return the most similar sounds using in-memory cache.
         
         Uses RapidFuzz (C++ optimized) + cached sounds for ~10-50x speedup.
@@ -356,6 +451,9 @@ class Database:
             sound_dict = sound if isinstance(sound, dict) else dict(sound)
             if sound_dict.get('is_elevenlabs', 0) == 1:
                 continue
+            sound_guild_id = sound_dict.get("guild_id")
+            if guild_id is not None and sound_guild_id not in (None, str(guild_id), guild_id):
+                continue
             
             # Calculate multiple fuzzy matching scores (same algorithms, C++ speed)
             token_set_score = fuzz.token_set_ratio(normalized_req, normalized_filename)
@@ -364,6 +462,8 @@ class Database:
 
             # Combine scores with weighted average
             combined_score = (0.5 * token_set_score) + (0.3 * partial_ratio_score) + (0.2 * token_sort_score)
+            if guild_id is not None and str(sound_guild_id) == str(guild_id):
+                combined_score += 5.0  # Prefer guild-local sounds over global fallback.
 
             scored_matches.append((combined_score, sound))
         
@@ -464,86 +564,81 @@ class Database:
 
     # ===== Sound lookup (used by downloaders) =====
     
-    def get_sound(self, sound_filename, original_filename=False):
-        try:
-            if original_filename:
-                self.cursor.execute("SELECT * FROM sounds WHERE originalfilename = ?;", (sound_filename,))
-            else:
-                self.cursor.execute("SELECT * FROM sounds WHERE Filename = ?;", (sound_filename,))
-            return self.cursor.fetchone()
-        except sqlite3.Error as e:
-            print(f"An error occurred: {e}")
+    def get_sound(self, sound_filename, original_filename=False, guild_id=None):
+        """Delegate to SoundRepository for tenant-aware sound resolution."""
+        from bot.repositories import SoundRepository
+        return SoundRepository().get_sound(sound_filename, original_filename, guild_id=guild_id)
 
     # ===== Backwards-compatible delegators (for UI layer) =====
     # These methods delegate to repositories for backwards compatibility
     
-    def get_random_sounds(self, favorite=None, num_sounds=1):
+    def get_random_sounds(self, favorite=None, num_sounds=1, guild_id=None):
         """Delegate to SoundRepository for backwards compatibility."""
         from bot.repositories import SoundRepository
-        return SoundRepository().get_random_sounds(favorite=favorite, num_sounds=num_sounds)
+        return SoundRepository().get_random_sounds(favorite=favorite, num_sounds=num_sounds, guild_id=guild_id)
     
-    def get_sounds(self, favorite=None, slap=None, num_sounds=25, sort="DESC", favorite_by_user=False, user=None):
+    def get_sounds(self, favorite=None, slap=None, num_sounds=25, sort="DESC", favorite_by_user=False, user=None, guild_id=None):
         """Delegate to SoundRepository for backwards compatibility."""
         from bot.repositories import SoundRepository
         return SoundRepository().get_sounds(favorite=favorite, slap=slap, num_sounds=num_sounds, 
-                                            sort=sort, favorite_by_user=favorite_by_user, user=user)
+                                            sort=sort, favorite_by_user=favorite_by_user, user=user, guild_id=guild_id)
     
-    def get_sound_by_name(self, sound_name):
+    def get_sound_by_name(self, sound_name, guild_id=None):
         """Delegate to SoundRepository for backwards compatibility."""
         from bot.repositories import SoundRepository
-        return SoundRepository().get_sound_by_name(sound_name)
+        return SoundRepository().get_sound_by_name(sound_name, guild_id=guild_id)
     
     async def update_sound(self, filename, new_filename=None, favorite=None, slap=None):
         """Delegate to SoundRepository for backwards compatibility."""
         from bot.repositories import SoundRepository
         return SoundRepository().update_sound(filename, new_filename=new_filename, favorite=favorite, slap=slap)
     
-    def get_user_events(self, user, event):
+    def get_user_events(self, user, event, guild_id=None):
         """Delegate to EventRepository for backwards compatibility."""
         from bot.repositories import EventRepository
-        return EventRepository().get_user_events(user, event)
+        return EventRepository().get_user_events(user, event, guild_id=guild_id)
     
-    def get_user_event_sound(self, user_id, event, sound):
+    def get_user_event_sound(self, user_id, event, sound, guild_id=None):
         """Delegate to EventRepository for backwards compatibility."""
         from bot.repositories import EventRepository
         # Use get_event_sound which returns the tuple if exists, None otherwise
-        result = EventRepository().get_event_sound(user_id, event, sound)
+        result = EventRepository().get_event_sound(user_id, event, sound, guild_id=guild_id)
         return result is not None
     
-    def toggle_user_event_sound(self, user_id, event, sound):
+    def toggle_user_event_sound(self, user_id, event, sound, guild_id=None):
         """Delegate to EventRepository for backwards compatibility."""
         from bot.repositories import EventRepository
-        return EventRepository().toggle(user_id, event, sound)
+        return EventRepository().toggle(user_id, event, sound, guild_id=guild_id)
     
-    def remove_user_event_sound(self, user_id, event, sound):
+    def remove_user_event_sound(self, user_id, event, sound, guild_id=None):
         """Delegate to EventRepository for backwards compatibility."""
         from bot.repositories import EventRepository
-        return EventRepository().remove(user_id, event, sound)
+        return EventRepository().remove(user_id, event, sound, guild_id=guild_id)
     
-    def get_sound_lists(self, creator=None):
+    def get_sound_lists(self, creator=None, guild_id=None):
         """Delegate to ListRepository for backwards compatibility."""
         from bot.repositories import ListRepository
-        return ListRepository().get_all(creator=creator)
+        return ListRepository().get_all(creator=creator, guild_id=guild_id)
     
-    def get_sound_list(self, list_id):
+    def get_sound_list(self, list_id, guild_id=None):
         """Delegate to ListRepository for backwards compatibility."""
         from bot.repositories import ListRepository
-        return ListRepository().get_by_id(list_id)
+        return ListRepository().get_by_id(list_id, guild_id=guild_id)
     
     def get_sounds_in_list(self, list_id):
         """Delegate to ListRepository for backwards compatibility."""
         from bot.repositories import ListRepository
         return ListRepository().get_sounds_in_list(list_id)
     
-    def get_list_by_name(self, list_name, creator=None):
+    def get_list_by_name(self, list_name, creator=None, guild_id=None):
         """Delegate to ListRepository for backwards compatibility."""
         from bot.repositories import ListRepository
-        return ListRepository().get_by_name(list_name, creator)
+        return ListRepository().get_by_name(list_name, creator, guild_id=guild_id)
     
-    def create_sound_list(self, list_name, creator):
+    def create_sound_list(self, list_name, creator, guild_id=None):
         """Delegate to ListRepository for backwards compatibility."""
         from bot.repositories import ListRepository
-        return ListRepository().create(list_name, creator)
+        return ListRepository().create(list_name, creator, guild_id=guild_id)
     
     def add_sound_to_list(self, list_id, sound_filename):
         """Delegate to ListRepository for backwards compatibility."""
@@ -560,7 +655,7 @@ class Database:
         from bot.repositories import ListRepository
         return ListRepository().delete(list_id)
     
-    def get_lists_containing_sound(self, sound_filename):
+    def get_lists_containing_sound(self, sound_filename, guild_id=None):
         """Delegate to ListRepository for backwards compatibility."""
         from bot.repositories import ListRepository
-        return ListRepository().get_lists_containing_sound(sound_filename)
+        return ListRepository().get_lists_containing_sound(sound_filename, guild_id=guild_id)

@@ -12,6 +12,7 @@ import queue
 from datetime import datetime
 import traceback
 from typing import Optional, List, Dict, Any
+from collections import deque
 from mutagen.mp3 import MP3
 import speech_recognition as sr
 import vosk
@@ -47,7 +48,7 @@ class AudioService:
         self.keyword_repo = KeywordRepository()
         self.event_repo = EventRepository()
         
-        # Audio state moved from BotBehavior
+        # Legacy single-guild state (kept for compatibility in transitional callers)
         self.last_played_time: Optional[datetime] = None
         self.current_sound_message: Optional[discord.Message] = None
         self.stop_progress_update = False
@@ -58,6 +59,16 @@ class AudioService:
         self.playback_done = asyncio.Event()
         self.playback_done.set()
         self._progress_update_task: Optional[asyncio.Task] = None
+        # Per-guild playback state (authoritative state for hosted multi-guild mode)
+        self._guild_last_played_time: Dict[int, Optional[datetime]] = {}
+        self._guild_current_sound_message: Dict[int, Optional[discord.Message]] = {}
+        self._guild_stop_progress_update: Dict[int, bool] = {}
+        self._guild_cooldown_message: Dict[int, Optional[discord.Message]] = {}
+        self._guild_current_similar_sounds: Dict[int, Optional[List[Any]]] = {}
+        self._guild_playback_done: Dict[int, asyncio.Event] = {}
+        self._guild_progress_update_task: Dict[int, Optional[asyncio.Task]] = {}
+        self._guild_current_view: Dict[int, Optional[discord.ui.View]] = {}
+        self._active_guild_id: Optional[int] = None
         
         # Track current view to update progress button
         self.current_view: Optional[discord.ui.View] = None
@@ -102,11 +113,127 @@ class AudioService:
         # Image generator for sound cards
         self.image_generator = ImageGeneratorService()
         self.progress_display_delay_seconds = 2.0
+        # Playback job controls
+        self._ffmpeg_max_jobs = max(1, int(os.getenv("FFMPEG_MAX_CONCURRENT_JOBS", "2")))
+        self._ffmpeg_semaphore = asyncio.Semaphore(self._ffmpeg_max_jobs)
+        self.audio_latency_mode = (os.getenv("AUDIO_LATENCY_MODE", "low_latency") or "low_latency").strip().lower()
+        self._play_request_window_seconds = float(os.getenv("PLAY_REQUEST_WINDOW_SECONDS", "10"))
+        self._play_request_max_per_window = max(1, int(os.getenv("PLAY_REQUEST_MAX_PER_WINDOW", "8")))
+        self._play_pending_limit = max(1, int(os.getenv("PLAY_MAX_PENDING_PER_GUILD", "6")))
+        self._play_request_timestamps: Dict[int, deque] = {}
+        self._play_pending_count: Dict[int, int] = {}
 
     def _log_perf(self, operation: str, start_time: float, extra: str = ""):
         """Log performance metrics for an operation."""
         duration = time.time() - start_time
         print(f"[AudioService] [PERF] {operation} finished in {duration:.4f}s {extra}")
+
+    def _ensure_guild_playback_state(self, guild_id: int) -> None:
+        """Ensure playback state dictionaries are initialized for a guild."""
+        if not hasattr(self, "_guild_last_played_time"):
+            self._guild_last_played_time = {}
+            self._guild_current_sound_message = {}
+            self._guild_stop_progress_update = {}
+            self._guild_cooldown_message = {}
+            self._guild_current_similar_sounds = {}
+            self._guild_playback_done = {}
+            self._guild_progress_update_task = {}
+            self._guild_current_view = {}
+            self._play_request_timestamps = {}
+            self._play_pending_count = {}
+        if guild_id not in self._guild_last_played_time:
+            self._guild_last_played_time[guild_id] = None
+            self._guild_current_sound_message[guild_id] = None
+            self._guild_stop_progress_update[guild_id] = False
+            self._guild_cooldown_message[guild_id] = None
+            self._guild_current_similar_sounds[guild_id] = None
+            event = asyncio.Event()
+            event.set()
+            self._guild_playback_done[guild_id] = event
+            self._guild_progress_update_task[guild_id] = None
+            self._guild_current_view[guild_id] = None
+
+    def _set_active_guild(self, guild_id: int) -> None:
+        """Mark the active guild for backward-compatible fields."""
+        self._active_guild_id = guild_id
+        self.last_played_time = self._guild_last_played_time.get(guild_id)
+        self.current_sound_message = self._guild_current_sound_message.get(guild_id)
+        self.stop_progress_update = self._guild_stop_progress_update.get(guild_id, False)
+        self.cooldown_message = self._guild_cooldown_message.get(guild_id)
+        self.current_similar_sounds = self._guild_current_similar_sounds.get(guild_id)
+        self.playback_done = self._guild_playback_done.get(guild_id, self.playback_done)
+        self._progress_update_task = self._guild_progress_update_task.get(guild_id)
+        self.current_view = self._guild_current_view.get(guild_id)
+
+    def _track_guild_play_request(self, guild_id: int) -> bool:
+        """Return False when per-guild rate or backpressure limits are exceeded."""
+        now = time.time()
+        timestamps = self._play_request_timestamps.setdefault(guild_id, deque())
+        while timestamps and (now - timestamps[0]) > self._play_request_window_seconds:
+            timestamps.popleft()
+
+        pending = self._play_pending_count.get(guild_id, 0)
+        if pending >= self._play_pending_limit:
+            print(f"[AudioService] [PERF] dropped_play_request guild_id={guild_id} reason=backpressure pending={pending}")
+            return False
+        if len(timestamps) >= self._play_request_max_per_window:
+            print(f"[AudioService] [PERF] dropped_play_request guild_id={guild_id} reason=rate_limit requests={len(timestamps)}")
+            return False
+
+        timestamps.append(now)
+        self._play_pending_count[guild_id] = pending + 1
+        return True
+
+    def _build_ffmpeg_before_options(self) -> str:
+        """Build ffmpeg before-options based on selected latency policy."""
+        if self.audio_latency_mode == "high_quality":
+            return "-nostdin"
+        if self.audio_latency_mode == "balanced":
+            return "-nostdin -fflags +genpts"
+        # Default low-latency policy.
+        return "-nostdin -fflags nobuffer -flags low_delay -analyzeduration 0 -probesize 32"
+
+    def _release_guild_play_request(self, guild_id: int) -> None:
+        """Release one pending play slot for a guild."""
+        if guild_id not in self._play_pending_count:
+            return
+        self._play_pending_count[guild_id] = max(0, self._play_pending_count[guild_id] - 1)
+
+    def _is_stt_enabled_for_guild(self, guild: discord.Guild) -> bool:
+        """Return whether STT is enabled for the given guild."""
+        behavior = getattr(self, "_behavior", None)
+        settings_service = getattr(behavior, "_guild_settings_service", None) if behavior else None
+        if settings_service is None:
+            return True
+        try:
+            return bool(settings_service.get(guild.id).stt_enabled)
+        except Exception as e:
+            print(f"[AudioService] Warning: Failed to read STT setting for {guild.name}: {e}")
+            return True
+
+    def get_current_view(self, guild_id: int) -> Optional[discord.ui.View]:
+        """Get current playback view for a guild."""
+        self._ensure_guild_playback_state(guild_id)
+        return self._guild_current_view[guild_id]
+
+    def set_current_view(self, guild_id: int, view: Optional[discord.ui.View]) -> None:
+        """Set current playback view for a guild."""
+        self._ensure_guild_playback_state(guild_id)
+        self._guild_current_view[guild_id] = view
+        if self._active_guild_id == guild_id:
+            self.current_view = view
+
+    def get_current_similar_sounds(self, guild_id: int) -> Optional[List[Any]]:
+        """Get cached similar sounds for a guild."""
+        self._ensure_guild_playback_state(guild_id)
+        return self._guild_current_similar_sounds[guild_id]
+
+    def set_current_similar_sounds(self, guild_id: int, sounds: Optional[List[Any]]) -> None:
+        """Set cached similar sounds for a guild."""
+        self._ensure_guild_playback_state(guild_id)
+        self._guild_current_similar_sounds[guild_id] = sounds
+        if self._active_guild_id == guild_id:
+            self.current_similar_sounds = sounds
 
     def _format_duration(self, seconds: float) -> str:
         """Format seconds into mm:ss string."""
@@ -305,12 +432,20 @@ class AudioService:
         self._behavior = behavior
         self.bot.behavior = behavior
 
-    def _cancel_progress_update_task(self) -> None:
-        """Cancel the active progress update task, if any."""
-        task = self._progress_update_task
+    def _cancel_progress_update_task(self, guild_id: Optional[int] = None) -> None:
+        """Cancel the active progress update task, optionally scoped to guild."""
+        if guild_id is not None:
+            task = self._guild_progress_update_task.get(guild_id)
+        else:
+            task = self._progress_update_task
         if task and not task.done():
             task.cancel()
-        self._progress_update_task = None
+        if guild_id is not None:
+            self._guild_progress_update_task[guild_id] = None
+            if self._active_guild_id == guild_id:
+                self._progress_update_task = None
+        else:
+            self._progress_update_task = None
 
     async def _notify_tts_busy(self, channel, user, original_message: str = "", audio_file: str = "", loading_message: 'discord.Message' = None):
         """Send a plain-text message when a TTS request is rejected due to active playback."""
@@ -543,9 +678,17 @@ class AudioService:
         voice_client = channel.guild.voice_client
         if voice_client and voice_client.is_connected() and voice_client.channel.id == channel.id:
             try:
-                await self.start_keyword_detection(channel.guild)
+                behavior = getattr(self, "_behavior", None)
+                settings_service = getattr(behavior, "_guild_settings_service", None) if behavior else None
+                stt_enabled = True
+                if settings_service is not None:
+                    stt_enabled = settings_service.get(channel.guild.id).stt_enabled
+                if stt_enabled:
+                    await self.start_keyword_detection(channel.guild)
+                else:
+                    await self.stop_keyword_detection(channel.guild)
             except Exception as e:
-                print(f"[AudioService] Warning: Failed to restart keyword detection: {e}")
+                print(f"[AudioService] Warning: Failed to apply keyword detection state: {e}")
         
         return voice_client
 
@@ -583,6 +726,9 @@ class AudioService:
     async def play_slap(self, channel, audio_file, user):
         """Play a slap sound - stops current audio, plays immediately, no embed."""
         try:
+            guild_id = channel.guild.id
+            self._ensure_guild_playback_state(guild_id)
+            self._set_active_guild(guild_id)
             voice_client = await self.ensure_voice_connected(channel)
             if not voice_client:
                 return False
@@ -591,14 +737,17 @@ class AudioService:
 
             # Stop any currently playing audio and mark as slapped
             if voice_client.is_playing():
-                self.stop_progress_update = True  # Stop the progress bar animation
-                self._cancel_progress_update_task()
+                self._guild_stop_progress_update[guild_id] = True  # Stop the progress bar animation
+                self.stop_progress_update = True
+                self._cancel_progress_update_task(guild_id)
                 # Update the current sound message with slap icon
-                if self.current_sound_message and self.current_view:
+                current_message = self._guild_current_sound_message.get(guild_id)
+                current_view = self._guild_current_view.get(guild_id)
+                if current_message and current_view:
                     try:
-                        if hasattr(self.current_view, 'update_progress_emoji'):
-                             self.current_view.update_progress_emoji('👋')
-                             await self.current_sound_message.edit(view=self.current_view)
+                        if hasattr(current_view, 'update_progress_emoji'):
+                             current_view.update_progress_emoji('👋')
+                             await current_message.edit(view=current_view)
                     except:
                         pass
                 voice_client.stop()
@@ -614,7 +763,7 @@ class AudioService:
             audio_source = await discord.FFmpegOpusAudio.from_probe(
                 audio_file_path,
                 executable=self.ffmpeg_path,
-                before_options="-nostdin -fflags nobuffer -flags low_delay -analyzeduration 0 -probesize 32",
+                before_options=self._build_ffmpeg_before_options(),
                 options=f'-filter:a "volume={self.volume}"'
             )
             # Volume is handled by ffmpeg filter now
@@ -638,7 +787,10 @@ class AudioService:
                         loading_message: 'discord.Message' = None):
         """Play an audio file in the specified voice channel."""
         play_start_time = time.time()
-        print(f"[AudioService] play_audio(file={audio_file}, user={user}, guild={channel.guild.name})")
+        guild_id = channel.guild.id
+        self._ensure_guild_playback_state(guild_id)
+        self._set_active_guild(guild_id)
+        print(f"[AudioService] play_audio(file={audio_file}, user={user}, guild={channel.guild.name}, guild_id={guild_id})")
         MAX_RETRIES = 3
 
         if self.mute_service.is_muted:
@@ -651,32 +803,53 @@ class AudioService:
                 )
             return
 
-        # Check cooldown first
-        if not is_tts and self.last_played_time and (datetime.now() - self.last_played_time).total_seconds() < 2:
-            if self.cooldown_message is None and not is_entrance:
+        # Per-guild rate limiting and backpressure for non-TTS plays.
+        if not is_tts and not self._track_guild_play_request(guild_id):
+            bot_channel = self.message_service.get_bot_channel(channel.guild)
+            if bot_channel:
+                await bot_channel.send(
+                    embed=discord.Embed(
+                        title="Too many play requests right now for this server. Try again in a few seconds."
+                    ),
+                    delete_after=5,
+                )
+            return False
+
+        # Check cooldown first (per guild)
+        guild_last_played = self._guild_last_played_time.get(guild_id)
+        guild_cooldown_message = self._guild_cooldown_message.get(guild_id)
+        if not is_tts and guild_last_played and (datetime.now() - guild_last_played).total_seconds() < 2:
+            if guild_cooldown_message is None and not is_entrance:
                 bot_channel = self.message_service.get_bot_channel(channel.guild)
                 if bot_channel:
-                    self.cooldown_message = await bot_channel.send(
+                    cooldown_message = await bot_channel.send(
                         embed=discord.Embed(title="Don't be rude, let Gertrudes speak 😤")
                     )
+                    self._guild_cooldown_message[guild_id] = cooldown_message
+                    self.cooldown_message = cooldown_message
                     await asyncio.sleep(3)
                     try:
-                        await self.cooldown_message.delete()
+                        await cooldown_message.delete()
                     except:
                         pass
+                    self._guild_cooldown_message[guild_id] = None
                     self.cooldown_message = None
+                    self._release_guild_play_request(guild_id)
                     return
-        self.last_played_time = datetime.now()
+        self._guild_last_played_time[guild_id] = datetime.now()
+        self.last_played_time = self._guild_last_played_time[guild_id]
 
         # We'll update the previous sound's message only if we actually interrupt it
         # This flag will be set below if we detect we're interrupting playback
-        previous_sound_message = self.current_sound_message
+        previous_sound_message = self._guild_current_sound_message.get(guild_id)
         was_interrupted = False
 
         try:
+            self._guild_current_similar_sounds[guild_id] = None
             self.current_similar_sounds = None
             voice_client = await self.ensure_voice_connected(channel)
             if not voice_client:
+                self._release_guild_play_request(guild_id)
                 return False
 
             # Check if we're actually interrupting playback
@@ -694,18 +867,20 @@ class AudioService:
                     return False
 
                 was_interrupted = True
+                self._guild_stop_progress_update[guild_id] = True
                 self.stop_progress_update = True
-                self._cancel_progress_update_task()
+                self._cancel_progress_update_task(guild_id)
                 voice_client.stop()
                 await asyncio.sleep(0.1)  # Allow FFmpeg process to terminate cleanly
                 
                 # Update the previous sound's message with skip emoji
                 if previous_sound_message: 
                     # Use tracked current_view which corresponds to the sound being stopped
-                    if self.current_view and hasattr(self.current_view, 'update_progress_emoji'):
+                    previous_view = self._guild_current_view.get(guild_id)
+                    if previous_view and hasattr(previous_view, 'update_progress_emoji'):
                          try:
-                             self.current_view.update_progress_emoji('⏭️')
-                             await previous_sound_message.edit(view=self.current_view)
+                             previous_view.update_progress_emoji('⏭️')
+                             await previous_sound_message.edit(view=previous_view)
                          except:
                              pass
                     pass # Original logic relied on msg content, but now we use view buttons.
@@ -718,19 +893,20 @@ class AudioService:
             audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Sounds", audio_file))
             if not os.path.exists(audio_file_path):
                 # Fallback to DB lookup only if file not found directly
-                sound_info = await asyncio.to_thread(self.sound_repo.get_sound, audio_file, False)
+                sound_info = await asyncio.to_thread(self.sound_repo.get_sound, audio_file, False, guild_id)
                 if sound_info:
                     audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Sounds", sound_info[1]))
                 
                 # Double check existence
                 if not os.path.exists(audio_file_path):
                     # Try original name lookup
-                    sound_info_orig = await asyncio.to_thread(self.sound_repo.get_sound, audio_file, True)
+                    sound_info_orig = await asyncio.to_thread(self.sound_repo.get_sound, audio_file, True, guild_id)
                     if sound_info_orig and len(sound_info_orig) > 2:
                         audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Sounds", sound_info_orig[2]))
                     
                     if not os.path.exists(audio_file_path):
                         await self.message_service.send_error(f"Audio file not found: {audio_file}")
+                        self._release_guild_play_request(guild_id)
                         return False
 
             # FFmpeg options
@@ -750,30 +926,53 @@ class AudioService:
 
             if not self.ffmpeg_path or not os.path.exists(self.ffmpeg_path):
                 await self.message_service.send_error(f"Invalid FFmpeg path: {self.ffmpeg_path}")
+                self._release_guild_play_request(guild_id)
                 return False
 
             # START PLAYBACK IMMEDIATELY
             try:
-                # Use FFmpegOpusAudio for stability
-                audio_source = await discord.FFmpegOpusAudio.from_probe(
-                    audio_file_path, 
-                    executable=self.ffmpeg_path, 
-                    options=ffmpeg_options,
-                    before_options="-nostdin"
-                )
-                self._log_perf("FFmpeg Source Creation", play_start_time)
+                ffmpeg_wait_start = time.time()
+                async with self._ffmpeg_semaphore:
+                    ffmpeg_queue_wait = time.time() - ffmpeg_wait_start
+                    print(
+                        f"[AudioService] [PERF] ffmpeg_queue_wait guild_id={guild_id} wait={ffmpeg_queue_wait:.4f}s"
+                    )
+                    ffmpeg_spawn_start = time.time()
+                    # Use FFmpegOpusAudio for stability
+                    audio_source = await discord.FFmpegOpusAudio.from_probe(
+                        audio_file_path,
+                        executable=self.ffmpeg_path,
+                        options=ffmpeg_options,
+                        before_options=self._build_ffmpeg_before_options()
+                    )
+                    ffmpeg_spawn_duration = time.time() - ffmpeg_spawn_start
+                    print(
+                        f"[AudioService] [PERF] ffmpeg_spawn guild_id={guild_id} duration={ffmpeg_spawn_duration:.4f}s"
+                    )
+                self._log_perf("FFmpeg Source Creation", play_start_time, extra=f"guild_id={guild_id}")
                 
                 def after_playing(error):
                     try:
                         if error: print(f'[AudioService] Error in playback: {error}')
                     finally:
+                        guild_event = self._guild_playback_done.get(guild_id)
+                        if guild_event is not None:
+                            self.bot.loop.call_soon_threadsafe(guild_event.set)
                         self.bot.loop.call_soon_threadsafe(self.playback_done.set)
 
                 voice_client.play(audio_source, after=after_playing)
+                guild_event = self._guild_playback_done.get(guild_id)
+                if guild_event is not None:
+                    guild_event.clear()
                 self.playback_done.clear()
+                request_to_play_start = time.time() - play_start_time
+                print(
+                    f"[AudioService] [PERF] request_to_playback_start guild_id={guild_id} duration={request_to_play_start:.4f}s"
+                )
             except Exception as e:
                 print(f"[AudioService] Error starting playback: {e}")
                 self.playback_done.set()
+                self._release_guild_play_request(guild_id)
                 return False
 
             async def handle_ui():
@@ -783,7 +982,7 @@ class AudioService:
                     print(f"[AudioService] [DEBUG] handle_ui background task started for {audio_file}")
 
                     # 1. Fetch sound info and metadata in background
-                    sound_info = await asyncio.to_thread(self.sound_repo.get_sound, audio_file, False)
+                    sound_info = await asyncio.to_thread(self.sound_repo.get_sound, audio_file, False, guild_id)
                     
                     duration = 0
                     duration_str = "Unknown"
@@ -859,8 +1058,14 @@ class AudioService:
                         
                         if sound_id:
                             # Wrap DB calls in to_thread to prevent blocking main thread
-                            play_count = (await asyncio.to_thread(self.action_repo.get_sound_play_count, sound_id)) + 1
-                            download_date = await asyncio.to_thread(self.stats_repo.get_sound_download_date, sound_id)
+                            play_count = (
+                                await asyncio.to_thread(self.action_repo.get_sound_play_count, sound_id, guild_id)
+                            ) + 1
+                            download_date = await asyncio.to_thread(
+                                self.stats_repo.get_sound_download_date,
+                                sound_id,
+                                guild_id,
+                            )
                             if download_date and download_date != "Unknown date":
                                 try:
                                     if isinstance(download_date, str) and "2023-10-30" in download_date:
@@ -877,7 +1082,11 @@ class AudioService:
                                             download_date_str = download_date.strftime("%b %d, %Y")
                                 except Exception: pass
                             
-                            favorited_by = await asyncio.to_thread(self.stats_repo.get_users_who_favorited_sound, sound_id)
+                            favorited_by = await asyncio.to_thread(
+                                self.stats_repo.get_users_who_favorited_sound,
+                                sound_id,
+                                guild_id,
+                            )
                             if favorited_by:
                                 users_display = favorited_by[:3]
                                 if len(favorited_by) > 3: users_display.append(f"+{len(favorited_by) - 3} more")
@@ -886,7 +1095,11 @@ class AudioService:
                                 favorited_by_str = "Unknown" # Fallback placeholder ✅
                         
                         if sound_filename:
-                            lists_containing = await asyncio.to_thread(self.list_repo.get_lists_containing_sound, sound_filename)
+                            lists_containing = await asyncio.to_thread(
+                                self.list_repo.get_lists_containing_sound,
+                                sound_filename,
+                                guild_id,
+                            )
                             if lists_containing:
                                 list_names = [lst[1] for lst in lists_containing[:3]]
                                 if len(lists_containing) > 3: list_names.append(f"+{len(lists_containing) - 3} more")
@@ -898,7 +1111,7 @@ class AudioService:
                         event_data_str = None
                         try:
                             print(f"[AudioService] [DEBUG] Fetching event data for {sound_filename}...")
-                            events = await asyncio.to_thread(self.event_repo.get_events_for_sound, sound_filename)
+                            events = await asyncio.to_thread(self.event_repo.get_events_for_sound, sound_filename, guild_id)
                             if events:
                                 # Format: "Join: User1, User2 | Leave: User3"
                                 joins = [e[0] for e in events if e[1] == 'join']
@@ -991,6 +1204,9 @@ class AudioService:
                                     pass
                             sound_message = await bot_channel.send(embed=embed, view=view)
                         
+                        self._guild_current_sound_message[guild_id] = sound_message
+                        self._guild_current_view[guild_id] = view
+                        self._guild_stop_progress_update[guild_id] = False
                         self.current_sound_message = sound_message
                         self.current_view = view
                         self.stop_progress_update = False
@@ -1000,6 +1216,7 @@ class AudioService:
                     else:
                         embed = discord.Embed(title="👋 Slap!", color=discord.Color.orange())
                         sound_message = await bot_channel.send(embed=embed)
+                        self._guild_current_sound_message[guild_id] = sound_message
                         self.current_sound_message = sound_message
                         # if send_controls and hasattr(self, '_behavior') and self._behavior:
                         #     await self.message_service.send_controls(self._behavior)
@@ -1014,41 +1231,58 @@ class AudioService:
                         pass
                     
                     if sound_message and not is_slap_sound and duration > 0:
-                        self._cancel_progress_update_task()
-                        self._progress_update_task = asyncio.create_task(
-                            self.update_progress_bar(sound_message, duration, view)
+                        self._cancel_progress_update_task(guild_id)
+                        progress_task = asyncio.create_task(
+                            self.update_progress_bar(sound_message, duration, view, guild_id=guild_id)
                         )
+                        self._guild_progress_update_task[guild_id] = progress_task
+                        self._progress_update_task = progress_task
                 except Exception as ui_error:
                     print(f"[AudioService] Error in background UI task: {ui_error}")
                     traceback.print_exc()
 
             asyncio.create_task(handle_ui())
+            self._release_guild_play_request(guild_id)
             return True
 
         except Exception as e:
             print(f"[AudioService] Error in play_audio: {e}")
             traceback.print_exc()
             self.playback_done.set()
+            guild_event = self._guild_playback_done.get(guild_id)
+            if guild_event is not None:
+                guild_event.set()
+            self._release_guild_play_request(guild_id)
             return False
 
-    async def update_progress_bar(self, sound_message: discord.Message, duration: float, view: discord.ui.View = None):
+    async def update_progress_bar(
+        self,
+        sound_message: discord.Message,
+        duration: float,
+        view: discord.ui.View = None,
+        guild_id: Optional[int] = None,
+    ):
         """Update the progress bar embed for a currently playing sound."""
         if duration <= 0:
             return
+        if guild_id is None:
+            guild = getattr(sound_message, "guild", None)
+            guild_id = guild.id if guild else 0
+        self._ensure_guild_playback_state(guild_id)
 
         start_time = time.time()
         # Shorter bar for button (Wider now, but trimmed to 6 ✅)
         bar_length = 7
         total_time_str = self._format_duration(duration)
-        target_view = view if view is not None else self.current_view
+        target_view = view if view is not None else self._guild_current_view.get(guild_id)
         target_message_id = getattr(sound_message, "id", None)
 
         try:
             while time.time() - start_time < duration:
-                if self.stop_progress_update:
+                if self._guild_stop_progress_update.get(guild_id, False):
                     break
 
-                current_message = self.current_sound_message
+                current_message = self._guild_current_sound_message.get(guild_id)
                 if (
                     target_message_id is not None
                     and (
@@ -1079,12 +1313,12 @@ class AudioService:
                 current_view = target_view
                 if (
                     target_message_id is not None
-                    and self.current_sound_message
-                    and getattr(self.current_sound_message, "id", None) == target_message_id
-                    and self.current_view is not None
+                    and self._guild_current_sound_message.get(guild_id)
+                    and getattr(self._guild_current_sound_message.get(guild_id), "id", None) == target_message_id
+                    and self._guild_current_view.get(guild_id) is not None
                 ):
                     # Keep supporting in-place view replacements for the same active message.
-                    current_view = self.current_view
+                    current_view = self._guild_current_view.get(guild_id)
 
                 if current_view and hasattr(current_view, 'update_progress_label'):
                     try:
@@ -1102,11 +1336,11 @@ class AudioService:
                 await asyncio.sleep(1.0) # Update roughly once per second
 
             # Final update
-            if not self.stop_progress_update:
+            if not self._guild_stop_progress_update.get(guild_id, False):
                 final_bar = "▬" * bar_length + "🔘"
                 final_text = f"✅ {final_bar} {total_time_str}"
 
-                current_message = self.current_sound_message
+                current_message = self._guild_current_sound_message.get(guild_id)
                 if (
                     target_message_id is not None
                     and (
@@ -1119,11 +1353,11 @@ class AudioService:
                 current_view = target_view
                 if (
                     target_message_id is not None
-                    and self.current_sound_message
-                    and getattr(self.current_sound_message, "id", None) == target_message_id
-                    and self.current_view is not None
+                    and self._guild_current_sound_message.get(guild_id)
+                    and getattr(self._guild_current_sound_message.get(guild_id), "id", None) == target_message_id
+                    and self._guild_current_view.get(guild_id) is not None
                 ):
-                    current_view = self.current_view
+                    current_view = self._guild_current_view.get(guild_id)
                 if current_view and hasattr(current_view, 'update_progress_label'):
                     try:
                         current_view.update_progress_label(final_text)
@@ -1136,12 +1370,20 @@ class AudioService:
             print(f"[AudioService] Error updating progress bar: {e}")
         finally:
             current_task = asyncio.current_task()
-            if current_task is not None and self._progress_update_task is current_task:
-                self._progress_update_task = None
+            if current_task is not None:
+                tracked_task = self._guild_progress_update_task.get(guild_id)
+                if tracked_task is current_task:
+                    self._guild_progress_update_task[guild_id] = None
+                if self._progress_update_task is current_task:
+                    self._progress_update_task = None
 
     async def start_keyword_detection(self, guild: discord.Guild):
         """Start background keyword detection in the specified guild."""
         try:
+            if not self._is_stt_enabled_for_guild(guild):
+                print(f"[AudioService] STT disabled for {guild.name}; skipping keyword detection start")
+                return False
+
             voice_client = guild.voice_client
             if not voice_client or not voice_client.is_connected():
                 return False
@@ -1733,6 +1975,7 @@ class KeywordDetectionSink(sinks.Sink):
         """Trigger the action for a detected keyword."""
         if not self.guild.voice_client:
             return
+        guild_id = self.guild.id
 
         member = self.guild.get_member(user_id)
         requester_name = member.name if member else f"user_{user_id}"
@@ -1743,24 +1986,38 @@ class KeywordDetectionSink(sinks.Sink):
         
         if action == "slap":
             # Play random slap sound
-            slap_sounds = self.audio_service._behavior.db.get_sounds(slap=True, num_sounds=100)
+            slap_sounds = self.audio_service._behavior.db.get_sounds(
+                slap=True,
+                num_sounds=100,
+                guild_id=guild_id,
+            )
             if slap_sounds:
                 import random
                 random_slap = random.choice(slap_sounds)
                 print(f"[KeywordDetection] Playing random slap for {requester_name}")
                 await self.audio_service.play_slap(channel, random_slap[2], requester_name)
-                self.audio_service._behavior.db.insert_action(requester_name, "keyword_slap", random_slap[0])
+                self.audio_service._behavior.db.insert_action(
+                    requester_name,
+                    "keyword_slap",
+                    random_slap[0],
+                    guild_id=guild_id,
+                )
         
         elif action.startswith("list:"):
             # Play random sound from a specific list
             list_name = action.split(":", 1)[1]
             from bot.repositories import ListRepository
-            sound = ListRepository().get_random_sound_from_list(list_name)
+            sound = ListRepository().get_random_sound_from_list(list_name, guild_id=guild_id)
             if sound:
                 print(f"[KeywordDetection] Playing random sound from '{list_name}' list for {requester_name}: {sound[2]}")
                 # Use play_audio instead of play_slap to show the normal message in chat
                 # Suggestions are now enabled because they run in the background
                 await self.audio_service.play_audio(channel, sound[2], requester_name)
-                self.audio_service._behavior.db.insert_action(requester_name, f"keyword_{keyword}", sound[0])
+                self.audio_service._behavior.db.insert_action(
+                    requester_name,
+                    f"keyword_{keyword}",
+                    sound[0],
+                    guild_id=guild_id,
+                )
             else:
                 print(f"[KeywordDetection] No sounds found in list '{list_name}'")

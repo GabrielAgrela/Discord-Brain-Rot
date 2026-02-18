@@ -4,6 +4,7 @@ Tests for bot/services/audio.py - AudioService helper behavior.
 
 import os
 import sys
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -257,6 +258,32 @@ class TestAudioService:
 
         task.cancel.assert_called_once()
         assert audio_service._progress_update_task is None
+
+    def test_is_stt_enabled_for_guild_defaults_true_without_settings_service(self, audio_service):
+        """Ensure STT defaults to enabled when guild settings service is unavailable."""
+        guild = Mock(id=123, name="Guild A")
+        assert audio_service._is_stt_enabled_for_guild(guild) is True
+
+    @pytest.mark.asyncio
+    async def test_start_keyword_detection_skips_when_stt_disabled(self, audio_service):
+        """Ensure keyword detection does not start when guild STT setting is disabled."""
+        from bot.services.audio import AudioService
+
+        audio_service.keyword_sinks = {}
+        audio_service._behavior = SimpleNamespace(
+            _guild_settings_service=SimpleNamespace(
+                get=Mock(return_value=SimpleNamespace(stt_enabled=False))
+            )
+        )
+
+        guild = Mock(id=999, name="Guild B")
+        voice_client = Mock()
+        guild.voice_client = voice_client
+
+        result = await AudioService.start_keyword_detection(audio_service, guild)
+
+        assert result is False
+        voice_client.start_recording.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_update_progress_bar_exits_when_message_is_no_longer_current(self, audio_service):

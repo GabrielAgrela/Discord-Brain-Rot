@@ -60,17 +60,16 @@ class SoundService:
 
     async def play_random_sound(self, user: str = "admin", effects: Optional[dict] = None, guild: Optional[discord.Guild] = None):
         """Pick a random sound and play it in the user's or largest channel."""
-        sounds = self.sound_repo.get_random_sounds(num_sounds=1)
+        if guild is None:
+            print("[SoundService] No guild available for play_random_sound")
+            return
+
+        guild_id = guild.id
+        sounds = self.sound_repo.get_random_sounds(num_sounds=1, guild_id=guild_id)
         if not sounds:
             return
         
         sound = sounds[0]
-        if not guild and self.bot.guilds:
-            guild = self.bot.guilds[0]
-            
-        if not guild:
-            print("[SoundService] No guild available for play_random_sound")
-            return
 
         channel = self.audio_service.get_user_voice_channel(guild, user)
         if not channel:
@@ -78,18 +77,18 @@ class SoundService:
             
         if channel:
             await self.audio_service.play_audio(channel, sound[2], user, effects=effects)
-            self.action_repo.insert(user, "play_random_sound", sound[0])
+            self.action_repo.insert(user, "play_random_sound", sound[0], guild_id=guild_id)
 
     async def play_random_favorite_sound(self, username: str, guild: Optional[discord.Guild] = None):
         """Pick a random favorite sound for the user and play it."""
-        sounds = self.sound_repo.get_random_sounds(favorite=True, num_sounds=1)
+        if guild is None:
+            print("[SoundService] No guild available for play_random_favorite_sound")
+            return
+
+        guild_id = guild.id
+        sounds = self.sound_repo.get_random_sounds(favorite=True, num_sounds=1, guild_id=guild_id)
         if sounds:
             sound = sounds[0]
-            if not guild and self.bot.guilds:
-                guild = self.bot.guilds[0]
-            
-            if not guild:
-                return
 
             channel = self.audio_service.get_user_voice_channel(guild, username)
             if not channel:
@@ -97,16 +96,15 @@ class SoundService:
             
             if channel:
                 await self.audio_service.play_audio(channel, sound[2], username)
-                self.action_repo.insert(username, "play_random_favorite_sound", sound[0])
+                self.action_repo.insert(username, "play_random_favorite_sound", sound[0], guild_id=guild_id)
 
     async def play_random_sound_from_list(self, list_name: str, username: str, guild: Optional[discord.Guild] = None):
         """Play a random sound from a specific list."""
         try:
-            if not guild and self.bot.guilds:
-                guild = self.bot.guilds[0]
-            
-            if not guild:
+            if guild is None:
+                print("[SoundService] No guild available for play_random_sound_from_list")
                 return
+            guild_id = guild.id
 
             channel = self.audio_service.get_user_voice_channel(guild, username)
             if not channel:
@@ -115,12 +113,12 @@ class SoundService:
             if not channel:
                 return
 
-            random_sound = self.list_repo.get_random_sound_from_list(list_name)
+            random_sound = self.list_repo.get_random_sound_from_list(list_name, guild_id=guild_id)
             if not random_sound:
                 await self.message_service.send_error(f"No sounds found in list '{list_name}'.")
                 return
             
-            self.action_repo.insert(username, f"play_random_from_{list_name}", random_sound[0])
+            self.action_repo.insert(username, f"play_random_from_{list_name}", random_sound[0], guild_id=guild_id)
             # random_sound[1] is filename
             await self.audio_service.play_audio(channel, random_sound[1], username)
         except Exception as e:
@@ -128,10 +126,14 @@ class SoundService:
 
     async def play_request(self, sound_id_or_name: str, user: str, exact: bool = False, effects: Optional[dict] = None, guild: Optional[discord.Guild] = None):
         """Play a specific sound requested by a user, with fuzzy matching support."""
+        if guild is None:
+            print("[SoundService] No guild available for play_request")
+            return False
+        guild_id = guild.id
         filenames = []
         
         # Always try exact match first (before fuzzy search)
-        exact_match = self.sound_repo.get_by_filename(sound_id_or_name)
+        exact_match = self.sound_repo.get_by_filename(sound_id_or_name, guild_id=guild_id)
         if exact_match:
             filenames = [exact_match.filename]
         elif exact:
@@ -142,7 +144,7 @@ class SoundService:
             filenames = [sound_id_or_name]
         else:
             # No exact match found, use fuzzy search
-            results = self.db.get_sounds_by_similarity(sound_id_or_name, 1)
+            results = self.db.get_sounds_by_similarity(sound_id_or_name, 1, guild_id=guild_id)
             for r in results:
                 sound_data = r[0]
                 # Robustly get filename from Row, dict, or tuple
@@ -156,11 +158,6 @@ class SoundService:
             return False
 
         filename = filenames[0]
-        if not guild and self.bot.guilds:
-            guild = self.bot.guilds[0]
-        
-        if not guild:
-            return False
 
         channel = self.audio_service.get_user_voice_channel(guild, user)
         if not channel:
@@ -176,13 +173,19 @@ class SoundService:
             )
             
             # Insert action
-            sound_info = self.sound_repo.get_sound(filename)
+            sound_info = self.sound_repo.get_sound(filename, guild_id=guild_id)
             if sound_info:
-                self.action_repo.insert(user, "play_request", sound_info[0])
+                self.action_repo.insert(user, "play_request", sound_info[0], guild_id=guild_id)
             return True
         return False
 
-    async def save_uploaded_sound_secure(self, attachment: discord.Attachment, custom_filename: Optional[str] = None, max_mb: int = 20):
+    async def save_uploaded_sound_secure(
+        self,
+        attachment: discord.Attachment,
+        custom_filename: Optional[str] = None,
+        max_mb: int = 20,
+        guild_id: Optional[int] = None,
+    ):
         """Save an uploaded Discord attachment safely after validation."""
         if not attachment.filename.lower().endswith('.mp3') and not custom_filename:
             return False, "Only .mp3 files are allowed."
@@ -209,7 +212,7 @@ class SoundService:
                     return False, "Invalid MP3 file format."
 
                 # Insert into DB
-                self.sound_repo.insert_sound(final_filename, final_filename)
+                self.sound_repo.insert_sound(final_filename, final_filename, guild_id=guild_id)
                 return True, save_path  # <-- This was missing!
         except Exception as e:
             print(f"[SoundService] Error saving uploaded sound: {e}")
@@ -251,7 +254,11 @@ class SoundService:
                 if response.attachments:
                     # Handle attachment
                     custom_filename = response.content.strip() if response.content else None
-                    success, result = await self.save_uploaded_sound_secure(response.attachments[0], custom_filename)
+                    success, result = await self.save_uploaded_sound_secure(
+                        response.attachments[0],
+                        custom_filename,
+                        guild_id=interaction.guild.id if interaction.guild else None,
+                    )
                     if not success:
                         await self.message_service.send_error(result)
                         return
@@ -268,11 +275,20 @@ class SoundService:
                     if any(x in url for x in ["tiktok.com", "youtube.com", "youtu.be", "instagram.com"]):
                         file_path = await self.save_sound_from_video(url, custom_filename)
                     else:
-                        file_path = await self.save_sound_from_url(url, custom_filename)
+                        file_path = await self.save_sound_from_url(
+                            url,
+                            custom_filename,
+                            guild_id=interaction.guild.id if interaction.guild else None,
+                        )
 
                 if file_path:
                     filename = os.path.basename(file_path)
-                    self.action_repo.insert(interaction.user.name, "upload_sound", filename)
+                    self.action_repo.insert(
+                        interaction.user.name,
+                        "upload_sound",
+                        filename,
+                        guild_id=interaction.guild.id if interaction.guild else None,
+                    )
                     await self.message_service.send_message("✅ Success!", f"Sound `{filename}` uploaded successfully.")
                 
                 await response.delete()
@@ -301,7 +317,13 @@ class SoundService:
             print(f"[SoundService] Error in save_sound_from_video: {e}")
             raise
 
-    async def save_sound_from_url(self, url: str, custom_filename: Optional[str] = None, max_mb: int = 20) -> str:
+    async def save_sound_from_url(
+        self,
+        url: str,
+        custom_filename: Optional[str] = None,
+        max_mb: int = 20,
+        guild_id: Optional[int] = None,
+    ) -> str:
         """Download an MP3 file directly from a URL."""
         # Build candidate base name from custom name or URL path.
         if custom_filename:
@@ -339,7 +361,11 @@ class SoundService:
                     raise Exception("Downloaded file is not a valid MP3.")
                 
                 # Insert into DB
-                self.sound_repo.insert_sound(os.path.basename(final_path), os.path.basename(final_path))
+                self.sound_repo.insert_sound(
+                    os.path.basename(final_path),
+                    os.path.basename(final_path),
+                    guild_id=guild_id,
+                )
                 return final_path
 
     async def find_and_update_similar_sounds(self, sound_message, audio_file, original_message, send_controls=False, num_suggestions=25):
@@ -358,7 +384,13 @@ class SoundService:
             loop = asyncio.get_running_loop()
             all_similar = await loop.run_in_executor(
                 None,
-                functools.partial(self.db.get_sounds_by_similarity, sound_name, num_suggestions + 1, 0.00001),
+                functools.partial(
+                    self.db.get_sounds_by_similarity,
+                    sound_name,
+                    num_suggestions + 1,
+                    0.00001,
+                    sound_message.guild.id if sound_message and sound_message.guild else None,
+                ),
             )
             
             if not all_similar:
@@ -388,11 +420,13 @@ class SoundService:
             # Retrieve current label and toggle state to preserve it
             current_label = "▶️ 0:00"
             show_controls = False
-            if self.audio_service.current_view:
-                if hasattr(self.audio_service.current_view, 'progress_button'):
-                    current_label = self.audio_service.current_view.progress_button.label
-                if hasattr(self.audio_service.current_view, 'show_controls'):
-                    show_controls = self.audio_service.current_view.show_controls
+            guild_id = sound_message.guild.id if sound_message and sound_message.guild else None
+            current_view = self.audio_service.get_current_view(guild_id) if guild_id else self.audio_service.current_view
+            if current_view:
+                if hasattr(current_view, 'progress_button'):
+                    current_label = current_view.progress_button.label
+                if hasattr(current_view, 'show_controls'):
+                    show_controls = current_view.show_controls
 
             from bot.ui import SoundBeingPlayedWithSuggestionsView
             combined_view = SoundBeingPlayedWithSuggestionsView(
@@ -407,7 +441,10 @@ class SoundService:
             await sound_message.edit(view=combined_view)
             
             # Update the current view in AudioService so progress bar continues
-            self.audio_service.current_view = combined_view
+            if guild_id:
+                self.audio_service.set_current_view(guild_id, combined_view)
+            else:
+                self.audio_service.current_view = combined_view
             
         except Exception as e:
             import traceback
@@ -420,11 +457,20 @@ class SoundService:
         
         try:
             from bot.ui import SoundBeingPlayedWithSuggestionsView
-            similar_sounds = self.audio_service.current_similar_sounds
+            guild_id = sound_message.guild.id if sound_message and sound_message.guild else None
+            similar_sounds = (
+                self.audio_service.get_current_similar_sounds(guild_id)
+                if guild_id
+                else self.audio_service.current_similar_sounds
+            )
             
             # Fallback if suggestions were missed
             if similar_sounds is None:
-                results = self.db.get_sounds_by_similarity(audio_file.replace('.mp3', ''), 6)
+                results = self.db.get_sounds_by_similarity(
+                    audio_file.replace('.mp3', ''),
+                    6,
+                    guild_id=sound_message.guild.id if sound_message and sound_message.guild else None,
+                )
                 seen_filenames = set()
                 seen_filenames.add(audio_file)  # Exclude current sound
                 similar_sounds = []
@@ -447,11 +493,12 @@ class SoundService:
             # Retrieve current label and toggle state to preserve it (Final state ✅)
             current_label = "▶️ 0:00"
             show_controls = False
-            if self.audio_service.current_view:
-                if hasattr(self.audio_service.current_view, 'progress_button'):
-                    current_label = self.audio_service.current_view.progress_button.label
-                if hasattr(self.audio_service.current_view, 'show_controls'):
-                    show_controls = self.audio_service.current_view.show_controls
+            current_view = self.audio_service.get_current_view(guild_id) if guild_id else self.audio_service.current_view
+            if current_view:
+                if hasattr(current_view, 'progress_button'):
+                    current_label = current_view.progress_button.label
+                if hasattr(current_view, 'show_controls'):
+                    show_controls = current_view.show_controls
 
             view = SoundBeingPlayedWithSuggestionsView(
                 self.bot_behavior, 
@@ -464,7 +511,10 @@ class SoundService:
             await sound_message.edit(view=view)
             
             # Update the current view in AudioService
-            self.audio_service.current_view = view
+            if guild_id:
+                self.audio_service.set_current_view(guild_id, view)
+            else:
+                self.audio_service.current_view = view
             
         except Exception as e:
             import traceback
@@ -478,11 +528,12 @@ class SoundService:
             if not bot_channel:
                 return
 
-            sounds = self.sound_repo.get_sounds(num_sounds=count)
+            guild_id = guild.id if guild else None
+            sounds = self.sound_repo.get_sounds(num_sounds=count, guild_id=guild_id)
             from bot.ui import SoundView
             
             if count > 0:
-                self.action_repo.insert(user.name, "list_last_sounds", str(count))
+                self.action_repo.insert(user.name, "list_last_sounds", str(count), guild_id=guild_id)
                 message = await self.message_service.send_message(
                     title=f"📦 Last {count} Sounds Downloaded", 
                     view=SoundView(self.bot_behavior, sounds),
@@ -503,5 +554,6 @@ class SoundService:
 
     async def change_filename(self, oldfilename: str, newfilename: str, user: Any):
         """Update a sound's filename in the database and log the action."""
-        self.action_repo.insert(user.name, "change_filename", f"{oldfilename} to {newfilename}")
+        guild_id = user.guild.id if hasattr(user, "guild") and user.guild else None
+        self.action_repo.insert(user.name, "change_filename", f"{oldfilename} to {newfilename}", guild_id=guild_id)
         await asyncio.to_thread(self.sound_repo.update_sound, oldfilename, new_filename=newfilename)

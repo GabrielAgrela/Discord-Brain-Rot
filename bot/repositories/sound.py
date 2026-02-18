@@ -48,7 +48,7 @@ class SoundRepository(BaseRepository[Sound]):
         )
         return self._row_to_entity(row) if row else None
     
-    def get_by_filename(self, filename: str) -> Optional[Sound]:
+    def get_by_filename(self, filename: str, guild_id: Optional[int | str] = None) -> Optional[Sound]:
         """
         Get a sound by its filename.
         
@@ -62,13 +62,24 @@ class SoundRepository(BaseRepository[Sound]):
         if not filename.endswith('.mp3'):
             filename = f"{filename}.mp3"
         
-        row = self._execute_one(
-            "SELECT * FROM sounds WHERE filename = ?",
-            (filename,)
-        )
+        if guild_id is None:
+            row = self._execute_one(
+                "SELECT * FROM sounds WHERE filename = ?",
+                (filename,)
+            )
+        else:
+            row = self._execute_one(
+                """
+                SELECT * FROM sounds
+                WHERE filename = ? AND (guild_id = ? OR guild_id IS NULL)
+                ORDER BY CASE WHEN guild_id = ? THEN 0 WHEN guild_id IS NULL THEN 1 ELSE 2 END
+                LIMIT 1
+                """,
+                (filename, str(guild_id), str(guild_id))
+            )
         return self._row_to_entity(row) if row else None
     
-    def get_sound(self, sound_name: str, original_filename: bool = False) -> Optional[tuple]:
+    def get_sound(self, sound_name: str, original_filename: bool = False, guild_id: Optional[int | str] = None) -> Optional[tuple]:
         """
         Get a sound by name, returning a tuple for backwards compatibility.
         
@@ -85,35 +96,54 @@ class SoundRepository(BaseRepository[Sound]):
         if not sound_name.endswith('.mp3'):
             sound_name = f"{sound_name}.mp3"
         
+        if guild_id is None:
+            guild_clause = ""
+            guild_params: tuple = tuple()
+        else:
+            guild_clause = "AND (guild_id = ? OR guild_id IS NULL)"
+            guild_params = (str(guild_id), str(guild_id))
+
         if original_filename:
             # First try originalfilename
             row = self._execute_one(
-                "SELECT * FROM sounds WHERE originalfilename = ?",
-                (sound_name,)
+                f"""
+                SELECT * FROM sounds WHERE originalfilename = ? {guild_clause}
+                {f'ORDER BY CASE WHEN guild_id = ? THEN 0 WHEN guild_id IS NULL THEN 1 ELSE 2 END LIMIT 1' if guild_id is not None else ''}
+                """,
+                (sound_name, *guild_params) if guild_id is not None else (sound_name,)
             )
             if row:
                 return tuple(row)
             
             # Fall back to Filename match
             row = self._execute_one(
-                "SELECT * FROM sounds WHERE Filename = ?",
-                (sound_name,)
+                f"""
+                SELECT * FROM sounds WHERE Filename = ? {guild_clause}
+                {f'ORDER BY CASE WHEN guild_id = ? THEN 0 WHEN guild_id IS NULL THEN 1 ELSE 2 END LIMIT 1' if guild_id is not None else ''}
+                """,
+                (sound_name, *guild_params) if guild_id is not None else (sound_name,)
             )
             if row:
                 return tuple(row)
         else:
             # First try Filename
             row = self._execute_one(
-                "SELECT * FROM sounds WHERE Filename = ?",
-                (sound_name,)
+                f"""
+                SELECT * FROM sounds WHERE Filename = ? {guild_clause}
+                {f'ORDER BY CASE WHEN guild_id = ? THEN 0 WHEN guild_id IS NULL THEN 1 ELSE 2 END LIMIT 1' if guild_id is not None else ''}
+                """,
+                (sound_name, *guild_params) if guild_id is not None else (sound_name,)
             )
             if row:
                 return tuple(row)
             
             # Fall back to originalfilename
             row = self._execute_one(
-                "SELECT * FROM sounds WHERE originalfilename = ?",
-                (sound_name,)
+                f"""
+                SELECT * FROM sounds WHERE originalfilename = ? {guild_clause}
+                {f'ORDER BY CASE WHEN guild_id = ? THEN 0 WHEN guild_id IS NULL THEN 1 ELSE 2 END LIMIT 1' if guild_id is not None else ''}
+                """,
+                (sound_name, *guild_params) if guild_id is not None else (sound_name,)
             )
             if row:
                 return tuple(row)
@@ -121,8 +151,18 @@ class SoundRepository(BaseRepository[Sound]):
         # Final fallback: LIKE search
         sound_name_pattern = f"%{sound_name.replace('.mp3', '')}%"
         row = self._execute_one(
-            "SELECT * FROM sounds WHERE Filename LIKE ? OR originalfilename LIKE ?",
-            (sound_name_pattern, sound_name_pattern)
+            f"""
+            SELECT * FROM sounds
+            WHERE (Filename LIKE ? OR originalfilename LIKE ?)
+            {"AND (guild_id = ? OR guild_id IS NULL)" if guild_id is not None else ""}
+            {f'ORDER BY CASE WHEN guild_id = ? THEN 0 WHEN guild_id IS NULL THEN 1 ELSE 2 END LIMIT 1' if guild_id is not None else ''}
+            """,
+            (
+                sound_name_pattern,
+                sound_name_pattern,
+                str(guild_id),
+                str(guild_id),
+            ) if guild_id is not None else (sound_name_pattern, sound_name_pattern)
         )
         if row:
             return tuple(row)
@@ -160,7 +200,12 @@ class SoundRepository(BaseRepository[Sound]):
         )
         return [self._row_to_entity(row) for row in rows]
     
-    def get_random_sounds(self, favorite: bool = None, num_sounds: int = 1) -> List[tuple]:
+    def get_random_sounds(
+        self,
+        favorite: bool = None,
+        num_sounds: int = 1,
+        guild_id: Optional[int | str] = None,
+    ) -> List[tuple]:
         """
         Get random sounds, returning tuples for backwards compatibility.
         
@@ -174,17 +219,22 @@ class SoundRepository(BaseRepository[Sound]):
         conditions = ["slap = 0", "is_elevenlabs = 0"]  # Exclude slap and ElevenLabs sounds
         if favorite:
             conditions.append("favorite = 1")
+        params: list = []
+        if guild_id is not None:
+            conditions.append("(guild_id = ? OR guild_id IS NULL)")
+            params.append(str(guild_id))
         
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
         
         rows = self._execute(
             f"SELECT * FROM sounds {where_clause} ORDER BY RANDOM() LIMIT ?",
-            (num_sounds,)
+            (*params, num_sounds)
         )
         return [tuple(row) for row in rows]
     
     def get_sounds(self, favorite: bool = None, slap: bool = None, num_sounds: int = 25, 
-                   sort: str = "DESC", favorite_by_user: bool = False, user: str = None) -> List[tuple]:
+                   sort: str = "DESC", favorite_by_user: bool = False, user: str = None,
+                   guild_id: Optional[int | str] = None) -> List[tuple]:
         """
         Get sounds with filtering, returning tuples for backwards compatibility.
         
@@ -198,8 +248,14 @@ class SoundRepository(BaseRepository[Sound]):
         """
         # If filtering by user favorites, use a different query that joins with actions
         if favorite_by_user and user:
+            guild_clause = ""
+            params: list = [user]
+            if guild_id is not None:
+                guild_clause = "AND (s.guild_id = ? OR s.guild_id IS NULL)"
+                params.append(str(guild_id))
+            params.append(num_sounds)
             rows = self._execute(
-                """
+                f"""
                 WITH UserFavorites AS (
                     SELECT 
                         target,
@@ -214,17 +270,24 @@ class SoundRepository(BaseRepository[Sound]):
                 FROM sounds s
                 INNER JOIN UserFavorites uf ON CAST(uf.target AS INTEGER) = s.id
                 WHERE uf.rn = 1 AND uf.action = 'favorite_sound'
+                {guild_clause}
                 ORDER BY uf.favorited_at DESC, s.id DESC
                 LIMIT ?
                 """,
-                (user, num_sounds)
+                tuple(params)
             )
             return [tuple(row) for row in rows]
         
         # For global favorites, also order by when the sound was most recently favorited
         if favorite is True:
+            guild_clause = ""
+            params: list = []
+            if guild_id is not None:
+                guild_clause = "AND (s.guild_id = ? OR s.guild_id IS NULL)"
+                params.append(str(guild_id))
+            params.append(num_sounds)
             rows = self._execute(
-                """
+                f"""
                 WITH LatestFavorite AS (
                     SELECT 
                         CAST(target AS INTEGER) as sound_id,
@@ -237,10 +300,11 @@ class SoundRepository(BaseRepository[Sound]):
                 FROM sounds s
                 LEFT JOIN LatestFavorite lf ON lf.sound_id = s.id
                 WHERE s.favorite = 1 AND s.is_elevenlabs = 0
+                {guild_clause}
                 ORDER BY lf.last_favorited DESC, s.id DESC
                 LIMIT ?
                 """,
-                (num_sounds,)
+                tuple(params)
             )
             return [tuple(row) for row in rows]
         
@@ -250,16 +314,20 @@ class SoundRepository(BaseRepository[Sound]):
             conditions.append(f"favorite = {1 if favorite else 0}")
         if slap is not None:
             conditions.append(f"slap = {1 if slap else 0}")
+        params: list = []
+        if guild_id is not None:
+            conditions.append("(guild_id = ? OR guild_id IS NULL)")
+            params.append(str(guild_id))
         
         where_clause = f"WHERE {' AND '.join(conditions)}"
         
         rows = self._execute(
             f"SELECT * FROM sounds {where_clause} ORDER BY timestamp {sort}, id {sort} LIMIT ?",
-            (num_sounds,)
+            (*params, num_sounds)
         )
         return [tuple(row) for row in rows]
     
-    def get_sound_by_name(self, sound_name: str) -> Optional[tuple]:
+    def get_sound_by_name(self, sound_name: str, guild_id: Optional[int | str] = None) -> Optional[tuple]:
         """
         Get a sound by its name (with or without .mp3 extension).
         Returns tuple for backwards compatibility.
@@ -271,34 +339,60 @@ class SoundRepository(BaseRepository[Sound]):
             search_name = sound_name
         
         # Try filename first
+        if guild_id is None:
+            guild_clause = ""
+            params: tuple = (search_name,)
+        else:
+            guild_clause = "AND (guild_id = ? OR guild_id IS NULL)"
+            params = (search_name, str(guild_id), str(guild_id))
+
         row = self._execute_one(
-            "SELECT * FROM sounds WHERE filename = ?",
-            (search_name,)
+            f"""
+            SELECT * FROM sounds WHERE filename = ? {guild_clause}
+            {f'ORDER BY CASE WHEN guild_id = ? THEN 0 WHEN guild_id IS NULL THEN 1 ELSE 2 END LIMIT 1' if guild_id is not None else ''}
+            """,
+            params
         )
         if row:
             return tuple(row)
         
         # Try original filename
         row = self._execute_one(
-            "SELECT * FROM sounds WHERE originalfilename = ?",
-            (search_name,)
+            f"""
+            SELECT * FROM sounds WHERE originalfilename = ? {guild_clause}
+            {f'ORDER BY CASE WHEN guild_id = ? THEN 0 WHEN guild_id IS NULL THEN 1 ELSE 2 END LIMIT 1' if guild_id is not None else ''}
+            """,
+            params
         )
         if row:
             return tuple(row)
         
         # Try without .mp3
         base_name = sound_name.replace('.mp3', '')
-        row = self._execute_one(
-            "SELECT * FROM sounds WHERE filename LIKE ? OR originalfilename LIKE ?",
-            (f"%{base_name}%", f"%{base_name}%")
-        )
+        if guild_id is None:
+            row = self._execute_one(
+                "SELECT * FROM sounds WHERE filename LIKE ? OR originalfilename LIKE ?",
+                (f"%{base_name}%", f"%{base_name}%")
+            )
+        else:
+            row = self._execute_one(
+                """
+                SELECT * FROM sounds
+                WHERE (filename LIKE ? OR originalfilename LIKE ?)
+                AND (guild_id = ? OR guild_id IS NULL)
+                ORDER BY CASE WHEN guild_id = ? THEN 0 WHEN guild_id IS NULL THEN 1 ELSE 2 END
+                LIMIT 1
+                """,
+                (f"%{base_name}%", f"%{base_name}%", str(guild_id), str(guild_id))
+            )
         if row:
             return tuple(row)
         
         return None
     
-    def insert_sound(self, original_filename: str, filename: str, 
-                     favorite: int = 0, date=None, is_elevenlabs: int = 0) -> int:
+    def insert_sound(self, original_filename: str, filename: str,
+                     favorite: int = 0, date=None, is_elevenlabs: int = 0,
+                     guild_id: Optional[int | str] = None) -> int:
         """Insert a new sound (backwards compatibility signature)."""
         from datetime import datetime
         if date is None:
@@ -306,10 +400,17 @@ class SoundRepository(BaseRepository[Sound]):
         
         return self._execute_write(
             """
-            INSERT INTO sounds (originalfilename, filename, favorite, blacklist, date, slap, is_elevenlabs)
-            VALUES (?, ?, ?, 0, ?, 0, ?)
+            INSERT INTO sounds (originalfilename, filename, favorite, blacklist, date, slap, is_elevenlabs, guild_id)
+            VALUES (?, ?, ?, 0, ?, 0, ?, ?)
             """,
-            (original_filename, filename, favorite, date.strftime("%Y-%m-%d %H:%M:%S") if hasattr(date, 'strftime') else str(date), is_elevenlabs)
+            (
+                original_filename,
+                filename,
+                favorite,
+                date.strftime("%Y-%m-%d %H:%M:%S") if hasattr(date, 'strftime') else str(date),
+                is_elevenlabs,
+                str(guild_id) if guild_id is not None else None,
+            )
         )
     
     def update_sound(self, filename: str, new_filename: str = None, 

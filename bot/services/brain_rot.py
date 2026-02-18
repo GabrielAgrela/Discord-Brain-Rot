@@ -49,8 +49,9 @@ class BrainRotService:
                 chosen = random.choice(functions)
                 try:
                     await chosen(user, guild)
+                    guild_id = guild.id if guild else None
                     self.action_repo.insert(user.name if hasattr(user, 'name') else str(user), 
-                                         f"brain_rot_{chosen.__name__}", "")
+                                         f"brain_rot_{chosen.__name__}", "", guild_id=guild_id)
                 except Exception as e:
                     print(f"[BrainRotService] Error in {chosen.__name__}: {e}")
 
@@ -118,4 +119,4 @@ class BrainRotService:
             pass
         
         username = user.name if hasattr(user, 'name') else str(user) if user else "admin"
-        self.action_repo.insert(username, folder_name.lower(), file)
+        self.action_repo.insert(username, folder_name.lower(), file, guild_id=guild.id if guild else None)

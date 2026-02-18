@@ -34,7 +34,8 @@ def db_connection():
             blacklist INTEGER DEFAULT 0,
             slap INTEGER DEFAULT 0,
             is_elevenlabs INTEGER DEFAULT 0,
-            timestamp TEXT
+            timestamp TEXT,
+            guild_id TEXT
         )
     """)
     
@@ -45,7 +46,8 @@ def db_connection():
             username TEXT NOT NULL,
             action TEXT NOT NULL,
             target TEXT,
-            timestamp TEXT
+            timestamp TEXT,
+            guild_id TEXT
         )
     """)
     
@@ -54,7 +56,8 @@ def db_connection():
         CREATE TABLE users (
             id TEXT NOT NULL,
             event TEXT NOT NULL,
-            sound TEXT NOT NULL
+            sound TEXT NOT NULL,
+            guild_id TEXT
         )
     """)
 
@@ -65,7 +68,8 @@ def db_connection():
             username TEXT NOT NULL,
             channel_id TEXT NOT NULL,
             join_time TEXT NOT NULL,
-            leave_time TEXT
+            leave_time TEXT,
+            guild_id TEXT
         )
     """)
     
@@ -84,7 +88,23 @@ def db_connection():
         CREATE TABLE sound_lists (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             list_name TEXT NOT NULL,
-            creator TEXT NOT NULL
+            creator TEXT NOT NULL,
+            guild_id TEXT
+        )
+    """)
+
+    # Create guild_settings table for per-guild configuration.
+    cursor.execute("""
+        CREATE TABLE guild_settings (
+            guild_id TEXT PRIMARY KEY,
+            bot_text_channel_id TEXT,
+            default_voice_channel_id TEXT,
+            autojoin_enabled INTEGER NOT NULL DEFAULT 0,
+            periodic_enabled INTEGER NOT NULL DEFAULT 0,
+            stt_enabled INTEGER NOT NULL DEFAULT 0,
+            audio_policy TEXT NOT NULL DEFAULT 'low_latency',
+            created_at TEXT,
+            updated_at TEXT
         )
     """)
     

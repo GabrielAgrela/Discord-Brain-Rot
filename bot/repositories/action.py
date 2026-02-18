@@ -33,7 +33,7 @@ class ActionRepository(BaseRepository):
         rows = self._execute("SELECT * FROM actions ORDER BY timestamp DESC LIMIT ?", (limit,))
         return [self._row_to_entity(row) for row in rows]
     
-    def insert(self, username: str, action: str, target) -> int:
+    def insert(self, username: str, action: str, target, guild_id: Optional[int | str] = None) -> int:
         """
         Log a user action.
         
@@ -46,11 +46,23 @@ class ActionRepository(BaseRepository):
             ID of the inserted action
         """
         return self._execute_write(
-            "INSERT INTO actions (username, action, target, timestamp) VALUES (?, ?, ?, ?)",
-            (username, action, str(target), datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            "INSERT INTO actions (username, action, target, timestamp, guild_id) VALUES (?, ?, ?, ?, ?)",
+            (
+                username,
+                action,
+                str(target),
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                str(guild_id) if guild_id is not None else None,
+            ),
         )
     
-    def get_top_users(self, days: int = 0, limit: int = 5, by: str = "plays") -> List[Tuple[str, int]]:
+    def get_top_users(
+        self,
+        days: int = 0,
+        limit: int = 5,
+        by: str = "plays",
+        guild_id: Optional[int | str] = None,
+    ) -> List[Tuple[str, int]]:
         """
         Get users with most activity.
         
@@ -69,6 +81,11 @@ class ActionRepository(BaseRepository):
             date_filter = "AND timestamp >= ?"
             cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
             params.append(cutoff)
+
+        guild_filter = ""
+        if guild_id is not None:
+            guild_filter = "AND (guild_id = ? OR guild_id IS NULL)"
+            params.append(str(guild_id))
         
         params.append(limit)
         
@@ -79,6 +96,7 @@ class ActionRepository(BaseRepository):
             WHERE action IN ('play_random_sound', 'replay_sound', 'play_random_favorite_sound', 
                             'play_request', 'play_from_list', 'play_similar_sound')
             {date_filter}
+            {guild_filter}
             GROUP BY username
             ORDER BY count DESC
             LIMIT ?
@@ -87,7 +105,13 @@ class ActionRepository(BaseRepository):
         )
         return [(row['username'], row['count']) for row in rows]
     
-    def get_top_sounds(self, days: int = 0, limit: int = 5, user: str = None) -> Tuple[List[Tuple[str, int]], int]:
+    def get_top_sounds(
+        self,
+        days: int = 0,
+        limit: int = 5,
+        user: str = None,
+        guild_id: Optional[int | str] = None,
+    ) -> Tuple[List[Tuple[str, int]], int]:
         """
         Get most played sounds.
         
@@ -110,6 +134,10 @@ class ActionRepository(BaseRepository):
         if user:
             conditions.append("a.username = ?")
             params.append(user)
+
+        if guild_id is not None:
+            conditions.append("(a.guild_id = ? OR a.guild_id IS NULL)")
+            params.append(str(guild_id))
         
         where_clause = " AND ".join(conditions)
         params.append(limit)
@@ -140,24 +168,36 @@ class ActionRepository(BaseRepository):
         
         return [(row['Filename'], row['count']) for row in rows], total
     
-    def get_sound_play_count(self, sound_id: int) -> int:
+    def get_sound_play_count(self, sound_id: int, guild_id: Optional[int | str] = None) -> int:
         """Get the total play count for a specific sound."""
+        guild_filter = ""
+        params = [str(sound_id)]
+        if guild_id is not None:
+            guild_filter = "AND (guild_id = ? OR guild_id IS NULL)"
+            params.append(str(guild_id))
+
         row = self._execute_one(
-            """
+            f"""
             SELECT COUNT(*) as count 
             FROM actions 
             WHERE target = ?
             AND action IN ('play_random_sound', 'replay_sound', 'play_random_favorite_sound', 
                           'play_request', 'play_from_list', 'play_similar_sound', 'play_sound_periodically')
+            {guild_filter}
             """,
-            (str(sound_id),)
+            tuple(params)
         )
         return row['count'] if row else 0
     
-    def get_users_who_favorited(self, sound_id: int) -> List[str]:
+    def get_users_who_favorited(self, sound_id: int, guild_id: Optional[int | str] = None) -> List[str]:
         """Get all users who have favorited a specific sound."""
+        guild_filter = ""
+        params = [str(sound_id)]
+        if guild_id is not None:
+            guild_filter = "AND (guild_id = ? OR guild_id IS NULL)"
+            params.append(str(guild_id))
         rows = self._execute(
-            """
+            f"""
             WITH UserActions AS (
                 SELECT 
                     username,
@@ -167,17 +207,23 @@ class ActionRepository(BaseRepository):
                 FROM actions
                 WHERE target = ?
                 AND action IN ('favorite_sound', 'unfavorite_sound')
+                {guild_filter}
             )
             SELECT username
             FROM UserActions
             WHERE rn = 1 AND action = 'favorite_sound'
             ORDER BY username
             """,
-            (str(sound_id),)
+            tuple(params)
         )
         return [row['username'] for row in rows]
     
-    def get_sounds_on_this_day(self, months_ago: int = 12, limit: int = 10) -> List[Tuple[str, int]]:
+    def get_sounds_on_this_day(
+        self,
+        months_ago: int = 12,
+        limit: int = 10,
+        guild_id: Optional[int | str] = None,
+    ) -> List[Tuple[str, int]]:
         """
         Get sounds that were popular on this day in the past.
         
@@ -195,20 +241,28 @@ class ActionRepository(BaseRepository):
         start_date = (target_date - timedelta(days=1)).strftime("%Y-%m-%d 00:00:00")
         end_date = (target_date + timedelta(days=1)).strftime("%Y-%m-%d 23:59:59")
         
+        guild_filter = ""
+        params: list = [start_date, end_date]
+        if guild_id is not None:
+            guild_filter = "AND (a.guild_id = ? OR a.guild_id IS NULL)"
+            params.append(str(guild_id))
+        params.append(limit)
+
         rows = self._execute(
-            """
+            f"""
             SELECT s.Filename, COUNT(*) as count
             FROM actions a
             JOIN sounds s ON CAST(a.target AS INTEGER) = s.id
             WHERE a.action IN ('play_random_sound', 'replay_sound', 'play_random_favorite_sound', 
                               'play_request', 'play_from_list', 'play_similar_sound', 'play_sound_periodically')
             AND a.timestamp BETWEEN ? AND ?
+            {guild_filter}
             AND s.slap = 0
             GROUP BY s.Filename
             ORDER BY count DESC
             LIMIT ?
             """,
-            (start_date, end_date, limit)
+            tuple(params)
         )
         
         return [(row['Filename'], row['count']) for row in rows]

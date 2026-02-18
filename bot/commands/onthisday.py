@@ -37,7 +37,11 @@ class OnThisDayCog(commands.Cog):
         months_ago = 12 if period == "1 year ago" else 1
         
         # Get sounds from that time period
-        sounds = self.action_repo.get_sounds_on_this_day(months_ago=months_ago, limit=10)
+        sounds = self.action_repo.get_sounds_on_this_day(
+            months_ago=months_ago,
+            limit=10,
+            guild_id=ctx.guild.id if ctx.guild else None,
+        )
         
         # Create the view
         from bot.ui.views.onthisday import OnThisDayView

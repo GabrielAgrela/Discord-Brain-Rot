@@ -45,6 +45,7 @@ from bot.services.stats import StatsService
 from bot.services.background import BackgroundService
 from bot.services.backup import BackupService
 from bot.services.llm import LLMService
+from bot.services.guild_settings import GuildSettingsService
 
 
 
@@ -68,6 +69,7 @@ class BotBehavior:
         self._background_service = BackgroundService(bot, self._audio_service, self._sound_service, self)
         self._backup_service = BackupService(bot, self._message_service)
         self._llm_service = LLMService()
+        self._guild_settings_service = GuildSettingsService()
         
         from bot.services.ai_commentary import AICommentaryService
         self._ai_commentary_service = AICommentaryService(self)
@@ -96,6 +98,21 @@ class BotBehavior:
         self.mod_role = None
         self.now_playing_messages = []
         self.last_sound_played = {}
+        self._owner_user_ids = self._parse_owner_ids(os.getenv("OWNER_USER_IDS", ""))
+
+    @staticmethod
+    def _parse_owner_ids(raw_ids: str) -> set[int]:
+        """Parse comma-separated owner IDs from env."""
+        owner_ids: set[int] = set()
+        for value in (raw_ids or "").split(","):
+            cleaned = value.strip()
+            if not cleaned:
+                continue
+            try:
+                owner_ids.add(int(cleaned))
+            except ValueError:
+                print(f"[BotBehavior] Ignoring invalid OWNER_USER_IDS entry: {cleaned}")
+        return owner_ids
         
     @property
     def playback_done(self): return self._audio_service.playback_done
@@ -150,15 +167,20 @@ class BotBehavior:
     def brain_rot_cooldown_message(self, value): self._brain_rot_service.cooldown_message = value
 
     def is_admin_or_mod(self, member: discord.Member) -> bool:
-        """Checks if a member has the DEVELOPER or MODERATOR role."""
-        allowed_roles = {"DEVELOPER", "MODERATOR"}
-        for role in member.roles:
-            if role.name in allowed_roles:
-                return True
+        """Check admin authorization via owner allowlist and Discord permissions."""
+        if member.id in self._owner_user_ids:
+            return True
+        guild_permissions = getattr(member, "guild_permissions", None)
+        if guild_permissions and (
+            guild_permissions.administrator
+            or guild_permissions.manage_guild
+            or guild_permissions.manage_channels
+        ):
+            return True
         return False
 
     async def display_top_users(self, user, number_users=5, number_sounds=5, days=7, by="plays", guild: Optional[discord.Guild] = None):
-        await self.delete_controls_message()  # Delete controls first so it can be re-sent at bottom
+        await self.delete_controls_message(guild=guild)  # Delete controls first so it can be re-sent at bottom
         await self._stats_service.display_top_users(user, number_users, number_sounds, days, by, guild)
         await self.send_controls(guild=guild)
 
@@ -204,20 +226,20 @@ class BotBehavior:
         await asyncio.sleep(30)
         await message.delete()     
 
-    async def delete_controls_message(self, delete_all=True):
-        return await self._message_service.delete_controls_message(delete_all)
+    async def delete_controls_message(self, delete_all=True, guild: Optional[discord.Guild] = None):
+        return await self._message_service.delete_controls_message(delete_all, guild=guild)
 
-    async def disable_controls_message(self, disable_all: bool = True):
+    async def disable_controls_message(self, disable_all: bool = True, guild: Optional[discord.Guild] = None):
         """Disable control message components instead of deleting messages."""
-        return await self._message_service.disable_controls_message(disable_all)
+        return await self._message_service.disable_controls_message(disable_all, guild=guild)
 
     async def delete_last_message(self, count=1):
         bot_channel = await self.get_bot_channel()
         if bot_channel:
             return await self._message_service.delete_messages(bot_channel, count, bot_only=False)
     
-    async def clean_buttons(self, count=5):
-        return await self._message_service.clean_buttons(count)
+    async def clean_buttons(self, count=5, guild: Optional[discord.Guild] = None):
+        return await self._message_service.clean_buttons(count, guild=guild)
     
     async def get_bot_channel(self, guild: Optional[discord.Guild] = None):
         """Get the bot's primary text channel for a guild."""
@@ -271,8 +293,8 @@ class BotBehavior:
     async def play_random_favorite_sound(self, username, guild=None):
         return await self._sound_service.play_random_favorite_sound(username, guild)
 
-    async def play_random_sound_from_list(self, list_name, username):
-        return await self._sound_service.play_random_sound_from_list(list_name, username)
+    async def play_random_sound_from_list(self, list_name, username, guild: Optional[discord.Guild] = None):
+        return await self._sound_service.play_random_sound_from_list(list_name, username, guild=guild)
 
     async def play_request(self, id, user, exact=False, effects=None, guild=None):
         return await self._sound_service.play_request(id, user, exact, effects, guild)
@@ -329,11 +351,13 @@ class BotBehavior:
     async def is_playing_sound(self):
         return self._audio_service.is_playing_sound()
 
-    async def add_user_event(self, username, event, sound_name):
-        return await self._user_event_service.add_user_event(username, event, sound_name)
+    async def add_user_event(self, username, event, sound_name, guild: Optional[discord.Guild] = None):
+        guild_id = guild.id if guild else None
+        return await self._user_event_service.add_user_event(username, event, sound_name, guild_id=guild_id)
 
-    async def list_user_events(self, user, user_full_name, requesting_user=None):
-        return await self._user_event_service.list_user_events(user_full_name, requesting_user)
+    async def list_user_events(self, user, user_full_name, requesting_user=None, guild: Optional[discord.Guild] = None):
+        guild_id = guild.id if guild else None
+        return await self._user_event_service.list_user_events(user_full_name, requesting_user, guild_id=guild_id)
 
     async def find_and_update_similar_sounds(self, *args, **kwargs):
         return await self._sound_service.find_and_update_similar_sounds(*args, **kwargs)
@@ -343,4 +367,3 @@ class BotBehavior:
 
     async def perform_backup(self, interaction):
         return await self._backup_service.perform_backup(interaction)
-

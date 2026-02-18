@@ -7,6 +7,7 @@ import discord
 from discord.ext import tasks
 from bot.repositories import SoundRepository, ActionRepository
 from bot.downloaders.sound import SoundDownloader
+from bot.services.guild_settings import GuildSettingsService
 
 class BackgroundService:
     """
@@ -23,6 +24,7 @@ class BackgroundService:
         # Repositories
         self.sound_repo = SoundRepository()
         self.action_repo = ActionRepository()
+        self.guild_settings_service = GuildSettingsService()
         
         self._started = False
 
@@ -318,6 +320,7 @@ class BackgroundService:
         """
         try:
             for guild in self.bot.guilds:
+                settings = self.guild_settings_service.get(guild.id)
                 voice_client = guild.voice_client
                 
                 # Check for zombie/broken voice client (e.g., after shard reconnect)
@@ -348,6 +351,11 @@ class BackgroundService:
                 
                 # Normal health checks - only if voice client is actually connected
                 if voice_client and voice_client.is_connected():
+                    if not settings.stt_enabled:
+                        if guild.id in self.audio_service.keyword_sinks:
+                            print(f"[BackgroundService] STT disabled in {guild.name}; stopping keyword detection")
+                            await self.audio_service.stop_keyword_detection(guild)
+                        continue
                     sink = self.audio_service.keyword_sinks.get(guild.id)
                     
                     if sink is None:
@@ -433,6 +441,9 @@ class BackgroundService:
                 
                 # Play sound in each guild
                 for guild in self.bot.guilds:
+                    settings = self.guild_settings_service.get(guild.id)
+                    if not settings.periodic_enabled:
+                        continue
                     channel = self.audio_service.get_largest_voice_channel(guild)
                     if channel:
                         # Skip if channel is empty (no non-bot members)
@@ -441,12 +452,12 @@ class BackgroundService:
                             print(f"[BackgroundService] Skipping periodic sound in {guild.name} - no users in channel")
                             continue
                         
-                        random_sounds = self.sound_repo.get_random_sounds(num_sounds=1)
+                        random_sounds = self.sound_repo.get_random_sounds(num_sounds=1, guild_id=guild.id)
                         if random_sounds:
                             sound = random_sounds[0]
                             print(f"[BackgroundService] Playing periodic sound: {sound[2]} in {guild.name}")
                             await self.audio_service.play_audio(channel, sound[2], "periodic function")
-                            self.action_repo.insert("admin", "play_sound_periodically", sound[0])
+                            self.action_repo.insert("admin", "play_sound_periodically", sound[0], guild_id=guild.id)
                             
             except Exception as e:
                 print(f"[BackgroundService] Error in periodic playback: {e}")

@@ -26,7 +26,8 @@ async def _get_sound_autocomplete(ctx: discord.AutocompleteContext):
         if not current or len(current) < 2:
             return []
         
-        similar_sounds = db.get_sounds_by_similarity(current, 15)
+        guild_id = getattr(getattr(ctx, "interaction", None), "guild_id", None)
+        similar_sounds = db.get_sounds_by_similarity(current, 15, guild_id=guild_id)
         # similar_sounds is a list of (sound_data, score)
         completions = []
         for s in similar_sounds:

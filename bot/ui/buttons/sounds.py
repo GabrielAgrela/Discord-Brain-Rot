@@ -36,6 +36,7 @@ class STSButton(Button):
 
     async def callback(self, interaction):
         await interaction.response.defer()
+        guild_id = interaction.guild.id if interaction.guild else None
         
         # Get avatar URL and character thumbnail
         avatar = getattr(interaction.user, "display_avatar", None)
@@ -66,9 +67,9 @@ class STSButton(Button):
             sts_thumbnail_url=sts_thumbnail_url
         ))
         # Record the action
-        sound = Database().get_sound(self.audio_file, False)
+        sound = Database().get_sound(self.audio_file, False, guild_id=guild_id)
         if sound:
-            Database().insert_action(interaction.user.name, "sts_EL", sound[0])
+            Database().insert_action(interaction.user.name, "sts_EL", sound[0], guild_id=guild_id)
         # Delete the character selection message
         try:
             await interaction.message.delete()
@@ -84,10 +85,13 @@ class IsolateButton(Button):
 
     async def callback(self, interaction):
         await interaction.response.defer()
+        guild_id = interaction.guild.id if interaction.guild else None
         asyncio.create_task(self.bot_behavior._audio_service.isolate_voice(interaction.message.channel, self.audio_file))
-        similar_sounds = Database().get_sounds_by_similarity(self.audio_file)
+        similar_sounds = Database().get_sounds_by_similarity(self.audio_file, guild_id=guild_id)
         if similar_sounds and similar_sounds[0]:
-            Database().insert_action(interaction.user.name, "isolate", similar_sounds[0][0][0])
+            sound_data = similar_sounds[0][0]
+            sound_id = sound_data["id"] if isinstance(sound_data, dict) else sound_data[0]
+            Database().insert_action(interaction.user.name, "isolate", sound_id, guild_id=guild_id)
 
 class FavoriteButton(Button):
     def __init__(self, bot_behavior, audio_file, **kwargs):
@@ -99,7 +103,8 @@ class FavoriteButton(Button):
     async def callback(self, interaction: discord.Interaction):
         print(f"DEBUG: FavoriteButton.callback called by {interaction.user.name} for {self.audio_file}")
         await interaction.response.defer()
-        sound = Database().get_sound(self.audio_file, False)
+        guild_id = interaction.guild.id if interaction.guild else None
+        sound = Database().get_sound(self.audio_file, False, guild_id=guild_id)
         if not sound:
              await interaction.followup.send("Sound not found in database.", ephemeral=True)
              return
@@ -117,7 +122,7 @@ class FavoriteButton(Button):
             action_type = "unfavorite_sound"
         
         # No need to update the button state or view
-        Database().insert_action(interaction.user.name, action_type, sound[0])
+        Database().insert_action(interaction.user.name, action_type, sound[0], guild_id=guild_id)
 
 # BlacklistButton Removed
 
@@ -153,20 +158,21 @@ class DownloadSoundButton(Button):
 
     async def callback(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
+        guild_id = interaction.guild.id if interaction.guild else None
         try:
             # Adjust path since we are now in bot/ui/buttons/
             sound_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "Sounds", self.audio_file))
             if os.path.exists(sound_path):
                 await interaction.followup.send(file=discord.File(sound_path), ephemeral=True)
-                Database().insert_action(interaction.user.name, "download_sound", self.audio_file)
+                Database().insert_action(interaction.user.name, "download_sound", self.audio_file, guild_id=guild_id)
             else:
                  # Check if the sound exists with its original name (if the filename passed is the original name but renamed in DB)
-                sound = Database().get_sound(self.audio_file, False)
+                sound = Database().get_sound(self.audio_file, False, guild_id=guild_id)
                 if sound:
                      original_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "Sounds", sound[1]))
                      if os.path.exists(original_path):
                           await interaction.followup.send(file=discord.File(original_path), ephemeral=True)
-                          Database().insert_action(interaction.user.name, "download_sound", self.audio_file)
+                          Database().insert_action(interaction.user.name, "download_sound", self.audio_file, guild_id=guild_id)
                           return
 
                 await interaction.followup.send("Sound file not found on server.", ephemeral=True)
@@ -186,15 +192,16 @@ class PlaySoundButton(Button):
     async def callback(self, interaction):
         try:
             await interaction.response.defer()
+            guild_id = interaction.guild.id if interaction.guild else None
             channel = self.bot_behavior._audio_service.get_user_voice_channel(interaction.guild, interaction.user.name)
             if not channel:
                 channel = self.bot_behavior._audio_service.get_largest_voice_channel(interaction.guild)
             if channel:
                 asyncio.create_task(self.bot_behavior._audio_service.play_audio(channel, self.sound_name, interaction.user.name))
                 # Log the action
-                sound = Database().get_sound(self.sound_name, False)
+                sound = Database().get_sound(self.sound_name, False, guild_id=guild_id)
                 if sound:
-                    Database().insert_action(interaction.user.name, "play_similar_sound", sound[0])
+                    Database().insert_action(interaction.user.name, "play_similar_sound", sound[0], guild_id=guild_id)
             else:
                 await interaction.followup.send("No voice channel available to play sounds! 😭", ephemeral=True)
         except Exception as e:
@@ -217,13 +224,14 @@ class SlapButton(Button):
     async def callback(self, interaction: discord.Interaction):
         print(f"DEBUG: SlapButton.callback called by {interaction.user.name} for {self.audio_file}")
         await interaction.response.defer()
+        guild_id = interaction.guild.id if interaction.guild else None
         
         # Check if user has admin/mod permissions
         if not self.bot_behavior.is_admin_or_mod(interaction.user):
             await interaction.followup.send("Only admins and moderators can add slap sounds! 😤", ephemeral=True)
             return
             
-        sound = Database().get_sound(self.audio_file, False)
+        sound = Database().get_sound(self.audio_file, False, guild_id=guild_id)
         if not sound:
              await interaction.followup.send("Sound not found in database.", ephemeral=True)
              return
@@ -237,7 +245,7 @@ class SlapButton(Button):
         # Update the entire view
         from bot.ui.views.sounds import SoundBeingPlayedView
         await interaction.message.edit(view=SoundBeingPlayedView(self.bot_behavior, self.audio_file))
-        Database().insert_action(interaction.user.name, "slap_sound", sound[0])
+        Database().insert_action(interaction.user.name, "slap_sound", sound[0], guild_id=guild_id)
 
 class PlaySlapButton(Button):
     def __init__(self, bot_behavior, **kwargs):
@@ -252,8 +260,9 @@ async def play_random_slap(bot_behavior, interaction: discord.Interaction):
     """Play a random slap sound using the standard slap button flow."""
     try:
         await interaction.response.defer()
+        guild_id = interaction.guild.id if interaction.guild else None
         # Get a random slap sound from the database
-        slap_sounds = Database().get_sounds(slap=True, num_sounds=100)
+        slap_sounds = Database().get_sounds(slap=True, num_sounds=100, guild_id=guild_id)
         if slap_sounds:
             random_slap = random.choice(slap_sounds)
             # Use fast silent slap path - stops current audio, plays immediately, no embed
@@ -264,7 +273,7 @@ async def play_random_slap(bot_behavior, interaction: discord.Interaction):
                 asyncio.create_task(bot_behavior._audio_service.play_slap(
                     channel, random_slap[2], interaction.user.name
                 ))
-                Database().insert_action(interaction.user.name, "play_slap", random_slap[0])
+                Database().insert_action(interaction.user.name, "play_slap", random_slap[0], guild_id=guild_id)
             else:
                 await interaction.followup.send("Join a voice channel first! 👋", ephemeral=True)
         else:
@@ -284,6 +293,7 @@ async def replay_sound(
     """Replay a specific sound using the same behavior as ReplayButton."""
     try:
         await interaction.response.defer()
+        guild_id = interaction.guild.id if interaction.guild else None
         channel = interaction.user.voice.channel if interaction.user.voice else None
         if not channel:
             channel = bot_behavior._audio_service.get_largest_voice_channel(interaction.guild)
@@ -308,9 +318,11 @@ async def replay_sound(
                 requester_avatar_url=requester_avatar_url,
                 sts_thumbnail_url=sts_thumbnail_url
             ))
-            sound_data = Database().get_sounds_by_similarity(audio_file)
+            sound_data = Database().get_sounds_by_similarity(audio_file, guild_id=guild_id)
             if sound_data and sound_data[0]:
-                Database().insert_action(interaction.user.name, "replay_sound", sound_data[0][0]['id'])
+                target_sound = sound_data[0][0]
+                target_sound_id = target_sound["id"] if isinstance(target_sound, dict) else target_sound[0]
+                Database().insert_action(interaction.user.name, "replay_sound", target_sound_id, guild_id=guild_id)
         else:
             await interaction.followup.send("No voice channel available! 😭", ephemeral=True)
     except Exception as e:
@@ -396,6 +408,7 @@ class STSCharacterSelectButton(Button):
 
     async def callback(self, interaction):
         await interaction.response.defer()
+        guild_id = interaction.guild.id if interaction.guild else None
         
         # Create a view with buttons for each character
         from discord.ui import View
@@ -411,9 +424,9 @@ class STSCharacterSelectButton(Button):
             ephemeral=True,
             delete_after=10
         )
-        sound = Database().get_sound(self.audio_file, False)
+        sound = Database().get_sound(self.audio_file, False, guild_id=guild_id)
         if sound:
-            Database().insert_action(interaction.user.name, "sts_character_select", sound[0])
+            Database().insert_action(interaction.user.name, "sts_character_select", sound[0], guild_id=guild_id)
 class ToggleControlsButton(Button):
     def __init__(self, **kwargs):
         # Extract initial state from view if possible
@@ -445,7 +458,13 @@ class ToggleControlsButton(Button):
                     # Note: We need to import the Database class here or ensure it's available
                     from bot.database import Database
                     # Request slightly more than we display to have variety if needed, but select component uses its own limit
-                    similar_data = await asyncio.to_thread(Database().get_sounds_by_similarity, view.audio_file)
+                    similar_data = await asyncio.to_thread(
+                        Database().get_sounds_by_similarity,
+                        view.audio_file,
+                        5,
+                        0.0,
+                        interaction.guild.id if interaction.guild else None,
+                    )
                     
                     # Filter out the current sound itself
                     import sqlite3

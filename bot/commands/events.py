@@ -17,7 +17,11 @@ from bot.database import Database
 async def _get_user_choices(ctx: discord.AutocompleteContext):
     """Get all known users for autocomplete."""
     from bot.repositories import EventRepository
-    return EventRepository().get_all_users_with_events()
+    guild_id = None
+    interaction = getattr(ctx, "interaction", None)
+    if interaction is not None:
+        guild_id = getattr(interaction, "guild_id", None)
+    return EventRepository().get_all_users_with_events(guild_id=guild_id)
 
 class EventCog(commands.Cog):
     """Cog for managing user events (join/leave sounds)."""
@@ -37,7 +41,7 @@ class EventCog(commands.Cog):
     ):
         """Set a sound to play on user join/leave."""
         await ctx.respond("Processing your request...", delete_after=0)
-        success = await self.behavior.add_user_event(username, event, sound)
+        success = await self.behavior.add_user_event(username, event, sound, guild=ctx.guild)
         if success:
             await ctx.followup.send(f"Successfully added {sound} as {event} sound for {username}!", ephemeral=True, delete_after=5)
         else:
@@ -63,7 +67,12 @@ class EventCog(commands.Cog):
             else:
                  target_user_full = ctx.user.name
         
-        if not await self.behavior.list_user_events(target_user, target_user_full, requesting_user=ctx.user.name):
+        if not await self.behavior.list_user_events(
+            target_user,
+            target_user_full,
+            requesting_user=ctx.user.name,
+            guild=ctx.guild,
+        ):
             await ctx.followup.send(f"No event sounds found for {target_user}!", ephemeral=True)
 
 

@@ -15,6 +15,7 @@ from bot.repositories.event import EventRepository
 from bot.repositories.stats import StatsRepository
 from bot.repositories.keyword import KeywordRepository
 from bot.repositories.voice_activity import VoiceActivityRepository
+from bot.repositories.guild_settings import GuildSettingsRepository
 
 __all__ = [
     "BaseRepository",
@@ -25,4 +26,5 @@ __all__ = [
     "StatsRepository",
     "KeywordRepository",
     "VoiceActivityRepository",
+    "GuildSettingsRepository",
 ]

@@ -29,7 +29,12 @@ class EventRepository(BaseRepository):
         rows = self._execute("SELECT * FROM users LIMIT ?", (limit,))
         return [self._row_to_entity(row) for row in rows]
     
-    def get_user_events(self, user_id: str, event_type: str) -> List[str]:
+    def get_user_events(
+        self,
+        user_id: str,
+        event_type: str,
+        guild_id: Optional[int | str] = None,
+    ) -> List[str]:
         """
         Get all sounds for a user's event type.
         
@@ -40,58 +45,110 @@ class EventRepository(BaseRepository):
         Returns:
             List of sound filenames
         """
-        rows = self._execute(
-            "SELECT * FROM users WHERE event = ? AND id = ?",
-            (event_type, user_id)
-        )
+        if guild_id is None:
+            rows = self._execute(
+                "SELECT * FROM users WHERE event = ? AND id = ?",
+                (event_type, user_id)
+            )
+        else:
+            rows = self._execute(
+                "SELECT * FROM users WHERE event = ? AND id = ? AND (guild_id = ? OR guild_id IS NULL)",
+                (event_type, user_id, str(guild_id))
+            )
         return [tuple(row) for row in rows]
     
-    def get_all_users_with_events(self) -> List[str]:
+    def get_all_users_with_events(self, guild_id: Optional[int | str] = None) -> List[str]:
         """Get all unique user IDs who have event sounds configured."""
-        rows = self._execute(
-            "SELECT DISTINCT id FROM users"
-        )
+        if guild_id is None:
+            rows = self._execute(
+                "SELECT DISTINCT id FROM users"
+            )
+        else:
+            rows = self._execute(
+                "SELECT DISTINCT id FROM users WHERE guild_id = ? OR guild_id IS NULL",
+                (str(guild_id),)
+            )
         return [row['id'] for row in rows]
     
-    def get_event_sound(self, user_id: str, event_type: str, sound: str) -> Optional[Tuple]:
+    def get_event_sound(
+        self,
+        user_id: str,
+        event_type: str,
+        sound: str,
+        guild_id: Optional[int | str] = None,
+    ) -> Optional[Tuple]:
         """Check if a specific user event sound exists."""
-        row = self._execute_one(
-            "SELECT * FROM users WHERE id = ? AND event = ? AND sound = ?",
-            (user_id, event_type, sound)
-        )
+        if guild_id is None:
+            row = self._execute_one(
+                "SELECT * FROM users WHERE id = ? AND event = ? AND sound = ?",
+                (user_id, event_type, sound)
+            )
+        else:
+            row = self._execute_one(
+                "SELECT * FROM users WHERE id = ? AND event = ? AND sound = ? AND (guild_id = ? OR guild_id IS NULL)",
+                (user_id, event_type, sound, str(guild_id))
+            )
         return tuple(row) if row else None
     
-    def insert(self, user_id: str, event_type: str, sound: str) -> int:
+    def insert(
+        self,
+        user_id: str,
+        event_type: str,
+        sound: str,
+        guild_id: Optional[int | str] = None,
+    ) -> int:
         """Insert a new user event sound."""
         return self._execute_write(
-            "INSERT INTO users (id, event, sound) VALUES (?, ?, ?)",
-            (user_id, event_type, sound)
+            "INSERT INTO users (id, event, sound, guild_id) VALUES (?, ?, ?, ?)",
+            (user_id, event_type, sound, str(guild_id) if guild_id is not None else None)
         )
     
-    def remove(self, user_id: str, event_type: str, sound: str) -> bool:
+    def remove(
+        self,
+        user_id: str,
+        event_type: str,
+        sound: str,
+        guild_id: Optional[int | str] = None,
+    ) -> bool:
         """Remove a user event sound."""
-        self._execute_write(
-            "DELETE FROM users WHERE id = ? AND event = ? AND sound = ?",
-            (user_id, event_type, sound)
-        )
+        if guild_id is None:
+            self._execute_write(
+                "DELETE FROM users WHERE id = ? AND event = ? AND sound = ?",
+                (user_id, event_type, sound)
+            )
+        else:
+            self._execute_write(
+                "DELETE FROM users WHERE id = ? AND event = ? AND sound = ? AND (guild_id = ? OR guild_id IS NULL)",
+                (user_id, event_type, sound, str(guild_id))
+            )
         return True
     
-    def toggle(self, user_id: str, event_type: str, sound: str) -> bool:
+    def toggle(
+        self,
+        user_id: str,
+        event_type: str,
+        sound: str,
+        guild_id: Optional[int | str] = None,
+    ) -> bool:
         """
         Toggle a user event sound (add if doesn't exist, remove if exists).
         
         Returns:
             True if sound was added, False if removed
         """
-        existing = self.get_event_sound(user_id, event_type, sound)
+        existing = self.get_event_sound(user_id, event_type, sound, guild_id=guild_id)
         if existing:
-            self.remove(user_id, event_type, sound)
+            self.remove(user_id, event_type, sound, guild_id=guild_id)
             return False
         else:
-            self.insert(user_id, event_type, sound)
+            self.insert(user_id, event_type, sound, guild_id=guild_id)
             return True
 
-    def get_events_for_sound(self, sound_filename: str) -> List[Tuple[str, str]]:
+    def get_events_for_sound(
+        self,
+        sound_filename: str,
+        guild_id: Optional[int | str] = None,
+    ) -> List[Tuple[str, str]]:
         """
         Get all (user_id, event_type) tuples for a specific sound.
         
@@ -112,8 +169,14 @@ class EventRepository(BaseRepository):
         # We need to handle potential .mp3 mismatch
         clean_name = sound_filename.replace('.mp3', '')
         
-        rows = self._execute(
-            "SELECT id, event FROM users WHERE sound = ? OR sound = ?",
-            (clean_name, sound_filename)
-        )
+        if guild_id is None:
+            rows = self._execute(
+                "SELECT id, event FROM users WHERE sound = ? OR sound = ?",
+                (clean_name, sound_filename)
+            )
+        else:
+            rows = self._execute(
+                "SELECT id, event FROM users WHERE (sound = ? OR sound = ?) AND (guild_id = ? OR guild_id IS NULL)",
+                (clean_name, sound_filename, str(guild_id))
+            )
         return [(row['id'], row['event']) for row in rows]

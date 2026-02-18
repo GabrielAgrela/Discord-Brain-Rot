@@ -146,3 +146,50 @@ class TestSoundRepositoryEdgeCases:
         """Test search with no matching results."""
         results = sound_repository.search("nonexistent_xyz")
         assert len(results) == 0
+
+    def test_get_by_filename_prefers_guild_local_over_global(self, sound_repository, db_connection):
+        """Guild-scoped lookups should prefer guild-local row over global fallback."""
+        cursor = db_connection.cursor()
+        cursor.execute(
+            """
+            INSERT INTO sounds (originalfilename, Filename, date, favorite, blacklist, slap, is_elevenlabs, timestamp, guild_id)
+            VALUES (?, ?, ?, 0, 0, 0, 0, ?, NULL)
+            """,
+            ("shared.mp3", "shared.mp3", "2025-01-01 00:00:00", "2025-01-01 00:00:00"),
+        )
+        cursor.execute(
+            """
+            INSERT INTO sounds (originalfilename, Filename, date, favorite, blacklist, slap, is_elevenlabs, timestamp, guild_id)
+            VALUES (?, ?, ?, 0, 0, 0, 0, ?, ?)
+            """,
+            ("shared.mp3", "shared.mp3", "2025-01-01 00:00:01", "2025-01-01 00:00:01", "42"),
+        )
+        db_connection.commit()
+
+        sound = sound_repository.get_by_filename("shared.mp3", guild_id=42)
+        assert sound is not None
+        assert sound.id == 2
+
+    def test_get_sounds_scoped_to_guild_keeps_global_fallback(self, sound_repository, db_connection):
+        """Guild-scoped sound listing should include guild-local and global rows only."""
+        cursor = db_connection.cursor()
+        rows = [
+            ("global.mp3", "global.mp3", "2025-01-01 00:00:00", None),
+            ("guild42.mp3", "guild42.mp3", "2025-01-01 00:00:01", "42"),
+            ("guild43.mp3", "guild43.mp3", "2025-01-01 00:00:02", "43"),
+        ]
+        for original, filename, ts, guild_id in rows:
+            cursor.execute(
+                """
+                INSERT INTO sounds (originalfilename, Filename, date, favorite, blacklist, slap, is_elevenlabs, timestamp, guild_id)
+                VALUES (?, ?, ?, 0, 0, 0, 0, ?, ?)
+                """,
+                (original, filename, ts, ts, guild_id),
+            )
+        db_connection.commit()
+
+        sounds = sound_repository.get_sounds(num_sounds=20, guild_id=42)
+        filenames = {row[2] for row in sounds}
+        assert "global.mp3" in filenames
+        assert "guild42.mp3" in filenames
+        assert "guild43.mp3" not in filenames

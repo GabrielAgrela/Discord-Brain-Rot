@@ -40,6 +40,7 @@ class StatsCog(commands.Cog):
     ):
         """Show leaderboard statistics."""
         await ctx.respond("Processing your request...", delete_after=0)
+        guild_id = ctx.guild.id if ctx.guild else None
         if option == "sounds":
             # Note: The original code used a method write_top_played_sounds on behavior.player_history_db
             # But in database.py we only see get_top_sounds.
@@ -54,7 +55,7 @@ class StatsCog(commands.Cog):
             # Let's assume for now we need to implement the logic here using get_top_sounds/users.
             
             # Let's implement the display logic here using behavior.embed/message service
-            top_sounds, total = self.action_repo.get_top_sounds(numberdays, number)
+            top_sounds, total = self.action_repo.get_top_sounds(numberdays, number, guild_id=guild_id)
             
             description = ""
             for i, (name, count) in enumerate(top_sounds, 1):
@@ -66,11 +67,12 @@ class StatsCog(commands.Cog):
                 
             await self.behavior.send_message(
                 title=f"Top {number} Sounds (Last {numberdays} days)",
-                description=description
+                description=description,
+                guild=ctx.guild,
             )
             
         elif option == "users":
-            top_users = self.action_repo.get_top_users(numberdays, number)
+            top_users = self.action_repo.get_top_users(numberdays, number, guild_id=guild_id)
             
             description = ""
             for i, (name, count) in enumerate(top_users, 1):
@@ -81,11 +83,12 @@ class StatsCog(commands.Cog):
 
             await self.behavior.send_message(
                 title=f"Top {number} Users (Last {numberdays} days)",
-                description=description
+                description=description,
+                guild=ctx.guild,
             )
 
         elif option == "voice users":
-            top_voice_users = self.stats_repo.get_top_voice_users(days=numberdays, limit=number)
+            top_voice_users = self.stats_repo.get_top_voice_users(days=numberdays, limit=number, guild_id=guild_id)
 
             description = ""
             for i, user_data in enumerate(top_voice_users, 1):
@@ -100,11 +103,12 @@ class StatsCog(commands.Cog):
 
             await self.behavior.send_message(
                 title=f"Top {number} Voice Users (Last {numberdays} days)",
-                description=description
+                description=description,
+                guild=ctx.guild,
             )
 
         elif option == "voice channels":
-            top_voice_channels = self.stats_repo.get_top_voice_channels(days=numberdays, limit=number)
+            top_voice_channels = self.stats_repo.get_top_voice_channels(days=numberdays, limit=number, guild_id=guild_id)
 
             description = ""
             for i, channel_data in enumerate(top_voice_channels, 1):
@@ -120,7 +124,8 @@ class StatsCog(commands.Cog):
 
             await self.behavior.send_message(
                 title=f"Top {number} Voice Channels (Last {numberdays} days)",
-                description=description
+                description=description,
+                guild=ctx.guild,
             )
 
     def _resolve_voice_channel_label(self, guild: Optional[discord.Guild], channel_id: str) -> str:
@@ -164,7 +169,7 @@ class StatsCog(commands.Cog):
         # It was in PersonalGreeter calls: db.get_user_year_stats
         
         try:
-            stats = self.stats_repo.get_user_year_stats(username, review_year)
+            stats = self.stats_repo.get_user_year_stats(username, review_year, guild_id=guild_id)
             await self._send_year_review_embed(ctx, target_user, stats, review_year)
         except AttributeError:
              await self.behavior.send_message(title="Error", description="Year review stats not available directly.")

@@ -35,7 +35,7 @@ class StatsPaginationButton(Button):
 class PaginatedStatsView(View):
     """View for displaying paginated user stats with navigation buttons."""
     
-    def __init__(self, bot, users_data: list, number_sounds: int = 5, days: int = 700):
+    def __init__(self, bot, users_data: list, number_sounds: int = 5, days: int = 700, guild_id: int | None = None):
         """
         Initialize the paginated stats view.
         
@@ -50,6 +50,7 @@ class PaginatedStatsView(View):
         self.users_data = users_data
         self.number_sounds = number_sounds
         self.days = days
+        self.guild_id = guild_id
         self.current_index = 0
         
         # Import here to avoid circular imports
@@ -88,7 +89,12 @@ class PaginatedStatsView(View):
             embed.set_thumbnail(url=discord_user.default_avatar.url)
         
         # Get top sounds for this user
-        user_top_sounds, _ = self.action_repo.get_top_sounds(self.days, self.number_sounds, username)
+        user_top_sounds, _ = self.action_repo.get_top_sounds(
+            self.days,
+            self.number_sounds,
+            username,
+            guild_id=self.guild_id,
+        )
         for sound in user_top_sounds:
             embed.add_field(name=f"🎵 **{sound[0]}**", value=f"Played **{sound[1]}** times", inline=False)
         

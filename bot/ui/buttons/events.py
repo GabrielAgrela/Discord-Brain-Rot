@@ -40,7 +40,13 @@ class ConfirmUserEventButton(Button):
 
         sound_name = self.audio_file.split('/')[-1].replace('.mp3', '')
         try:
-            Database().toggle_user_event_sound(selected_user_id_for_db, selected_event_type, sound_name)
+            guild_id = interaction.guild.id if interaction.guild else None
+            Database().toggle_user_event_sound(
+                selected_user_id_for_db,
+                selected_event_type,
+                sound_name,
+                guild_id=guild_id,
+            )
             if self.view.message_to_edit:
                 await self.view.message_to_edit.edit(content=self.view._build_message_content(), view=self.view)
         except Exception as e:
@@ -71,11 +77,17 @@ class DeleteEventButton(Button):
 
     async def callback(self, interaction):
         await interaction.response.defer()
+        guild_id = interaction.guild.id if interaction.guild else None
         
         if interaction.user.name == self.user_id.split('#')[0]:
-            if Database().remove_user_event_sound(self.user_id, self.event, self.sound):
-                Database().insert_action(interaction.user.name, f"delete_{self.event}_event", self.sound)
-                remaining_events = Database().get_user_events(self.user_id, self.event)
+            if Database().remove_user_event_sound(self.user_id, self.event, self.sound, guild_id=guild_id):
+                Database().insert_action(
+                    interaction.user.name,
+                    f"delete_{self.event}_event",
+                    self.sound,
+                    guild_id=guild_id,
+                )
+                remaining_events = Database().get_user_events(self.user_id, self.event, guild_id=guild_id)
                 
                 if not remaining_events:
                     await interaction.message.delete()
@@ -99,8 +111,16 @@ class DeleteEventButton(Button):
         else:
             channel = self.bot_behavior._audio_service.get_user_voice_channel(interaction.guild, interaction.user.name)
             if channel:
-                similar_sounds = Database().get_sounds_by_similarity(self.sound, 1)
-                await self.bot_behavior._audio_service.play_audio(channel, similar_sounds[0][1], interaction.user.name)
-                Database().insert_action(interaction.user.name, f"play_{self.event}_event_sound", self.sound)
+                similar_sounds = Database().get_sounds_by_similarity(self.sound, 1, guild_id=guild_id)
+                sound_data = similar_sounds[0][0] if similar_sounds else None
+                sound_filename = sound_data["Filename"] if isinstance(sound_data, dict) else sound_data[2] if sound_data else None
+                if sound_filename:
+                    await self.bot_behavior._audio_service.play_audio(channel, sound_filename, interaction.user.name)
+                Database().insert_action(
+                    interaction.user.name,
+                    f"play_{self.event}_event_sound",
+                    self.sound,
+                    guild_id=guild_id,
+                )
             else:
                 await interaction.followup.send("You need to be in a voice channel to play sounds! 😭", ephemeral=True)

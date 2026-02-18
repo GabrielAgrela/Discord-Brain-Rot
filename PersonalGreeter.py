@@ -27,6 +27,7 @@ from bot.commands.stats import StatsCog
 from bot.commands.keywords import KeywordCog
 from bot.commands.debug import DebugCog
 from bot.commands.onthisday import OnThisDayCog
+from bot.commands.settings import SettingsCog
 from bot.repositories import VoiceActivityRepository
 import random
 import time
@@ -60,6 +61,7 @@ bot.add_cog(StatsCog(bot, behavior))
 bot.add_cog(KeywordCog(bot, behavior))
 bot.add_cog(DebugCog(bot, behavior))
 bot.add_cog(OnThisDayCog(bot, behavior))
+bot.add_cog(SettingsCog(bot, behavior))
 db = Database(behavior=behavior)
 voice_activity_repo = VoiceActivityRepository()
 
@@ -113,7 +115,7 @@ async def check_playback_queue():
                 db.conn.commit()
                 continue
 
-            sound_data = db.get_sound(sound_filename)
+                sound_data = db.get_sound(sound_filename, guild_id=guild_id)
             if not sound_data:
                 print(
                     f"[Playback Queue] Error: Sound '{sound_filename}' not found in database. Skipping request {req_id}."
@@ -145,7 +147,7 @@ async def check_playback_queue():
                 channel = behavior.get_largest_voice_channel(guild)
                 if channel is not None:
                     await behavior.play_audio(channel, sound_filename, "webpage")
-                    Database().insert_action("admin", "play_sound_periodically", sound_filename)
+                    Database().insert_action("admin", "play_sound_periodically", sound_filename, guild_id=guild_id)
 
                 cursor.execute(
                     "UPDATE playback_queue SET played_at = ? WHERE id = ?",
@@ -184,8 +186,13 @@ async def on_ready():
 
     print(f"We have logged in as {bot.user}")
     #bot.loop.create_task(behavior.check_if_in_game())
-    await behavior.disable_controls_message()
-    await behavior.clean_buttons()
+    settings_service = behavior._guild_settings_service
+    for guild in bot.guilds:
+        settings_service.ensure_guild(guild.id)
+
+    for guild in bot.guilds:
+        await behavior.disable_controls_message(guild=guild)
+        await behavior.clean_buttons(guild=guild)
     if not bot.startup_announcement_sent:
         for guild in bot.guilds:
             try:
@@ -212,10 +219,24 @@ async def on_ready():
 
 
     # --- Auto-join most populated voice channel --- 
-    print("Attempting to join the most populated voice channel in each guild...")
+    print("Attempting per-guild auto-join where enabled...")
     for guild in bot.guilds:
+        guild_settings = settings_service.get(guild.id)
+        if not guild_settings.autojoin_enabled:
+            print(f"Auto-join disabled for {guild.name}; skipping.")
+            continue
+
         print(f"Checking guild: {guild.name} ({guild.id})")
-        channel_to_join = behavior.get_largest_voice_channel(guild)
+        channel_to_join = None
+        if guild_settings.default_voice_channel_id:
+            try:
+                configured_channel = guild.get_channel(int(guild_settings.default_voice_channel_id))
+                if isinstance(configured_channel, discord.VoiceChannel):
+                    channel_to_join = configured_channel
+            except (TypeError, ValueError):
+                channel_to_join = None
+        if channel_to_join is None:
+            channel_to_join = behavior.get_largest_voice_channel(guild)
         
         if channel_to_join:
             print(f"Found most populated channel in {guild.name}: {channel_to_join.name} ({len(channel_to_join.members)} members)")
@@ -250,11 +271,12 @@ async def on_ready():
                         print(f"Error playing startup sound: {e}")
                     bot.startup_sound_played = True
                 
-                # Start keyword detection AFTER startup sound
-                try:
-                    await behavior._audio_service.start_keyword_detection(guild)
-                except Exception as e:
-                    print(f"Could not start keyword detection: {e}")
+                # Start keyword detection only when enabled for this guild.
+                if guild_settings.stt_enabled:
+                    try:
+                        await behavior._audio_service.start_keyword_detection(guild)
+                    except Exception as e:
+                        print(f"Could not start keyword detection: {e}")
             except discord.ClientException as e:
                 print(f"Error connecting to {channel_to_join.name} in {guild.name}: {e}. Already connected elsewhere or connection issue.")
             except asyncio.TimeoutError:
@@ -351,10 +373,10 @@ def _track_voice_session(
     after_is_trackable = after_channel is not None and after_channel != afk_channel
 
     if before_is_trackable:
-        voice_activity_repo.log_leave(username, str(before_channel.id))
+        voice_activity_repo.log_leave(username, str(before_channel.id), guild_id=member.guild.id)
 
     if after_is_trackable:
-        voice_activity_repo.log_join(username, str(after_channel.id))
+        voice_activity_repo.log_join(username, str(after_channel.id), guild_id=member.guild.id)
 
 
 @bot.event
@@ -470,7 +492,7 @@ async def play_audio_for_event(member, member_str, event, channel):
             print(f"[EventSound] Failed to join {channel.name} for {event} sound: Connection failed according to ensure_voice_connected")
             return
         
-        user_events = db.get_user_events(member_str, event)
+        user_events = db.get_user_events(member_str, event, guild_id=member.guild.id)
         if user_events:
             if await behavior.is_channel_empty(channel):
                 return
@@ -483,10 +505,10 @@ async def play_audio_for_event(member, member_str, event, channel):
                 exact_match = SoundRepository().get_by_filename(sound_name)
                 if exact_match:
                     await behavior.play_audio(channel, exact_match.filename, member_str)
-                    db.insert_action(member_str, event, exact_match.id)
+                    db.insert_action(member_str, event, exact_match.id, guild_id=member.guild.id)
                 else:
                     # Fall back to fuzzy search
-                    similar_sounds = db.get_sounds_by_similarity(sound_name, 1)
+                    similar_sounds = db.get_sounds_by_similarity(sound_name, 1, guild_id=member.guild.id)
                     if similar_sounds:
                         sound_row = similar_sounds[0][0]  # (row, score) -> row
                         # Convert Row to dict if needed
@@ -500,14 +522,14 @@ async def play_audio_for_event(member, member_str, event, channel):
                             filename = sound_row[2]
                             sound_id = sound_row[0]
                         await behavior.play_audio(channel, filename, member_str)
-                        db.insert_action(member_str, event, sound_id)
+                        db.insert_action(member_str, event, sound_id, guild_id=member.guild.id)
                     else:
                         print(f"Sound {sound_name} not found for user event")
                     
         elif event == "join":
             await behavior.play_audio(channel, "gay-echo.mp3", "admin")
             # Log action for default join sound
-            similar_sounds = db.get_sounds_by_similarity("gay-echo.mp3", 1)
+            similar_sounds = db.get_sounds_by_similarity("gay-echo.mp3", 1, guild_id=member.guild.id)
             if similar_sounds:
                 sound_row = similar_sounds[0][0]
                 # Safe access
@@ -517,13 +539,13 @@ async def play_audio_for_event(member, member_str, event, channel):
                     sound_id = sound_row['id']
                 else:
                     sound_id = sound_row[0]
-                db.insert_action(member_str, event, sound_id)
+                db.insert_action(member_str, event, sound_id, guild_id=member.guild.id)
             else:
                  # Fallback if gay-echo not found in DB but exists on disk?
-                 db.insert_action(member_str, event, "gay-echo.mp3")
+                 db.insert_action(member_str, event, "gay-echo.mp3", guild_id=member.guild.id)
 
         elif event == "leave":
-            db.insert_action(member_str, event, "-")
+            db.insert_action(member_str, event, "-", guild_id=member.guild.id)
             await behavior.is_channel_empty(channel)
     except Exception as e:
         print(f"An error occurred in play_audio_for_event: {e}")

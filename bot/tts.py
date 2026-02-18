@@ -12,6 +12,7 @@ import tempfile
 import re
 import aiohttp
 from datetime import datetime
+from typing import Optional
 from bot.database import Database
 
 class TTS:
@@ -26,8 +27,11 @@ class TTS:
         self.behavior = behavior
         self.bot = bot
         self.last_request_time = 0
+        self.last_request_time_by_guild: dict[int, float] = {}
         self.cooldown_seconds = cooldown_seconds
         self.locked = False
+        self.locked_by_guild: dict[int, bool] = {}
+        self.loudnorm_mode = (os.getenv("TTS_LOUDNORM_MODE", "off") or "off").strip().lower()
         # Loudness normalization targets (configurable via env if desired)
         try:
             self.lufs_target = float(os.getenv('TTS_LUFS_TARGET', '-16'))  # Integrated LUFS target
@@ -42,7 +46,7 @@ class TTS:
         except Exception:
             self.loudnorm_lra = 11.0
 
-    def _get_default_voice_channel(self):
+    def _get_default_voice_channel(self, guild_id: Optional[int] = None):
         """Return the preferred voice channel for playback.
 
         Preference order:
@@ -51,6 +55,24 @@ class TTS:
              (matches the legacy behaviour while still allowing us to detect
              when *no* channel is available).
         """
+        if guild_id is not None:
+            guild = self.bot.get_guild(int(guild_id))
+            if guild:
+                settings_service = getattr(getattr(self.bot, "behavior", None), "_guild_settings_service", None)
+                if settings_service:
+                    settings = settings_service.get(guild.id)
+                    configured_voice_id = settings.default_voice_channel_id
+                    if configured_voice_id:
+                        try:
+                            configured_channel = guild.get_channel(int(configured_voice_id))
+                            if configured_channel is not None:
+                                return configured_channel
+                        except (TypeError, ValueError):
+                            pass
+                if guild.voice_client and guild.voice_client.is_connected() and guild.voice_client.channel:
+                    return guild.voice_client.channel
+                return self.behavior.get_largest_voice_channel(guild)
+
         for voice_client in getattr(self.bot, "voice_clients", []):
             try:
                 if voice_client and voice_client.is_connected() and voice_client.channel:
@@ -164,18 +186,55 @@ class TTS:
         except Exception as e:
             print(f"TTS loudnorm error: {e}")
 
-    def is_on_cooldown(self):
+    def is_on_cooldown(self, guild_id: Optional[int] = None):
         current_time = time.time()
-        return current_time - self.last_request_time < self.cooldown_seconds
+        if guild_id is None:
+            return current_time - self.last_request_time < self.cooldown_seconds
+        last_request = self.last_request_time_by_guild.get(int(guild_id), 0)
+        return current_time - last_request < self.cooldown_seconds
 
-    def update_last_request_time(self):
-        self.last_request_time = time.time()
+    def update_last_request_time(self, guild_id: Optional[int] = None):
+        now = time.time()
+        self.last_request_time = now
+        if guild_id is not None:
+            self.last_request_time_by_guild[int(guild_id)] = now
+
+    def _is_locked(self, guild_id: Optional[int] = None) -> bool:
+        """Check lock for guild-scoped TTS processing."""
+        if guild_id is None:
+            return self.locked
+        return self.locked_by_guild.get(int(guild_id), False)
+
+    def _set_locked(self, value: bool, guild_id: Optional[int] = None) -> None:
+        """Set lock for guild-scoped TTS processing."""
+        if guild_id is None:
+            self.locked = value
+            return
+        self.locked_by_guild[int(guild_id)] = value
+
+    def _apply_loudnorm_if_enabled(self, file_path: str):
+        """Apply configurable loudness normalization."""
+        if self.loudnorm_mode == "off":
+            return
+        if self.loudnorm_mode == "single":
+            self._normalize_file_inplace(file_path, -20.0)
+            return
+        self._loudnorm_inplace(file_path)
 
     def _timestamp_token(self) -> str:
         """Generate a high-resolution timestamp token for unique filenames."""
         return datetime.now().strftime('%d-%m-%y-%H-%M-%S-%f')
 
-    async def save_as_mp3(self, text, lang, region="", loading_message=None, requester_avatar_url=None, requester_name="admin"):
+    async def save_as_mp3(
+        self,
+        text,
+        lang,
+        region="",
+        loading_message=None,
+        requester_avatar_url=None,
+        requester_name="admin",
+        guild_id: Optional[int] = None,
+    ):
         if region == "":
             tts = gTTS(text=text, lang=lang)
         else:
@@ -188,15 +247,20 @@ class TTS:
         
         path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", filename))
         tts.save(path)
-        # Apply integrated loudness normalization for consistent perceived volume
-        self._loudnorm_inplace(path)
-        channel = self._get_default_voice_channel()
+        # Apply configurable loudness normalization for consistent perceived volume
+        self._apply_loudnorm_if_enabled(path)
+        channel = self._get_default_voice_channel(guild_id=guild_id)
         if channel is None:
             await self.behavior.send_error_message("No available voice channel for TTS playback.")
             return
             
         # Record in database so it can be replayed or processed
-        Database().insert_sound(os.path.basename(filename), os.path.basename(filename), is_elevenlabs=0)
+        Database().insert_sound(
+            os.path.basename(filename),
+            os.path.basename(filename),
+            is_elevenlabs=0,
+            guild_id=guild_id,
+        )
         
         await self.behavior.play_audio(
             channel, filename, requester_name, is_tts=True,
@@ -204,14 +268,14 @@ class TTS:
             loading_message=loading_message,
             requester_avatar_url=requester_avatar_url
         )
-        self.update_last_request_time()
+        self.update_last_request_time(guild_id=guild_id)
 
     async def speech_to_speech(self, input_audio_name, char="en", region="",
                                loading_message=None, requester_avatar_url=None, sts_thumbnail_url=None,
-                               requester_name="admin"):
+                               requester_name="admin", guild_id: Optional[int] = None):
         boost_volume = 0
         
-        filenames = Database().get_sounds_by_similarity(input_audio_name)
+        filenames = Database().get_sounds_by_similarity(input_audio_name, guild_id=guild_id)
         
         # get_sounds_by_similarity returns [(sound_data, score), ...]
         # sound_data is a sqlite3.Row or dict; use 'Filename' key
@@ -241,7 +305,7 @@ class TTS:
             self.voice_id = self.voice_id_en
             boost_volume = 10
 
-        if self.is_on_cooldown():
+        if self.is_on_cooldown(guild_id=guild_id):
             print("Cooldown active. Please wait before making another request.")
             cooldown_message = await self.behavior.send_message(view=None, title="Cooldown Active", description="Please wait before making another request.")
             await asyncio.sleep(5)
@@ -255,14 +319,14 @@ class TTS:
             await error_message.delete()
             return
         
-        if self.locked:
+        if self._is_locked(guild_id=guild_id):
             print("Being processed. Please try again later.")
             locked_message = await self.behavior.send_message(view=None, title="Server Locked", description="Please try again later.")
             await asyncio.sleep(5)
             await locked_message.delete()
             return
         
-        self.locked = True
+        self._set_locked(True, guild_id=guild_id)
         try:
             url = f"https://api.elevenlabs.io/v1/speech-to-speech/{self.voice_id}/stream"
             headers = {
@@ -296,12 +360,17 @@ class TTS:
                             final_audio = audio
 
                             path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", output_filename))
-                            Database().insert_sound(os.path.basename(output_filename), os.path.basename(output_filename), is_elevenlabs=1)
+                            Database().insert_sound(
+                                os.path.basename(output_filename),
+                                os.path.basename(output_filename),
+                                is_elevenlabs=1,
+                                guild_id=guild_id,
+                            )
                             final_audio.export(path, format="mp3")
-                            # Integrated loudness normalization (EBU R128)
-                            self._loudnorm_inplace(path)
+                            # Configurable loudness normalization
+                            self._apply_loudnorm_if_enabled(path)
 
-                            channel = self._get_default_voice_channel()
+                            channel = self._get_default_voice_channel(guild_id=guild_id)
                             if channel is None:
                                 await self.behavior.send_error_message("No available voice channel for TTS playback.")
                                 return
@@ -315,17 +384,17 @@ class TTS:
                                 sts_thumbnail_url=sts_thumbnail_url
                             )
 
-                            self.update_last_request_time()
+                            self.update_last_request_time(guild_id=guild_id)
                             print("Audio stream saved and played successfully.")
                         else:
                             print(f"Error: {await response.text()}")
         finally:
-            self.locked = False
+            self._set_locked(False, guild_id=guild_id)
 
-    async def isolate_voice(self, input_audio_name):
+    async def isolate_voice(self, input_audio_name, guild_id: Optional[int] = None):
         boost_volume = 0
         
-        filenames = Database().get_sounds_by_similarity(input_audio_name)
+        filenames = Database().get_sounds_by_similarity(input_audio_name, guild_id=guild_id)
         if filenames:
             sound_data = filenames[0][0]
             sound_dict = sound_data if isinstance(sound_data, dict) else dict(sound_data)
@@ -342,7 +411,7 @@ class TTS:
         output_filename = f"{source_stem}-isolated-{self._timestamp_token()}.mp3"
         self.filename = output_filename
 
-        if self.is_on_cooldown():
+        if self.is_on_cooldown(guild_id=guild_id):
             print("Cooldown active. Please wait before making another request.")
             cooldown_message = await self.behavior.send_message(view=None, title="Cooldown Active", description="Please wait before making another request.")
             await asyncio.sleep(5)
@@ -356,14 +425,14 @@ class TTS:
             await error_message.delete()
             return
         
-        if self.locked:
+        if self._is_locked(guild_id=guild_id):
             print("Being processed. Please try again later.")
             locked_message = await self.behavior.send_message(view=None, title="Server Locked", description="Please try again later.")
             await asyncio.sleep(5)
             await locked_message.delete()
             return
         
-        self.locked = True
+        self._set_locked(True, guild_id=guild_id)
         try:
             url = "https://api.elevenlabs.io/v1/audio-isolation"
             headers = {
@@ -396,27 +465,32 @@ class TTS:
                             final_audio = louder_audio
 
                             path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", output_filename))
-                            Database().insert_sound(os.path.basename(output_filename), os.path.basename(output_filename), is_elevenlabs=1)
+                            Database().insert_sound(
+                                os.path.basename(output_filename),
+                                os.path.basename(output_filename),
+                                is_elevenlabs=1,
+                                guild_id=guild_id,
+                            )
 
                             final_audio.export(path, format="mp3")
-                            # Integrated loudness normalization (EBU R128)
-                            self._loudnorm_inplace(path)
+                            # Configurable loudness normalization
+                            self._apply_loudnorm_if_enabled(path)
 
-                            channel = self._get_default_voice_channel()
+                            channel = self._get_default_voice_channel(guild_id=guild_id)
                             if channel is None:
                                 await self.behavior.send_error_message("No available voice channel for TTS playback.")
                                 return
                             await self.behavior.play_audio(channel, output_filename, "admin", is_tts=True)
-                            self.update_last_request_time()
+                            self.update_last_request_time(guild_id=guild_id)
                             print("Audio stream saved and played successfully.")
                         else:
                             print(f"Error: {await response.text()}")
         finally:
-            self.locked = False
+            self._set_locked(False, guild_id=guild_id)
 
     async def save_as_mp3_EL(self, text, lang="pt", region="", send_controls=True,
                              loading_message=None, requester_avatar_url=None, sts_thumbnail_url=None,
-                             requester_name="admin"):
+                             requester_name="admin", guild_id: Optional[int] = None):
         boost_volume = 0
         # Sanitize filename-safe text (keep it reasonably short for FS, but image gen will use full text)
         safe_text = "".join(x for x in text[:30] if x.isalnum() or x in " -_")
@@ -432,7 +506,7 @@ class TTS:
             self.voice_id = self.voice_id_en
             boost_volume = 0
 
-        if self.is_on_cooldown():
+        if self.is_on_cooldown(guild_id=guild_id):
             print("Cooldown active. Please wait before making another request.")
             cooldown_message = await self.behavior.send_message(view=None, title="Não dês spam nesta merda (1/m)", description="Custa 11 euros por 2h de andre ventura fdp")
             await asyncio.sleep(5)
@@ -469,14 +543,19 @@ class TTS:
                     final_audio = louder_audio
 
                     path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", filename))
-                    Database().insert_sound(os.path.basename(filename), os.path.basename(filename), is_elevenlabs=1)
+                    Database().insert_sound(
+                        os.path.basename(filename),
+                        os.path.basename(filename),
+                        is_elevenlabs=1,
+                        guild_id=guild_id,
+                    )
                     #self.db.add_entry(os.path.basename(self.filename))
 
                     final_audio.export(path, format="mp3")
-                    # Integrated loudness normalization (EBU R128)
-                    self._loudnorm_inplace(path)
+                    # Configurable loudness normalization
+                    self._apply_loudnorm_if_enabled(path)
 
-                    channel = self._get_default_voice_channel()
+                    channel = self._get_default_voice_channel(guild_id=guild_id)
                     if channel is None:
                         await self.behavior.send_error_message("No available voice channel for TTS playback.")
                         return
@@ -488,7 +567,7 @@ class TTS:
                         requester_avatar_url=requester_avatar_url,
                         sts_thumbnail_url=sts_thumbnail_url
                     )
-                    self.update_last_request_time()
+                    self.update_last_request_time(guild_id=guild_id)
                     print("Audio stream saved and played successfully.")
                 else:
                     error_msg = f"ElevenLabs API Error: {await response.text()}"

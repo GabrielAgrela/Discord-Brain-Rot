@@ -27,6 +27,10 @@ database copy.db
 .coverage
 htmlcov/
 
+# Trailer (Remotion)
+trailer/node_modules/
+trailer/out/
+
 # Static and downloaded assets
 # /static/
 # /templates/

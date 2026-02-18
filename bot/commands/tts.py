@@ -172,7 +172,10 @@ class TTSCog(commands.Cog):
         self.behavior.color = discord.Color.dark_blue()
         
         try:
-            await self.behavior._audio_service.isolate_voice(user, sound)
+            await self.behavior._voice_transformation_service.isolate_voice(
+                sound_name=sound,
+                guild_id=ctx.guild.id if ctx.guild else None,
+            )
         except Exception as e:
             await self.behavior._message_service.send_error(str(e))
 

@@ -45,9 +45,8 @@ BACKUP_EXCLUSIONS = ["venv", "actions-runner", ".git", "__pycache__", ".pytest_c
 # Bot command prefix (for text commands, if any)
 COMMAND_PREFIX = "*"
 
-# Role names for permission checks
-DEVELOPER_ROLE = "DEVELOPER"
-MODERATOR_ROLE = "MODERATOR"
+# Owner allowlist for admin operations (comma-separated Discord user IDs)
+OWNER_USER_IDS = os.getenv("OWNER_USER_IDS", "")
 
 # Default channels
 BOT_CHANNEL_NAME = "bot"
@@ -199,8 +198,8 @@ ENABLE_VENTURA = os.getenv("ENABLE_VENTURA", "true").lower() == "true"
 # Web Interface Settings
 # ============================================================================
 
-# Default guild ID for web playback requests
-DEFAULT_GUILD_ID = 359077662742020107
+# Default guild ID for web playback requests (empty disables default routing)
+DEFAULT_GUILD_ID = os.getenv("DEFAULT_GUILD_ID", "")
 
 # Web server settings
 WEB_HOST = '0.0.0.0'

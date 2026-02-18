@@ -9,11 +9,12 @@ from bot.services.message import MessageService
 from bot.services.mute import MuteService
 from bot.services.backup import BackupService
 from bot.services.image_generator import ImageGeneratorService
+from bot.services.guild_settings import GuildSettingsService
 
 __all__ = [
     "MessageService",
     "MuteService",
     "BackupService",
     "ImageGeneratorService",
+    "GuildSettingsService",
 ]
-

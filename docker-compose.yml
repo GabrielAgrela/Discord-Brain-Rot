@@ -3,6 +3,12 @@ services:
     build: .
     container_name: brain-rot-bot
     restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'python PersonalGreeter.py' >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
     env_file:
       - .env
     environment:
@@ -20,13 +26,18 @@ services:
       - /home/gabi/github/Discord-Brain-Rot/templates:/app/templates
       - /home/gabi/github/backups/discord-brainrot:/backups/discord-brainrot
     command: python PersonalGreeter.py
-    privileged: true
-    pid: host
 
   web:
     build: .
     container_name: brain-rot-web
     restart: always
+    profiles: ["web"]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/', timeout=2)\" >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
     ports:
       - "8080:8080"
     env_file:

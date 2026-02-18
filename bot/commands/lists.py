@@ -14,6 +14,7 @@ import discord
 from discord.ext import commands
 from discord.commands import Option
 import re
+import sqlite3
 
 from bot.repositories import ListRepository, SoundRepository
 from bot.database import Database  # Keep for get_sounds_by_similarity until migrated
@@ -37,13 +38,21 @@ async def _get_sound_autocomplete(ctx: discord.AutocompleteContext):
     """Autocomplete for sound names."""
     try:
         _, db = _get_repos()
+        guild_id = getattr(getattr(ctx, "interaction", None), "guild_id", None)
         current = ctx.value.lower() if ctx.value else ""
         if not current or len(current) < 2:
             return []
         
-        similar_sounds = db.get_sounds_by_similarity(current, 15)
+        similar_sounds = db.get_sounds_by_similarity(current, 15, guild_id=guild_id)
         # Return just the filenames without .mp3 extension
-        return [sound[2].split('/')[-1].replace('.mp3', '') for sound in similar_sounds]
+        completions = []
+        for sound_data, _score in similar_sounds:
+            if isinstance(sound_data, (sqlite3.Row, dict)):
+                filename = sound_data["Filename"]
+            else:
+                filename = sound_data[2]
+            completions.append(filename.split('/')[-1].replace('.mp3', ''))
+        return completions
     except Exception as e:
         print(f"Autocomplete error: {e}")
         return []
@@ -53,9 +62,10 @@ async def _get_list_autocomplete(ctx: discord.AutocompleteContext):
     try:
         list_repo, _ = _get_repos()
         current = ctx.value.lower() if ctx.value else ""
+        guild_id = getattr(getattr(ctx, "interaction", None), "guild_id", None)
         
         # get all lists
-        lists = list_repo.get_all(limit=200)
+        lists = list_repo.get_all(limit=200, guild_id=guild_id)
         
         matching_lists = []
         for lst in lists:
@@ -102,13 +112,13 @@ class ListCog(commands.Cog):
     ):
         """Create a new sound list."""
         # Check if the user already has a list with this name
-        existing_list = self.list_repo.get_by_name(list_name, ctx.author.name)
+        existing_list = self.list_repo.get_by_name(list_name, ctx.author.name, guild_id=ctx.guild.id if ctx.guild else None)
         if existing_list:
             await ctx.respond(f"You already have a list named '{list_name}'.", ephemeral=True)
             return
             
         # Create the list
-        list_id = self.list_repo.create(list_name, ctx.author.name)
+        list_id = self.list_repo.create(list_name, ctx.author.name, guild_id=ctx.guild.id if ctx.guild else None)
         if list_id:
             await ctx.respond(f"Created list '{list_name}'.", ephemeral=True)
             
@@ -132,18 +142,22 @@ class ListCog(commands.Cog):
         match = re.match(r'^(.+?) \(by (.+)\)$', list_name)
         actual_name = match.group(1) if match else list_name
         
-        sound_list = self.list_repo.get_by_name(actual_name)
+        sound_list = self.list_repo.get_by_name(actual_name, guild_id=ctx.guild.id if ctx.guild else None)
         if not sound_list:
             await ctx.respond(f"List '{actual_name}' not found.", ephemeral=True)
             return
         
         # Get the sound ID using similarity search
-        similar = self.db.get_sounds_by_similarity(sound, num_results=1)
+        similar = self.db.get_sounds_by_similarity(sound, num_results=1, guild_id=ctx.guild.id if ctx.guild else None)
         if not similar:
              await ctx.respond(f"Sound '{sound}' not found.", ephemeral=True)
              return
              
-        soundid = similar[0][1]  # Filename from similarity result
+        sound_data = similar[0][0]
+        if isinstance(sound_data, (sqlite3.Row, dict)):
+            soundid = sound_data["Filename"]
+        else:
+            soundid = sound_data[2]
         
         # Add the sound to the list
         success = self.list_repo.add_sound(sound_list[0], soundid)
@@ -174,7 +188,7 @@ class ListCog(commands.Cog):
         match = re.match(r'^(.+?) \(by (.+)\)$', list_name)
         actual_name = match.group(1) if match else list_name
         
-        sound_list = self.list_repo.get_by_name(actual_name)
+        sound_list = self.list_repo.get_by_name(actual_name, guild_id=ctx.guild.id if ctx.guild else None)
         if not sound_list:
             await ctx.respond(f"List '{actual_name}' not found.", ephemeral=True)
             return
@@ -203,7 +217,7 @@ class ListCog(commands.Cog):
         match = re.match(r'^(.+?) \(by (.+)\)$', list_name)
         actual_name = match.group(1) if match else list_name
 
-        sound_list = self.list_repo.get_by_name(actual_name)
+        sound_list = self.list_repo.get_by_name(actual_name, guild_id=ctx.guild.id if ctx.guild else None)
         if not sound_list:
             await ctx.respond(f"List '{actual_name}' not found.", ephemeral=True)
             return
@@ -238,7 +252,7 @@ class ListCog(commands.Cog):
         match = re.match(r'^(.+?) \(by (.+)\)$', list_name)
         actual_list_name = match.group(1) if match else list_name
         
-        sound_list = self.list_repo.get_by_name(actual_list_name)
+        sound_list = self.list_repo.get_by_name(actual_list_name, guild_id=ctx.guild.id if ctx.guild else None)
         if not sound_list:
             await ctx.followup.send(f"List '{actual_list_name}' not found.", ephemeral=True)
             return

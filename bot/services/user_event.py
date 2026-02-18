@@ -27,18 +27,18 @@ class UserEventService:
         """Set the behavior reference."""
         self.behavior = behavior
 
-    async def add_user_event(self, username: str, event: str, sound_name: str) -> bool:
+    async def add_user_event(self, username: str, event: str, sound_name: str, guild_id: Optional[int] = None) -> bool:
         """Add a join/leave event sound for a user."""
         try:
             from bot.repositories import SoundRepository
             
             # Try exact match first
-            exact_match = SoundRepository().get_by_filename(sound_name)
+            exact_match = SoundRepository().get_by_filename(sound_name, guild_id=guild_id)
             if exact_match:
                 most_similar_sound = exact_match.filename.replace('.mp3', '')
             else:
                 # Fall back to fuzzy search
-                results = self.db.get_sounds_by_similarity(sound_name, 1)
+                results = self.db.get_sounds_by_similarity(sound_name, 1, guild_id=guild_id)
                 if not results:
                     return False
                 
@@ -51,22 +51,22 @@ class UserEventService:
                     most_similar_sound = sound_data[2].replace('.mp3', '')
             
             # Add the event sound to the database
-            success = self.event_repo.toggle(username, event, most_similar_sound)
+            success = self.event_repo.toggle(username, event, most_similar_sound, guild_id=guild_id)
             
             # Log the action
             if success:
-                self.action_repo.insert(username, f"add_{event}_sound", most_similar_sound)
+                self.action_repo.insert(username, f"add_{event}_sound", most_similar_sound, guild_id=guild_id)
             
             return success
         except Exception as e:
             print(f"[UserEventService] Error adding user event: {e}")
             return False
 
-    async def list_user_events(self, user_full_name: str, requesting_user: Optional[str] = None):
+    async def list_user_events(self, user_full_name: str, requesting_user: Optional[str] = None, guild_id: Optional[int] = None):
         """List all join/leave events for a user with delete buttons."""
         # Get user's events from database
-        join_events = self.event_repo.get_user_events(user_full_name, "join")
-        leave_events = self.event_repo.get_user_events(user_full_name, "leave")
+        join_events = self.event_repo.get_user_events(user_full_name, "join", guild_id=guild_id)
+        leave_events = self.event_repo.get_user_events(user_full_name, "leave", guild_id=guild_id)
         user_name = user_full_name.split('#')[0]
         
         if not join_events and not leave_events:
@@ -74,7 +74,12 @@ class UserEventService:
         
         # Log the action
         action_user = requesting_user if requesting_user else user_full_name
-        self.action_repo.insert(action_user, "list_events", f"{len(join_events) + len(leave_events)} events for {user_full_name}")
+        self.action_repo.insert(
+            action_user,
+            "list_events",
+            f"{len(join_events) + len(leave_events)} events for {user_full_name}",
+            guild_id=guild_id,
+        )
         
         from bot.ui import PaginatedEventView
         

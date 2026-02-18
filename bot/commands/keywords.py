@@ -24,7 +24,8 @@ class KeywordCog(commands.Cog):
         """Autocomplete for sound lists."""
         try:
             current = ctx.value.lower() if ctx.value else ""
-            lists = self.list_repo.get_all(limit=25)
+            guild_id = getattr(getattr(ctx, "interaction", None), "guild_id", None)
+            lists = self.list_repo.get_all(limit=25, guild_id=guild_id)
             return [l[1] for l in lists if current in l[1].lower()]
         except Exception:
             return []
@@ -49,7 +50,7 @@ class KeywordCog(commands.Cog):
             
         if action == "list":
             # Verify list exists
-            lst = self.list_repo.get_by_name(list_name)
+            lst = self.list_repo.get_by_name(list_name, guild_id=ctx.guild.id if ctx.guild else None)
             if not lst:
                 await ctx.respond(f"List '{list_name}' not found.", ephemeral=True)
                 return
@@ -61,7 +62,7 @@ class KeywordCog(commands.Cog):
         
         if success:
             # Refresh all active sinks
-            audio_service = getattr(self.behavior, 'audio_service', None)
+            audio_service = getattr(self.behavior, '_audio_service', None)
             if audio_service:
                 for sink in audio_service.keyword_sinks.values():
                     sink.refresh_keywords()
@@ -94,7 +95,7 @@ class KeywordCog(commands.Cog):
         success = self.keyword_repo.remove(keyword)
         if success:
             # Refresh all active sinks
-            audio_service = getattr(self.behavior, 'audio_service', None)
+            audio_service = getattr(self.behavior, '_audio_service', None)
             if audio_service:
                 for sink in audio_service.keyword_sinks.values():
                     sink.refresh_keywords()

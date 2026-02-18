@@ -1,6 +1,6 @@
 # Discord Brain Rot
 
-Discord bot + web dashboard for soundboard playback, live voice keyword triggers, TTS/STS, AI commentary, and analytics.
+Discord bot for soundboard playback, live voice keyword triggers, TTS/STS, AI commentary, and analytics. Web dashboard is optional and disabled by default in production.
 
 This README is based on the current codebase behavior (not historical README assumptions).
 
@@ -50,7 +50,7 @@ This README is based on the current codebase behavior (not historical README ass
 - Reconnection grace period to avoid competing reconnects.
 - Auto-follow users when they switch channels.
 - Auto-disconnect when bot is alone (event-based + safety loop).
-- Startup auto-join of the largest populated voice channel per guild.
+- Auto-join is feature-flagged per guild (disabled by default for public hosting).
 
 ### Real-Time Keyword Detection (Vosk)
 - Live transcription via Vosk + Discord voice sinks.
@@ -105,15 +105,15 @@ This README is based on the current codebase behavior (not historical README ass
 ### Operations and Admin
 - Daily rotating logs in `Logs/YYYY-MM-DD.log` (+ `Logs/errors.log`).
 - Admin slash commands:
-  - `/reboot`
   - `/lastlogs`
   - `/commands`
   - `/ventura`
   - `/backup`
+- `/reboot` command is intentionally disabled for public deployments.
 - Backup service creates compressed project backups with exclusions.
 
 ### Background Automations
-- Random periodic sound playback loop.
+- Random periodic sound playback loop (feature-flagged per guild; disabled by default).
 - MyInstants scraping loop.
 - Scraper start + completion image cards with compact run summary.
 - Controls-button normalizer loop (every minute): keeps one recent inline `⚙️` on eligible bot messages by adding if missing and removing extras with safe raw-component edits.
@@ -185,16 +185,21 @@ This README is based on the current codebase behavior (not historical README ass
 - `/sendyearreview user:<required> year:<optional>` (admin-gated placeholder DM flow)
 
 ### Admin
-- `/reboot`
 - `/lastlogs lines:<int> service:<optional>`
 - `/commands`
 - `/ventura state:<Enable|Disable>`
 - `/backup`
 
+### Setup / Settings
+- `/setup text_channel:<optional> voice_channel:<optional>`
+- `/settings channel channel_type:<text|voice> action:<set|clear> text_channel:<optional> voice_channel:<optional>`
+- `/settings feature feature:<autojoin_enabled|periodic_enabled|stt_enabled> enabled:<bool>`
+- `/settings audio_policy policy:<low_latency|balanced|high_quality>`
+
 ### Historical
 - `/onthisday period:<1 year ago|1 month ago>`
 
-## Web Routes
+## Web Routes (Optional `web` Profile)
 
 - `GET /`
 - `GET /analytics`
@@ -225,6 +230,14 @@ This README is based on the current codebase behavior (not historical README ass
 - `FFMPEG_PATH` (local run default: `ffmpeg`; Docker sets `/usr/bin/ffmpeg`)
 - `CHROMEDRIVER_PATH` (Docker sets `/usr/bin/chromedriver`)
 - `ENABLE_VENTURA` (`true`/`false`, default `true`)
+- `OWNER_USER_IDS` (comma-separated Discord user IDs allowed to run admin-only commands)
+- `AUDIO_LATENCY_MODE` (`low_latency` default, or `balanced` / `high_quality`)
+- `TTS_LOUDNORM_MODE` (`off` default, or `single` / `double`)
+- `FFMPEG_MAX_CONCURRENT_JOBS` (global ffmpeg concurrency cap)
+- `TTS_MAX_CONCURRENT_JOBS` (global TTS/STS concurrency cap)
+- `AUTOJOIN_DEFAULT` (`false` default for new guilds)
+- `PERIODIC_DEFAULT` (`false` default for new guilds)
+- `STT_DEFAULT` (`false` default for new guilds)
 
 ### ElevenLabs
 - `EL_key`
@@ -249,7 +262,7 @@ git clone https://github.com/GabrielAgrela/Discord-Brain-Rot.git
 cd Discord-Brain-Rot
 
 # Create .env with at least DISCORD_BOT_TOKEN
-docker-compose up --build -d
+docker-compose up --build -d bot
 ```
 
 Useful commands:
@@ -259,7 +272,7 @@ Useful commands:
 docker-compose logs -f bot
 
 # Follow web logs
-docker-compose logs -f web
+docker-compose --profile web logs -f web
 
 # Restart services
 docker-compose restart
@@ -287,6 +300,7 @@ It runs:
 ```bash
 ./venv/bin/python -m pytest -q tests/
 ./venv/bin/python PersonalGreeter.py
+# Optional web dashboard:
 ./venv/bin/python WebPage.py
 ```
 
@@ -316,8 +330,11 @@ Discord-Brain-Rot/
 
 ## Notes
 
-- Bot auto-messaging expects a text channel named `bot`.
-- `POST /api/play_sound` currently uses a fixed guild ID constant in `WebPage.py`.
+- Public invite/install scopes: `bot` and `applications.commands`.
+- Recommended bot permissions: `Send Messages`, `Embed Links`, `Read Message History`, `Connect`, `Speak`, `Use Voice Activity`, `Manage Messages`.
+- Slash command propagation note: global commands can take up to about 1 hour to appear in newly invited guilds.
+- Bot auto-messaging falls back to a text channel named `bot` when `/setup` has not configured a text channel.
+- Web dashboard routes are not started unless the `web` profile is enabled.
 - `templates/sound_card.html` is runtime-critical and tracked in git.
 
 ## License

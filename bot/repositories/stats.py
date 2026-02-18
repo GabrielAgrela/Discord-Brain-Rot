@@ -31,13 +31,18 @@ class StatsRepository(BaseRepository):
         """Not applicable for stats repository."""
         return []
     
-    def get_sound_download_date(self, sound_id: int) -> Optional[str]:
+    def get_sound_download_date(self, sound_id: int, guild_id: Optional[int | str] = None) -> Optional[str]:
         """Get the date when a sound was downloaded/added to the database."""
         try:
+            guild_clause = ""
+            params = [sound_id]
+            if guild_id is not None:
+                guild_clause = "AND (guild_id = ? OR guild_id IS NULL)"
+                params.append(str(guild_id))
             # First check if the sound has a timestamp in the sounds table
             row = self._execute_one(
-                "SELECT timestamp FROM sounds WHERE id = ?",
-                (sound_id,)
+                f"SELECT timestamp FROM sounds WHERE id = ? {guild_clause}",
+                tuple(params)
             )
             
             if row and row['timestamp']:
@@ -47,9 +52,14 @@ class StatsRepository(BaseRepository):
                 return row['timestamp']
             
             # Fallback: Check earliest action for this sound
+            action_guild_clause = ""
+            action_params = [str(sound_id)]
+            if guild_id is not None:
+                action_guild_clause = "AND (guild_id = ? OR guild_id IS NULL)"
+                action_params.append(str(guild_id))
             row = self._execute_one(
-                "SELECT MIN(timestamp) as min_ts FROM actions WHERE target = ?",
-                (str(sound_id),)
+                f"SELECT MIN(timestamp) as min_ts FROM actions WHERE target = ? {action_guild_clause}",
+                tuple(action_params)
             )
             
             if row and row['min_ts']:
@@ -62,10 +72,15 @@ class StatsRepository(BaseRepository):
             # Column may not exist
             return None
     
-    def get_users_who_favorited_sound(self, sound_id: int) -> List[str]:
+    def get_users_who_favorited_sound(self, sound_id: int, guild_id: Optional[int | str] = None) -> List[str]:
         """Get all users who have favorited a specific sound."""
+        guild_clause = ""
+        params = [str(sound_id)]
+        if guild_id is not None:
+            guild_clause = "AND (guild_id = ? OR guild_id IS NULL)"
+            params.append(str(guild_id))
         rows = self._execute(
-            """
+            f"""
             WITH UserActions AS (
                 SELECT 
                     username,
@@ -75,17 +90,18 @@ class StatsRepository(BaseRepository):
                 FROM actions
                 WHERE target = ?
                 AND action IN ('favorite_sound', 'unfavorite_sound')
+                {guild_clause}
             )
             SELECT username
             FROM UserActions
             WHERE rn = 1 AND action = 'favorite_sound'
             ORDER BY username
             """,
-            (str(sound_id),)
+            tuple(params)
         )
         return [row['username'] for row in rows]
     
-    def get_user_year_stats(self, username: str, year: int) -> Dict[str, Any]:
+    def get_user_year_stats(self, username: str, year: int, guild_id: Optional[int | str] = None) -> Dict[str, Any]:
         """
         Get comprehensive yearly stats for a user.
         
@@ -127,6 +143,13 @@ class StatsRepository(BaseRepository):
         
         year_start = f"{year}-01-01 00:00:00"
         year_end = f"{year}-12-31 23:59:59"
+        guild_action_filter = ""
+        guild_sound_filter = ""
+        guild_params = []
+        if guild_id is not None:
+            guild_action_filter = "AND (guild_id = ? OR guild_id IS NULL)"
+            guild_sound_filter = "AND (s.guild_id = ? OR s.guild_id IS NULL)"
+            guild_params = [str(guild_id)]
         
         play_actions = "('play_random_sound', 'replay_sound', 'play_random_favorite_sound', 'play_request', 'play_from_list', 'play_similar_sound')"
         
@@ -138,9 +161,10 @@ class StatsRepository(BaseRepository):
             WHERE username = ? 
             AND timestamp BETWEEN ? AND ?
             AND action IN {play_actions}
+            {guild_action_filter}
             GROUP BY action
             """,
-            (username, year_start, year_end)
+            (username, year_start, year_end, *guild_params)
         )
         
         for row in rows:
@@ -163,11 +187,13 @@ class StatsRepository(BaseRepository):
             AND a.timestamp BETWEEN ? AND ?
             AND a.action IN {play_actions}
             AND s.slap = 0
+            {guild_action_filter}
+            {guild_sound_filter}
             GROUP BY s.Filename
             ORDER BY play_count DESC
             LIMIT 5
             """,
-            (username, year_start, year_end)
+            (username, year_start, year_end, *guild_params, *guild_params)
         )
         stats['top_sounds'] = [(row['Filename'], row['play_count']) for row in rows]
         
@@ -181,8 +207,10 @@ class StatsRepository(BaseRepository):
             AND a.timestamp BETWEEN ? AND ?
             AND a.action IN {play_actions}
             AND s.slap = 0
+            {guild_action_filter}
+            {guild_sound_filter}
             """,
-            (username, year_start, year_end)
+            (username, year_start, year_end, *guild_params, *guild_params)
         )
         stats['unique_sounds'] = row['count'] if row else 0
         
@@ -194,11 +222,12 @@ class StatsRepository(BaseRepository):
             WHERE username = ?
             AND timestamp BETWEEN ? AND ?
             AND action IN {play_actions}
+            {guild_action_filter}
             GROUP BY day_of_week
             ORDER BY count DESC
             LIMIT 1
             """,
-            (username, year_start, year_end)
+            (username, year_start, year_end, *guild_params)
         )
         if row and row['day_of_week'] is not None:
             day_names = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
@@ -213,11 +242,12 @@ class StatsRepository(BaseRepository):
             WHERE username = ?
             AND timestamp BETWEEN ? AND ?
             AND action IN {play_actions}
+            {guild_action_filter}
             GROUP BY hour
             ORDER BY count DESC
             LIMIT 1
             """,
-            (username, year_start, year_end)
+            (username, year_start, year_end, *guild_params)
         )
         if row and row['hour'] is not None:
             stats['most_active_hour'] = int(row['hour'])
@@ -233,10 +263,12 @@ class StatsRepository(BaseRepository):
             AND a.timestamp BETWEEN ? AND ?
             AND a.action IN {play_actions}
             AND s.slap = 0
+            {guild_action_filter}
+            {guild_sound_filter}
             ORDER BY a.timestamp ASC
             LIMIT 1
             """,
-            (username, year_start, year_end)
+            (username, year_start, year_end, *guild_params, *guild_params)
         )
         if row:
             stats['first_sound'] = row['Filename']
@@ -252,10 +284,12 @@ class StatsRepository(BaseRepository):
             AND a.timestamp BETWEEN ? AND ?
             AND a.action IN {play_actions}
             AND s.slap = 0
+            {guild_action_filter}
+            {guild_sound_filter}
             ORDER BY a.timestamp DESC
             LIMIT 1
             """,
-            (username, year_start, year_end)
+            (username, year_start, year_end, *guild_params, *guild_params)
         )
         if row:
             stats['last_sound'] = row['Filename']
@@ -268,10 +302,11 @@ class StatsRepository(BaseRepository):
             FROM actions
             WHERE timestamp BETWEEN ? AND ?
             AND action IN {play_actions}
+            {guild_action_filter}
             GROUP BY username
             ORDER BY play_count DESC
             """,
-            (year_start, year_end)
+            (year_start, year_end, *guild_params)
         )
         all_users = list(rows)
         stats['total_users'] = len(all_users)
@@ -288,9 +323,10 @@ class StatsRepository(BaseRepository):
             WHERE username = ?
             AND timestamp BETWEEN ? AND ?
             AND action IN {play_actions}
+            {guild_action_filter}
             ORDER BY play_date ASC
             """,
-            (username, year_start, year_end)
+            (username, year_start, year_end, *guild_params)
         )
         active_dates = [row['play_date'] for row in rows]
         stats['total_active_days'] = len(active_dates)
@@ -315,6 +351,7 @@ class StatsRepository(BaseRepository):
             username=username,
             period_start=year_start,
             period_end=year_end,
+            guild_id=guild_id,
         )
         stats['voice_joins'] = voice_metrics['joins']
         stats['voice_leaves'] = voice_metrics['leaves']
@@ -328,7 +365,7 @@ class StatsRepository(BaseRepository):
         
         return stats
 
-    def get_top_voice_users(self, days: int = 7, limit: int = 10) -> List[Dict[str, Any]]:
+    def get_top_voice_users(self, days: int = 7, limit: int = 10, guild_id: Optional[int | str] = None) -> List[Dict[str, Any]]:
         """
         Get users ranked by total voice session time.
 
@@ -339,7 +376,7 @@ class StatsRepository(BaseRepository):
         Returns:
             List of dictionaries with username, total_seconds, total_hours, and session_count.
         """
-        voice_rows = VoiceActivityRepository().get_top_users_by_voice_time(days=days, limit=limit)
+        voice_rows = VoiceActivityRepository().get_top_users_by_voice_time(days=days, limit=limit, guild_id=guild_id)
         return [
             {
                 "username": username,
@@ -350,7 +387,7 @@ class StatsRepository(BaseRepository):
             for username, total_seconds, session_count in voice_rows
         ]
 
-    def get_top_voice_channels(self, days: int = 7, limit: int = 10) -> List[Dict[str, Any]]:
+    def get_top_voice_channels(self, days: int = 7, limit: int = 10, guild_id: Optional[int | str] = None) -> List[Dict[str, Any]]:
         """
         Get channels ranked by total voice session time.
 
@@ -361,7 +398,7 @@ class StatsRepository(BaseRepository):
         Returns:
             List of dictionaries with channel_id, total_seconds, total_hours, and session_count.
         """
-        voice_rows = VoiceActivityRepository().get_top_channels_by_voice_time(days=days, limit=limit)
+        voice_rows = VoiceActivityRepository().get_top_channels_by_voice_time(days=days, limit=limit, guild_id=guild_id)
         return [
             {
                 "channel_id": channel_id,
@@ -374,7 +411,7 @@ class StatsRepository(BaseRepository):
     
     # ===== Analytics Dashboard Methods =====
     
-    def get_activity_heatmap(self, days: int = 30) -> List[Dict[str, Any]]:
+    def get_activity_heatmap(self, days: int = 30, guild_id: Optional[int | str] = None) -> List[Dict[str, Any]]:
         """
         Get activity counts grouped by day of week and hour for heatmap visualization.
         
@@ -392,6 +429,9 @@ class StatsRepository(BaseRepository):
             cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
             conditions.append("timestamp >= ?")
             params.append(cutoff)
+        if guild_id is not None:
+            conditions.append("(guild_id = ? OR guild_id IS NULL)")
+            params.append(str(guild_id))
         
         where_clause = " AND ".join(conditions)
         
@@ -411,7 +451,7 @@ class StatsRepository(BaseRepository):
         
         return [{'day': row['day_of_week'], 'hour': row['hour'], 'count': row['count']} for row in rows]
     
-    def get_activity_timeline(self, days: int = 30) -> List[Dict[str, Any]]:
+    def get_activity_timeline(self, days: int = 30, guild_id: Optional[int | str] = None) -> List[Dict[str, Any]]:
         """
         Get daily activity counts for timeline/line chart visualization.
         
@@ -424,8 +464,13 @@ class StatsRepository(BaseRepository):
         from datetime import timedelta
         cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
         
+        guild_filter = ""
+        params = [cutoff]
+        if guild_id is not None:
+            guild_filter = "AND (guild_id = ? OR guild_id IS NULL)"
+            params.append(str(guild_id))
         rows = self._execute(
-            """
+            f"""
             SELECT 
                 date(timestamp) as date,
                 COUNT(*) as count
@@ -433,15 +478,16 @@ class StatsRepository(BaseRepository):
             WHERE action IN ('play_random_sound', 'replay_sound', 'play_random_favorite_sound', 
                            'play_request', 'play_from_list', 'play_similar_sound', 'play_sound_periodically')
             AND date(timestamp) >= ?
+            {guild_filter}
             GROUP BY date(timestamp)
             ORDER BY date(timestamp) ASC
             """,
-            (cutoff,)
+            tuple(params)
         )
         
         return [{'date': row['date'], 'count': row['count']} for row in rows]
     
-    def get_summary_stats(self, days: int = 0) -> Dict[str, Any]:
+    def get_summary_stats(self, days: int = 0, guild_id: Optional[int | str] = None) -> Dict[str, Any]:
         """
         Get aggregated summary statistics for the analytics dashboard.
         
@@ -463,7 +509,13 @@ class StatsRepository(BaseRepository):
         }
         
         # Total sounds
-        row = self._execute_one("SELECT COUNT(*) as count FROM sounds")
+        if guild_id is None:
+            row = self._execute_one("SELECT COUNT(*) as count FROM sounds")
+        else:
+            row = self._execute_one(
+                "SELECT COUNT(*) as count FROM sounds WHERE guild_id = ? OR guild_id IS NULL",
+                (str(guild_id),),
+            )
         stats['total_sounds'] = row['count'] if row else 0
         
         # Build time filter
@@ -473,6 +525,10 @@ class StatsRepository(BaseRepository):
             cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
             time_filter = "AND timestamp >= ?"
             params.append(cutoff)
+        guild_filter = ""
+        if guild_id is not None:
+            guild_filter = "AND (guild_id = ? OR guild_id IS NULL)"
+            params.append(str(guild_id))
         
         # Total plays
         row = self._execute_one(
@@ -481,6 +537,7 @@ class StatsRepository(BaseRepository):
             WHERE action IN ('play_random_sound', 'replay_sound', 'play_random_favorite_sound', 
                            'play_request', 'play_from_list', 'play_similar_sound', 'play_sound_periodically')
             {time_filter}
+            {guild_filter}
             """,
             tuple(params)
         )
@@ -493,6 +550,7 @@ class StatsRepository(BaseRepository):
             WHERE action IN ('play_random_sound', 'replay_sound', 'play_random_favorite_sound', 
                            'play_request', 'play_from_list', 'play_similar_sound')
             {time_filter}
+            {guild_filter}
             """,
             tuple(params)
         )
@@ -500,14 +558,20 @@ class StatsRepository(BaseRepository):
         
         # Sounds added this week
         week_ago = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
-        row = self._execute_one(
-            "SELECT COUNT(*) as count FROM sounds WHERE timestamp >= ?",
-            (week_ago,)
-        )
+        if guild_id is None:
+            row = self._execute_one(
+                "SELECT COUNT(*) as count FROM sounds WHERE timestamp >= ?",
+                (week_ago,)
+            )
+        else:
+            row = self._execute_one(
+                "SELECT COUNT(*) as count FROM sounds WHERE timestamp >= ? AND (guild_id = ? OR guild_id IS NULL)",
+                (week_ago, str(guild_id)),
+            )
         stats['sounds_this_week'] = row['count'] if row else 0
 
         # Voice totals
-        top_voice_users = self.get_top_voice_users(days=days, limit=1000)
+        top_voice_users = self.get_top_voice_users(days=days, limit=1000, guild_id=guild_id)
         stats['active_voice_users'] = len(top_voice_users)
         stats['total_voice_hours'] = round(
             sum(user['total_seconds'] for user in top_voice_users) / 3600.0,
