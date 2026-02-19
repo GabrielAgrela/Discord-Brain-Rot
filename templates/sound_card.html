@@ -26,8 +26,6 @@
         }
 
         .card {
-            --accent-color: {{ accent_color }};
-            --accent-rgb: {{ accent_rgb }};
             background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #1a1a2e 100%);
             border-radius: 40px;
             padding: 24px 26px 16px 26px;
@@ -175,11 +173,9 @@
             font-size: 15px;
             font-weight: 700;
             line-height: 1.35;
-            background: linear-gradient(
-                135deg,
-                rgba(var(--accent-rgb), 0.20) 0%,
-                rgba(var(--accent-rgb), 0.10) 100%
-            );
+            background: linear-gradient(135deg,
+                    rgba(var(--accent-rgb), 0.20) 0%,
+                    rgba(var(--accent-rgb), 0.10) 100%);
             padding: 10px 12px;
             border-radius: 14px;
             border: 1px solid rgba(var(--accent-rgb), 0.50);
@@ -303,8 +299,8 @@
 </head>
 
 <body>
-    <div
-        class="card {{card_class}}{% if notification_only %} notification-only{% endif %}{% if requester_avatar_b64 %} has-requester-avatar{% endif %}">
+    <div class="card {{card_class}}{% if notification_only %} notification-only{% endif %}{% if requester_avatar_b64 %} has-requester-avatar{% endif %}"
+        style="--accent-color: {{ accent_color }}; --accent-rgb: {{ accent_rgb }};">
         {% if requester_avatar_b64 %}
         <img src="data:image/png;base64,{{requester_avatar_b64}}" class="requester-avatar-top-right">
         {% endif %}
@@ -350,7 +346,19 @@
             </div>
             {% endif %}
 
-
+            {% if event_data %}
+            <div class="summary-pill">
+                <img src="data:image/svg+xml;base64,{{icon_event}}" class="icon">
+                <div class="summary-grid">
+                    {% for raw_part in event_data.split('|') %}
+                    {% set metric = raw_part.strip() %}
+                    {% if metric %}
+                    <span class="summary-item">{{metric}}</span>
+                    {% endif %}
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
 
         </div>
         {% endif %}
