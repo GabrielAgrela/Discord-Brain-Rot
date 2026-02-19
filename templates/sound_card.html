@@ -350,19 +350,7 @@
             </div>
             {% endif %}
 
-            {% if event_data %}
-            <div class="summary-pill">
-                <img src="data:image/svg+xml;base64,{{icon_event}}" class="icon">
-                <div class="summary-grid">
-                    {% for raw_part in event_data.split('|') %}
-                        {% set metric = raw_part.strip() %}
-                        {% if metric %}
-                        <span class="summary-item">{{metric}}</span>
-                        {% endif %}
-                    {% endfor %}
-                </div>
-            </div>
-            {% endif %}
+
 
         </div>
         {% endif %}

@@ -4,6 +4,7 @@ Tests for bot/services/background.py - BackgroundService.
 
 import os
 import sys
+from collections import namedtuple
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -359,3 +360,171 @@ class TestBackgroundService:
 
         assert added is True
         message.edit.assert_not_awaited()
+
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    def test_calculate_cpu_percentages_uses_delta_samples(
+        self, _mock_sound_repo, _mock_action_repo
+    ):
+        """Ensure CPU percentages are derived from counter deltas, not absolute totals."""
+        from bot.services.background import BackgroundService
+
+        service = BackgroundService(
+            bot=Mock(),
+            audio_service=Mock(),
+            sound_service=Mock(),
+            behavior=Mock(),
+        )
+        service._perf_prev_sample_monotonic = 100.0
+        service._perf_prev_cpu_counters = {
+            "cpu": (1000, 500),
+            "cpu0": (500, 250),
+        }
+        service._perf_prev_process_cpu_ticks = 100
+        service._clock_ticks_per_second = 100
+        service._cpu_core_count = 4
+
+        metrics = service._calculate_cpu_percentages(
+            cpu_counters={
+                "cpu": (1100, 540),
+                "cpu0": (560, 272),
+            },
+            process_cpu_ticks=120,
+            sample_monotonic=101.0,
+        )
+
+        assert metrics["cpu_total_percent"] == 60.0
+        assert metrics["cpu_per_core_percent"] == [63.33]
+        assert metrics["process_cpu_percent_of_one_core"] == 20.0
+        assert metrics["process_cpu_percent_of_total_capacity"] == 5.0
+
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    def test_build_performance_snapshot_includes_high_detail_metrics(
+        self, _mock_sound_repo, _mock_action_repo
+    ):
+        """Ensure high-frequency performance snapshot includes rich host/process/runtime fields."""
+        from bot.services.background import BackgroundService
+
+        connected_voice_client = Mock()
+        connected_voice_client.is_connected.return_value = True
+        disconnected_voice_client = Mock()
+        disconnected_voice_client.is_connected.return_value = False
+
+        bot = Mock(
+            latency=0.321,
+            guilds=[
+                Mock(voice_client=connected_voice_client),
+                Mock(voice_client=disconnected_voice_client),
+                Mock(voice_client=None),
+            ],
+        )
+
+        service = BackgroundService(
+            bot=bot,
+            audio_service=Mock(),
+            sound_service=Mock(),
+            behavior=Mock(),
+        )
+        service._perf_start_monotonic = 10.0
+        service._perf_tick_rate_seconds = 0.5
+        service._perf_expected_tick_monotonic = 19.9
+        service._perf_prev_sample_monotonic = 19.5
+        service._perf_prev_cpu_counters = {
+            "cpu": (1000, 500),
+            "cpu0": (500, 250),
+        }
+        service._perf_prev_process_cpu_ticks = 100
+        service._clock_ticks_per_second = 100
+        service._cpu_core_count = 8
+        service._perf_prev_network_totals = (1000, 2000)
+        service._perf_prev_network_sample_monotonic = 19.5
+
+        disk_usage = namedtuple("disk_usage", ["total", "used", "free"])
+
+        with patch.object(
+            service,
+            "_read_proc_cpu_counters",
+            return_value={"cpu": (1100, 540), "cpu0": (560, 272)},
+        ), patch.object(
+            service, "_read_proc_process_cpu_ticks", return_value=140
+        ), patch.object(
+            service,
+            "_read_proc_meminfo",
+            return_value={"MemTotal": 10000, "MemAvailable": 2500},
+        ), patch.object(
+            service,
+            "_read_proc_status",
+            return_value={
+                "VmRSS": "4 kB",
+                "VmSize": "16 kB",
+                "Threads": "7",
+                "voluntary_ctxt_switches": "11",
+                "nonvoluntary_ctxt_switches": "3",
+            },
+        ), patch.object(
+            service, "_read_proc_network_totals", return_value=(1300, 2600)
+        ), patch.object(
+            service,
+            "_collect_audio_service_metrics",
+            return_value={
+                "audio_keyword_sink_count": 2,
+                "audio_pending_connection_count": 1,
+                "audio_active_progress_task_count": 3,
+            },
+        ), patch(
+            "bot.services.background.os.listdir", return_value=["1", "2", "3"]
+        ), patch(
+            "bot.services.background.resource.getrlimit", return_value=(1024, 4096)
+        ), patch(
+            "bot.services.background.shutil.disk_usage",
+            return_value=disk_usage(1000, 400, 600),
+        ), patch(
+            "bot.services.background.os.getloadavg", return_value=(1.2, 0.9, 0.8)
+        ), patch(
+            "bot.services.background.gc.get_count", return_value=(10, 20, 30)
+        ), patch(
+            "bot.services.background.time.time", return_value=1700000000.0
+        ):
+            payload = service._build_performance_snapshot(sample_monotonic=20.0)
+
+        assert payload["timestamp_unix"] == 1700000000.0
+        assert payload["uptime_seconds"] == 10.0
+        assert payload["tick_interval_seconds"] == 0.5
+        assert payload["loop_lag_ms"] == 100.0
+        assert payload["guild_count"] == 3
+        assert payload["connected_voice_clients"] == 1
+        assert payload["bot_latency_ms"] == 321.0
+        assert payload["cpu_total_percent"] == 60.0
+        assert payload["cpu_per_core_percent"] == [63.33]
+        assert payload["process_cpu_percent_of_one_core"] == 80.0
+        assert payload["process_cpu_percent_of_total_capacity"] == 10.0
+        assert payload["memory_total_bytes"] == 10000
+        assert payload["memory_available_bytes"] == 2500
+        assert payload["memory_used_bytes"] == 7500
+        assert payload["memory_used_percent"] == 75.0
+        assert payload["process_memory_rss_bytes"] == 4096
+        assert payload["process_memory_vms_bytes"] == 16384
+        assert payload["process_threads"] == 7
+        assert payload["process_voluntary_ctx_switches"] == 11
+        assert payload["process_nonvoluntary_ctx_switches"] == 3
+        assert payload["fd_open_count"] == 3
+        assert payload["fd_limit_soft"] == 1024
+        assert payload["fd_limit_hard"] == 4096
+        assert payload["disk_total_bytes"] == 1000
+        assert payload["disk_used_bytes"] == 400
+        assert payload["disk_free_bytes"] == 600
+        assert payload["disk_used_percent"] == 40.0
+        assert payload["network_total_rx_bytes"] == 1300
+        assert payload["network_total_tx_bytes"] == 2600
+        assert payload["network_rx_bytes_per_second"] == 600.0
+        assert payload["network_tx_bytes_per_second"] == 1200.0
+        assert payload["load_avg_1m"] == 1.2
+        assert payload["load_avg_5m"] == 0.9
+        assert payload["load_avg_15m"] == 0.8
+        assert payload["gc_gen0_count"] == 10
+        assert payload["gc_gen1_count"] == 20
+        assert payload["gc_gen2_count"] == 30
+        assert payload["audio_keyword_sink_count"] == 2
+        assert payload["audio_pending_connection_count"] == 1
+        assert payload["audio_active_progress_task_count"] == 3

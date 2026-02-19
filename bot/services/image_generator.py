@@ -429,7 +429,6 @@ class ImageGeneratorService:
         sts_char: Optional[str] = None,
         requester_avatar_url: Optional[str] = None,
         sts_thumbnail_url: Optional[str] = None,
-        event_data: Optional[str] = None,
         show_footer: bool = True,
         show_sound_icon: bool = True,
         accent_color: Optional[str] = None,
@@ -457,7 +456,6 @@ class ImageGeneratorService:
             sts_char,
             requester_avatar_url,
             sts_thumbnail_url,
-            event_data,
             show_footer,
             show_sound_icon,
             accent_color,
@@ -498,7 +496,6 @@ class ImageGeneratorService:
             quote: Quote text for TTS/STS modes
             is_tts: Whether this is a TTS message
             sts_char: STS character name (ventura, tyson, costa)
-            event_data: String describing events (e.g. "Join: Gabi | Leave: Someone")
             show_footer: Whether to render the footer row
             show_sound_icon: Whether to render the leading sound/speaker icon
             accent_color: Optional hex color for card border (default Discord blurple)
@@ -555,10 +552,7 @@ class ImageGeneratorService:
                 lists,
                 favorited_by,
             ])
-            has_stats = has_core_stats or bool(event_data)
-            summary_only = bool(event_data) and not has_core_stats
-            if summary_only:
-                card_class = f"{card_class} summary-notification".strip()
+            has_stats = has_core_stats
             has_leading_icon = bool(sts_thumbnail_b64 or speaker_icon)
             notification_only = (not has_stats) and (not show_footer)
             resolved_accent_color = accent_color or "#5865F2"
@@ -585,7 +579,6 @@ class ImageGeneratorService:
                 "quote": quote,
                 "requester_avatar_b64": requester_avatar_b64,
                 "sts_thumbnail_b64": sts_thumbnail_b64,
-                "event_data": event_data,
                 "show_footer": show_footer,
                 "has_stats": has_stats,
                 "has_leading_icon": has_leading_icon,

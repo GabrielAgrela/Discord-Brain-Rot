@@ -165,6 +165,10 @@ Canonical completion command:
 - Attribute name mismatches and service access patterns are only caught at runtime
 - When adding new commands/UI, manually test the full flow to catch integration issues
 
+### Requirements File Encoding
+- `requirements.txt` is currently encoded as UTF-16 LE (with BOM), not UTF-8
+- If dependency edits are needed, preserve UTF-16 encoding to avoid corrupting install behavior/diffs
+
 ### Sound Card Template Tracking
 - The sound card UI used by `ImageGeneratorService` lives in `templates/sound_card.html`
 - `templates/sound_card.html` is tracked in git; edits should appear in normal `git status`/`git diff`

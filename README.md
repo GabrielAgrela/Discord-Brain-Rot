@@ -119,6 +119,7 @@ This README is based on the current codebase behavior (not historical README ass
 - Controls-button normalizer loop (every minute): keeps one recent inline `⚙️` on eligible bot messages by adding if missing and removing extras with safe raw-component edits.
 - Keyword detection health check loop.
 - Voice-activity auto-disconnect safety loop.
+- High-frequency performance telemetry loop (JSON logs with CPU, memory, process/runtime, network, disk, loop lag, and bot health metrics).
 - Web playback queue consumer loop.
 
 ## Recent Updates (Last Months)
@@ -238,6 +239,7 @@ This README is based on the current codebase behavior (not historical README ass
 - `AUTOJOIN_DEFAULT` (`false` default for new guilds)
 - `PERIODIC_DEFAULT` (`false` default for new guilds)
 - `STT_DEFAULT` (`false` default for new guilds)
+- `PERFORMANCE_MONITOR_TICK_SECONDS` (performance monitor interval in seconds, default `0.5`, minimum `0.1`)
 
 ### ElevenLabs
 - `EL_key`
