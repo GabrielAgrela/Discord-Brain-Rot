@@ -1755,7 +1755,7 @@ class KeywordDetectionSink(sinks.Sink):
                 if user_id in self.last_partial:
                     del self.last_partial[user_id]
     def get_buffer_content(self, seconds: int = 10) -> bytes:
-        """Get the last N seconds of audio from all users' buffers."""
+        """Get the last N seconds of mixed audio from all users' buffers."""
         # SAFETY: Hard cap at 30 seconds no matter what is requested
         seconds = min(seconds, 30)
         
@@ -1763,25 +1763,59 @@ class KeywordDetectionSink(sinks.Sink):
         cutoff = now - seconds
         
         with self.buffer_lock:
-            all_chunks = []
+            has_data = any(ts >= cutoff for chunks in self.user_audio_buffers.values() for ts, _ in chunks)
+            if not has_data:
+                return bytes()
+                
+            # 1 sec = 192000 bytes (48000 Hz * 2 channels * 2 bytes/sample)
+            bytes_per_sec = 192000
+            total_bytes = int(seconds * bytes_per_sec)
+            # Ensure it's a multiple of 4 (frame alignment)
+            total_bytes = (total_bytes // 4) * 4
+            
+            mixed_buffer = bytearray(total_bytes)
+            
             for user_id, chunks in self.user_audio_buffers.items():
+                user_buffer = bytearray(total_bytes)
+                current_offset_bytes = 0
+                
                 for ts, audio in chunks:
                     if ts >= cutoff:
-                        all_chunks.append((ts, audio))
+                        # Expected offset if this was perfectly continuous from the last chunk
+                        expected_offset = current_offset_bytes
+                        
+                        # Actual offset according to timestamp
+                        actual_offset_sec = ts - cutoff
+                        actual_offset_bytes = int(actual_offset_sec * bytes_per_sec)
+                        actual_offset_bytes = (actual_offset_bytes // 4) * 4
+                        
+                        # If the gap is less than 100ms (19200 bytes), snap to continuous
+                        # unless current_offset_bytes is 0 (first chunk)
+                        if expected_offset > 0 and abs(actual_offset_bytes - expected_offset) < 19200:
+                            offset_bytes = expected_offset
+                        else:
+                            offset_bytes = actual_offset_bytes
+                            
+                        end_bytes = offset_bytes + len(audio)
+                        
+                        if offset_bytes < 0:
+                            audio = audio[-offset_bytes:]
+                            offset_bytes = 0
+                            
+                        # SAFETY: ensure we don't write past total_bytes
+                        if end_bytes > total_bytes:
+                            trim = end_bytes - total_bytes
+                            audio = audio[:-trim]
+                            end_bytes = total_bytes
+                            
+                        if len(audio) > 0 and offset_bytes < total_bytes:
+                            user_buffer[offset_bytes:end_bytes] = audio
+                            current_offset_bytes = end_bytes
+                            
+                # Mix this user's audio into the master buffer
+                mixed_buffer = bytearray(audioop.add(mixed_buffer, user_buffer, 2))
             
-            if not all_chunks:
-                return bytes()
-            
-            all_chunks.sort(key=lambda x: x[0])
-            result = b''.join(audio for ts, audio in all_chunks)
-            
-            # SAFETY: Hard cap on bytes (~30 seconds at 48kHz stereo 16-bit)
-            max_bytes = 48000 * 2 * 2 * 30  # 5.76MB max
-            if len(result) > max_bytes:
-                print(f"[AudioBuffer] WARNING: Truncating {len(result)} bytes to {max_bytes} bytes")
-                result = result[-max_bytes:]
-            
-            return result
+            return bytes(mixed_buffer)
 
     def get_recent_users(self, seconds: int = 15) -> List[str]:
         """Get the list of usernames who spoke in the last N seconds."""
