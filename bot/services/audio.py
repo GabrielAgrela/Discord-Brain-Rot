@@ -19,7 +19,7 @@ import vosk
 from discord import sinks
 from bot.repositories import (
     SoundRepository, ActionRepository, ListRepository, 
-    StatsRepository, KeywordRepository, EventRepository
+    StatsRepository, KeywordRepository
 )
 from bot.services.image_generator import ImageGeneratorService
 
@@ -46,7 +46,6 @@ class AudioService:
         self.list_repo = ListRepository()
         self.stats_repo = StatsRepository()
         self.keyword_repo = KeywordRepository()
-        self.event_repo = EventRepository()
         
         # Legacy single-guild state (kept for compatibility in transitional callers)
         self.last_played_time: Optional[datetime] = None
@@ -1107,27 +1106,6 @@ class AudioService:
                         
                         quote_text = original_message if (is_tts or sts_char) and original_message else None
                         
-                        # Fetch event data
-                        event_data_str = None
-                        try:
-                            print(f"[AudioService] [DEBUG] Fetching event data for {sound_filename}...")
-                            events = await asyncio.to_thread(self.event_repo.get_events_for_sound, sound_filename, guild_id)
-                            if events:
-                                # Format: "Join: User1, User2 | Leave: User3"
-                                joins = [e[0] for e in events if e[1] == 'join']
-                                leaves = [e[0] for e in events if e[1] == 'leave']
-                                
-                                parts = []
-                                if joins:
-                                    parts.append(f"Join: {', '.join(joins)}")
-                                if leaves:
-                                    parts.append(f"Leave: {', '.join(leaves)}")
-                                
-                                if parts:
-                                    event_data_str = " | ".join(parts)
-                        except Exception as e:
-                            print(f"[AudioService] Error fetching event data: {e}")
-                            
                         self._log_perf("handle_ui DB operations", db_start_time)
                         # print(f"[AudioService] [DEBUG] DB operations finished in {time.time() - db_start_time:.4f}s")
 
@@ -1140,7 +1118,6 @@ class AudioService:
                             quote=quote_text, is_tts=is_tts, sts_char=sts_char,
                             requester_avatar_url=resolved_avatar_url,
                             sts_thumbnail_url=sts_thumbnail_url,
-                            event_data=event_data_str
                         )
                         self._log_perf("Image Generation", img_start_time)
                         # print(f"[AudioService] [DEBUG] Image generation finished in {time.time() - handle_ui_start:.4f}s")
