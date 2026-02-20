@@ -303,3 +303,14 @@ class TestAudioService:
 
         sound_message.edit.assert_not_awaited()
         view.update_progress_label.assert_not_called()
+
+    def test_build_ffmpeg_before_options(self, audio_service):
+        """Ensure audio latency mode translates to the correct FFmpeg flags."""
+        audio_service.audio_latency_mode = "high_quality"
+        assert audio_service._build_ffmpeg_before_options() == "-nostdin"
+
+        audio_service.audio_latency_mode = "balanced"
+        assert audio_service._build_ffmpeg_before_options() == "-nostdin -fflags +genpts"
+
+        audio_service.audio_latency_mode = "low_latency"
+        assert audio_service._build_ffmpeg_before_options() == "-nostdin -fflags nobuffer -flags low_delay"

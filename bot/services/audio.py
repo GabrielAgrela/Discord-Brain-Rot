@@ -189,8 +189,9 @@ class AudioService:
             return "-nostdin"
         if self.audio_latency_mode == "balanced":
             return "-nostdin -fflags +genpts"
-        # Default low-latency policy.
-        return "-nostdin -fflags nobuffer -flags low_delay -analyzeduration 0 -probesize 32"
+        # Default low-latency policy without extreme probesize limits that cause
+        # ffmpeg to fail on MP3 files with large ID3 tags.
+        return "-nostdin -fflags nobuffer -flags low_delay"
 
     def _release_guild_play_request(self, guild_id: int) -> None:
         """Release one pending play slot for a guild."""

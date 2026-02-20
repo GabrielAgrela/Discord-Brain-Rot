@@ -203,6 +203,11 @@ Canonical completion command:
 - When combining concurrent raw PCM chunks from multiple users (e.g. from Discord Voice sinks), DO NOT simply concatenate them. Interleaved concatenations stretch out playback duration and cause severe lag/distortion.
 - Use `audioop.add(mix_buffer, user_buffer, 2)` to properly sum overlapping 16-bit PCM bytes together while preserving real-time duration.
 
+### FFmpegOpusAudio and Silent Failures
+- `discord.FFmpegOpusAudio` wraps an `ffmpeg` process but its `AudioPlayer` thread silently ignores immediate `ffmpeg` exit-code crashes, interpreting empty pipe reads simply as normal EOF.
+- When applying custom `before_options` like `-analyzeduration 0 -probesize 32`, mp3 files with ID3 headers larger than the probesize will cause ffmpeg to instantly crash.
+- This creates an insidious bug where the bot's UI (progress bars, sound cards) fully iterates for the sound's standard duration, but absolutely no audio is emitted. Avoid specifying stringent probesize limits unless explicitly required.
+
 ## Deployment
 
 ### Restarting the Bot

@@ -74,7 +74,42 @@ class BackgroundService:
                     seconds=self._perf_tick_rate_seconds
                 )
                 self.performance_telemetry_loop.start()
+            
+            asyncio.create_task(self._auto_join_channels())
             print("[BackgroundService] Background tasks started.")
+
+    async def _auto_join_channels(self):
+        """Auto-join configured voice channels on startup."""
+        await asyncio.sleep(3)  # Give the bot a moment to settle before joining
+        for guild in self.bot.guilds:
+            try:
+                settings = self.guild_settings_service.get(guild.id)
+                if not settings or not settings.autojoin_enabled:
+                    continue
+                
+                # Check if already connected
+                if guild.voice_client and guild.voice_client.is_connected():
+                    continue
+
+                target_channel = None
+                if settings.default_voice_channel_id:
+                    target_channel = guild.get_channel(int(settings.default_voice_channel_id))
+                
+                if not target_channel:
+                    # Fallback to largest channel
+                    target_channel = self.audio_service.get_largest_voice_channel(guild)
+                
+                if target_channel:
+                    print(f"[BackgroundService] Auto-joining '{target_channel.name}' in '{guild.name}'")
+                    await self.audio_service.ensure_voice_connected(target_channel)
+                    sounds = self.sound_repo.get_random_sounds(num_sounds=1, guild_id=guild.id)
+                    if sounds:
+                        sound = sounds[0]
+                        print(f"[BackgroundService] Playing startup sound '{sound[1]}' in '{guild.name}'")
+                        await self.audio_service.play_audio(target_channel, sound[2], "startup")
+            except Exception as e:
+                print(f"[BackgroundService] Failed to auto-join in '{guild.name}': {e}")
+
 
     @staticmethod
     def _resolve_clock_ticks_per_second() -> int:

@@ -528,3 +528,106 @@ class TestBackgroundService:
         assert payload["audio_keyword_sink_count"] == 2
         assert payload["audio_pending_connection_count"] == 1
         assert payload["audio_active_progress_task_count"] == 3
+
+
+class TestAutoJoinChannels:
+    """Tests for BackgroundService._auto_join_channels startup logic."""
+
+    @pytest.mark.asyncio
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    @patch("bot.services.background.asyncio.sleep", new_callable=AsyncMock)
+    async def test_auto_join_skipped_when_autojoin_disabled(
+        self, _mock_sleep, _mock_sound_repo, _mock_action_repo
+    ):
+        """Ensure no voice connection is attempted when autojoin_enabled is False."""
+        from bot.services.background import BackgroundService
+
+        guild = Mock()
+        guild.voice_client = None
+        bot = Mock(guilds=[guild])
+        audio_service = Mock()
+        audio_service.ensure_voice_connected = AsyncMock()
+
+        service = BackgroundService(
+            bot=bot,
+            audio_service=audio_service,
+            sound_service=Mock(),
+            behavior=Mock(),
+        )
+
+        settings = Mock(autojoin_enabled=False, default_voice_channel_id=None)
+        service.guild_settings_service = Mock()
+        service.guild_settings_service.get = Mock(return_value=settings)
+
+        await service._auto_join_channels()
+
+        audio_service.ensure_voice_connected.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    @patch("bot.services.background.asyncio.sleep", new_callable=AsyncMock)
+    async def test_auto_join_uses_configured_default_channel(
+        self, _mock_sleep, _mock_sound_repo, _mock_action_repo
+    ):
+        """Ensure bot joins the configured default_voice_channel_id when autojoin is on."""
+        from bot.services.background import BackgroundService
+
+        voice_channel = Mock()
+        guild = Mock()
+        guild.voice_client = None
+        guild.get_channel = Mock(return_value=voice_channel)
+        bot = Mock(guilds=[guild])
+        audio_service = Mock()
+        audio_service.ensure_voice_connected = AsyncMock()
+
+        service = BackgroundService(
+            bot=bot,
+            audio_service=audio_service,
+            sound_service=Mock(),
+            behavior=Mock(),
+        )
+
+        settings = Mock(autojoin_enabled=True, default_voice_channel_id="111222333")
+        service.guild_settings_service = Mock()
+        service.guild_settings_service.get = Mock(return_value=settings)
+
+        await service._auto_join_channels()
+
+        guild.get_channel.assert_called_once_with(111222333)
+        audio_service.ensure_voice_connected.assert_awaited_once_with(voice_channel)
+
+    @pytest.mark.asyncio
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    @patch("bot.services.background.asyncio.sleep", new_callable=AsyncMock)
+    async def test_auto_join_falls_back_to_largest_channel_when_no_default(
+        self, _mock_sleep, _mock_sound_repo, _mock_action_repo
+    ):
+        """Ensure bot falls back to largest voice channel when no default is configured."""
+        from bot.services.background import BackgroundService
+
+        fallback_channel = Mock()
+        guild = Mock()
+        guild.voice_client = None
+        bot = Mock(guilds=[guild])
+        audio_service = Mock()
+        audio_service.ensure_voice_connected = AsyncMock()
+        audio_service.get_largest_voice_channel = Mock(return_value=fallback_channel)
+
+        service = BackgroundService(
+            bot=bot,
+            audio_service=audio_service,
+            sound_service=Mock(),
+            behavior=Mock(),
+        )
+
+        settings = Mock(autojoin_enabled=True, default_voice_channel_id=None)
+        service.guild_settings_service = Mock()
+        service.guild_settings_service.get = Mock(return_value=settings)
+
+        await service._auto_join_channels()
+
+        audio_service.get_largest_voice_channel.assert_called_once_with(guild)
+        audio_service.ensure_voice_connected.assert_awaited_once_with(fallback_channel)
