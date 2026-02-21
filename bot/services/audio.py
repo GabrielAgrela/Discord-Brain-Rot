@@ -112,6 +112,8 @@ class AudioService:
         # Image generator for sound cards
         self.image_generator = ImageGeneratorService()
         self.progress_display_delay_seconds = 2.0
+        self.short_clip_duration_threshold_seconds = 2.0
+        self.short_clip_start_delay_ms = 120
         # Playback job controls
         self._ffmpeg_max_jobs = max(1, int(os.getenv("FFMPEG_MAX_CONCURRENT_JOBS", "2")))
         self._ffmpeg_semaphore = asyncio.Semaphore(self._ffmpeg_max_jobs)
@@ -214,6 +216,10 @@ class AudioService:
         # ffmpeg to fail on MP3 files with large ID3 tags.
         return "-nostdin -fflags nobuffer -flags low_delay"
 
+    def _build_conservative_ffmpeg_before_options(self) -> str:
+        """Build conservative ffmpeg before-options for reliability-sensitive clips."""
+        return "-nostdin"
+
     def _build_slap_ffmpeg_options(self) -> str:
         """Build ffmpeg options for slap playback (PCM path).
 
@@ -229,7 +235,26 @@ class AudioService:
         global low-latency flags (`-fflags nobuffer -flags low_delay`).
         Use conservative startup flags for slap reliability.
         """
-        return "-nostdin"
+        return self._build_conservative_ffmpeg_before_options()
+
+    @staticmethod
+    def _read_mp3_duration_seconds(audio_file_path: str) -> Optional[float]:
+        """Read MP3 duration in seconds, returning None when unavailable."""
+        try:
+            return float(MP3(audio_file_path).info.length)
+        except Exception:
+            return None
+
+    def _should_use_short_clip_safety(self, audio_file_path: str, duration_seconds: Optional[float]) -> bool:
+        """Return True when short MP3 playback should avoid aggressive startup flags."""
+        if self.audio_latency_mode != "low_latency":
+            return False
+        if not audio_file_path.lower().endswith(".mp3"):
+            return False
+        if duration_seconds is None:
+            return False
+        threshold = getattr(self, "short_clip_duration_threshold_seconds", 2.0)
+        return duration_seconds <= threshold
 
     def _release_guild_play_request(self, guild_id: int) -> None:
         """Release one pending play slot for a guild."""
@@ -983,25 +1008,51 @@ class AudioService:
                         self._release_guild_play_request(guild_id)
                         return False
 
-            # FFmpeg options
-            # Combine effect volume with global volume
-            effect_vol = effects.get('volume', 1.0) if effects else 1.0
-            total_vol = effect_vol * self.volume
-            
-            ffmpeg_options = f'-filter:a "volume={total_vol}'
-            if effects:
-                filters = []
-                if effects.get('pitch'): filters.append(f"asetrate=44100*{effects['pitch']},aresample=44100")
-                if effects.get('speed'): filters.append(f"atempo={effects['speed']}")
-                if effects.get('reverb'): filters.append("aecho=0.8:0.9:1000:0.3")
-                if effects.get('reverse'): filters.append('areverse')
-                if filters: ffmpeg_options += "," + ",".join(filters)
-            ffmpeg_options += '"'
-
             if not self.ffmpeg_path or not os.path.exists(self.ffmpeg_path):
                 await self.message_service.send_error(f"Invalid FFmpeg path: {self.ffmpeg_path}")
                 self._release_guild_play_request(guild_id)
                 return False
+
+            short_clip_duration_seconds: Optional[float] = None
+            if self.audio_latency_mode == "low_latency" and audio_file_path.lower().endswith(".mp3"):
+                short_clip_duration_seconds = await asyncio.to_thread(
+                    self._read_mp3_duration_seconds, audio_file_path
+                )
+
+            use_short_clip_safety = self._should_use_short_clip_safety(
+                audio_file_path,
+                short_clip_duration_seconds,
+            )
+
+            # FFmpeg options
+            # Combine effect volume with global volume
+            effect_vol = effects.get('volume', 1.0) if effects else 1.0
+            total_vol = effect_vol * self.volume
+            filters = [f"volume={total_vol}"]
+            if effects:
+                if effects.get('pitch'):
+                    filters.append(f"asetrate=44100*{effects['pitch']},aresample=44100")
+                if effects.get('speed'):
+                    filters.append(f"atempo={effects['speed']}")
+                if effects.get('reverb'):
+                    filters.append("aecho=0.8:0.9:1000:0.3")
+                if effects.get('reverse'):
+                    filters.append("areverse")
+            if use_short_clip_safety:
+                delay_ms = max(0, int(getattr(self, "short_clip_start_delay_ms", 120)))
+                filters.append(f"adelay={delay_ms}:all=1")
+
+            ffmpeg_options = f'-filter:a "{",".join(filters)}"'
+            ffmpeg_before_options = (
+                self._build_conservative_ffmpeg_before_options()
+                if use_short_clip_safety
+                else self._build_ffmpeg_before_options()
+            )
+            if use_short_clip_safety:
+                print(
+                    "[AudioService] [DEBUG] short-clip safety enabled "
+                    f"for {audio_file} duration={short_clip_duration_seconds}s"
+                )
 
             # START PLAYBACK IMMEDIATELY
             try:
@@ -1017,7 +1068,7 @@ class AudioService:
                         audio_file_path,
                         executable=self.ffmpeg_path,
                         options=ffmpeg_options,
-                        before_options=self._build_ffmpeg_before_options(),
+                        before_options=ffmpeg_before_options,
                         stderr=None,  # inherit stderr so ffmpeg crashes are visible in container logs
                     )
                     ffmpeg_spawn_duration = time.time() - ffmpeg_spawn_start

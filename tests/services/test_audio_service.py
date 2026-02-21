@@ -326,6 +326,19 @@ class TestAudioService:
         """Ensure slap playback uses conservative ffmpeg startup flags."""
         assert audio_service._build_slap_ffmpeg_before_options() == "-nostdin"
 
+    def test_should_use_short_clip_safety(self, audio_service):
+        """Ensure short low-latency MP3 clips opt into conservative playback startup."""
+        audio_service.audio_latency_mode = "low_latency"
+        audio_service.short_clip_duration_threshold_seconds = 2.0
+
+        assert audio_service._should_use_short_clip_safety("clip.mp3", 1.0) is True
+        assert audio_service._should_use_short_clip_safety("clip.mp3", 2.5) is False
+        assert audio_service._should_use_short_clip_safety("clip.wav", 1.0) is False
+        assert audio_service._should_use_short_clip_safety("clip.mp3", None) is False
+
+        audio_service.audio_latency_mode = "balanced"
+        assert audio_service._should_use_short_clip_safety("clip.mp3", 1.0) is False
+
     @pytest.mark.asyncio
     async def test_play_slap_waits_for_lingering_player_thread(self, audio_service):
         """Ensure slap playback waits for lingering AudioPlayer thread before play()."""

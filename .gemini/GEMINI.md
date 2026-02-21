@@ -213,6 +213,7 @@ Canonical completion command:
 - `AudioService.play_slap()` must also guard the "not currently playing" path: even when `voice_client.is_playing()` is already `False`, a lingering `_player` thread can still be alive and drop the next slap silently. Check `_player.is_alive()` and wait before `voice_client.play()`.
 - For slap playback specifically, adding a short ffmpeg pre-roll silence (`adelay=120:all=1`) in the filter chain helps avoid cases where Discord shows speaking but drops the first burst of audio.
 - Short MP3 slap clips can decode as **empty output** under low-latency ffmpeg startup flags (`-fflags nobuffer -flags low_delay`). For slap reliability, use conservative `before_options` (`-nostdin`) even when global audio latency mode is `low_latency`.
+- Short **non-slap** MP3 clips can hit the same low-latency startup issue. `AudioService.play_audio()` now enables short-clip safety for low-latency mode (<=2.0s MP3): conservative `before_options` (`-nostdin`) plus a small `adelay` pre-roll before playback.
 - If slap remains silent even with conservative `before_options` and logs show normal `voice_client.play()`/completion, prefer a slap-specific PCM path (`discord.FFmpegPCMAudio` + `discord.PCMVolumeTransformer`) instead of `FFmpegOpusAudio.from_probe` to avoid short-clip transcode/probe edge cases.
 
 
