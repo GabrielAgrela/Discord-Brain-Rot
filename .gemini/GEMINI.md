@@ -186,6 +186,7 @@ Canonical completion command:
 - `AudioService.start_keyword_detection` must enforce guild-level `stt_enabled` from `GuildSettingsService` before starting a sink.
 - `ensure_voice_connected` can be invoked more than once in quick succession during join/event playback flows; without the guard, keyword detection may start even when STT is disabled and then immediately be stopped by background health checks.
 - If Vosk appears to start and stop within seconds, verify `guild_settings.stt_enabled` for that guild first.
+- **VoskWorker event-loop crash cycle**: The `KeywordDetectionSink` runs in a background thread. All `asyncio.run_coroutine_threadsafe()` calls in this thread MUST be guarded with `if not loop.is_closed():` before calling. Without this guard, the VoskWorker crashes with `RuntimeError: Event loop is closed` every time the bot shuts down while STT is active, which triggers a crash-restart loop every 2-3 minutes and leaves the voice client in a broken state. This was the root cause of intermittent silent audio including slap sounds.
 
 ### Inline Controls Button Normalization
 - The minute background normalizer in `bot/services/background.py` is a safety dedupe pass; keep real-time cleanup in `on_message` (`handle_new_bot_message_for_controls_cleanup`) intact.
@@ -207,6 +208,13 @@ Canonical completion command:
 - `discord.FFmpegOpusAudio` wraps an `ffmpeg` process but its `AudioPlayer` thread silently ignores immediate `ffmpeg` exit-code crashes, interpreting empty pipe reads simply as normal EOF.
 - When applying custom `before_options` like `-analyzeduration 0 -probesize 32`, mp3 files with ID3 headers larger than the probesize will cause ffmpeg to instantly crash.
 - This creates an insidious bug where the bot's UI (progress bars, sound cards) fully iterates for the sound's standard duration, but absolutely no audio is emitted. Avoid specifying stringent probesize limits unless explicitly required.
+- **stop/play race condition**: `voice_client.stop()` signals the AudioPlayer background thread to terminate, but returns immediately before the thread is done. Calling `voice_client.play()` too soon after (e.g. with a fixed `await asyncio.sleep(0.1)`) can race against the lingering thread, resulting in the new audio being silently discarded. Use a spinwait: `while voice_client.is_playing(): await asyncio.sleep(0.05)` (with a timeout) after `stop()` to guard against this.
+- **is_playing() is NOT sufficient** as a completion guard: `AudioPlayer.is_playing()` returns `False` immediately after `stop()` sets the `_end` event — but the thread is still alive running its `finally` block (cleanup + `after` callback). The only reliable check is `player.is_alive()` on the thread object itself. Capture the `_player` reference **before** calling `stop()` (since `stop()` clears `voice_client._player` to `None`), then poll `player.is_alive()`. This is encapsulated in `AudioService._stop_voice_client_and_wait()`.
+- `AudioService.play_slap()` must also guard the "not currently playing" path: even when `voice_client.is_playing()` is already `False`, a lingering `_player` thread can still be alive and drop the next slap silently. Check `_player.is_alive()` and wait before `voice_client.play()`.
+- For slap playback specifically, adding a short ffmpeg pre-roll silence (`adelay=120:all=1`) in the filter chain helps avoid cases where Discord shows speaking but drops the first burst of audio.
+- Short MP3 slap clips can decode as **empty output** under low-latency ffmpeg startup flags (`-fflags nobuffer -flags low_delay`). For slap reliability, use conservative `before_options` (`-nostdin`) even when global audio latency mode is `low_latency`.
+- If slap remains silent even with conservative `before_options` and logs show normal `voice_client.play()`/completion, prefer a slap-specific PCM path (`discord.FFmpegPCMAudio` + `discord.PCMVolumeTransformer`) instead of `FFmpegOpusAudio.from_probe` to avoid short-clip transcode/probe edge cases.
+
 
 ## Deployment
 

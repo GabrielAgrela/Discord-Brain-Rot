@@ -2,6 +2,7 @@
 Tests for bot/services/audio.py - AudioService helper behavior.
 """
 
+import asyncio
 import os
 import sys
 from types import SimpleNamespace
@@ -55,6 +56,8 @@ class TestAudioService:
         service = AudioService.__new__(AudioService)
         service._last_gear_message_by_channel = {}
         service._progress_update_task = None
+        service.playback_done = asyncio.Event()
+        service.playback_done.set()
         return service
 
     @pytest.mark.asyncio
@@ -314,3 +317,83 @@ class TestAudioService:
 
         audio_service.audio_latency_mode = "low_latency"
         assert audio_service._build_ffmpeg_before_options() == "-nostdin -fflags nobuffer -flags low_delay"
+
+    def test_build_slap_ffmpeg_options(self, audio_service):
+        """Ensure slap playback options include startup delay."""
+        assert audio_service._build_slap_ffmpeg_options() == '-vn -af "adelay=120:all=1"'
+
+    def test_build_slap_ffmpeg_before_options(self, audio_service):
+        """Ensure slap playback uses conservative ffmpeg startup flags."""
+        assert audio_service._build_slap_ffmpeg_before_options() == "-nostdin"
+
+    @pytest.mark.asyncio
+    async def test_play_slap_waits_for_lingering_player_thread(self, audio_service):
+        """Ensure slap playback waits for lingering AudioPlayer thread before play()."""
+        from bot.services.audio import AudioService
+
+        audio_service.ffmpeg_path = "/usr/bin/ffmpeg"
+        audio_service.audio_latency_mode = "low_latency"
+        audio_service.volume = 1.0
+        audio_service._cancel_progress_update_task = Mock()
+        audio_service._log_perf = Mock()
+
+        voice_client = Mock()
+        voice_client.is_connected.return_value = True
+        voice_client.is_playing.return_value = False
+        voice_client.is_paused.return_value = False
+        voice_client.play = Mock()
+        player = Mock()
+        player.is_alive.return_value = True
+        voice_client._player = player
+
+        audio_service.ensure_voice_connected = AsyncMock(return_value=voice_client)
+        audio_service._wait_for_audio_player_thread = AsyncMock(return_value=True)
+
+        channel = Mock()
+        channel.guild = Mock(id=123)
+
+        with patch("bot.services.audio.os.path.exists", return_value=True), \
+             patch("bot.services.audio.discord.FFmpegPCMAudio", return_value=Mock()), \
+             patch("bot.services.audio.discord.PCMVolumeTransformer", return_value=Mock()), \
+             patch("bot.services.audio.asyncio.sleep", new=AsyncMock()):
+            result = await AudioService.play_slap(audio_service, channel, "slap.mp3", "tester")
+
+        assert result is True
+        audio_service._wait_for_audio_player_thread.assert_awaited_once_with(player, timeout=2.0)
+        voice_client.play.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_play_slap_treats_paused_voice_client_as_active_playback(self, audio_service):
+        """Ensure paused playback is stopped/waited before slap starts."""
+        from bot.services.audio import AudioService
+
+        audio_service.ffmpeg_path = "/usr/bin/ffmpeg"
+        audio_service.audio_latency_mode = "low_latency"
+        audio_service.volume = 1.0
+        audio_service._cancel_progress_update_task = Mock()
+        audio_service._stop_voice_client_and_wait = AsyncMock()
+        audio_service._wait_for_audio_player_thread = AsyncMock(return_value=False)
+        audio_service._log_perf = Mock()
+
+        voice_client = Mock()
+        voice_client.is_connected.return_value = True
+        voice_client.is_playing.return_value = False
+        voice_client.is_paused.return_value = True
+        voice_client.play = Mock()
+        voice_client._player = Mock()
+
+        audio_service.ensure_voice_connected = AsyncMock(return_value=voice_client)
+
+        channel = Mock()
+        channel.guild = Mock(id=456)
+
+        with patch("bot.services.audio.os.path.exists", return_value=True), \
+             patch("bot.services.audio.discord.FFmpegPCMAudio", return_value=Mock()), \
+             patch("bot.services.audio.discord.PCMVolumeTransformer", return_value=Mock()), \
+             patch("bot.services.audio.asyncio.sleep", new=AsyncMock()):
+            result = await AudioService.play_slap(audio_service, channel, "slap.mp3", "tester")
+
+        assert result is True
+        audio_service._stop_voice_client_and_wait.assert_awaited_once_with(voice_client)
+        audio_service._wait_for_audio_player_thread.assert_not_awaited()
+        voice_client.play.assert_called_once()

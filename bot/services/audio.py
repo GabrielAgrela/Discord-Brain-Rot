@@ -183,6 +183,27 @@ class AudioService:
         self._play_pending_count[guild_id] = pending + 1
         return True
 
+    async def _stop_voice_client_and_wait(self, voice_client, timeout: float = 2.0) -> None:
+        """Stop the voice client and wait for the AudioPlayer thread to actually finish.
+
+        voice_client.stop() sets the stop flag but returns immediately while the
+        background AudioPlayer thread is still in its finally block (cleanup + after-callback).
+        Calling voice_client.play() before that thread exits causes the new audio to be
+        silently dropped or corrupted. We join() the thread via asyncio-safe polling.
+        """
+        player = getattr(voice_client, "_player", None)
+        voice_client.stop()  # sets _end event; _player attribute is cleared to None
+        await self._wait_for_audio_player_thread(player, timeout=timeout)
+
+    async def _wait_for_audio_player_thread(self, player, timeout: float = 2.0) -> bool:
+        """Wait for a Discord AudioPlayer thread reference to fully exit."""
+        if player is None or not player.is_alive():
+            return False
+        deadline = time.time() + timeout
+        while player.is_alive() and time.time() < deadline:
+            await asyncio.sleep(0.02)
+        return not player.is_alive()
+
     def _build_ffmpeg_before_options(self) -> str:
         """Build ffmpeg before-options based on selected latency policy."""
         if self.audio_latency_mode == "high_quality":
@@ -192,6 +213,23 @@ class AudioService:
         # Default low-latency policy without extreme probesize limits that cause
         # ffmpeg to fail on MP3 files with large ID3 tags.
         return "-nostdin -fflags nobuffer -flags low_delay"
+
+    def _build_slap_ffmpeg_options(self) -> str:
+        """Build ffmpeg options for slap playback (PCM path).
+
+        A short leading silence helps avoid Discord startup packet races where
+        speaking toggles on but the first audio burst is dropped.
+        """
+        return '-vn -af "adelay=120:all=1"'
+
+    def _build_slap_ffmpeg_before_options(self) -> str:
+        """Build ffmpeg before-options for slap playback.
+
+        Some short MP3 slap clips produce empty output when decoded with the
+        global low-latency flags (`-fflags nobuffer -flags low_delay`).
+        Use conservative startup flags for slap reliability.
+        """
+        return "-nostdin"
 
     def _release_guild_play_request(self, guild_id: int) -> None:
         """Release one pending play slot for a guild."""
@@ -735,8 +773,12 @@ class AudioService:
             
             slap_start_time = time.time()
 
-            # Stop any currently playing audio and mark as slapped
-            if voice_client.is_playing():
+            # Stop any currently playing audio and mark as slapped.
+            # Also treat paused state as active playback for safe teardown.
+            is_currently_playing = voice_client.is_playing() or (
+                hasattr(voice_client, "is_paused") and voice_client.is_paused()
+            )
+            if is_currently_playing:
                 self._guild_stop_progress_update[guild_id] = True  # Stop the progress bar animation
                 self.stop_progress_update = True
                 self._cancel_progress_update_task(guild_id)
@@ -750,8 +792,21 @@ class AudioService:
                              await current_message.edit(view=current_view)
                     except:
                         pass
-                voice_client.stop()
-                await asyncio.sleep(0.1)  # Allow FFmpeg process to terminate cleanly
+                await self._stop_voice_client_and_wait(voice_client)
+                # Give Discord's gateway a moment to process the speaking=False
+                # state change before the new player fires speaking=True.
+                # Without this gap, Discord may treat audio as a seamless
+                # continuation and silently discard the first few packets.
+                await asyncio.sleep(0.2)
+            else:
+                # Even when is_playing() is already False, a previous AudioPlayer
+                # thread can still be in its finally block. Starting new playback
+                # during that window causes silent/discarded slap audio.
+                lingering_player = getattr(voice_client, "_player", None)
+                if lingering_player is not None and lingering_player.is_alive():
+                    print("[AudioService] [SLAP-DEBUG] Waiting for lingering AudioPlayer thread before slap playback")
+                    await self._wait_for_audio_player_thread(lingering_player, timeout=2.0)
+                    await asyncio.sleep(0.05)
 
 
             audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Sounds", audio_file))
@@ -759,16 +814,36 @@ class AudioService:
                 print(f"[AudioService] Slap sound not found: {audio_file_path}")
                 return False
 
-            # Use FFmpegOpusAudio for stability and bypassing Python-side encoding
-            audio_source = await discord.FFmpegOpusAudio.from_probe(
+            if not self.ffmpeg_path or not os.path.exists(self.ffmpeg_path):
+                print(f"[AudioService] Invalid FFmpeg path for slap playback: {self.ffmpeg_path}")
+                return False
+
+            # Use a conservative PCM pipeline for slap playback reliability.
+            vc_channel = getattr(voice_client, "channel", None)
+            target_channel_name = getattr(channel, "name", "unknown")
+            vc_channel_name = getattr(vc_channel, "name", "unknown")
+            print(
+                f"[AudioService] [SLAP-DEBUG] About to play. "
+                f"target_channel={target_channel_name}, vc_channel={vc_channel_name}, "
+                f"vc.is_connected={voice_client.is_connected()}, vc.is_playing={voice_client.is_playing()}, "
+                f"volume={self.volume:.2f}"
+            )
+            pcm_source = discord.FFmpegPCMAudio(
                 audio_file_path,
                 executable=self.ffmpeg_path,
-                before_options=self._build_ffmpeg_before_options(),
-                options=f'-filter:a "volume={self.volume}"'
+                before_options=self._build_slap_ffmpeg_before_options(),
+                options=self._build_slap_ffmpeg_options(),
             )
-            # Volume is handled by ffmpeg filter now
-            
-            voice_client.play(audio_source)
+            audio_source = discord.PCMVolumeTransformer(pcm_source, volume=self.volume)
+
+            def slap_after(error):
+                if error:
+                    print(f"[AudioService] [SLAP-DEBUG] Playback error: {error}")
+                else:
+                    print(f"[AudioService] [SLAP-DEBUG] Slap playback completed OK")
+
+            voice_client.play(audio_source, after=slap_after)
+            print(f"[AudioService] [SLAP-DEBUG] voice_client.play() returned. is_playing={voice_client.is_playing()}")
             self._log_perf(f"play_slap ({audio_file})", slap_start_time)
             return True
         except Exception as e:
@@ -870,8 +945,7 @@ class AudioService:
                 self._guild_stop_progress_update[guild_id] = True
                 self.stop_progress_update = True
                 self._cancel_progress_update_task(guild_id)
-                voice_client.stop()
-                await asyncio.sleep(0.1)  # Allow FFmpeg process to terminate cleanly
+                await self._stop_voice_client_and_wait(voice_client)
                 
                 # Update the previous sound's message with skip emoji
                 if previous_sound_message: 
@@ -943,7 +1017,8 @@ class AudioService:
                         audio_file_path,
                         executable=self.ffmpeg_path,
                         options=ffmpeg_options,
-                        before_options=self._build_ffmpeg_before_options()
+                        before_options=self._build_ffmpeg_before_options(),
+                        stderr=None,  # inherit stderr so ffmpeg crashes are visible in container logs
                     )
                     ffmpeg_spawn_duration = time.time() - ffmpeg_spawn_start
                     print(
@@ -1609,17 +1684,18 @@ class KeywordDetectionSink(sinks.Sink):
                             elif not voice_client.is_connected():
                                 print(f"[VoskWorker] WARNING: Voice client exists but is not connected! Triggering reconnection...")
                                 # Schedule reconnection on the main event loop
-                                asyncio.run_coroutine_threadsafe(
-                                    self.audio_service.ensure_voice_connected(voice_client.channel),
-                                    self.loop
-                                )
+                                if not self.loop.is_closed():
+                                    asyncio.run_coroutine_threadsafe(
+                                        self.audio_service.ensure_voice_connected(voice_client.channel),
+                                        self.loop
+                                    )
                             elif not hasattr(voice_client, 'ws') or voice_client.ws is None:
                                 print(f"[VoskWorker] WARNING: Voice client has no WebSocket! Triggering reconnection...")
-                                # Schedule reconnection on the main event loop  
-                                asyncio.run_coroutine_threadsafe(
-                                    self.audio_service.ensure_voice_connected(voice_client.channel),
-                                    self.loop
-                                )
+                                if not self.loop.is_closed():
+                                    asyncio.run_coroutine_threadsafe(
+                                        self.audio_service.ensure_voice_connected(voice_client.channel),
+                                        self.loop
+                                    )
                         else:
                             print(f"[VoskWorker] WARNING: No voice client found for {self.guild.name}")
                     except Exception as health_err:
@@ -1680,21 +1756,23 @@ class KeywordDetectionSink(sinks.Sink):
                             print(f"[AutoAI] Already processing. Skipping trigger.")
                         else:
                             print(f"[AutoAI] Silence detected. Triggering (duration={duration:.1f}s)")
-                            future = asyncio.run_coroutine_threadsafe(
-                                behavior._ai_commentary_service.trigger_commentary(self.guild.id, duration=duration),
-                                self.loop
-                            )
-                            future.add_done_callback(lambda f: print(f"[AutoAI] ERROR in trigger_commentary: {f.exception()}") if f.exception() else None)
+                            if not self.loop.is_closed():
+                                future = asyncio.run_coroutine_threadsafe(
+                                    behavior._ai_commentary_service.trigger_commentary(self.guild.id, duration=duration),
+                                    self.loop
+                                )
+                                future.add_done_callback(lambda f: print(f"[AutoAI] ERROR in trigger_commentary: {f.exception()}") if f.exception() else None)
         
         # Send "listening" notification when cooldown ends
         if hasattr(self.audio_service.bot, 'behavior'):
             behavior = self.audio_service.bot.behavior
             if hasattr(behavior, '_ai_commentary_service'):
-                future = asyncio.run_coroutine_threadsafe(
-                    behavior._ai_commentary_service.notify_listening_if_ready(self.guild.id),
-                    self.loop
-                )
-                future.add_done_callback(lambda f: print(f"[AutoAI] ERROR in notify_listening: {f.exception()}") if f.exception() else None)
+                if not self.loop.is_closed():
+                    future = asyncio.run_coroutine_threadsafe(
+                        behavior._ai_commentary_service.notify_listening_if_ready(self.guild.id),
+                        self.loop
+                    )
+                    future.add_done_callback(lambda f: print(f"[AutoAI] ERROR in notify_listening: {f.exception()}") if f.exception() else None)
         
         # Handle Vosk flushing for speech-to-text (1s threshold)
         for user_id, last_time in list(self.last_audio_time.items()):
@@ -1735,11 +1813,12 @@ class KeywordDetectionSink(sinks.Sink):
                                 print(f"[VenturaTrigger] Already processing. Skipping trigger for user {user_id}.")
                             else:
                                 print(f"[VenturaTrigger] Silence detected (2s) for user {user_id}. Triggering AI commentary (duration={duration:.1f}s)")
-                                future = asyncio.run_coroutine_threadsafe(
-                                    behavior._ai_commentary_service.trigger_commentary(self.guild.id, force=True, duration=duration),
-                                    self.loop
-                                )
-                                future.add_done_callback(lambda f: print(f"[VenturaTrigger] ERROR in trigger_commentary: {f.exception()}") if f.exception() else None)
+                                if not self.loop.is_closed():
+                                    future = asyncio.run_coroutine_threadsafe(
+                                        behavior._ai_commentary_service.trigger_commentary(self.guild.id, force=True, duration=duration),
+                                        self.loop
+                                    )
+                                    future.add_done_callback(lambda f: print(f"[VenturaTrigger] ERROR in trigger_commentary: {f.exception()}") if f.exception() else None)
             
         # 3. Cleanup users idle for more than 30 seconds to free memory
         for user_id, last_time in list(self.buffer_last_update.items()):
@@ -1860,7 +1939,8 @@ class KeywordDetectionSink(sinks.Sink):
             keyword, action = self._check_keywords(text, result)
             if keyword:
                 print(f"[{timestamp}] [KeywordDetection] Detected keyword '{keyword}' from user {username}!")
-                asyncio.run_coroutine_threadsafe(self.trigger_action(user_id, keyword, action), self.audio_service.bot.loop)
+                if not self.audio_service.bot.loop.is_closed():
+                    asyncio.run_coroutine_threadsafe(self.trigger_action(user_id, keyword, action), self.audio_service.bot.loop)
 
     def _check_keywords(self, text: str, result_obj: dict = None) -> tuple:
         """Check if any keyword is in the text. Returns (keyword, action) or (None, None).
@@ -1959,7 +2039,8 @@ class KeywordDetectionSink(sinks.Sink):
                         if user_id in self.recognizers: del self.recognizers[user_id]
                         if user_id in self.resample_states: del self.resample_states[user_id]
                         if user_id in self.last_partial: del self.last_partial[user_id]
-                        asyncio.run_coroutine_threadsafe(self.trigger_action(user_id, keyword, action), self.audio_service.bot.loop)
+                        if not self.audio_service.bot.loop.is_closed():
+                            asyncio.run_coroutine_threadsafe(self.trigger_action(user_id, keyword, action), self.audio_service.bot.loop)
                         return
             else:
                 result = json.loads(rec.PartialResult())
