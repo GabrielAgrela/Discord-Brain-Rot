@@ -7,6 +7,7 @@ import random
 import resource
 import shutil
 import time
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Tuple
 import discord
 from discord.ext import tasks
@@ -47,6 +48,11 @@ class BackgroundService:
         self._perf_prev_network_sample_monotonic: Optional[float] = None
         self._clock_ticks_per_second = self._resolve_clock_ticks_per_second()
         self._cpu_core_count = max(1, os.cpu_count() or 1)
+        self._weekly_wrapped_enabled = self._env_flag("WEEKLY_WRAPPED_ENABLED", True)
+        self._weekly_wrapped_day_utc = self._env_int("WEEKLY_WRAPPED_DAY_UTC", 4, 0, 6)
+        self._weekly_wrapped_hour_utc = self._env_int("WEEKLY_WRAPPED_HOUR_UTC", 18, 0, 23)
+        self._weekly_wrapped_minute_utc = self._env_int("WEEKLY_WRAPPED_MINUTE_UTC", 0, 0, 59)
+        self._weekly_wrapped_days = self._env_int("WEEKLY_WRAPPED_LOOKBACK_DAYS", 7, 1, 30)
 
     def start_tasks(self):
         """Schedule tasks to start when the bot is ready."""
@@ -74,6 +80,8 @@ class BackgroundService:
                     seconds=self._perf_tick_rate_seconds
                 )
                 self.performance_telemetry_loop.start()
+            if self._weekly_wrapped_enabled and not self.weekly_wrapped_scheduler_loop.is_running():
+                self.weekly_wrapped_scheduler_loop.start()
             
             asyncio.create_task(self._auto_join_channels())
             print("[BackgroundService] Background tasks started.")
@@ -118,6 +126,26 @@ class BackgroundService:
             return int(os.sysconf("SC_CLK_TCK"))
         except (AttributeError, ValueError):
             return 100
+
+    @staticmethod
+    def _env_flag(name: str, default: bool) -> bool:
+        """Parse a boolean environment variable with sane defaults."""
+        raw = os.getenv(name)
+        if raw is None:
+            return default
+        return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+    @staticmethod
+    def _env_int(name: str, default: int, minimum: int, maximum: int) -> int:
+        """Parse a bounded integer environment variable."""
+        raw = os.getenv(name)
+        if raw is None:
+            return default
+        try:
+            parsed = int(raw.strip())
+        except ValueError:
+            return default
+        return max(minimum, min(parsed, maximum))
 
     @staticmethod
     def _read_proc_cpu_counters() -> Dict[str, Tuple[int, int]]:
@@ -787,6 +815,58 @@ class BackgroundService:
         except Exception as notify_error:
             print(f"[BackgroundService] Failed to send scraper failure message: {notify_error}")
 
+    def _is_weekly_wrapped_window(self, now_utc: datetime) -> bool:
+        """Return True when the current UTC time matches the configured send window."""
+        if now_utc.weekday() != self._weekly_wrapped_day_utc:
+            return False
+        if now_utc.hour != self._weekly_wrapped_hour_utc:
+            return False
+        return now_utc.minute >= self._weekly_wrapped_minute_utc
+
+    async def _run_weekly_wrapped_scheduler_tick(
+        self,
+        now_utc: Optional[datetime] = None,
+    ) -> int:
+        """
+        Execute one scheduler tick for weekly wrapped delivery.
+
+        Args:
+            now_utc: Optional injected UTC time for deterministic tests.
+
+        Returns:
+            Number of guilds where a digest was sent.
+        """
+        if not self._weekly_wrapped_enabled or not self.behavior:
+            return 0
+
+        weekly_service = getattr(self.behavior, "_weekly_wrapped_service", None)
+        if weekly_service is None:
+            return 0
+
+        now_utc = now_utc or datetime.now(timezone.utc)
+        if now_utc.tzinfo is None:
+            now_utc = now_utc.replace(tzinfo=timezone.utc)
+
+        if not self._is_weekly_wrapped_window(now_utc):
+            return 0
+
+        sent_count = 0
+        for guild in self.bot.guilds:
+            try:
+                sent = await weekly_service.send_weekly_wrapped(
+                    guild=guild,
+                    days=self._weekly_wrapped_days,
+                    force=False,
+                    record_delivery=True,
+                    now_utc=now_utc,
+                )
+                if sent:
+                    sent_count += 1
+            except Exception as e:
+                print(f"[BackgroundService] Weekly wrapped failed for guild '{guild.name}': {e}")
+
+        return sent_count
+
     @tasks.loop(seconds=0.5)
     async def performance_telemetry_loop(self):
         """Log high-frequency process and host performance telemetry."""
@@ -800,6 +880,16 @@ class BackgroundService:
                 e,
                 exc_info=True,
             )
+
+    @tasks.loop(minutes=5)
+    async def weekly_wrapped_scheduler_loop(self):
+        """Send weekly wrapped summaries once per week at the configured UTC time."""
+        try:
+            sent_count = await self._run_weekly_wrapped_scheduler_tick()
+            if sent_count > 0:
+                print(f"[BackgroundService] Weekly wrapped sent in {sent_count} guild(s)")
+        except Exception as e:
+            print(f"[BackgroundService] Error in weekly wrapped scheduler: {e}")
 
     @tasks.loop(seconds=30)
     async def keyword_detection_health_check(self):

@@ -55,6 +55,53 @@ class ActionRepository(BaseRepository):
                 str(guild_id) if guild_id is not None else None,
             ),
         )
+
+    def has_action_for_target(
+        self,
+        action: str,
+        target: str,
+        guild_id: Optional[int | str] = None,
+        include_global: bool = False,
+    ) -> bool:
+        """
+        Check whether an action already exists for a specific target.
+
+        Args:
+            action: Action type to search.
+            target: Action target value.
+            guild_id: Optional guild scope.
+            include_global: When guild_id is set, include rows with NULL guild_id.
+
+        Returns:
+            True if a matching row exists.
+        """
+        if guild_id is None:
+            row = self._execute_one(
+                "SELECT 1 FROM actions WHERE action = ? AND target = ? LIMIT 1",
+                (action, target),
+            )
+        else:
+            if include_global:
+                row = self._execute_one(
+                    """
+                    SELECT 1
+                    FROM actions
+                    WHERE action = ? AND target = ? AND (guild_id = ? OR guild_id IS NULL)
+                    LIMIT 1
+                    """,
+                    (action, target, str(guild_id)),
+                )
+            else:
+                row = self._execute_one(
+                    """
+                    SELECT 1
+                    FROM actions
+                    WHERE action = ? AND target = ? AND guild_id = ?
+                    LIMIT 1
+                    """,
+                    (action, target, str(guild_id)),
+                )
+        return row is not None
     
     def get_top_users(
         self,

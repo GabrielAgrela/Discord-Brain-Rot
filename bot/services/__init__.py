@@ -10,6 +10,7 @@ from bot.services.mute import MuteService
 from bot.services.backup import BackupService
 from bot.services.image_generator import ImageGeneratorService
 from bot.services.guild_settings import GuildSettingsService
+from bot.services.weekly_wrapped import WeeklyWrappedService
 
 __all__ = [
     "MessageService",
@@ -17,4 +18,5 @@ __all__ = [
     "BackupService",
     "ImageGeneratorService",
     "GuildSettingsService",
+    "WeeklyWrappedService",
 ]

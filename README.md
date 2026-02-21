@@ -88,6 +88,7 @@ This README is based on the current codebase behavior (not historical README ass
   - sounds
   - voice users
   - voice channels
+- `/weeklywrapped` admin trigger for a weekly guild digest (top sounds/users/voice + quirky stats).
 - `/yearreview` yearly wrap-up with rank, play habits, streaks, and voice metrics.
 - Voice session analytics backed by `voice_activity` rows from `on_voice_state_update`.
 - Web analytics dashboard includes:
@@ -115,6 +116,7 @@ This README is based on the current codebase behavior (not historical README ass
 ### Background Automations
 - Random periodic sound playback loop (feature-flagged per guild; disabled by default).
 - MyInstants scraping loop.
+- Weekly wrapped scheduler loop (UTC-based, default Friday 18:00, deduped per guild/week).
 - Scraper start + completion image cards with compact run summary.
 - Controls-button normalizer loop (every minute): keeps one recent inline `⚙️` on eligible bot messages by adding if missing and removing extras with safe raw-component edits.
 - Keyword detection health check loop.
@@ -182,6 +184,7 @@ This README is based on the current codebase behavior (not historical README ass
 
 ### Stats
 - `/top option:<users|sounds|voice users|voice channels> number:<int> numberdays:<int>`
+- `/weeklywrapped days:<optional>` (admin/mod-gated; sends digest to configured bot channel)
 - `/yearreview user:<optional> year:<optional>`
 - `/sendyearreview user:<required> year:<optional>` (admin-gated placeholder DM flow)
 
@@ -240,6 +243,11 @@ This README is based on the current codebase behavior (not historical README ass
 - `PERIODIC_DEFAULT` (`false` default for new guilds)
 - `STT_DEFAULT` (`false` default for new guilds)
 - `PERFORMANCE_MONITOR_TICK_SECONDS` (performance monitor interval in seconds, default `0.5`, minimum `0.1`)
+- `WEEKLY_WRAPPED_ENABLED` (`true` default; enables weekly digest scheduler)
+- `WEEKLY_WRAPPED_DAY_UTC` (0-6, Monday=0, default `4` for Friday)
+- `WEEKLY_WRAPPED_HOUR_UTC` (0-23, default `18`)
+- `WEEKLY_WRAPPED_MINUTE_UTC` (0-59, default `0`)
+- `WEEKLY_WRAPPED_LOOKBACK_DAYS` (1-30, default `7`)
 
 ### ElevenLabs
 - `EL_key`

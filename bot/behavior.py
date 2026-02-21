@@ -46,6 +46,7 @@ from bot.services.background import BackgroundService
 from bot.services.backup import BackupService
 from bot.services.llm import LLMService
 from bot.services.guild_settings import GuildSettingsService
+from bot.services.weekly_wrapped import WeeklyWrappedService
 
 
 
@@ -70,6 +71,7 @@ class BotBehavior:
         self._backup_service = BackupService(bot, self._message_service)
         self._llm_service = LLMService()
         self._guild_settings_service = GuildSettingsService()
+        self._weekly_wrapped_service = WeeklyWrappedService(bot, self._message_service)
         
         from bot.services.ai_commentary import AICommentaryService
         self._ai_commentary_service = AICommentaryService(self)
@@ -367,3 +369,22 @@ class BotBehavior:
 
     async def perform_backup(self, interaction):
         return await self._backup_service.perform_backup(interaction)
+
+    async def send_weekly_wrapped(
+        self,
+        guild: discord.Guild,
+        days: int = 7,
+        force: bool = False,
+        record_delivery: bool = True,
+        requested_by: Optional[str] = None,
+        now_utc: Optional[datetime] = None,
+    ) -> bool:
+        """Send the weekly wrapped digest for a guild."""
+        return await self._weekly_wrapped_service.send_weekly_wrapped(
+            guild=guild,
+            days=days,
+            force=force,
+            record_delivery=record_delivery,
+            requested_by=requested_by,
+            now_utc=now_utc,
+        )

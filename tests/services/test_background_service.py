@@ -5,6 +5,7 @@ Tests for bot/services/background.py - BackgroundService.
 import os
 import sys
 from collections import namedtuple
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -528,6 +529,112 @@ class TestBackgroundService:
         assert payload["audio_keyword_sink_count"] == 2
         assert payload["audio_pending_connection_count"] == 1
         assert payload["audio_active_progress_task_count"] == 3
+
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    def test_weekly_wrapped_default_schedule_is_friday_18_utc(
+        self, _mock_sound_repo, _mock_action_repo
+    ):
+        """Ensure weekly wrapped defaults to Friday 18:00 UTC when env vars are unset."""
+        from bot.services.background import BackgroundService
+
+        with patch.dict(
+            "os.environ",
+            {
+                "WEEKLY_WRAPPED_DAY_UTC": "",
+                "WEEKLY_WRAPPED_HOUR_UTC": "",
+                "WEEKLY_WRAPPED_MINUTE_UTC": "",
+            },
+            clear=False,
+        ):
+            service = BackgroundService(
+                bot=Mock(),
+                audio_service=Mock(),
+                sound_service=Mock(),
+                behavior=Mock(),
+            )
+
+        assert service._weekly_wrapped_day_utc == 4
+        assert service._weekly_wrapped_hour_utc == 18
+        assert service._weekly_wrapped_minute_utc == 0
+
+    @pytest.mark.asyncio
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    async def test_weekly_wrapped_scheduler_tick_sends_for_matching_window(
+        self, _mock_sound_repo, _mock_action_repo
+    ):
+        """Ensure weekly scheduler dispatches digests when current UTC time matches the configured window."""
+        from bot.services.background import BackgroundService
+
+        guild_one = Mock(name="Guild One")
+        guild_two = Mock(name="Guild Two")
+        bot = Mock(guilds=[guild_one, guild_two])
+        behavior = Mock()
+        behavior._weekly_wrapped_service = Mock()
+        behavior._weekly_wrapped_service.send_weekly_wrapped = AsyncMock(side_effect=[True, False])
+
+        service = BackgroundService(
+            bot=bot,
+            audio_service=Mock(),
+            sound_service=Mock(),
+            behavior=behavior,
+        )
+        service._weekly_wrapped_enabled = True
+        service._weekly_wrapped_day_utc = 5  # Saturday
+        service._weekly_wrapped_hour_utc = 12
+        service._weekly_wrapped_minute_utc = 0
+        service._weekly_wrapped_days = 7
+
+        now_utc = datetime(2026, 2, 21, 12, 10, tzinfo=timezone.utc)
+        sent_count = await service._run_weekly_wrapped_scheduler_tick(now_utc=now_utc)
+
+        assert sent_count == 1
+        assert behavior._weekly_wrapped_service.send_weekly_wrapped.await_count == 2
+        behavior._weekly_wrapped_service.send_weekly_wrapped.assert_any_await(
+            guild=guild_one,
+            days=7,
+            force=False,
+            record_delivery=True,
+            now_utc=now_utc,
+        )
+        behavior._weekly_wrapped_service.send_weekly_wrapped.assert_any_await(
+            guild=guild_two,
+            days=7,
+            force=False,
+            record_delivery=True,
+            now_utc=now_utc,
+        )
+
+    @pytest.mark.asyncio
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    async def test_weekly_wrapped_scheduler_tick_skips_outside_window(
+        self, _mock_sound_repo, _mock_action_repo
+    ):
+        """Ensure weekly scheduler does nothing outside the configured UTC window."""
+        from bot.services.background import BackgroundService
+
+        behavior = Mock()
+        behavior._weekly_wrapped_service = Mock()
+        behavior._weekly_wrapped_service.send_weekly_wrapped = AsyncMock()
+
+        service = BackgroundService(
+            bot=Mock(guilds=[Mock(name="Guild")]),
+            audio_service=Mock(),
+            sound_service=Mock(),
+            behavior=behavior,
+        )
+        service._weekly_wrapped_enabled = True
+        service._weekly_wrapped_day_utc = 5  # Saturday
+        service._weekly_wrapped_hour_utc = 12
+        service._weekly_wrapped_minute_utc = 15
+
+        now_utc = datetime(2026, 2, 21, 12, 14, tzinfo=timezone.utc)
+        sent_count = await service._run_weekly_wrapped_scheduler_tick(now_utc=now_utc)
+
+        assert sent_count == 0
+        behavior._weekly_wrapped_service.send_weekly_wrapped.assert_not_awaited()
 
 
 class TestAutoJoinChannels:

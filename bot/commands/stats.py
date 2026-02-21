@@ -147,6 +147,50 @@ class StatsCog(commands.Cog):
 
         return f"Channel {channel_id}"
 
+    @commands.slash_command(name="weeklywrapped", description="[Admin] Send weekly wrapped digest to this server")
+    async def weekly_wrapped(
+        self,
+        ctx: discord.ApplicationContext,
+        days: Option(int, "Rolling window in days", default=7),
+    ):
+        """Manually trigger the weekly wrapped digest for the current guild."""
+        if not ctx.guild:
+            await ctx.respond("This command can only be used in a server.", ephemeral=True)
+            return
+
+        if not self.behavior.is_admin_or_mod(ctx.author):
+            await ctx.respond("You don't have permission to use this command.", ephemeral=True)
+            return
+
+        weekly_service = getattr(self.behavior, "_weekly_wrapped_service", None)
+        if weekly_service is None:
+            await ctx.respond("Weekly wrapped service is not available.", ephemeral=True)
+            return
+
+        safe_days = max(1, min(int(days), 30))
+        await ctx.respond(
+            f"Generating weekly wrapped for the last {safe_days} day(s)...",
+            ephemeral=True,
+        )
+
+        sent = await weekly_service.send_weekly_wrapped(
+            guild=ctx.guild,
+            days=safe_days,
+            force=True,
+            record_delivery=False,
+            requested_by=ctx.author.name,
+        )
+        if sent:
+            await ctx.followup.send(
+                "Weekly wrapped sent to the configured bot channel.",
+                ephemeral=True,
+            )
+        else:
+            await ctx.followup.send(
+                "I couldn't send the weekly wrapped (check bot channel configuration).",
+                ephemeral=True,
+            )
+
     @commands.slash_command(name="yearreview", description="Show yearly stats wrapped!")
     async def year_review(
         self, 
@@ -162,6 +206,7 @@ class StatsCog(commands.Cog):
         review_year = year if year else current_year
         
         username = target_user.name
+        guild_id = ctx.guild.id if ctx.guild else None
         
         # We need to implement the get_user_year_stats logic or assume it exists in DB
         # If it doesn't exist in the truncated DB code I saw earlier, I should try to call it

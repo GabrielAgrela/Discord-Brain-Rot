@@ -111,7 +111,7 @@ class AudioService:
         
         # Image generator for sound cards
         self.image_generator = ImageGeneratorService()
-        self.progress_display_delay_seconds = 1.0
+        self.progress_display_delay_seconds = 2.0
         self.short_clip_duration_threshold_seconds = 2.0
         self.short_clip_start_delay_ms = 120
         # Playback job controls

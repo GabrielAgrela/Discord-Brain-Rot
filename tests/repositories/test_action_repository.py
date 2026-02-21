@@ -91,6 +91,37 @@ class TestActionRepository:
         assert "user1" in users
         assert "user2" in users
 
+    def test_has_action_for_target(self, action_repository):
+        """Test checking for an existing action-target pair."""
+        action_repository.insert("user1", "weekly_wrapped_sent", "week:2026-02-16", guild_id=123)
+
+        assert action_repository.has_action_for_target(
+            action="weekly_wrapped_sent",
+            target="week:2026-02-16",
+            guild_id=123,
+        ) is True
+        assert action_repository.has_action_for_target(
+            action="weekly_wrapped_sent",
+            target="week:2026-02-09",
+            guild_id=123,
+        ) is False
+
+    def test_has_action_for_target_include_global(self, action_repository):
+        """Test guild-scoped checks with optional global-row fallback."""
+        action_repository.insert("user1", "weekly_wrapped_sent", "week:2026-02-16")
+
+        assert action_repository.has_action_for_target(
+            action="weekly_wrapped_sent",
+            target="week:2026-02-16",
+            guild_id=123,
+        ) is False
+        assert action_repository.has_action_for_target(
+            action="weekly_wrapped_sent",
+            target="week:2026-02-16",
+            guild_id=123,
+            include_global=True,
+        ) is True
+
 
 class TestActionRepositoryEdgeCases:
     """Edge case tests for ActionRepository."""
