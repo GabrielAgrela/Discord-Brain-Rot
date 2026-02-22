@@ -194,8 +194,22 @@ class AudioService:
         silently dropped or corrupted. We join() the thread via asyncio-safe polling.
         """
         player = getattr(voice_client, "_player", None)
+        player_id = hex(id(player)) if player is not None else "None"
+        player_alive_before = bool(player is not None and player.is_alive())
+        if player_alive_before:
+            print(
+                "[AudioService] [PLAY-DEBUG] stop_wait_begin "
+                f"player_id={player_id} timeout={timeout:.2f}s "
+                f"state={self._voice_client_state_summary(voice_client)}"
+            )
         voice_client.stop()  # sets _end event; _player attribute is cleared to None
-        await self._wait_for_audio_player_thread(player, timeout=timeout)
+        player_exited = await self._wait_for_audio_player_thread(player, timeout=timeout)
+        if player_alive_before:
+            print(
+                "[AudioService] [PLAY-DEBUG] stop_wait_end "
+                f"player_id={player_id} player_exited={player_exited} "
+                f"state={self._voice_client_state_summary(voice_client)}"
+            )
 
     async def _wait_for_audio_player_thread(self, player, timeout: float = 2.0) -> bool:
         """Wait for a Discord AudioPlayer thread reference to fully exit."""
@@ -205,6 +219,83 @@ class AudioService:
         while player.is_alive() and time.time() < deadline:
             await asyncio.sleep(0.02)
         return not player.is_alive()
+
+    def _voice_client_state_summary(self, voice_client) -> str:
+        """Return a compact voice-client/player state snapshot for debugging."""
+        if voice_client is None:
+            return "vc=None"
+
+        player = getattr(voice_client, "_player", None)
+        player_id = hex(id(player)) if player is not None else "None"
+
+        try:
+            player_alive = bool(player is not None and player.is_alive())
+        except Exception:
+            player_alive = False
+
+        try:
+            is_connected = bool(voice_client.is_connected())
+        except Exception:
+            is_connected = False
+
+        try:
+            is_playing = bool(voice_client.is_playing())
+        except Exception:
+            is_playing = False
+
+        try:
+            is_paused = bool(hasattr(voice_client, "is_paused") and voice_client.is_paused())
+        except Exception:
+            is_paused = False
+
+        channel_name = getattr(getattr(voice_client, "channel", None), "name", None) or "None"
+        return (
+            f"connected={is_connected} playing={is_playing} paused={is_paused} "
+            f"player_id={player_id} player_alive={player_alive} channel={channel_name}"
+        )
+
+    async def _log_playback_state_probe(
+        self,
+        voice_client,
+        guild_id: int,
+        audio_file: str,
+        play_id: str,
+        player,
+    ) -> None:
+        """Log delayed post-start state snapshots to diagnose silent playback races."""
+        checkpoints = (0.15, 0.75)
+        last_delay = 0.0
+
+        try:
+            for delay in checkpoints:
+                await asyncio.sleep(max(0.0, delay - last_delay))
+                last_delay = delay
+                current_player = getattr(voice_client, "_player", None)
+                same_player = current_player is player
+                tracked_player_alive = False
+                if player is not None:
+                    try:
+                        tracked_player_alive = player.is_alive()
+                    except Exception:
+                        tracked_player_alive = False
+
+                print(
+                    "[AudioService] [PLAY-DEBUG] start_probe "
+                    f"play_id={play_id} guild_id={guild_id} file={audio_file} "
+                    f"t_plus={delay:.2f}s same_player={same_player} "
+                    f"tracked_player_alive={tracked_player_alive} "
+                    f"state={self._voice_client_state_summary(voice_client)}"
+                )
+
+                if not tracked_player_alive:
+                    break
+        except asyncio.CancelledError:
+            return
+        except Exception as probe_error:
+            print(
+                "[AudioService] [PLAY-DEBUG] start_probe_error "
+                f"play_id={play_id} guild_id={guild_id} file={audio_file} error={probe_error}"
+            )
 
     def _build_ffmpeg_before_options(self) -> str:
         """Build ffmpeg before-options based on selected latency policy."""
@@ -891,6 +982,7 @@ class AudioService:
         self._ensure_guild_playback_state(guild_id)
         self._set_active_guild(guild_id)
         print(f"[AudioService] play_audio(file={audio_file}, user={user}, guild={channel.guild.name}, guild_id={guild_id})")
+        play_id = f"{guild_id}-{int(play_start_time * 1000)}"
         MAX_RETRIES = 3
 
         if self.mute_service.is_muted:
@@ -951,6 +1043,11 @@ class AudioService:
             if not voice_client:
                 self._release_guild_play_request(guild_id)
                 return False
+            print(
+                "[AudioService] [PLAY-DEBUG] pre_play "
+                f"play_id={play_id} guild_id={guild_id} file={audio_file} "
+                f"state={self._voice_client_state_summary(voice_client)}"
+            )
 
             # Check if we're actually interrupting playback
             is_currently_playing = voice_client.is_playing() or (hasattr(voice_client, "is_paused") and voice_client.is_paused())
@@ -987,6 +1084,27 @@ class AudioService:
                          # retrieving the view from the message components, which is complex.
                          # For now, relying on self.current_view is the best bet as it points to the 
                          # sound we are about to stop.
+            else:
+                # Natural completion can also leave a lingering AudioPlayer thread alive
+                # for a short window. Starting a new sound during that window can be
+                # silently discarded even though is_playing() is already False.
+                lingering_player = getattr(voice_client, "_player", None)
+                if lingering_player is not None and lingering_player.is_alive():
+                    lingering_player_id = hex(id(lingering_player))
+                    print(
+                        "[AudioService] [PLAY-DEBUG] wait_lingering_player_before_play "
+                        f"play_id={play_id} guild_id={guild_id} file={audio_file} "
+                        f"lingering_player_id={lingering_player_id} "
+                        f"state={self._voice_client_state_summary(voice_client)}"
+                    )
+                    lingering_exited = await self._wait_for_audio_player_thread(lingering_player, timeout=2.0)
+                    print(
+                        "[AudioService] [PLAY-DEBUG] lingering_player_wait_done "
+                        f"play_id={play_id} guild_id={guild_id} file={audio_file} "
+                        f"lingering_player_id={lingering_player_id} lingering_exited={lingering_exited} "
+                        f"state={self._voice_client_state_summary(voice_client)}"
+                    )
+                    await asyncio.sleep(0.05)
 
             # Resolve file path immediately to avoid pre-playback DB reads
             audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Sounds", audio_file))
@@ -1076,10 +1194,31 @@ class AudioService:
                         f"[AudioService] [PERF] ffmpeg_spawn guild_id={guild_id} duration={ffmpeg_spawn_duration:.4f}s"
                     )
                 self._log_perf("FFmpeg Source Creation", play_start_time, extra=f"guild_id={guild_id}")
-                
+                playback_started_at = time.time()
+                active_player = None
+
                 def after_playing(error):
                     try:
-                        if error: print(f'[AudioService] Error in playback: {error}')
+                        elapsed = time.time() - playback_started_at
+                        try:
+                            callback_player_alive = bool(active_player is not None and active_player.is_alive())
+                        except Exception:
+                            callback_player_alive = False
+                        if error:
+                            print(
+                                "[AudioService] [PLAY-DEBUG] play_after "
+                                f"play_id={play_id} guild_id={guild_id} file={audio_file} "
+                                f"status=error elapsed={elapsed:.3f}s "
+                                f"player_alive={callback_player_alive} error={error}"
+                            )
+                            print(f'[AudioService] Error in playback: {error}')
+                        else:
+                            print(
+                                "[AudioService] [PLAY-DEBUG] play_after "
+                                f"play_id={play_id} guild_id={guild_id} file={audio_file} "
+                                f"status=ok elapsed={elapsed:.3f}s "
+                                f"player_alive={callback_player_alive}"
+                            )
                     finally:
                         guild_event = self._guild_playback_done.get(guild_id)
                         if guild_event is not None:
@@ -1087,10 +1226,39 @@ class AudioService:
                         self.bot.loop.call_soon_threadsafe(self.playback_done.set)
 
                 voice_client.play(audio_source, after=after_playing)
+                active_player = getattr(voice_client, "_player", None)
+                active_player_id = hex(id(active_player)) if active_player is not None else "None"
+                try:
+                    active_player_alive = bool(active_player is not None and active_player.is_alive())
+                except Exception:
+                    active_player_alive = False
                 guild_event = self._guild_playback_done.get(guild_id)
                 if guild_event is not None:
                     guild_event.clear()
                 self.playback_done.clear()
+                print(
+                    "[AudioService] [PLAY-DEBUG] play_started "
+                    f"play_id={play_id} guild_id={guild_id} file={audio_file} "
+                    f"player_id={active_player_id} player_alive={active_player_alive} "
+                    f"short_clip_safety={use_short_clip_safety} before_options={ffmpeg_before_options!r} "
+                    f"state={self._voice_client_state_summary(voice_client)}"
+                )
+                try:
+                    asyncio.create_task(
+                        self._log_playback_state_probe(
+                            voice_client=voice_client,
+                            guild_id=guild_id,
+                            audio_file=audio_file,
+                            play_id=play_id,
+                            player=active_player,
+                        )
+                    )
+                except Exception as probe_schedule_error:
+                    print(
+                        "[AudioService] [PLAY-DEBUG] start_probe_schedule_error "
+                        f"play_id={play_id} guild_id={guild_id} file={audio_file} "
+                        f"error={probe_schedule_error}"
+                    )
                 request_to_play_start = time.time() - play_start_time
                 print(
                     f"[AudioService] [PERF] request_to_playback_start guild_id={guild_id} duration={request_to_play_start:.4f}s"
