@@ -114,6 +114,9 @@ class AudioService:
         self.progress_display_delay_seconds = 2.0
         self.short_clip_duration_threshold_seconds = 2.0
         self.short_clip_start_delay_ms = 120
+        self.entrance_playback_start_delay_seconds = float(
+            os.getenv("ENTRANCE_PLAYBACK_START_DELAY_SECONDS", "1.0")
+        )
         # Playback job controls
         self._ffmpeg_max_jobs = max(1, int(os.getenv("FFMPEG_MAX_CONCURRENT_JOBS", "2")))
         self._ffmpeg_semaphore = asyncio.Semaphore(self._ffmpeg_max_jobs)
@@ -296,6 +299,41 @@ class AudioService:
                 "[AudioService] [PLAY-DEBUG] start_probe_error "
                 f"play_id={play_id} guild_id={guild_id} file={audio_file} error={probe_error}"
             )
+
+    async def _maybe_apply_entrance_playback_warmup(
+        self,
+        guild_id: int,
+        audio_file: str,
+        play_id: str,
+        voice_client,
+        is_entrance: bool,
+    ) -> None:
+        """Delay entrance playback briefly so newly joined clients can receive audio reliably."""
+        if not is_entrance:
+            return
+
+        delay_seconds = max(0.0, float(getattr(self, "entrance_playback_start_delay_seconds", 0.0)))
+        if delay_seconds <= 0:
+            return
+
+        conn_age = None
+        conn_started_at = self._connection_timestamps.get(guild_id)
+        if conn_started_at:
+            conn_age = max(0.0, time.time() - conn_started_at)
+
+        print(
+            "[AudioService] [PLAY-DEBUG] entrance_warmup_begin "
+            f"play_id={play_id} guild_id={guild_id} file={audio_file} "
+            f"delay={delay_seconds:.2f}s conn_age={conn_age if conn_age is not None else 'unknown'} "
+            f"state={self._voice_client_state_summary(voice_client)}"
+        )
+        await asyncio.sleep(delay_seconds)
+        print(
+            "[AudioService] [PLAY-DEBUG] entrance_warmup_end "
+            f"play_id={play_id} guild_id={guild_id} file={audio_file} "
+            f"delay={delay_seconds:.2f}s conn_age={conn_age if conn_age is not None else 'unknown'} "
+            f"state={self._voice_client_state_summary(voice_client)}"
+        )
 
     def _build_ffmpeg_before_options(self) -> str:
         """Build ffmpeg before-options based on selected latency policy."""
@@ -1015,7 +1053,7 @@ class AudioService:
                 bot_channel = self.message_service.get_bot_channel(channel.guild)
                 if bot_channel:
                     cooldown_message = await bot_channel.send(
-                        embed=discord.Embed(title="Don't be rude, let Gertrudes speak 😤")
+                        embed=discord.Embed(title="Don't be rude, let Ventura speak 😤")
                     )
                     self._guild_cooldown_message[guild_id] = cooldown_message
                     self.cooldown_message = cooldown_message
@@ -1105,6 +1143,14 @@ class AudioService:
                         f"state={self._voice_client_state_summary(voice_client)}"
                     )
                     await asyncio.sleep(0.05)
+
+            await self._maybe_apply_entrance_playback_warmup(
+                guild_id=guild_id,
+                audio_file=audio_file,
+                play_id=play_id,
+                voice_client=voice_client,
+                is_entrance=is_entrance,
+            )
 
             # Resolve file path immediately to avoid pre-playback DB reads
             audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Sounds", audio_file))

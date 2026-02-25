@@ -152,7 +152,7 @@ class MessageService:
         channel: Optional[discord.TextChannel] = None,
         guild: Optional[discord.Guild] = None,
         message_format: Literal["embed", "image"] = "embed",
-        image_requester: str = "Gertrudes",
+        image_requester: str = "Ventura",
         image_show_footer: bool = True,
         image_show_sound_icon: bool = True,
         image_border_color: Optional[str] = None,
