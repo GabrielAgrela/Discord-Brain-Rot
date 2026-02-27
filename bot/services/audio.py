@@ -9,6 +9,7 @@ import wave
 import json
 import audioop
 import queue
+import re
 from datetime import datetime
 import traceback
 from typing import Optional, List, Dict, Any
@@ -114,6 +115,12 @@ class AudioService:
         self.progress_display_delay_seconds = 2.0
         self.short_clip_duration_threshold_seconds = 2.0
         self.short_clip_start_delay_ms = 120
+        self.playback_start_preroll_ms = max(
+            0, int(os.getenv("PLAYBACK_START_PREROLL_MS", "180"))
+        )
+        self.low_latency_mp3_start_preroll_ms = max(
+            0, int(os.getenv("LOW_LATENCY_MP3_START_PREROLL_MS", "650"))
+        )
         self.entrance_playback_start_delay_seconds = float(
             os.getenv("ENTRANCE_PLAYBACK_START_DELAY_SECONDS", "1.0")
         )
@@ -126,6 +133,44 @@ class AudioService:
         self._play_pending_limit = max(1, int(os.getenv("PLAY_MAX_PENDING_PER_GUILD", "6")))
         self._play_request_timestamps: Dict[int, deque] = {}
         self._play_pending_count: Dict[int, int] = {}
+        self.playback_ear_protection_enabled = (
+            os.getenv("SOUND_PLAYBACK_EAR_PROTECTION_ENABLED", "true").strip().lower()
+            not in {"0", "false", "off", "no"}
+        )
+        self.playback_ear_protection_gain_db = float(
+            os.getenv("SOUND_PLAYBACK_EAR_PROTECTION_GAIN_DB", "-3.0")
+        )
+        self.playback_ear_protection_threshold_db = float(
+            os.getenv("SOUND_PLAYBACK_EAR_PROTECTION_THRESHOLD_DBFS", "-16.0")
+        )
+        self.playback_ear_protection_ratio = max(
+            1.0,
+            float(os.getenv("SOUND_PLAYBACK_EAR_PROTECTION_RATIO", "6.0")),
+        )
+        self.playback_ear_protection_lowpass_hz = max(
+            0,
+            int(os.getenv("SOUND_PLAYBACK_EAR_PROTECTION_LOWPASS_HZ", "12000")),
+        )
+        keywords_env = os.getenv("SOUND_EARRAPE_KEYWORDS", "earrape,bassboost,bass boost")
+        self.earrape_keywords = tuple(
+            token.strip().lower()
+            for token in keywords_env.split(",")
+            if token.strip()
+        )
+        self.earrape_extra_attenuation_db = float(
+            os.getenv("SOUND_EARRAPE_EXTRA_ATTENUATION_DB", "-6.0")
+        )
+        self.earrape_lowpass_hz = max(
+            0,
+            int(os.getenv("SOUND_EARRAPE_LOWPASS_HZ", "9000")),
+        )
+        self.earrape_compression_threshold_db = float(
+            os.getenv("SOUND_EARRAPE_COMPRESS_THRESHOLD_DBFS", "-20.0")
+        )
+        self.earrape_compression_ratio = max(
+            1.0,
+            float(os.getenv("SOUND_EARRAPE_COMPRESS_RATIO", "12.0")),
+        )
 
     def _log_perf(self, operation: str, start_time: float, extra: str = ""):
         """Log performance metrics for an operation."""
@@ -384,6 +429,88 @@ class AudioService:
             return False
         threshold = getattr(self, "short_clip_duration_threshold_seconds", 2.0)
         return duration_seconds <= threshold
+
+    def _is_low_latency_mp3_playback(self, audio_file_path: str) -> bool:
+        """Return True for MP3 playback while low-latency policy is active."""
+        return self.audio_latency_mode == "low_latency" and audio_file_path.lower().endswith(".mp3")
+
+    def _get_play_audio_start_preroll_ms(
+        self,
+        use_short_clip_safety: bool,
+        is_low_latency_mp3: bool = False,
+    ) -> int:
+        """Return leading silence (ms) to protect clip starts from Discord startup drops.
+
+        Uses one delay value per playback to avoid stacking multiple `adelay`
+        filters. Short clips keep their existing minimum safeguard while also
+        honoring the general playback pre-roll if it is configured higher.
+        """
+        if self.audio_latency_mode != "low_latency":
+            return 0
+
+        general_delay_ms = max(0, int(getattr(self, "playback_start_preroll_ms", 180)))
+        if is_low_latency_mp3:
+            mp3_start_delay_ms = max(
+                0, int(getattr(self, "low_latency_mp3_start_preroll_ms", 650))
+            )
+            general_delay_ms = max(general_delay_ms, mp3_start_delay_ms)
+        if not use_short_clip_safety:
+            return general_delay_ms
+
+        short_delay_ms = max(0, int(getattr(self, "short_clip_start_delay_ms", 120)))
+        return max(general_delay_ms, short_delay_ms)
+
+    @staticmethod
+    def _db_to_volume_multiplier(gain_db: float) -> float:
+        """Convert dB gain/attenuation to linear ffmpeg volume multiplier."""
+        return pow(10.0, gain_db / 20.0)
+
+    def _is_earrape_like_filename(self, audio_file: str) -> bool:
+        """Return True when filename suggests intentionally harsh audio content."""
+        normalized = re.sub(r"[\W_]+", " ", (audio_file or "").lower()).strip()
+        if not normalized:
+            return False
+        keywords = getattr(self, "earrape_keywords", ("earrape",))
+        return any(keyword in normalized for keyword in keywords)
+
+    def _build_playback_ear_protection_filters(self, audio_file: str) -> List[str]:
+        """Build protective playback filters to tame harsh peaks."""
+        if not getattr(self, "playback_ear_protection_enabled", True):
+            return []
+
+        threshold_db = float(getattr(self, "playback_ear_protection_threshold_db", -16.0))
+        ratio = max(1.0, float(getattr(self, "playback_ear_protection_ratio", 6.0)))
+        lowpass_hz = max(0, int(getattr(self, "playback_ear_protection_lowpass_hz", 12000)))
+        gain_db = float(getattr(self, "playback_ear_protection_gain_db", -3.0))
+
+        if self._is_earrape_like_filename(audio_file):
+            threshold_db = min(
+                threshold_db,
+                float(getattr(self, "earrape_compression_threshold_db", -20.0)),
+            )
+            ratio = max(
+                ratio,
+                float(getattr(self, "earrape_compression_ratio", 12.0)),
+            )
+            earrape_lowpass = max(0, int(getattr(self, "earrape_lowpass_hz", 9000)))
+            if lowpass_hz <= 0:
+                lowpass_hz = earrape_lowpass
+            elif earrape_lowpass > 0:
+                lowpass_hz = min(lowpass_hz, earrape_lowpass)
+            gain_db += float(getattr(self, "earrape_extra_attenuation_db", -6.0))
+
+        filters: List[str] = []
+        if ratio > 1.0:
+            filters.append(
+                f"acompressor=threshold={threshold_db:.1f}dB:ratio={ratio:.2f}:attack=5:release=80:makeup=1"
+            )
+        if lowpass_hz > 0:
+            filters.append(f"lowpass=f={lowpass_hz}")
+
+        if abs(gain_db) > 0.01:
+            filters.append(f"volume={self._db_to_volume_multiplier(gain_db):.4f}")
+
+        return filters
 
     def _release_guild_play_request(self, guild_id: int) -> None:
         """Release one pending play slot for a guild."""
@@ -1187,6 +1314,7 @@ class AudioService:
                 audio_file_path,
                 short_clip_duration_seconds,
             )
+            use_low_latency_mp3_safety = self._is_low_latency_mp3_playback(audio_file_path)
 
             # FFmpeg options
             # Combine effect volume with global volume
@@ -1202,20 +1330,42 @@ class AudioService:
                     filters.append("aecho=0.8:0.9:1000:0.3")
                 if effects.get('reverse'):
                     filters.append("areverse")
-            if use_short_clip_safety:
-                delay_ms = max(0, int(getattr(self, "short_clip_start_delay_ms", 120)))
-                filters.append(f"adelay={delay_ms}:all=1")
+            ear_protection_filters = self._build_playback_ear_protection_filters(audio_file)
+            if ear_protection_filters:
+                filters.extend(ear_protection_filters)
+            startup_preroll_ms = self._get_play_audio_start_preroll_ms(
+                use_short_clip_safety,
+                is_low_latency_mp3=use_low_latency_mp3_safety,
+            )
+            if startup_preroll_ms > 0:
+                filters.append(f"adelay={startup_preroll_ms}:all=1")
 
             ffmpeg_options = f'-filter:a "{",".join(filters)}"'
             ffmpeg_before_options = (
                 self._build_conservative_ffmpeg_before_options()
-                if use_short_clip_safety
+                if use_short_clip_safety or use_low_latency_mp3_safety
                 else self._build_ffmpeg_before_options()
             )
             if use_short_clip_safety:
                 print(
                     "[AudioService] [DEBUG] short-clip safety enabled "
                     f"for {audio_file} duration={short_clip_duration_seconds}s"
+                )
+            if use_low_latency_mp3_safety:
+                print(
+                    "[AudioService] [DEBUG] low-latency mp3 startup safety enabled "
+                    f"for {audio_file}"
+                )
+            if startup_preroll_ms > 0:
+                print(
+                    "[AudioService] [DEBUG] playback startup preroll enabled "
+                    f"for {audio_file} delay_ms={startup_preroll_ms} "
+                    f"short_clip_safety={use_short_clip_safety} mp3_startup_safety={use_low_latency_mp3_safety}"
+                )
+            if ear_protection_filters:
+                print(
+                    "[AudioService] [DEBUG] playback ear protection enabled "
+                    f"for {audio_file} filters={ear_protection_filters}"
                 )
 
             # START PLAYBACK IMMEDIATELY
@@ -1286,7 +1436,8 @@ class AudioService:
                     "[AudioService] [PLAY-DEBUG] play_started "
                     f"play_id={play_id} guild_id={guild_id} file={audio_file} "
                     f"player_id={active_player_id} player_alive={active_player_alive} "
-                    f"short_clip_safety={use_short_clip_safety} before_options={ffmpeg_before_options!r} "
+                    f"short_clip_safety={use_short_clip_safety} mp3_startup_safety={use_low_latency_mp3_safety} "
+                    f"before_options={ffmpeg_before_options!r} "
                     f"state={self._voice_client_state_summary(voice_client)}"
                 )
                 try:

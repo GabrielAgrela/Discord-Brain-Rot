@@ -397,21 +397,36 @@ class SoundRepository(BaseRepository[Sound]):
         from datetime import datetime
         if date is None:
             date = datetime.now()
-        
-        return self._execute_write(
-            """
-            INSERT INTO sounds (originalfilename, filename, favorite, blacklist, date, slap, is_elevenlabs, guild_id)
-            VALUES (?, ?, ?, 0, ?, 0, ?, ?)
-            """,
-            (
-                original_filename,
-                filename,
-                favorite,
-                date.strftime("%Y-%m-%d %H:%M:%S") if hasattr(date, 'strftime') else str(date),
-                is_elevenlabs,
-                str(guild_id) if guild_id is not None else None,
-            )
+
+        time_value = date.strftime("%Y-%m-%d %H:%M:%S") if hasattr(date, 'strftime') else str(date)
+        params = (
+            original_filename,
+            filename,
+            favorite,
+            time_value,
+            is_elevenlabs,
+            str(guild_id) if guild_id is not None else None,
         )
+
+        try:
+            return self._execute_write(
+                """
+                INSERT INTO sounds (originalfilename, filename, favorite, blacklist, timestamp, slap, is_elevenlabs, guild_id)
+                VALUES (?, ?, ?, 0, ?, 0, ?, ?)
+                """,
+                params,
+            )
+        except sqlite3.OperationalError as exc:
+            # Legacy compatibility for schemas that still use `date` instead of `timestamp`.
+            if "no column named timestamp" not in str(exc).lower():
+                raise
+            return self._execute_write(
+                """
+                INSERT INTO sounds (originalfilename, filename, favorite, blacklist, date, slap, is_elevenlabs, guild_id)
+                VALUES (?, ?, ?, 0, ?, 0, ?, ?)
+                """,
+                params,
+            )
     
     def update_sound(self, filename: str, new_filename: str = None, 
                      favorite: int = None, slap: int = None) -> bool:
@@ -492,14 +507,28 @@ class SoundRepository(BaseRepository[Sound]):
         """
         if date is None:
             date = datetime.now()
-        
-        return self._execute_write(
-            """
-            INSERT INTO sounds (originalfilename, filename, favorite, blacklist, date)
-            VALUES (?, ?, ?, 0, ?)
-            """,
-            (original_filename, filename, int(favorite), date.isoformat())
-        )
+
+        time_value = date.isoformat() if hasattr(date, "isoformat") else str(date)
+        params = (original_filename, filename, int(favorite), time_value)
+
+        try:
+            return self._execute_write(
+                """
+                INSERT INTO sounds (originalfilename, filename, favorite, blacklist, timestamp)
+                VALUES (?, ?, ?, 0, ?)
+                """,
+                params,
+            )
+        except sqlite3.OperationalError as exc:
+            if "no column named timestamp" not in str(exc).lower():
+                raise
+            return self._execute_write(
+                """
+                INSERT INTO sounds (originalfilename, filename, favorite, blacklist, date)
+                VALUES (?, ?, ?, 0, ?)
+                """,
+                params,
+            )
     
     def update(self, sound_id: int, filename: Optional[str] = None,
                favorite: Optional[bool] = None, 

@@ -160,6 +160,29 @@ Canonical completion command:
 - Services don't expose repository methods directly - access via `.sound_repo`, `.action_repo`, etc.
 - Repository method names may differ from service methods - always verify by checking the repository class
 
+### Upload Lock Re-entrancy
+- `BotBehavior.upload_lock` is the same object as `SoundService.upload_lock`.
+- If upload flows already hold that lock (for example `UploadSoundWithFileModal.callback` or `SoundService.prompt_upload_sound`) and then call `save_uploaded_sound_secure()`, the method must **not** try to acquire the same lock again.
+- Use `save_uploaded_sound_secure(..., lock_already_held=True)` from these call sites to avoid self-deadlock.
+- Symptom of regression: first upload hangs right after `calling save_uploaded_sound_secure`, then the next attempt reports upload is locked/in progress.
+
+### Sounds Table Time Column
+- Production `sounds` table writes use `timestamp` (not `date`) for insert paths.
+- `SoundRepository.insert_sound()` and `SoundRepository.insert()` must target `timestamp` for modern schemas.
+- Keep compatibility fallback to `date` only for legacy/test schemas that still expose `date`.
+- Symptom of regression: upload/save reaches repository insert and fails with `table sounds has no column named date`.
+
+### Similarity Cache After Upload
+- New uploads that use `SoundRepository.insert_sound()` must invalidate the in-memory similarity cache (`Database.invalidate_sound_cache()`).
+- Without cache invalidation, the sound exists on disk + DB but autocomplete/similarity (`Database.get_sounds_by_similarity`) can miss it until process restart.
+
+### Ingest Loudness Normalization
+- Direct MP3 ingest paths in `SoundService` (`save_uploaded_sound_secure` and `save_sound_from_url`) now normalize loudness on save before DB insert.
+- This now uses a compression + peak-safe gain pass (not just flat average gain): `compress_dynamic_range` first, then gain clamped by `SOUND_INGEST_PEAK_CEILING_DBFS`.
+- Defaults are tuned for "audible but not earrape": `SOUND_INGEST_TARGET_DBFS=-18.0`, `SOUND_INGEST_PEAK_CEILING_DBFS=-2.0`, `SOUND_INGEST_COMPRESS_ENABLED=true`, `SOUND_INGEST_COMPRESS_THRESHOLD_DBFS=-14.0`, `SOUND_INGEST_COMPRESS_RATIO=6.0`.
+- Keep normalization best-effort (log failures and continue saving) so upload/import reliability is not blocked by ffmpeg/pydub edge cases.
+- TikTok/YouTube/Instagram downloads that pass through `Downloads/` still get normalized in `SoundDownloader.move_sounds` and must use the same env knobs as `SoundService` to keep consistent loudness behavior.
+
 ### Testing Limitations
 - Repository unit tests don't catch integration errors with Discord or BotBehavior
 - Attribute name mismatches and service access patterns are only caught at runtime
@@ -216,6 +239,9 @@ Canonical completion command:
 - For slap playback specifically, adding a short ffmpeg pre-roll silence (`adelay=120:all=1`) in the filter chain helps avoid cases where Discord shows speaking but drops the first burst of audio.
 - Short MP3 slap clips can decode as **empty output** under low-latency ffmpeg startup flags (`-fflags nobuffer -flags low_delay`). For slap reliability, use conservative `before_options` (`-nostdin`) even when global audio latency mode is `low_latency`.
 - Short **non-slap** MP3 clips can hit the same low-latency startup issue. `AudioService.play_audio()` now enables short-clip safety for low-latency mode (<=2.0s MP3): conservative `before_options` (`-nostdin`) plus a small `adelay` pre-roll before playback.
+- To reduce "first second cut" on normal MP3 playback in `low_latency` mode, `AudioService.play_audio()` now applies low-latency MP3 startup safety for all MP3s: conservative `before_options` plus a configurable pre-roll floor (`LOW_LATENCY_MP3_START_PREROLL_MS`, default `650`).
+- `AudioService.play_audio()` now also applies playback-time ear-protection filters by default (compressor + lowpass + attenuation) via `SOUND_PLAYBACK_EAR_PROTECTION_*` envs, with stronger profile automatically for filenames matching `SOUND_EARRAPE_KEYWORDS`.
+- In ffmpeg `acompressor`, `makeup` must stay in range `[1, 64]`. Using `makeup=0` causes filter-parse failure (`Error applying option 'makeup'`) and playback ends almost immediately with no audible output.
 - If slap remains silent even with conservative `before_options` and logs show normal `voice_client.play()`/completion, prefer a slap-specific PCM path (`discord.FFmpegPCMAudio` + `discord.PCMVolumeTransformer`) instead of `FFmpegOpusAudio.from_probe` to avoid short-clip transcode/probe edge cases.
 
 

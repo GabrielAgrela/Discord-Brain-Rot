@@ -17,6 +17,7 @@ from typing import Any
 
 import requests
 from pydub import AudioSegment
+from pydub.effects import compress_dynamic_range
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
@@ -328,6 +329,7 @@ class SoundDownloader:
         # Import here to avoid circular imports
         from bot.database import Database
         from bot.ui import DownloadedSoundView
+        target_dbfs = float(os.getenv("SOUND_INGEST_TARGET_DBFS", "-18.0"))
         
         while True:
             downloads_path = os.path.abspath(
@@ -339,7 +341,7 @@ class SoundDownloader:
                 try:
                     print(self.__class__.__name__, " MOVER: ", file, " chosen")
                     print(self.__class__.__name__, " MOVER: Adjusting sound volume")
-                    self.adjust_volume(file, -20.0)
+                    self.adjust_volume(file, target_dbfs)
                     destination_folder = os.path.abspath(
                         os.path.join(os.path.dirname(__file__), "..", "..", "Sounds")
                     )
@@ -394,6 +396,38 @@ class SoundDownloader:
             target_dBFS: Target volume level in dBFS.
         """
         sound = AudioSegment.from_file(sound_file, format="mp3")
-        difference = target_dBFS - sound.dBFS
-        adjusted_sound = sound.apply_gain(difference)
+        if float(sound.dBFS) == float("-inf"):
+            return
+
+        compression_enabled = (
+            os.getenv("SOUND_INGEST_COMPRESS_ENABLED", "true").strip().lower()
+            not in {"0", "false", "off", "no"}
+        )
+        compression_threshold_dbfs = float(
+            os.getenv("SOUND_INGEST_COMPRESS_THRESHOLD_DBFS", "-14.0")
+        )
+        compression_ratio = max(
+            1.0,
+            float(os.getenv("SOUND_INGEST_COMPRESS_RATIO", "6.0")),
+        )
+        peak_ceiling_dbfs = float(
+            os.getenv("SOUND_INGEST_PEAK_CEILING_DBFS", "-2.0")
+        )
+
+        working_sound = sound
+        if compression_enabled:
+            working_sound = compress_dynamic_range(
+                working_sound,
+                threshold=compression_threshold_dbfs,
+                ratio=compression_ratio,
+                attack=5.0,
+                release=80.0,
+            )
+
+        desired_gain = target_dBFS - float(working_sound.dBFS)
+        max_allowed_gain = peak_ceiling_dbfs - float(working_sound.max_dBFS)
+        gain = min(desired_gain, max_allowed_gain)
+        adjusted_sound = working_sound.apply_gain(gain)
+        if float(adjusted_sound.max_dBFS) > peak_ceiling_dbfs:
+            adjusted_sound = adjusted_sound.apply_gain(peak_ceiling_dbfs - float(adjusted_sound.max_dBFS))
         adjusted_sound.export(sound_file, format="mp3")

@@ -339,6 +339,117 @@ class TestAudioService:
         audio_service.audio_latency_mode = "balanced"
         assert audio_service._should_use_short_clip_safety("clip.mp3", 1.0) is False
 
+    def test_is_low_latency_mp3_playback(self, audio_service):
+        """Ensure MP3 startup safety detection is tied to low-latency mode."""
+        audio_service.audio_latency_mode = "low_latency"
+        assert audio_service._is_low_latency_mp3_playback("clip.mp3") is True
+        assert audio_service._is_low_latency_mp3_playback("clip.wav") is False
+
+        audio_service.audio_latency_mode = "balanced"
+        assert audio_service._is_low_latency_mp3_playback("clip.mp3") is False
+
+    def test_get_play_audio_start_preroll_ms_uses_general_low_latency_preroll(self, audio_service):
+        """Ensure normal low-latency playback gets startup pre-roll protection."""
+        audio_service.audio_latency_mode = "low_latency"
+        audio_service.playback_start_preroll_ms = 180
+        audio_service.short_clip_start_delay_ms = 120
+
+        assert audio_service._get_play_audio_start_preroll_ms(use_short_clip_safety=False) == 180
+        assert audio_service._get_play_audio_start_preroll_ms(use_short_clip_safety=True) == 180
+
+    def test_get_play_audio_start_preroll_ms_uses_low_latency_mp3_floor(self, audio_service):
+        """Ensure low-latency MP3 playback gets a stronger startup delay floor."""
+        audio_service.audio_latency_mode = "low_latency"
+        audio_service.playback_start_preroll_ms = 180
+        audio_service.low_latency_mp3_start_preroll_ms = 650
+        audio_service.short_clip_start_delay_ms = 120
+
+        assert (
+            audio_service._get_play_audio_start_preroll_ms(
+                use_short_clip_safety=False,
+                is_low_latency_mp3=True,
+            )
+            == 650
+        )
+
+        audio_service.playback_start_preroll_ms = 900
+        assert (
+            audio_service._get_play_audio_start_preroll_ms(
+                use_short_clip_safety=False,
+                is_low_latency_mp3=True,
+            )
+            == 900
+        )
+
+    def test_get_play_audio_start_preroll_ms_falls_back_to_short_clip_delay(self, audio_service):
+        """Ensure short-clip path keeps its minimum delay when general pre-roll is disabled."""
+        audio_service.audio_latency_mode = "low_latency"
+        audio_service.playback_start_preroll_ms = 0
+        audio_service.short_clip_start_delay_ms = 120
+
+        assert audio_service._get_play_audio_start_preroll_ms(use_short_clip_safety=False) == 0
+        assert audio_service._get_play_audio_start_preroll_ms(use_short_clip_safety=True) == 120
+
+    def test_get_play_audio_start_preroll_ms_disabled_outside_low_latency(self, audio_service):
+        """Ensure playback pre-roll is only applied in low-latency mode."""
+        audio_service.audio_latency_mode = "balanced"
+        audio_service.playback_start_preroll_ms = 180
+        audio_service.short_clip_start_delay_ms = 120
+
+        assert audio_service._get_play_audio_start_preroll_ms(use_short_clip_safety=False) == 0
+        assert audio_service._get_play_audio_start_preroll_ms(use_short_clip_safety=True) == 0
+
+    def test_db_to_volume_multiplier(self, audio_service):
+        """Ensure dB conversion produces expected ffmpeg volume multipliers."""
+        assert round(audio_service._db_to_volume_multiplier(-6.0), 3) == 0.501
+        assert round(audio_service._db_to_volume_multiplier(0.0), 3) == 1.000
+
+    def test_is_earrape_like_filename(self, audio_service):
+        """Ensure filename keyword matching works for ear-protection escalation."""
+        audio_service.earrape_keywords = ("earrape", "bass boost")
+
+        assert audio_service._is_earrape_like_filename("microondas-earrape.mp3") is True
+        assert audio_service._is_earrape_like_filename("mega bass boost remix.mp3") is True
+        assert audio_service._is_earrape_like_filename("normal-sound.mp3") is False
+
+    def test_build_playback_ear_protection_filters_default_profile(self, audio_service):
+        """Ensure default playback ear-protection filters are generated."""
+        audio_service.playback_ear_protection_enabled = True
+        audio_service.playback_ear_protection_gain_db = -3.0
+        audio_service.playback_ear_protection_threshold_db = -16.0
+        audio_service.playback_ear_protection_ratio = 6.0
+        audio_service.playback_ear_protection_lowpass_hz = 12000
+        audio_service.earrape_keywords = ("earrape",)
+        audio_service.earrape_extra_attenuation_db = -6.0
+        audio_service.earrape_lowpass_hz = 9000
+        audio_service.earrape_compression_threshold_db = -20.0
+        audio_service.earrape_compression_ratio = 12.0
+
+        filters = audio_service._build_playback_ear_protection_filters("normal.mp3")
+
+        assert filters[0] == "acompressor=threshold=-16.0dB:ratio=6.00:attack=5:release=80:makeup=1"
+        assert filters[1] == "lowpass=f=12000"
+        assert filters[2] == "volume=0.7079"
+
+    def test_build_playback_ear_protection_filters_earrape_profile(self, audio_service):
+        """Ensure earrape-like filenames get stronger protective filtering."""
+        audio_service.playback_ear_protection_enabled = True
+        audio_service.playback_ear_protection_gain_db = -3.0
+        audio_service.playback_ear_protection_threshold_db = -16.0
+        audio_service.playback_ear_protection_ratio = 6.0
+        audio_service.playback_ear_protection_lowpass_hz = 12000
+        audio_service.earrape_keywords = ("earrape",)
+        audio_service.earrape_extra_attenuation_db = -6.0
+        audio_service.earrape_lowpass_hz = 9000
+        audio_service.earrape_compression_threshold_db = -20.0
+        audio_service.earrape_compression_ratio = 12.0
+
+        filters = audio_service._build_playback_ear_protection_filters("microondas earrape 3.mp3")
+
+        assert filters[0] == "acompressor=threshold=-20.0dB:ratio=12.00:attack=5:release=80:makeup=1"
+        assert filters[1] == "lowpass=f=9000"
+        assert filters[2] == "volume=0.3548"
+
     @pytest.mark.asyncio
     async def test_play_slap_waits_for_lingering_player_thread(self, audio_service):
         """Ensure slap playback waits for lingering AudioPlayer thread before play()."""

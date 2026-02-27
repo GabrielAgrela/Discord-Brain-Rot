@@ -8,12 +8,15 @@ import functools
 import uuid
 import time
 import sqlite3
+import math
 from typing import Optional, List, Tuple, Any
 from bot.repositories import SoundRepository, ActionRepository, ListRepository
 from bot.database import Database  # Keep for get_sounds_by_similarity until migrated
 from moviepy.editor import VideoFileClip
 from bot.downloaders.manual import ManualSoundDownloader
 from mutagen.mp3 import MP3
+from pydub import AudioSegment
+from pydub.effects import compress_dynamic_range
 
 class SoundService:
     """
@@ -39,6 +42,27 @@ class SoundService:
         # Base paths
         self.sounds_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Sounds"))
         self.downloads_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Downloads"))
+        self.enable_ingest_loudness_normalization = (
+            os.getenv("SOUND_INGEST_NORMALIZE_ENABLED", "true").strip().lower()
+            not in {"0", "false", "off", "no"}
+        )
+        self.ingest_loudness_target_dbfs = float(
+            os.getenv("SOUND_INGEST_TARGET_DBFS", "-18.0")
+        )
+        self.ingest_peak_ceiling_dbfs = float(
+            os.getenv("SOUND_INGEST_PEAK_CEILING_DBFS", "-2.0")
+        )
+        self.ingest_compression_enabled = (
+            os.getenv("SOUND_INGEST_COMPRESS_ENABLED", "true").strip().lower()
+            not in {"0", "false", "off", "no"}
+        )
+        self.ingest_compression_threshold_dbfs = float(
+            os.getenv("SOUND_INGEST_COMPRESS_THRESHOLD_DBFS", "-14.0")
+        )
+        self.ingest_compression_ratio = max(
+            1.0,
+            float(os.getenv("SOUND_INGEST_COMPRESS_RATIO", "6.0")),
+        )
         
         os.makedirs(self.sounds_dir, exist_ok=True)
         os.makedirs(self.downloads_dir, exist_ok=True)
@@ -57,6 +81,84 @@ class SoundService:
             cleaned = default_base
 
         return f"{cleaned}.mp3"
+
+    def _normalize_mp3_loudness(self, sound_file: str, target_dbfs: float) -> None:
+        """Normalize an MP3 file in-place with compression and peak-safe loudness."""
+        temp_path = f"{sound_file}.normalized.tmp.mp3"
+        try:
+            sound = AudioSegment.from_file(sound_file, format="mp3")
+            current_dbfs = float(sound.dBFS)
+            if current_dbfs == float("-inf"):
+                print(
+                    f"[SoundService] Skipping loudness normalization for silent file: {sound_file}"
+                )
+                return
+
+            working_sound = sound
+            compression_applied = False
+            if self.ingest_compression_enabled:
+                working_sound = compress_dynamic_range(
+                    working_sound,
+                    threshold=self.ingest_compression_threshold_dbfs,
+                    ratio=self.ingest_compression_ratio,
+                    attack=5.0,
+                    release=80.0,
+                )
+                compression_applied = True
+
+            working_dbfs = float(working_sound.dBFS)
+            if not math.isfinite(working_dbfs):
+                print(
+                    f"[SoundService] Skipping loudness normalization due to invalid dBFS: {sound_file}"
+                )
+                return
+            peak_dbfs = float(working_sound.max_dBFS)
+            gain_change = self._calculate_safe_gain(
+                current_dbfs=working_dbfs,
+                peak_dbfs=peak_dbfs,
+                target_dbfs=target_dbfs,
+                peak_ceiling_dbfs=self.ingest_peak_ceiling_dbfs,
+            )
+            if abs(gain_change) < 0.25 and not compression_applied:
+                return
+
+            normalized = working_sound.apply_gain(gain_change)
+            final_peak_dbfs = float(normalized.max_dBFS)
+            if math.isfinite(final_peak_dbfs) and final_peak_dbfs > self.ingest_peak_ceiling_dbfs:
+                normalized = normalized.apply_gain(self.ingest_peak_ceiling_dbfs - final_peak_dbfs)
+
+            normalized.export(temp_path, format="mp3")
+            os.replace(temp_path, sound_file)
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+
+    @staticmethod
+    def _calculate_safe_gain(
+        current_dbfs: float,
+        peak_dbfs: float,
+        target_dbfs: float,
+        peak_ceiling_dbfs: float,
+    ) -> float:
+        """Return gain that targets loudness without exceeding peak ceiling."""
+        desired_gain = target_dbfs - current_dbfs
+        if not math.isfinite(peak_dbfs):
+            return desired_gain
+        max_allowed_gain = peak_ceiling_dbfs - peak_dbfs
+        return min(desired_gain, max_allowed_gain)
+
+    async def _maybe_normalize_ingested_mp3(self, sound_file: str) -> None:
+        """Normalize ingested MP3 loudness when enabled, without failing upload flow."""
+        if not self.enable_ingest_loudness_normalization:
+            return
+        try:
+            await asyncio.to_thread(
+                self._normalize_mp3_loudness,
+                sound_file,
+                self.ingest_loudness_target_dbfs,
+            )
+        except Exception as e:
+            print(f"[SoundService] Loudness normalization failed for {sound_file}: {e}")
 
     async def play_random_sound(self, user: str = "admin", effects: Optional[dict] = None, guild: Optional[discord.Guild] = None):
         """Pick a random sound and play it in the user's or largest channel."""
@@ -185,35 +287,46 @@ class SoundService:
         custom_filename: Optional[str] = None,
         max_mb: int = 20,
         guild_id: Optional[int] = None,
+        lock_already_held: bool = False,
     ):
         """Save an uploaded Discord attachment safely after validation."""
-        if not attachment.filename.lower().endswith('.mp3') and not custom_filename:
-            return False, "Only .mp3 files are allowed."
 
-        if attachment.size > max_mb * 1024 * 1024:
-            return False, f"File too large! Max {max_mb}MB."
+        async def _save_without_lock() -> tuple[bool, str]:
+            if not attachment.filename.lower().endswith('.mp3') and not custom_filename:
+                return False, "Only .mp3 files are allowed."
 
-        # Sanitize filename while preserving spaces.
-        final_filename = self._sanitize_mp3_filename(custom_filename or attachment.filename, "uploaded_sound")
-        save_path = os.path.join(self.sounds_dir, final_filename)
+            if attachment.size > max_mb * 1024 * 1024:
+                return False, f"File too large! Max {max_mb}MB."
 
-        if os.path.exists(save_path):
-            return False, f"A sound with the name '{final_filename}' already exists."
+            # Sanitize filename while preserving spaces.
+            final_filename = self._sanitize_mp3_filename(custom_filename or attachment.filename, "uploaded_sound")
+            save_path = os.path.join(self.sounds_dir, final_filename)
+
+            if os.path.exists(save_path):
+                return False, f"A sound with the name '{final_filename}' already exists."
+
+            await attachment.save(save_path)
+
+            # Verify it's a valid MP3
+            try:
+                MP3(save_path)
+            except Exception:
+                os.remove(save_path)
+                return False, "Invalid MP3 file format."
+
+            await self._maybe_normalize_ingested_mp3(save_path)
+
+            # Insert into DB
+            self.sound_repo.insert_sound(final_filename, final_filename, guild_id=guild_id)
+            self.db.invalidate_sound_cache()
+            return True, save_path
 
         try:
-            async with self.upload_lock:
-                await attachment.save(save_path)
-                
-                # Verify it's a valid MP3
-                try:
-                    MP3(save_path)
-                except Exception:
-                    os.remove(save_path)
-                    return False, "Invalid MP3 file format."
+            if lock_already_held:
+                return await _save_without_lock()
 
-                # Insert into DB
-                self.sound_repo.insert_sound(final_filename, final_filename, guild_id=guild_id)
-                return True, save_path  # <-- This was missing!
+            async with self.upload_lock:
+                return await _save_without_lock()
         except Exception as e:
             print(f"[SoundService] Error saving uploaded sound: {e}")
             return False, "System error while saving file."
@@ -258,6 +371,7 @@ class SoundService:
                         response.attachments[0],
                         custom_filename,
                         guild_id=interaction.guild.id if interaction.guild else None,
+                        lock_already_held=True,
                     )
                     if not success:
                         await self.message_service.send_error(result)
@@ -359,6 +473,8 @@ class SoundService:
                 except:
                     os.remove(final_path)
                     raise Exception("Downloaded file is not a valid MP3.")
+
+                await self._maybe_normalize_ingested_mp3(final_path)
                 
                 # Insert into DB
                 self.sound_repo.insert_sound(
@@ -366,6 +482,7 @@ class SoundService:
                     os.path.basename(final_path),
                     guild_id=guild_id,
                 )
+                self.db.invalidate_sound_cache()
                 return final_path
 
     async def find_and_update_similar_sounds(self, sound_message, audio_file, original_message, send_controls=False, num_suggestions=25):

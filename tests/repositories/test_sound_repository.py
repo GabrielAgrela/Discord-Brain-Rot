@@ -4,6 +4,7 @@ Tests for bot/repositories/sound.py - SoundRepository.
 
 import pytest
 from datetime import datetime
+import sqlite3
 
 
 class TestSoundRepository:
@@ -146,6 +147,47 @@ class TestSoundRepositoryEdgeCases:
         """Test search with no matching results."""
         results = sound_repository.search("nonexistent_xyz")
         assert len(results) == 0
+
+    def test_insert_sound_without_date_column(self):
+        """Insert should work on schemas that only have `timestamp` (production shape)."""
+        from bot.repositories.base import BaseRepository
+        from bot.repositories.sound import SoundRepository
+
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            CREATE TABLE sounds (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                originalfilename TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                favorite INTEGER DEFAULT 0,
+                blacklist INTEGER DEFAULT 0,
+                slap INTEGER DEFAULT 0,
+                is_elevenlabs INTEGER DEFAULT 0,
+                timestamp TEXT,
+                guild_id TEXT
+            )
+            """
+        )
+        conn.commit()
+
+        BaseRepository.set_shared_connection(conn, ":memory:")
+        try:
+            repo = SoundRepository(use_shared=True)
+            sound_id = repo.insert_sound("prodshape.mp3", "prodshape.mp3")
+            row = conn.execute(
+                "SELECT filename, timestamp FROM sounds WHERE id = ?",
+                (sound_id,),
+            ).fetchone()
+            assert row is not None
+            assert row["filename"] == "prodshape.mp3"
+            assert row["timestamp"] is not None
+        finally:
+            BaseRepository._shared_connection = None
+            BaseRepository._shared_db_path = None
+            conn.close()
 
     def test_get_by_filename_prefers_guild_local_over_global(self, sound_repository, db_connection):
         """Guild-scoped lookups should prefer guild-local row over global fallback."""

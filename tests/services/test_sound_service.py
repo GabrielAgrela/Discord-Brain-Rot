@@ -6,6 +6,7 @@ Uses mocked dependencies to test business logic in isolation.
 
 import pytest
 from unittest.mock import Mock, MagicMock, AsyncMock, patch
+import asyncio
 import os
 import sys
 
@@ -113,6 +114,36 @@ class TestSoundServiceFilename:
         sanitized = mock_service._sanitize_mp3_filename("  bad:/name*?  ", "fallback")
         assert sanitized == "badname.mp3"
 
+    def test_calculate_safe_gain_limits_boost_by_peak_ceiling(self, mock_service):
+        """Ensure gain boost is clamped when it would violate peak ceiling."""
+        gain = mock_service._calculate_safe_gain(
+            current_dbfs=-30.0,
+            peak_dbfs=-1.0,
+            target_dbfs=-18.0,
+            peak_ceiling_dbfs=-2.0,
+        )
+        assert gain == -1.0
+
+    def test_calculate_safe_gain_hits_target_when_peak_has_headroom(self, mock_service):
+        """Ensure gain reaches loudness target when peak headroom allows it."""
+        gain = mock_service._calculate_safe_gain(
+            current_dbfs=-24.0,
+            peak_dbfs=-8.0,
+            target_dbfs=-18.0,
+            peak_ceiling_dbfs=-2.0,
+        )
+        assert gain == 6.0
+
+    def test_calculate_safe_gain_allows_loud_clip_attenuation(self, mock_service):
+        """Ensure loud clips are attenuated to target even if peak already exceeds ceiling."""
+        gain = mock_service._calculate_safe_gain(
+            current_dbfs=-10.0,
+            peak_dbfs=-0.5,
+            target_dbfs=-18.0,
+            peak_ceiling_dbfs=-2.0,
+        )
+        assert gain == -8.0
+
 
 class TestSoundServiceValidation:
     """Tests for input validation in SoundService."""
@@ -130,3 +161,94 @@ class TestSoundServiceValidation:
         for ext in invalid_extensions:
             filename = f"test{ext}"
             assert not any(filename.endswith(v) for v in valid_extensions)
+
+
+class TestSoundServiceUpload:
+    """Tests for upload flow in SoundService."""
+
+    @pytest.fixture
+    def mock_service(self):
+        """Create a minimally mocked SoundService."""
+        from bot.services.sound import SoundService
+
+        service = SoundService(
+            bot_behavior=Mock(),
+            bot=Mock(),
+            audio_service=Mock(),
+            message_service=Mock(),
+        )
+        return service
+
+    @pytest.mark.asyncio
+    async def test_save_uploaded_sound_secure_when_lock_already_held(self, mock_service, tmp_path):
+        """Ensure upload does not deadlock when caller already holds upload_lock."""
+        mock_service.sounds_dir = str(tmp_path)
+
+        attachment = Mock()
+        attachment.filename = "clip.mp3"
+        attachment.size = 1024
+
+        async def _save_to_path(path):
+            with open(path, "wb") as file_obj:
+                file_obj.write(b"fake-mp3-bytes")
+
+        attachment.save = AsyncMock(side_effect=_save_to_path)
+
+        with patch("bot.services.sound.MP3", return_value=Mock()):
+            with patch.object(mock_service.sound_repo, "insert_sound") as mock_insert_sound:
+                with patch.object(mock_service.db, "invalidate_sound_cache") as mock_invalidate_cache:
+                    with patch.object(mock_service, "_maybe_normalize_ingested_mp3", new=AsyncMock()) as mock_normalize:
+                        await mock_service.upload_lock.acquire()
+                        try:
+                            success, result = await asyncio.wait_for(
+                                mock_service.save_uploaded_sound_secure(
+                                    attachment,
+                                    guild_id=1234,
+                                    lock_already_held=True,
+                                ),
+                                timeout=1.0,
+                            )
+                        finally:
+                            mock_service.upload_lock.release()
+
+        assert success is True
+        assert os.path.exists(result)
+        mock_insert_sound.assert_called_once_with("clip.mp3", "clip.mp3", guild_id=1234)
+        mock_invalidate_cache.assert_called_once()
+        mock_normalize.assert_awaited_once_with(result)
+
+    @pytest.mark.asyncio
+    async def test_save_sound_from_url_normalizes_before_insert(self, mock_service, tmp_path):
+        """Ensure direct URL ingestion normalizes loudness before DB insertion."""
+        mock_service.sounds_dir = str(tmp_path)
+
+        response = AsyncMock()
+        response.status = 200
+        response.read = AsyncMock(return_value=b"fake-mp3-bytes")
+
+        response_ctx = AsyncMock()
+        response_ctx.__aenter__.return_value = response
+        response_ctx.__aexit__.return_value = False
+
+        session = Mock()
+        session.get.return_value = response_ctx
+
+        session_ctx = AsyncMock()
+        session_ctx.__aenter__.return_value = session
+        session_ctx.__aexit__.return_value = False
+
+        with patch("bot.services.sound.aiohttp.ClientSession", return_value=session_ctx):
+            with patch("bot.services.sound.MP3", return_value=Mock()):
+                with patch.object(mock_service.sound_repo, "insert_sound") as mock_insert_sound:
+                    with patch.object(mock_service.db, "invalidate_sound_cache") as mock_invalidate_cache:
+                        with patch.object(mock_service, "_maybe_normalize_ingested_mp3", new=AsyncMock()) as mock_normalize:
+                            saved_path = await mock_service.save_sound_from_url(
+                                "https://example.com/test.mp3",
+                                guild_id=999,
+                            )
+
+        assert os.path.exists(saved_path)
+        filename = os.path.basename(saved_path)
+        mock_normalize.assert_awaited_once_with(saved_path)
+        mock_insert_sound.assert_called_once_with(filename, filename, guild_id=999)
+        mock_invalidate_cache.assert_called_once()

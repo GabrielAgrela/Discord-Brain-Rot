@@ -289,7 +289,9 @@ class UploadSoundWithFileModal(discord.ui.DesignerModal):
                         # Save the uploaded file
                         success, result = await self.bot_behavior._sound_service.save_uploaded_sound_secure(
                             uploaded_file, 
-                            custom_filename
+                            custom_filename,
+                            guild_id=interaction.guild.id if interaction.guild else None,
+                            lock_already_held=True,
                         )
                         
                         print(f"[UploadModal] save result: success={success}, result={result}")
@@ -349,5 +351,4 @@ class UploadSoundWithFileModal(discord.ui.DesignerModal):
                     )
         except Exception as e:
             print(f"Error in UploadSoundWithFileModal.callback: {e}")
-
 
