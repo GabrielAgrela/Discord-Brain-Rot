@@ -49,6 +49,7 @@ This README is based on the current codebase behavior (not historical README ass
 - `ensure_voice_connected` with per-guild locks and retry logic.
 - Zombie voice client detection/recovery (websocket/socket/latency checks).
 - Reconnection grace period to avoid competing reconnects.
+- Voice DAVE compatibility patch for py-cord (identify payload, DAVE transitions, and MLS binary frame handling).
 - Auto-follow users when they switch channels.
 - Auto-disconnect when bot is alone (event-based + safety loop).
 - Auto-join is feature-flagged per guild (disabled by default for public hosting).
@@ -261,6 +262,7 @@ This README is based on the current codebase behavior (not historical README ass
 - `AUTOJOIN_DEFAULT` (`false` default for new guilds)
 - `PERIODIC_DEFAULT` (`false` default for new guilds)
 - `STT_DEFAULT` (`false` default for new guilds)
+- `VOICE_MAX_DAVE_PROTOCOL_VERSION` (default auto-detected from `davey` protocol version, currently `1`; set `0` only to force-disable DAVE negotiation)
 - `PERFORMANCE_MONITOR_TICK_SECONDS` (performance monitor interval in seconds, default `0.5`, minimum `0.1`)
 - `WEEKLY_WRAPPED_ENABLED` (`true` default; enables weekly digest scheduler)
 - `WEEKLY_WRAPPED_DAY_UTC` (0-6, Monday=0, default `4` for Friday)

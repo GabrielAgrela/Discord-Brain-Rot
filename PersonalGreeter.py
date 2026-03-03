@@ -41,6 +41,9 @@ import platform # Added for OS detection
 import re # Add import for regex
 import ctypes.util
 import discord.opus
+from bot.voice_compat import apply_voice_protocol_compat_patches
+
+apply_voice_protocol_compat_patches()
 
 env = Environment()
 intents = discord.Intents(guilds=True, voice_states=True, messages=True, message_content=True, members=True)

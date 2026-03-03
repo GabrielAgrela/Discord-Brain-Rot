@@ -244,6 +244,15 @@ Canonical completion command:
 - In ffmpeg `acompressor`, `makeup` must stay in range `[1, 64]`. Using `makeup=0` causes filter-parse failure (`Error applying option 'makeup'`) and playback ends almost immediately with no audible output.
 - If slap remains silent even with conservative `before_options` and logs show normal `voice_client.play()`/completion, prefer a slap-specific PCM path (`discord.FFmpegPCMAudio` + `discord.PCMVolumeTransformer`) instead of `FFmpegOpusAudio.from_probe` to avoid short-clip transcode/probe edge cases.
 
+### Discord Voice 4017 (DAVE Enforcement)
+- As of **March 2, 2026**, Discord enforces DAVE end-to-end encryption for **non-stage** voice calls. Outdated voice clients are rejected with close code `4017`.
+- Symptom pattern in this project: `Failed to connect to voice... Retrying...` + `discord.errors.ConnectionClosed ... code 4017`, followed by playback failures like `Error starting playback: Not connected to voice.`
+- This project now applies a runtime backport in `bot/voice_compat.py` (identify `max_dave_protocol_version`, DAVE transition handling, MLS binary frame handling, and DAVE-aware opus wrapping) to keep py-cord voice usable under enforcement.
+- `davey==0.1.4` is now a hard runtime dependency for voice in Docker. If `davey` is missing, DAVE negotiation cannot complete and `4017` will recur.
+- `VOICE_MAX_DAVE_PROTOCOL_VERSION` defaults to auto-detected `davey.DAVE_PROTOCOL_VERSION` (currently `1`). Do not force it to `0` in production unless intentionally disabling voice while debugging.
+- In py-cord `VoiceClient.connect_websocket()`, `VoiceClient.ws` is still `utils.MISSING` while `ws.poll_event()` is processing handshake frames. Any DAVE MLS send path during `SESSION_DESCRIPTION` must use the live `DiscordVoiceWebSocket` reference (for example `_voicecompat_active_ws`) instead of `self.ws` to avoid `'_MissingSentinel' object has no attribute 'send_binary'`.
+- Reconnect loops can additionally produce `_MissingSentinel` (`poll_event`/`close`) and `Unclosed connection` noise; these are secondary effects after the initial `4017` rejection.
+
 
 ## Deployment
 
