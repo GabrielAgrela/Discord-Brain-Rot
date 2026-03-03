@@ -19,6 +19,7 @@ from discord import utils
 from discord.enums import SpeakingState
 from discord.errors import ConnectionClosed
 from discord.gateway import DiscordVoiceWebSocket, VoiceKeepAliveHandler
+from discord.sinks.core import RawData
 from discord.voice_client import VoiceClient
 
 try:
@@ -388,6 +389,53 @@ async def _patched_poll_event(self: DiscordVoiceWebSocket) -> None:
         raise ConnectionClosed(self.ws, shard_id=None, code=close_code)
 
 
+def _patched_unpack_audio(self: VoiceClient, data: bytes) -> None:
+    """
+    Decode incoming RTP audio, with DAVE decrypt for encrypted opus payloads.
+
+    py-cord handles RTP transport encryption but does not decrypt DAVE media
+    payloads for receive sinks. Without this, Vosk/STT sees encrypted opus and
+    decode fails continuously.
+    """
+    if data[1] & 0x78 != 0x78:
+        return
+    if self.paused:
+        return
+
+    frame = RawData(data, self)
+    if frame.decrypted_data == b"\xf8\xff\xfe":  # Frame of silence
+        return
+
+    _ensure_voice_client_state(self)
+    session = getattr(self, "dave_session", None)
+    if session is not None and getattr(self, "can_encrypt", False):
+        ws = getattr(self, "ws", None)
+        if ws in (None, utils.MISSING):
+            return
+
+        user_id = ws.ssrc_map.get(frame.ssrc, {}).get("user_id")
+        if user_id is None:
+            # DAVE decrypt requires user identity; drop until mapping arrives.
+            return
+
+        try:
+            frame.decrypted_data = session.decrypt(
+                int(user_id),
+                davey.MediaType.audio,  # type: ignore[union-attr]
+                bytes(frame.decrypted_data),
+            )
+        except Exception:
+            logger.debug(
+                "[VoiceCompat] Failed to decrypt incoming DAVE audio (ssrc=%s user_id=%s)",
+                frame.ssrc,
+                user_id,
+                exc_info=True,
+            )
+            return
+
+    self.decoder.decode(frame)
+
+
 def apply_voice_protocol_compat_patches() -> None:
     """
     Apply runtime monkey patches for py-cord voice protocol compatibility.
@@ -463,6 +511,7 @@ def apply_voice_protocol_compat_patches() -> None:
         return original_get_voice_packet(self, packet)
 
     _set_attribute(VoiceClient, "_get_voice_packet", patched_get_voice_packet)
+    _set_attribute(VoiceClient, "unpack_audio", _patched_unpack_audio)
 
     _set_attribute(DiscordVoiceWebSocket, "identify", _patched_identify)
     _set_attribute(DiscordVoiceWebSocket, "speak", _patched_speak)

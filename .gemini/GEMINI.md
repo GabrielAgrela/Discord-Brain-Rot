@@ -252,6 +252,8 @@ Canonical completion command:
 - `VOICE_MAX_DAVE_PROTOCOL_VERSION` defaults to auto-detected `davey.DAVE_PROTOCOL_VERSION` (currently `1`). Do not force it to `0` in production unless intentionally disabling voice while debugging.
 - In py-cord `VoiceClient.connect_websocket()`, `VoiceClient.ws` is still `utils.MISSING` while `ws.poll_event()` is processing handshake frames. Any DAVE MLS send path during `SESSION_DESCRIPTION` must use the live `DiscordVoiceWebSocket` reference (for example `_voicecompat_active_ws`) instead of `self.ws` to avoid `'_MissingSentinel' object has no attribute 'send_binary'`.
 - Reconnect loops can additionally produce `_MissingSentinel` (`poll_event`/`close`) and `Unclosed connection` noise; these are secondary effects after the initial `4017` rejection.
+- **STT/recording with DAVE requires inbound media decrypt**: patching only outbound voice packets (`encrypt_opus`) is not enough. `voice_client.start_recording()`/sinks receive RTP-decrypted bytes that still contain DAVE-encrypted opus payloads; without `dave_session.decrypt(user_id, davey.MediaType.audio, packet)` in `VoiceClient.unpack_audio`, logs spam `Error occurred while decoding opus frame.` / `error has happened in opus_decode` and keyword detection appears dead even though `audio_keyword_sink_count` is non-zero.
+- DAVE inbound decrypt depends on `ssrc -> user_id` mapping (`ws.ssrc_map`). When mapping is not available yet, drop those packets until mapping arrives; attempting opus decode on still-encrypted payloads causes continuous decoder errors and high CPU.
 
 
 ## Deployment

@@ -177,3 +177,81 @@ async def test_reinit_dave_session_uses_active_ws_fallback(monkeypatch):
     await module._voiceclient_reinit_dave_session(fake_client)
 
     assert sent == [(DiscordVoiceWebSocket.MLS_KEY_PACKAGE, b"kp")]
+
+
+def test_unpack_audio_decrypts_incoming_dave_packet(monkeypatch):
+    """Incoming encrypted opus should be DAVE-decrypted before decode."""
+    monkeypatch.setenv("VOICE_MAX_DAVE_PROTOCOL_VERSION", "1")
+    module = importlib.reload(voice_compat)
+    module.apply_voice_protocol_compat_patches()
+
+    class FakeRawData:
+        def __init__(self, _data, _client):
+            self.ssrc = 42
+            self.decrypted_data = b"encrypted-opus"
+
+    monkeypatch.setattr(module, "RawData", FakeRawData)
+
+    calls = {"decode": None, "decrypt": None}
+
+    class FakeSession:
+        ready = True
+
+        def decrypt(self, user_id, media_type, packet):
+            calls["decrypt"] = (user_id, media_type, packet)
+            return b"plain-opus"
+
+    fake_client = SimpleNamespace(
+        paused=False,
+        decoder=SimpleNamespace(
+            decode=lambda frame: calls.__setitem__("decode", frame.decrypted_data)
+        ),
+        dave_session=FakeSession(),
+        dave_protocol_version=1,
+        can_encrypt=True,
+        ws=SimpleNamespace(ssrc_map={42: {"user_id": 123}}),
+    )
+
+    module._patched_unpack_audio(fake_client, bytes([0x80, 0x78]) + b"\x00" * 32)
+
+    assert calls["decode"] == b"plain-opus"
+    assert calls["decrypt"] is not None
+    assert calls["decrypt"][0] == 123
+    assert calls["decrypt"][2] == b"encrypted-opus"
+
+
+def test_unpack_audio_drops_encrypted_packet_without_user_mapping(monkeypatch):
+    """Encrypted packets should be ignored until SSRC->user mapping is known."""
+    monkeypatch.setenv("VOICE_MAX_DAVE_PROTOCOL_VERSION", "1")
+    module = importlib.reload(voice_compat)
+    module.apply_voice_protocol_compat_patches()
+
+    class FakeRawData:
+        def __init__(self, _data, _client):
+            self.ssrc = 99
+            self.decrypted_data = b"encrypted-opus"
+
+    monkeypatch.setattr(module, "RawData", FakeRawData)
+
+    called = {"decode": False, "decrypt": False}
+
+    class FakeSession:
+        ready = True
+
+        def decrypt(self, *_args):
+            called["decrypt"] = True
+            return b"plain-opus"
+
+    fake_client = SimpleNamespace(
+        paused=False,
+        decoder=SimpleNamespace(decode=lambda _frame: called.__setitem__("decode", True)),
+        dave_session=FakeSession(),
+        dave_protocol_version=1,
+        can_encrypt=True,
+        ws=SimpleNamespace(ssrc_map={}),
+    )
+
+    module._patched_unpack_audio(fake_client, bytes([0x80, 0x78]) + b"\x00" * 32)
+
+    assert called["decrypt"] is False
+    assert called["decode"] is False
