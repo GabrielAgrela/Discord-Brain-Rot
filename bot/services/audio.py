@@ -414,10 +414,37 @@ class AudioService:
     @staticmethod
     def _read_mp3_duration_seconds(audio_file_path: str) -> Optional[float]:
         """Read MP3 duration in seconds, returning None when unavailable."""
+        duration_seconds, _, _ = AudioService._read_mp3_playback_info(audio_file_path)
+        return duration_seconds
+
+    @staticmethod
+    def _read_mp3_playback_info(
+        audio_file_path: str,
+    ) -> tuple[Optional[float], Optional[int], Optional[int]]:
+        """Read MP3 duration/sample-rate/bitrate for playback heuristics."""
         try:
-            return float(MP3(audio_file_path).info.length)
+            info = MP3(audio_file_path).info
+            duration_seconds = float(info.length) if getattr(info, "length", None) else None
+            sample_rate_hz = int(getattr(info, "sample_rate", 0) or 0) or None
+            bitrate_bps = int(getattr(info, "bitrate", 0) or 0) or None
+            return duration_seconds, sample_rate_hz, bitrate_bps
         except Exception:
-            return None
+            return None, None, None
+
+    @staticmethod
+    def _is_low_fidelity_mp3_playback(
+        audio_file_path: str,
+        sample_rate_hz: Optional[int],
+        bitrate_bps: Optional[int],
+    ) -> bool:
+        """Return True when MP3 source quality is likely to hiss under heavy compression."""
+        if not audio_file_path.lower().endswith(".mp3"):
+            return False
+        if sample_rate_hz is not None and sample_rate_hz <= 24000:
+            return True
+        if bitrate_bps is not None and bitrate_bps <= 96000:
+            return True
+        return False
 
     def _should_use_short_clip_safety(self, audio_file_path: str, duration_seconds: Optional[float]) -> bool:
         """Return True when short MP3 playback should avoid aggressive startup flags."""
@@ -473,8 +500,14 @@ class AudioService:
         keywords = getattr(self, "earrape_keywords", ("earrape",))
         return any(keyword in normalized for keyword in keywords)
 
-    def _build_playback_ear_protection_filters(self, audio_file: str) -> List[str]:
-        """Build protective playback filters to tame harsh peaks."""
+    def _build_playback_ear_protection_filters(
+        self,
+        audio_file: str,
+        sample_rate_hz: Optional[int] = None,
+        bitrate_bps: Optional[int] = None,
+        relax_for_low_fidelity: bool = False,
+    ) -> List[str]:
+        """Build protective playback filters while avoiding artifacts on low-fidelity sources."""
         if not getattr(self, "playback_ear_protection_enabled", True):
             return []
 
@@ -482,8 +515,15 @@ class AudioService:
         ratio = max(1.0, float(getattr(self, "playback_ear_protection_ratio", 6.0)))
         lowpass_hz = max(0, int(getattr(self, "playback_ear_protection_lowpass_hz", 12000)))
         gain_db = float(getattr(self, "playback_ear_protection_gain_db", -3.0))
+        is_earrape = self._is_earrape_like_filename(audio_file)
 
-        if self._is_earrape_like_filename(audio_file):
+        if relax_for_low_fidelity and not is_earrape:
+            # Low-fidelity MP3s (e.g. 24kHz/64kbps voice clips) can produce
+            # rising hiss when compressed; keep attenuation only.
+            ratio = 1.0
+            lowpass_hz = 0
+
+        if is_earrape:
             threshold_db = min(
                 threshold_db,
                 float(getattr(self, "earrape_compression_threshold_db", -20.0)),
@@ -498,6 +538,13 @@ class AudioService:
             elif earrape_lowpass > 0:
                 lowpass_hz = min(lowpass_hz, earrape_lowpass)
             gain_db += float(getattr(self, "earrape_extra_attenuation_db", -6.0))
+
+        if sample_rate_hz is not None and sample_rate_hz > 0 and lowpass_hz > 0:
+            safe_cutoff_hz = int(sample_rate_hz * 0.45)
+            if safe_cutoff_hz <= 0:
+                lowpass_hz = 0
+            else:
+                lowpass_hz = min(lowpass_hz, safe_cutoff_hz)
 
         filters: List[str] = []
         if ratio > 1.0:
@@ -1305,16 +1352,29 @@ class AudioService:
                 return False
 
             short_clip_duration_seconds: Optional[float] = None
-            if self.audio_latency_mode == "low_latency" and audio_file_path.lower().endswith(".mp3"):
-                short_clip_duration_seconds = await asyncio.to_thread(
-                    self._read_mp3_duration_seconds, audio_file_path
+            playback_sample_rate_hz: Optional[int] = None
+            playback_bitrate_bps: Optional[int] = None
+            if audio_file_path.lower().endswith(".mp3"):
+                (
+                    mp3_duration_seconds,
+                    playback_sample_rate_hz,
+                    playback_bitrate_bps,
+                ) = await asyncio.to_thread(
+                    self._read_mp3_playback_info, audio_file_path
                 )
+                if self.audio_latency_mode == "low_latency":
+                    short_clip_duration_seconds = mp3_duration_seconds
 
             use_short_clip_safety = self._should_use_short_clip_safety(
                 audio_file_path,
                 short_clip_duration_seconds,
             )
             use_low_latency_mp3_safety = self._is_low_latency_mp3_playback(audio_file_path)
+            use_low_fidelity_mp3_ear_protection_relax = self._is_low_fidelity_mp3_playback(
+                audio_file_path,
+                playback_sample_rate_hz,
+                playback_bitrate_bps,
+            )
 
             # FFmpeg options
             # Combine effect volume with global volume
@@ -1330,7 +1390,12 @@ class AudioService:
                     filters.append("aecho=0.8:0.9:1000:0.3")
                 if effects.get('reverse'):
                     filters.append("areverse")
-            ear_protection_filters = self._build_playback_ear_protection_filters(audio_file)
+            ear_protection_filters = self._build_playback_ear_protection_filters(
+                audio_file,
+                sample_rate_hz=playback_sample_rate_hz,
+                bitrate_bps=playback_bitrate_bps,
+                relax_for_low_fidelity=use_low_fidelity_mp3_ear_protection_relax,
+            )
             if ear_protection_filters:
                 filters.extend(ear_protection_filters)
             startup_preroll_ms = self._get_play_audio_start_preroll_ms(
@@ -1355,6 +1420,12 @@ class AudioService:
                 print(
                     "[AudioService] [DEBUG] low-latency mp3 startup safety enabled "
                     f"for {audio_file}"
+                )
+            if use_low_fidelity_mp3_ear_protection_relax:
+                print(
+                    "[AudioService] [DEBUG] low-fidelity mp3 ear-protection relax enabled "
+                    f"for {audio_file} sample_rate={playback_sample_rate_hz} "
+                    f"bitrate={playback_bitrate_bps}"
                 )
             if startup_preroll_ms > 0:
                 print(

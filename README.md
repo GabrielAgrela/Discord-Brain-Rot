@@ -248,6 +248,7 @@ This README is based on the current codebase behavior (not historical README ass
 - `SOUND_PLAYBACK_EAR_PROTECTION_THRESHOLD_DBFS` (default `-16.0`; playback compressor threshold)
 - `SOUND_PLAYBACK_EAR_PROTECTION_RATIO` (default `6.0`; playback compressor ratio)
 - `SOUND_PLAYBACK_EAR_PROTECTION_LOWPASS_HZ` (default `12000`; playback high-frequency smoothing)
+- Low-fidelity MP3 sources (<=24kHz or <=96kbps) auto-relax ear-protection (skip compressor/lowpass, keep attenuation) unless filename matches earrape keywords.
 - `SOUND_EARRAPE_KEYWORDS` (default `earrape,bassboost,bass boost`; filename markers for stronger protection)
 - `SOUND_EARRAPE_EXTRA_ATTENUATION_DB` (default `-6.0`; extra attenuation for matched filenames)
 - `SOUND_EARRAPE_LOWPASS_HZ` (default `9000`; stronger lowpass for matched filenames)

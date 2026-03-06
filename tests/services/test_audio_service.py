@@ -348,6 +348,41 @@ class TestAudioService:
         audio_service.audio_latency_mode = "balanced"
         assert audio_service._is_low_latency_mp3_playback("clip.mp3") is False
 
+    def test_is_low_fidelity_mp3_playback(self, audio_service):
+        """Ensure low-fidelity MP3 detection uses sample-rate/bitrate thresholds."""
+        assert (
+            audio_service._is_low_fidelity_mp3_playback(
+                "clip.mp3",
+                sample_rate_hz=24000,
+                bitrate_bps=128000,
+            )
+            is True
+        )
+        assert (
+            audio_service._is_low_fidelity_mp3_playback(
+                "clip.mp3",
+                sample_rate_hz=44100,
+                bitrate_bps=96000,
+            )
+            is True
+        )
+        assert (
+            audio_service._is_low_fidelity_mp3_playback(
+                "clip.mp3",
+                sample_rate_hz=44100,
+                bitrate_bps=128000,
+            )
+            is False
+        )
+        assert (
+            audio_service._is_low_fidelity_mp3_playback(
+                "clip.wav",
+                sample_rate_hz=24000,
+                bitrate_bps=64000,
+            )
+            is False
+        )
+
     def test_get_play_audio_start_preroll_ms_uses_general_low_latency_preroll(self, audio_service):
         """Ensure normal low-latency playback gets startup pre-roll protection."""
         audio_service.audio_latency_mode = "low_latency"
@@ -449,6 +484,50 @@ class TestAudioService:
         assert filters[0] == "acompressor=threshold=-20.0dB:ratio=12.00:attack=5:release=80:makeup=1"
         assert filters[1] == "lowpass=f=9000"
         assert filters[2] == "volume=0.3548"
+
+    def test_build_playback_ear_protection_filters_relaxes_low_fidelity_mp3(self, audio_service):
+        """Ensure low-fidelity MP3 playback avoids compressor/lowpass hiss artifacts."""
+        audio_service.playback_ear_protection_enabled = True
+        audio_service.playback_ear_protection_gain_db = -3.0
+        audio_service.playback_ear_protection_threshold_db = -16.0
+        audio_service.playback_ear_protection_ratio = 6.0
+        audio_service.playback_ear_protection_lowpass_hz = 12000
+        audio_service.earrape_keywords = ("earrape",)
+        audio_service.earrape_extra_attenuation_db = -6.0
+        audio_service.earrape_lowpass_hz = 9000
+        audio_service.earrape_compression_threshold_db = -20.0
+        audio_service.earrape_compression_ratio = 12.0
+
+        filters = audio_service._build_playback_ear_protection_filters(
+            "normal.mp3",
+            sample_rate_hz=24000,
+            bitrate_bps=64000,
+            relax_for_low_fidelity=True,
+        )
+
+        assert filters == ["volume=0.7079"]
+
+    def test_build_playback_ear_protection_filters_lowpass_clamped_by_sample_rate(self, audio_service):
+        """Ensure lowpass cutoff never exceeds a safe fraction of Nyquist."""
+        audio_service.playback_ear_protection_enabled = True
+        audio_service.playback_ear_protection_gain_db = -3.0
+        audio_service.playback_ear_protection_threshold_db = -16.0
+        audio_service.playback_ear_protection_ratio = 6.0
+        audio_service.playback_ear_protection_lowpass_hz = 12000
+        audio_service.earrape_keywords = ("earrape",)
+        audio_service.earrape_extra_attenuation_db = -6.0
+        audio_service.earrape_lowpass_hz = 9000
+        audio_service.earrape_compression_threshold_db = -20.0
+        audio_service.earrape_compression_ratio = 12.0
+
+        filters = audio_service._build_playback_ear_protection_filters(
+            "normal.mp3",
+            sample_rate_hz=24000,
+            bitrate_bps=128000,
+            relax_for_low_fidelity=False,
+        )
+
+        assert filters[1] == "lowpass=f=10800"
 
     @pytest.mark.asyncio
     async def test_play_slap_waits_for_lingering_player_thread(self, audio_service):
