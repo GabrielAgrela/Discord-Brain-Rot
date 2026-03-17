@@ -96,3 +96,93 @@ class TestImageGeneratorService:
         assert "0 downloaded" in captured["html"]
         assert "0 skipped/invalid" in captured["html"]
         assert "1.2s" in captured["html"]
+
+    def test_generate_rl_store_card_sync_renders_item_images(self):
+        """RL store cards should include every item tile image in the rendered HTML."""
+        from bot.services.image_generator import ImageGeneratorService
+
+        service = ImageGeneratorService()
+        rendered = _create_png_bytes(900, 1200)
+        captured: dict[str, str] = {}
+
+        def _capture_render(html_content, size, selector):
+            captured["html"] = html_content
+            captured["selector"] = selector
+            captured["size"] = size
+            return rendered
+
+        card_data = {
+            "shop_name": "Featured Shop",
+            "shop_subtitle": None,
+            "shop_type": "Featured",
+            "updated_text": "March 17, 2026 19:00 UTC",
+            "ends_text": "Ends Mar 18 19:00 UTC",
+            "page_text": "Page 1/2",
+            "summary_text": "Shop 1/1 | Shop Page 1/2",
+            "source_label": "Source rlshop.gg",
+            "accent_color": "#F59E0B",
+            "grid_columns": 5,
+            "tiles": [
+                {
+                    "label": "Cyclone",
+                    "category": "Body",
+                    "group_label": "Miku Bundle",
+                    "paint_badge": "Orange",
+                    "paint_badge_background": "#F97316",
+                    "paint_badge_color": "#FFF7ED",
+                    "paint_badge_border": "rgba(254, 215, 170, 0.36)",
+                    "time_badge": "23h 4m",
+                    "price_text": "1500 credits",
+                    "image_url": "https://rlshop.gg/cyclone.png",
+                    "placeholder": "CYC",
+                },
+                {
+                    "label": "Miku Wheels",
+                    "category": "Wheels",
+                    "group_label": "Miku Bundle",
+                    "paint_badge": None,
+                    "paint_badge_background": None,
+                    "paint_badge_color": None,
+                    "paint_badge_border": None,
+                    "time_badge": "23h 4m",
+                    "price_text": None,
+                    "image_url": "https://rlshop.gg/wheels.png",
+                    "placeholder": "MIK",
+                }
+            ],
+        }
+
+        with patch.object(
+            service,
+            "_download_many_images",
+            return_value={
+                "https://rlshop.gg/cyclone.png": "abc123",
+                "https://rlshop.gg/wheels.png": "def456",
+            },
+        ), patch.object(service, "_render_html_to_png", side_effect=_capture_render):
+            result = service._generate_rl_store_card_sync(card_data)
+
+        assert result is not None
+        assert _image_size(result) == (675, 900)
+        assert captured["selector"] == ".store-board"
+        assert "tile-grid" in captured["html"]
+        assert "Cyclone" in captured["html"]
+        assert "Miku Wheels" in captured["html"]
+        assert "Miku Bundle" in captured["html"]
+        assert "23h 4m" in captured["html"]
+        assert "data:image/png;base64,abc123" in captured["html"]
+        assert "data:image/png;base64,def456" in captured["html"]
+        assert "--accent-rgb: 245, 158, 11;" in captured["html"]
+        assert "background: #F97316;" in captured["html"]
+        assert "color: #FFF7ED;" in captured["html"]
+        assert captured["size"] == (1500, 760)
+
+    def test_estimate_rl_store_canvas_height_scales_by_row_count(self):
+        """RL store canvas estimates should leave extra headroom for multi-line tile text."""
+        from bot.services.image_generator import ImageGeneratorService
+
+        service = ImageGeneratorService()
+
+        assert service._estimate_rl_store_canvas_height(0, 5) == 520
+        assert service._estimate_rl_store_canvas_height(5, 5) == 760
+        assert service._estimate_rl_store_canvas_height(10, 5) == 1120

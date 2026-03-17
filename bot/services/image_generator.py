@@ -27,6 +27,9 @@ class ImageGeneratorService:
         self.template_path = os.path.abspath(
             os.path.join(os.path.dirname(__file__), "..", "..", "templates", "sound_card.html")
         )
+        self.rl_store_template_path = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "..", "templates", "rl_store_card.html")
+        )
         self._hti = None
         self._temp_dir = os.path.abspath(
             os.path.join(os.path.dirname(__file__), "..", "..", "Debug", "sound_cards")
@@ -34,8 +37,10 @@ class ImageGeneratorService:
         os.makedirs(self._temp_dir, exist_ok=True)
 
         self._template_content = self._load_template(self.template_path)
+        self._rl_store_template_content = self._load_template(self.rl_store_template_path)
         self._jinja_template_class = None
         self._sound_card_template = None
+        self._rl_store_card_template = None
 
         self._render_lock = threading.Lock()
         self._driver = None
@@ -93,6 +98,54 @@ class ImageGeneratorService:
             return f"{red}, {green}, {blue}"
         except ValueError:
             return fallback
+
+    def _estimate_rl_store_canvas_height(self, tile_count: int, grid_columns: int) -> int:
+        """Return a generous initial viewport height for RL store pages."""
+        if tile_count <= 0:
+            return 520
+
+        rows = max(1, (tile_count + max(1, grid_columns) - 1) // max(1, grid_columns))
+        return 280 + (rows * 360) + 120
+
+    def _measure_selector_capture_bounds(
+        self,
+        driver: Any,
+        selector: str,
+    ) -> Optional[Dict[str, float]]:
+        """Measure the selector and document size for stable screenshot capture."""
+        return driver.execute_script(
+            """
+            const el = document.querySelector(arguments[0]);
+            if (!el) return null;
+            const rect = el.getBoundingClientRect();
+            const doc = document.documentElement;
+            const body = document.body;
+            const documentHeight = Math.max(
+                rect.height,
+                el.scrollHeight || 0,
+                doc ? doc.scrollHeight || 0 : 0,
+                body ? body.scrollHeight || 0 : 0
+            );
+            const documentWidth = Math.max(
+                rect.width,
+                el.scrollWidth || 0,
+                doc ? doc.scrollWidth || 0 : 0,
+                body ? body.scrollWidth || 0 : 0
+            );
+            return {
+                x: Math.max(0, rect.x),
+                y: Math.max(0, rect.y),
+                width: Math.max(1, Math.ceil(rect.width)),
+                height: Math.max(1, Math.ceil(rect.height)),
+                requiredWidth: Math.max(1, Math.ceil(documentWidth + 32)),
+                requiredHeight: Math.max(1, Math.ceil(documentHeight + 40)),
+                viewportWidth: Math.max(1, window.innerWidth || 0),
+                viewportHeight: Math.max(1, window.innerHeight || 0),
+                scale: window.devicePixelRatio || 1
+            };
+            """,
+            selector,
+        )
 
     def _download_image_as_base64(self, url: str) -> Optional[str]:
         """Download an image from URL and return base64, with short-lived cache."""
@@ -159,6 +212,22 @@ class ImageGeneratorService:
                 print(f"[ImageGeneratorService] Error resolving image future ({key}): {e}")
 
         return requester_avatar_b64, sts_thumbnail_b64
+
+    def _download_many_images(self, urls: list[str]) -> Dict[str, Optional[str]]:
+        """Download a batch of image URLs concurrently and return base64 strings keyed by URL."""
+        unique_urls = [url for url in dict.fromkeys(urls) if url]
+        futures = {
+            url: self._download_pool.submit(self._download_image_as_base64, url)
+            for url in unique_urls
+        }
+        results: Dict[str, Optional[str]] = {}
+        for url, future in futures.items():
+            try:
+                results[url] = future.result()
+            except Exception as e:
+                print(f"[ImageGeneratorService] Error resolving image future ({url}): {e}")
+                results[url] = None
+        return results
 
     def _get_driver(self):
         """Get a persistent Selenium driver for fast repeated screenshots."""
@@ -248,6 +317,10 @@ class ImageGeneratorService:
                 if self._sound_card_template is None:
                     self._sound_card_template = self._jinja_template_class(template_str)
                 template = self._sound_card_template
+            elif template_str == self._rl_store_template_content:
+                if self._rl_store_card_template is None:
+                    self._rl_store_card_template = self._jinja_template_class(template_str)
+                template = self._rl_store_card_template
             else:
                 template = self._jinja_template_class(template_str)
 
@@ -291,23 +364,19 @@ class ImageGeneratorService:
                     WebDriverWait(driver, 2.0).until(
                         EC.presence_of_element_located((By.CSS_SELECTOR, selector))
                     )
-                    clip = driver.execute_script(
-                        """
-                        const el = document.querySelector(arguments[0]);
-                        if (!el) return null;
-                        const rect = el.getBoundingClientRect();
-                        return {
-                            x: Math.max(0, rect.x),
-                            y: Math.max(0, rect.y),
-                            width: Math.max(1, rect.width),
-                            height: Math.max(1, rect.height),
-                            scale: window.devicePixelRatio || 1
-                        };
-                        """,
-                        selector,
-                    )
+                    clip = self._measure_selector_capture_bounds(driver, selector)
                     if not clip:
                         return None
+                    required_width = max(max(900, width), int(clip.get("requiredWidth", width)))
+                    required_height = max(max(640, height), int(clip.get("requiredHeight", height)))
+                    viewport_width = int(clip.get("viewportWidth", width))
+                    viewport_height = int(clip.get("viewportHeight", height))
+                    if required_width > viewport_width or required_height > viewport_height:
+                        driver.set_window_size(required_width, required_height)
+                        driver.execute_script("window.scrollTo(0, 0);")
+                        clip = self._measure_selector_capture_bounds(driver, selector)
+                        if not clip:
+                            return None
                     result = driver.execute_cdp_cmd(
                         "Page.captureScreenshot",
                         {
@@ -463,6 +532,17 @@ class ImageGeneratorService:
             accent_color,
         )
 
+    async def generate_rl_store_card(self, card_data: Dict[str, Any]) -> Optional[bytes]:
+        """Render a Rocket League store page card in a background thread."""
+        import asyncio
+
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None,
+            self._generate_rl_store_card_sync,
+            card_data,
+        )
+
     def _generate_sound_card_sync(
         self,
         sound_name: str,
@@ -611,6 +691,39 @@ class ImageGeneratorService:
 
         except Exception as e:
             print(f"[ImageGeneratorService] Error generating sound card: {e}")
+            import traceback
+
+            traceback.print_exc()
+            return None
+
+    def _generate_rl_store_card_sync(self, card_data: Dict[str, Any]) -> Optional[bytes]:
+        """Generate a Rocket League store page image."""
+        try:
+            tiles = [dict(tile) for tile in card_data.get("tiles") or []]
+            image_urls = [tile.get("image_url") for tile in tiles if tile.get("image_url")]
+            images_by_url = self._download_many_images(image_urls)
+
+            for tile in tiles:
+                image_url = tile.get("image_url")
+                tile["image_b64"] = images_by_url.get(image_url) if image_url else None
+
+            render_data = dict(card_data)
+            render_data["tiles"] = tiles
+            render_data["accent_color"] = card_data.get("accent_color") or "#5865F2"
+            render_data["accent_rgb"] = self._hex_to_rgb(render_data["accent_color"])
+            render_data["grid_columns"] = max(1, int(card_data.get("grid_columns") or 5))
+
+            html_content = self._render_template(self._rl_store_template_content, render_data)
+
+            rendered = self._render_html_to_png(
+                html_content,
+                size=(1500, min(self._estimate_rl_store_canvas_height(len(tiles), render_data["grid_columns"]), 2600)),
+                selector=".store-board",
+            )
+            return self._scale_png_bytes(rendered, scale=self._card_image_scale)
+
+        except Exception as e:
+            print(f"[ImageGeneratorService] Error generating RL store card: {e}")
             import traceback
 
             traceback.print_exc()

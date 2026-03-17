@@ -23,6 +23,8 @@ class BackgroundService:
     Service for background tasks like status updates, periodic sound playback,
     and MyInstants scraping.
     """
+
+    RLSTORE_NOTIFY_ACTION = "rlstore_daily_notification_sent"
     
     def __init__(self, bot, audio_service, sound_service, behavior=None):
         self.bot = bot
@@ -53,6 +55,10 @@ class BackgroundService:
         self._weekly_wrapped_hour_utc = self._env_int("WEEKLY_WRAPPED_HOUR_UTC", 18, 0, 23)
         self._weekly_wrapped_minute_utc = self._env_int("WEEKLY_WRAPPED_MINUTE_UTC", 0, 0, 59)
         self._weekly_wrapped_days = self._env_int("WEEKLY_WRAPPED_LOOKBACK_DAYS", 7, 1, 30)
+        self._rlstore_notify_enabled = self._env_flag("RLSTORE_NOTIFY_ENABLED", True)
+        self._rlstore_notify_hour_utc = self._env_int("RLSTORE_NOTIFY_HOUR_UTC", 19, 0, 23)
+        self._rlstore_notify_minute_utc = self._env_int("RLSTORE_NOTIFY_MINUTE_UTC", 5, 0, 59)
+        self._rlstore_notify_target = (os.getenv("RLSTORE_NOTIFY_TARGET_USERNAME", "sopustos") or "").strip()
 
     def start_tasks(self):
         """Schedule tasks to start when the bot is ready."""
@@ -82,6 +88,8 @@ class BackgroundService:
                 self.performance_telemetry_loop.start()
             if self._weekly_wrapped_enabled and not self.weekly_wrapped_scheduler_loop.is_running():
                 self.weekly_wrapped_scheduler_loop.start()
+            if self._rlstore_notify_enabled and not self.rlstore_notification_loop.is_running():
+                self.rlstore_notification_loop.start()
             
             asyncio.create_task(self._auto_join_channels())
             print("[BackgroundService] Background tasks started.")
@@ -867,6 +875,148 @@ class BackgroundService:
 
         return sent_count
 
+    def _is_rlstore_notify_window(self, now_utc: datetime) -> bool:
+        """Return True when the current UTC time matches the daily rlstore send window."""
+        if now_utc.hour != self._rlstore_notify_hour_utc:
+            return False
+        return now_utc.minute >= self._rlstore_notify_minute_utc
+
+    @staticmethod
+    def _rlstore_notify_key(now_utc: datetime) -> str:
+        """Return a stable per-day key for rlstore scheduler dedupe."""
+        return f"rlstore:{now_utc.date().isoformat()}"
+
+    def _resolve_rlstore_notify_member(self, guild: discord.Guild) -> Optional[discord.Member]:
+        """Resolve the configured rlstore notification target to a guild member."""
+        target = self._rlstore_notify_target.strip()
+        if not target:
+            return None
+
+        if target.isdigit():
+            return guild.get_member(int(target))
+
+        target_lower = target.lower()
+        for member in guild.members:
+            candidates = {
+                (member.name or "").lower(),
+                (member.display_name or "").lower(),
+                (getattr(member, "global_name", None) or "").lower(),
+            }
+            if target_lower in candidates:
+                return member
+        return None
+
+    async def _run_rlstore_notification_tick(
+        self,
+        now_utc: Optional[datetime] = None,
+    ) -> int:
+        """
+        Execute one scheduler tick for the daily rlstore notification.
+
+        Args:
+            now_utc: Optional injected UTC time for deterministic tests.
+
+        Returns:
+            Number of guilds where the notification was sent.
+        """
+        if not self._rlstore_notify_enabled or not self.behavior:
+            return 0
+
+        rlstore_service = getattr(self.behavior, "_rocket_league_store_service", None)
+        message_service = getattr(self.behavior, "_message_service", None)
+        image_generator = getattr(getattr(self.behavior, "_audio_service", None), "image_generator", None)
+        if rlstore_service is None or message_service is None or image_generator is None:
+            return 0
+
+        now_utc = now_utc or datetime.now(timezone.utc)
+        if now_utc.tzinfo is None:
+            now_utc = now_utc.replace(tzinfo=timezone.utc)
+
+        if not self._is_rlstore_notify_window(now_utc):
+            return 0
+
+        try:
+            snapshot = await rlstore_service.fetch_store_snapshot()
+        except Exception as exc:
+            logger.error("[BackgroundService] Failed to fetch rlstore snapshot: %s", exc, exc_info=True)
+            return 0
+
+        notify_key = self._rlstore_notify_key(now_utc)
+        merc_status = rlstore_service.build_merc_status_text(snapshot)
+        from bot.ui import RocketLeagueStoreView
+
+        sent_count = 0
+        for guild in self.bot.guilds:
+            try:
+                if self.action_repo.has_action_for_target(
+                    self.RLSTORE_NOTIFY_ACTION,
+                    notify_key,
+                    guild_id=guild.id,
+                    include_global=False,
+                ):
+                    continue
+
+                channel = message_service.get_bot_channel(guild)
+                if channel is None:
+                    continue
+
+                target_member = self._resolve_rlstore_notify_member(guild)
+                if target_member is not None:
+                    content = (
+                        f"{target_member.mention} Rocket League store refreshed. "
+                        f"{merc_status} "
+                        "Daily reset is at 19:00 UTC and this post runs at 19:05 UTC."
+                    )
+                    allowed_mentions = discord.AllowedMentions(users=True)
+                elif self._rlstore_notify_target:
+                    logger.warning(
+                        "[BackgroundService] rlstore notify target '%s' was not found in guild '%s'",
+                        self._rlstore_notify_target,
+                        guild.name,
+                    )
+                    content = (
+                        "Rocket League store refreshed. "
+                        f"{merc_status} "
+                        f"Configured notify target '{self._rlstore_notify_target}' was not found for a direct mention."
+                    )
+                    allowed_mentions = discord.AllowedMentions.none()
+                else:
+                    content = f"Rocket League store refreshed. {merc_status}"
+                    allowed_mentions = discord.AllowedMentions.none()
+
+                view = RocketLeagueStoreView(
+                    snapshot=snapshot,
+                    owner_id=None,
+                    image_generator=image_generator,
+                )
+                await view.prepare_all_pages()
+                image_file = await view.create_file()
+                if image_file is not None:
+                    await channel.send(
+                        content=content,
+                        file=image_file,
+                        view=view,
+                        allowed_mentions=allowed_mentions,
+                    )
+                else:
+                    await channel.send(
+                        content=content,
+                        embed=view.create_embed(),
+                        view=view,
+                        allowed_mentions=allowed_mentions,
+                    )
+                self.action_repo.insert("scheduler", self.RLSTORE_NOTIFY_ACTION, notify_key, guild_id=guild.id)
+                sent_count += 1
+            except Exception as exc:
+                logger.error(
+                    "[BackgroundService] rlstore notification failed for guild '%s': %s",
+                    guild.name,
+                    exc,
+                    exc_info=True,
+                )
+
+        return sent_count
+
     @tasks.loop(seconds=0.5)
     async def performance_telemetry_loop(self):
         """Log high-frequency process and host performance telemetry."""
@@ -890,6 +1040,16 @@ class BackgroundService:
                 print(f"[BackgroundService] Weekly wrapped sent in {sent_count} guild(s)")
         except Exception as e:
             print(f"[BackgroundService] Error in weekly wrapped scheduler: {e}")
+
+    @tasks.loop(minutes=5)
+    async def rlstore_notification_loop(self):
+        """Send the daily rlstore notification shortly after the store reset window."""
+        try:
+            sent_count = await self._run_rlstore_notification_tick()
+            if sent_count > 0:
+                print(f"[BackgroundService] rlstore notification sent in {sent_count} guild(s)")
+        except Exception as e:
+            print(f"[BackgroundService] Error in rlstore notification scheduler: {e}")
 
     @tasks.loop(seconds=30)
     async def keyword_detection_health_check(self):

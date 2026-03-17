@@ -52,6 +52,9 @@ from bot.ui.views.stats import (
 from bot.ui.views.onthisday import (
     OnThisDayView
 )
+from bot.ui.views.rlstore import (
+    RocketLeagueStoreView
+)
 from bot.ui.selects import (
     EventTypeSelect, UserSelect, SoundSelect, AddToListSelect,
     STSCharacterSelect, SimilarSoundsSelect, LoadingSimilarSoundsSelect
@@ -88,7 +91,7 @@ __all__ = [
 
     'ControlsView', 'InlineControlsMessageView', 'DownloadedSoundView', 'SoundView',
     'UserEventSelectView', 'EventView', 'PaginatedEventView',
-    'PaginatedFavoritesView', 'PaginatedStatsView', 'OnThisDayView', 'UploadChoiceView',
+    'PaginatedFavoritesView', 'PaginatedStatsView', 'OnThisDayView', 'RocketLeagueStoreView', 'UploadChoiceView',
     
     # Selects
     'EventTypeSelect', 'UserSelect', 'SoundSelect', 'AddToListSelect',

@@ -83,6 +83,7 @@ This README is based on the current codebase behavior (not historical README ass
 - Add/remove sounds with autocomplete and ownership checks.
 - Join/leave event sound assignment UI and paginated event browsing.
 - `/onthisday` returns sounds from 1 month or 1 year ago.
+- `/rlstore` shows the current Rocket League item shop as compact paginated image grids with item thumbnails, labeled page-jump buttons, and a Merc yes/no ping for the configured notify target.
 
 ### Stats and Analytics
 - `/top` leaderboard options:
@@ -113,12 +114,13 @@ This README is based on the current codebase behavior (not historical README ass
   - `/ventura`
   - `/backup`
 - `/reboot` command is intentionally disabled for public deployments.
-- Backup service creates compressed project backups with exclusions.
+- Backup service creates compressed project backups with exclusions and now updates the ephemeral `/backup` response with live stage/progress status while archiving.
 
 ### Background Automations
 - Random periodic sound playback loop (feature-flagged per guild; disabled by default).
 - MyInstants scraping loop.
 - Weekly wrapped scheduler loop (UTC-based, default Friday 18:00, deduped per guild/week).
+- Daily `rlstore` notification loop (UTC-based, default 19:05, mentions the configured target user and posts the paginated image-card shop view).
 - Scraper start + completion image cards with compact run summary.
 - Controls-button normalizer loop (every minute): keeps one recent inline `⚙️` on eligible bot messages by adding if missing and removing extras with safe raw-component edits.
 - Keyword detection health check loop.
@@ -205,6 +207,9 @@ This README is based on the current codebase behavior (not historical README ass
 ### Historical
 - `/onthisday period:<1 year ago|1 month ago>`
 
+### External
+- `/rlstore`
+
 ## Web Routes (Optional `web` Profile)
 
 - `GET /`
@@ -238,6 +243,10 @@ This README is based on the current codebase behavior (not historical README ass
 - `ENABLE_VENTURA` (`true`/`false`, default `true`)
 - `OWNER_USER_IDS` (comma-separated Discord user IDs allowed to run admin-only commands)
 - `AUDIO_LATENCY_MODE` (`low_latency` default, or `balanced` / `high_quality`)
+- `RLSTORE_NOTIFY_ENABLED` (`true` default; enables the daily Rocket League store notification scheduler)
+- `RLSTORE_NOTIFY_HOUR_UTC` (default `19`; current store-reset follow-up hour in UTC)
+- `RLSTORE_NOTIFY_MINUTE_UTC` (default `5`; notification minute after the reset hour)
+- `RLSTORE_NOTIFY_TARGET_USERNAME` (default `sopustos`; exact username/display name or Discord user ID to mention)
 - `PLAYBACK_START_PREROLL_MS` (default `180`; baseline startup pre-roll for low-latency playback)
 - `LOW_LATENCY_MP3_START_PREROLL_MS` (default `650`; minimum startup pre-roll floor for MP3 in low-latency mode)
 - `TTS_LOUDNORM_MODE` (`off` default, or `single` / `double`)

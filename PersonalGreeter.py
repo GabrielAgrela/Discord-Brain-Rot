@@ -27,6 +27,7 @@ from bot.commands.stats import StatsCog
 from bot.commands.keywords import KeywordCog
 from bot.commands.debug import DebugCog
 from bot.commands.onthisday import OnThisDayCog
+from bot.commands.rlstore import RocketLeagueStoreCog
 from bot.commands.settings import SettingsCog
 from bot.repositories import VoiceActivityRepository
 import random
@@ -64,6 +65,7 @@ bot.add_cog(StatsCog(bot, behavior))
 bot.add_cog(KeywordCog(bot, behavior))
 bot.add_cog(DebugCog(bot, behavior))
 bot.add_cog(OnThisDayCog(bot, behavior))
+bot.add_cog(RocketLeagueStoreCog(bot, behavior))
 bot.add_cog(SettingsCog(bot, behavior))
 db = Database(behavior=behavior)
 voice_activity_repo = VoiceActivityRepository()

@@ -46,6 +46,7 @@ from bot.services.background import BackgroundService
 from bot.services.backup import BackupService
 from bot.services.llm import LLMService
 from bot.services.guild_settings import GuildSettingsService
+from bot.services.rl_store import RocketLeagueStoreService
 from bot.services.weekly_wrapped import WeeklyWrappedService
 
 
@@ -71,6 +72,7 @@ class BotBehavior:
         self._backup_service = BackupService(bot, self._message_service)
         self._llm_service = LLMService()
         self._guild_settings_service = GuildSettingsService()
+        self._rocket_league_store_service = RocketLeagueStoreService()
         self._weekly_wrapped_service = WeeklyWrappedService(bot, self._message_service)
         
         from bot.services.ai_commentary import AICommentaryService

@@ -9,6 +9,12 @@ from bot.models.sound import Sound, SoundEffect
 from bot.models.user import User, UserEvent
 from bot.models.action import Action
 from bot.models.guild_settings import GuildSettings
+from bot.models.rl_store import (
+    RocketLeagueStoreSnapshot,
+    RocketLeagueStoreShop,
+    RocketLeagueStoreGroup,
+    RocketLeagueStoreItem,
+)
 
 __all__ = [
     "Sound",
@@ -17,4 +23,8 @@ __all__ = [
     "UserEvent",
     "Action",
     "GuildSettings",
+    "RocketLeagueStoreSnapshot",
+    "RocketLeagueStoreShop",
+    "RocketLeagueStoreGroup",
+    "RocketLeagueStoreItem",
 ]

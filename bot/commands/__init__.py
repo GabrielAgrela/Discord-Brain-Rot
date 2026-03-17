@@ -20,4 +20,5 @@ __all__ = [
     "KeywordCog",
     "DebugCog",
     "OnThisDayCog",
+    "RocketLeagueStoreCog",
 ]

@@ -188,6 +188,17 @@ Canonical completion command:
 - Attribute name mismatches and service access patterns are only caught at runtime
 - When adding new commands/UI, manually test the full flow to catch integration issues
 
+### Rocket League Store Data Source
+- `/rlstore` uses `https://rlshop.gg/__data.json` for the featured shop and `https://rlshop.gg/<shop_id>/__data.json` for other active shops.
+- These payloads are SvelteKit/devalue-encoded: decode node `0` for `activeShops`/`lastUpdated` and node `1` for the selected shop body.
+- The linked `dank/rlapi` repo is the upstream project behind `rlshop.gg`; using `rlshop.gg` avoids adding Epic auth/PsyNet session handling to this bot for read-only shop browsing.
+- The interactive RL store UI now sends file attachments, not embeds, for the normal path. `RocketLeagueStoreView` renders a dedicated image card through `ImageGeneratorService.generate_rl_store_card()` so page buttons must replace the attached file (`attachments=[]` + `file=...`) when editing.
+- RL store pages are now pre-rendered up front via `RocketLeagueStoreView.prepare_all_pages()`. Keep pagination tile-based and cache the image bytes so labeled direct-jump page buttons do not re-render on every button press.
+- RL store paint badges in `templates/rl_store_card.html` are driven by per-paint style tokens from `RocketLeagueStoreView`; do not leave the badge CSS hard-coded to one color or paints like Orange/Sky Blue/Titanium White will render incorrectly.
+- RL store cards can exceed the simple `rows * constant height` estimate when item names wrap. Keep the Selenium render path measuring the real `.store-board` bounds and resizing the viewport before `Page.captureScreenshot`, otherwise the bottom of multi-row pages can get clipped.
+- RL store notifications now also include a shared Merc-status string from `RocketLeagueStoreService.build_merc_status_text()`, and both the scheduled notification and `/rlstore` command notify the configured target user about that yes/no result.
+- The daily RL store notification in `BackgroundService` is intentionally a one-send-per-day catch-up window after the configured reset+5 time (default `19:05 UTC`), not an exact-minute-only fire. Dedupe is stored via `ActionRepository` with action `rlstore_daily_notification_sent`, so restarts later that day still send once instead of skipping the day entirely.
+
 ### Requirements File Encoding
 - `requirements.txt` is currently encoded as UTF-16 LE (with BOM), not UTF-8
 - If dependency edits are needed, preserve UTF-16 encoding to avoid corrupting install behavior/diffs
