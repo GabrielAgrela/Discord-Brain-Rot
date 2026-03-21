@@ -168,3 +168,11 @@ class TestRocketLeagueStoreService:
         )
 
         assert service.build_merc_status_text(snapshot) == "Merc car on the shop: yes (Merc)."
+
+    def test_build_source_url_text_returns_non_unfurled_rlshop_url(self):
+        """Source URL helper should expose the rlshop.gg URL wrapped to avoid embeds."""
+        from bot.services.rl_store import RocketLeagueStoreService
+
+        service = RocketLeagueStoreService()
+
+        assert service.build_source_url_text() == "<https://rlshop.gg>"

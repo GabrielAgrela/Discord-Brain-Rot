@@ -85,12 +85,13 @@ class RocketLeagueStoreCog(commands.Cog):
         snapshot,
         guild: discord.Guild | None,
     ) -> tuple[str, discord.AllowedMentions]:
-        """Build the content line that notifies the configured target about Merc presence."""
+        """Build the content text with Merc status and the bare rlshop.gg source URL."""
         merc_status = self.store_service.build_merc_status_text(snapshot)
+        website_text = self.store_service.build_source_url_text()
         target_member = self._resolve_notify_member(guild)
         if target_member is not None:
-            return f"{target_member.mention} {merc_status}", discord.AllowedMentions(users=True)
-        return merc_status, discord.AllowedMentions.none()
+            return f"{target_member.mention} {merc_status}\n{website_text}", discord.AllowedMentions(users=True)
+        return f"{merc_status}\n{website_text}", discord.AllowedMentions.none()
 
     def _resolve_notify_member(self, guild: discord.Guild | None) -> discord.Member | None:
         """Resolve the configured notify target to a guild member."""

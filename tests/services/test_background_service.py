@@ -791,6 +791,7 @@ class TestAutoJoinChannels:
             )
         )
         behavior._rocket_league_store_service.build_merc_status_text = Mock(return_value="Merc car on the shop: no.")
+        behavior._rocket_league_store_service.build_source_url_text = Mock(return_value="<https://rlshop.gg>")
 
         service = BackgroundService(
             bot=bot,
@@ -811,6 +812,7 @@ class TestAutoJoinChannels:
         kwargs = channel.send.await_args.kwargs
         assert kwargs["content"].startswith("<@123> Rocket League store refreshed.")
         assert "Merc car on the shop: no." in kwargs["content"]
+        assert "<https://rlshop.gg>" in kwargs["content"]
         assert "file" in kwargs
         assert "view" in kwargs
         service.action_repo.insert.assert_called_once_with(

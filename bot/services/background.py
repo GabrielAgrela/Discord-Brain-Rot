@@ -943,6 +943,7 @@ class BackgroundService:
 
         notify_key = self._rlstore_notify_key(now_utc)
         merc_status = rlstore_service.build_merc_status_text(snapshot)
+        website_text = rlstore_service.build_source_url_text()
         from bot.ui import RocketLeagueStoreView
 
         sent_count = 0
@@ -965,7 +966,8 @@ class BackgroundService:
                     content = (
                         f"{target_member.mention} Rocket League store refreshed. "
                         f"{merc_status} "
-                        "Daily reset is at 19:00 UTC and this post runs at 19:05 UTC."
+                        "Daily reset is at 19:00 UTC and this post runs at 19:05 UTC.\n"
+                        f"{website_text}"
                     )
                     allowed_mentions = discord.AllowedMentions(users=True)
                 elif self._rlstore_notify_target:
@@ -977,11 +979,12 @@ class BackgroundService:
                     content = (
                         "Rocket League store refreshed. "
                         f"{merc_status} "
-                        f"Configured notify target '{self._rlstore_notify_target}' was not found for a direct mention."
+                        f"Configured notify target '{self._rlstore_notify_target}' was not found for a direct mention.\n"
+                        f"{website_text}"
                     )
                     allowed_mentions = discord.AllowedMentions.none()
                 else:
-                    content = f"Rocket League store refreshed. {merc_status}"
+                    content = f"Rocket League store refreshed. {merc_status}\n{website_text}"
                     allowed_mentions = discord.AllowedMentions.none()
 
                 view = RocketLeagueStoreView(

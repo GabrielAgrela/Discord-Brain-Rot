@@ -195,8 +195,10 @@ Canonical completion command:
 - The interactive RL store UI now sends file attachments, not embeds, for the normal path. `RocketLeagueStoreView` renders a dedicated image card through `ImageGeneratorService.generate_rl_store_card()` so page buttons must replace the attached file (`attachments=[]` + `file=...`) when editing.
 - RL store pages are now pre-rendered up front via `RocketLeagueStoreView.prepare_all_pages()`. Keep pagination tile-based and cache the image bytes so labeled direct-jump page buttons do not re-render on every button press.
 - RL store paint badges in `templates/rl_store_card.html` are driven by per-paint style tokens from `RocketLeagueStoreView`; do not leave the badge CSS hard-coded to one color or paints like Orange/Sky Blue/Titanium White will render incorrectly.
+- `RocketLeagueStoreView` uses `timeout=None` so shop page-jump buttons do not die after five minutes. Keep that unless the user explicitly wants expiring controls.
 - RL store cards can exceed the simple `rows * constant height` estimate when item names wrap. Keep the Selenium render path measuring the real `.store-board` bounds and resizing the viewport before `Page.captureScreenshot`, otherwise the bottom of multi-row pages can get clipped.
 - RL store notifications now also include a shared Merc-status string from `RocketLeagueStoreService.build_merc_status_text()`, and both the scheduled notification and `/rlstore` command notify the configured target user about that yes/no result.
+- RL store notifications and `/rlstore` also include the `rlshop.gg` source URL from `RocketLeagueStoreService.build_source_url_text()`, wrapped as `<https://rlshop.gg>` so Discord does not unfurl it. Keep that helper shared so command and scheduler content stay aligned.
 - The daily RL store notification in `BackgroundService` is intentionally a one-send-per-day catch-up window after the configured reset+5 time (default `19:05 UTC`), not an exact-minute-only fire. Dedupe is stored via `ActionRepository` with action `rlstore_daily_notification_sent`, so restarts later that day still send once instead of skipping the day entirely.
 
 ### Requirements File Encoding

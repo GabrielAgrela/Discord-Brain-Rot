@@ -72,6 +72,7 @@ class TestRocketLeagueStoreView:
             grid_columns=3,
         )
 
+        assert view.timeout is None
         assert len(view.pages) == 2
         assert [child.label for child in view.children] == ["Featured 1", "Featured 2"]
         assert view.children[0].disabled is True
@@ -132,6 +133,7 @@ class TestRocketLeagueStoreView:
             grid_columns=5,
         )
 
+        assert view.timeout is None
         assert len(view.pages) <= 25
         assert len(view.children) == len(view.pages)
         assert view.tiles_per_page > 1

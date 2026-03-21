@@ -102,7 +102,7 @@ class TestImageGeneratorService:
         from bot.services.image_generator import ImageGeneratorService
 
         service = ImageGeneratorService()
-        rendered = _create_png_bytes(900, 1200)
+        rendered = _create_png_bytes(1500, 760)
         captured: dict[str, str] = {}
 
         def _capture_render(html_content, size, selector):
@@ -163,7 +163,7 @@ class TestImageGeneratorService:
             result = service._generate_rl_store_card_sync(card_data)
 
         assert result is not None
-        assert _image_size(result) == (675, 900)
+        assert _image_size(result) == (1125, 570)
         assert captured["selector"] == ".store-board"
         assert "tile-grid" in captured["html"]
         assert "Cyclone" in captured["html"]
@@ -173,6 +173,13 @@ class TestImageGeneratorService:
         assert "data:image/png;base64,abc123" in captured["html"]
         assert "data:image/png;base64,def456" in captured["html"]
         assert "--accent-rgb: 245, 158, 11;" in captured["html"]
+        assert "width: 1320px;" in captured["html"]
+        assert "border-radius: 40px;" in captured["html"]
+        assert "border: 12px solid var(--accent-color);" in captured["html"]
+        assert "background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #1a1a2e 100%);" in captured["html"]
+        assert "tile-art-inner" in captured["html"]
+        assert "border: 4px solid var(--accent-color);" in captured["html"]
+        assert "border-radius: 28px;" in captured["html"]
         assert "background: #F97316;" in captured["html"]
         assert "color: #FFF7ED;" in captured["html"]
         assert captured["size"] == (1500, 760)

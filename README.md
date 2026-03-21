@@ -83,7 +83,7 @@ This README is based on the current codebase behavior (not historical README ass
 - Add/remove sounds with autocomplete and ownership checks.
 - Join/leave event sound assignment UI and paginated event browsing.
 - `/onthisday` returns sounds from 1 month or 1 year ago.
-- `/rlstore` shows the current Rocket League item shop as compact paginated image grids with item thumbnails, labeled page-jump buttons, and a Merc yes/no ping for the configured notify target.
+- `/rlstore` shows the current Rocket League item shop as compact paginated image grids with item thumbnails, labeled page-jump buttons that stay active until bot restart, a Merc yes/no ping for the configured notify target, and a non-unfurled `https://rlshop.gg` source URL.
 
 ### Stats and Analytics
 - `/top` leaderboard options:
@@ -120,7 +120,7 @@ This README is based on the current codebase behavior (not historical README ass
 - Random periodic sound playback loop (feature-flagged per guild; disabled by default).
 - MyInstants scraping loop.
 - Weekly wrapped scheduler loop (UTC-based, default Friday 18:00, deduped per guild/week).
-- Daily `rlstore` notification loop (UTC-based, default 19:05, mentions the configured target user and posts the paginated image-card shop view).
+- Daily `rlstore` notification loop (UTC-based, default 19:05, mentions the configured target user, posts the paginated image-card shop view, and includes a non-unfurled `https://rlshop.gg` source URL).
 - Scraper start + completion image cards with compact run summary.
 - Controls-button normalizer loop (every minute): keeps one recent inline `⚙️` on eligible bot messages by adding if missing and removing extras with safe raw-component edits.
 - Keyword detection health check loop.

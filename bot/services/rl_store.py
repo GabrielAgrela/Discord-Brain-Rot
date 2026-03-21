@@ -124,6 +124,15 @@ class RocketLeagueStoreService:
             return f"Merc car on the shop: yes ({labels})."
         return "Merc car on the shop: no."
 
+    def build_source_url_text(self) -> str:
+        """
+        Return the rlshop.gg source URL wrapped to suppress Discord embeds.
+
+        Returns:
+            Clickable source URL text without Discord unfurl.
+        """
+        return f"<{self.BASE_URL}>"
+
     async def _fetch_shop_data(
         self,
         session: aiohttp.ClientSession,

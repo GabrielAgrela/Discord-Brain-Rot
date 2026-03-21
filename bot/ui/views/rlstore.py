@@ -180,7 +180,7 @@ class RocketLeagueStoreView(View):
             tiles_per_page: Number of tiles to render per page.
             grid_columns: Number of columns in the compact store grid.
         """
-        super().__init__(timeout=300)
+        super().__init__(timeout=None)
         self.snapshot = snapshot
         self.owner_id = owner_id
         self.image_generator = image_generator
