@@ -120,7 +120,7 @@ This README is based on the current codebase behavior (not historical README ass
 - Random periodic sound playback loop (feature-flagged per guild; disabled by default).
 - MyInstants scraping loop.
 - Weekly wrapped scheduler loop (UTC-based, default Friday 18:00, deduped per guild/week).
-- Daily `rlstore` notification loop (UTC-based, default 19:05, mentions the configured target user, posts the paginated image-card shop view, and includes a non-unfurled `https://rlshop.gg` source URL).
+- Daily `rlstore` notification loop (UTC-based, default 19:05, mentions the configured target user, posts the paginated image-card shop view to `#botrl` when that channel exists, otherwise falls back to the configured bot channel, and includes a non-unfurled `https://rlshop.gg` source URL).
 - Scraper start + completion image cards with compact run summary.
 - Controls-button normalizer loop (every minute): keeps one recent inline `⚙️` on eligible bot messages by adding if missing and removing extras with safe raw-component edits.
 - Keyword detection health check loop.

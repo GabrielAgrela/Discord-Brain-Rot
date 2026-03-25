@@ -8,6 +8,7 @@ from collections import namedtuple
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, Mock, patch
 
+import discord
 import pytest
 
 # Add project root to path
@@ -745,7 +746,7 @@ class TestAutoJoinChannels:
     async def test_run_rlstore_notification_tick_sends_daily_notification_once_in_window(
         self, _mock_sound_repo, _mock_action_repo
     ):
-        """Ensure rlstore scheduler posts after the reset window and records delivery."""
+        """Ensure rlstore scheduler prefers #botrl and records delivery."""
         from bot.models.rl_store import (
             RocketLeagueStoreItem,
             RocketLeagueStoreShop,
@@ -753,8 +754,13 @@ class TestAutoJoinChannels:
         )
         from bot.services.background import BackgroundService
 
-        channel = Mock()
-        channel.send = AsyncMock(return_value=Mock())
+        default_channel = Mock()
+        default_channel.name = "bot"
+        default_channel.send = AsyncMock(return_value=Mock())
+
+        rlstore_channel = Mock(spec=discord.TextChannel)
+        rlstore_channel.name = "botrl"
+        rlstore_channel.send = AsyncMock(return_value=Mock())
 
         target_member = Mock()
         target_member.id = 123
@@ -767,12 +773,13 @@ class TestAutoJoinChannels:
         guild.id = 42
         guild.name = "Guild"
         guild.members = [target_member]
+        guild.text_channels = [rlstore_channel]
         guild.get_member = Mock(return_value=target_member)
 
         bot = Mock(guilds=[guild])
         behavior = Mock()
         behavior._message_service = Mock()
-        behavior._message_service.get_bot_channel = Mock(return_value=channel)
+        behavior._message_service.get_bot_channel = Mock(return_value=default_channel)
         behavior._audio_service = Mock()
         behavior._audio_service.image_generator = Mock()
         behavior._audio_service.image_generator.generate_rl_store_card = AsyncMock(return_value=b"rlstore-image")
@@ -808,8 +815,9 @@ class TestAutoJoinChannels:
 
         assert sent_count == 1
         behavior._rocket_league_store_service.fetch_store_snapshot.assert_awaited_once()
-        channel.send.assert_awaited_once()
-        kwargs = channel.send.await_args.kwargs
+        rlstore_channel.send.assert_awaited_once()
+        default_channel.send.assert_not_awaited()
+        kwargs = rlstore_channel.send.await_args.kwargs
         assert kwargs["content"].startswith("<@123> Rocket League store refreshed.")
         assert "Merc car on the shop: no." in kwargs["content"]
         assert "<https://rlshop.gg>" in kwargs["content"]
@@ -821,6 +829,60 @@ class TestAutoJoinChannels:
             "rlstore:2026-03-18",
             guild_id=42,
         )
+
+    @pytest.mark.asyncio
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    async def test_run_rlstore_notification_tick_falls_back_to_default_bot_channel(
+        self, _mock_sound_repo, _mock_action_repo
+    ):
+        """Ensure rlstore scheduler falls back when #botrl does not exist."""
+        from bot.models.rl_store import RocketLeagueStoreSnapshot
+        from bot.services.background import BackgroundService
+
+        default_channel = Mock()
+        default_channel.name = "bot"
+        default_channel.send = AsyncMock(return_value=Mock())
+
+        guild = Mock()
+        guild.id = 42
+        guild.name = "Guild"
+        guild.members = []
+        guild.text_channels = []
+        guild.get_member = Mock(return_value=None)
+
+        bot = Mock(guilds=[guild])
+        behavior = Mock()
+        behavior._message_service = Mock()
+        behavior._message_service.get_bot_channel = Mock(return_value=default_channel)
+        behavior._audio_service = Mock()
+        behavior._audio_service.image_generator = Mock()
+        behavior._audio_service.image_generator.generate_rl_store_card = AsyncMock(return_value=b"rlstore-image")
+        behavior._rocket_league_store_service = Mock()
+        behavior._rocket_league_store_service.fetch_store_snapshot = AsyncMock(
+            return_value=RocketLeagueStoreSnapshot(
+                last_updated=datetime(2026, 3, 18, 19, 0, tzinfo=timezone.utc),
+                shops=[],
+            )
+        )
+        behavior._rocket_league_store_service.build_merc_status_text = Mock(return_value="Merc car on the shop: no.")
+        behavior._rocket_league_store_service.build_source_url_text = Mock(return_value="<https://rlshop.gg>")
+
+        service = BackgroundService(
+            bot=bot,
+            audio_service=Mock(),
+            sound_service=Mock(),
+            behavior=behavior,
+        )
+        service.action_repo.has_action_for_target = Mock(return_value=False)
+        service.action_repo.insert = Mock()
+
+        sent_count = await service._run_rlstore_notification_tick(
+            now_utc=datetime(2026, 3, 18, 19, 5, tzinfo=timezone.utc)
+        )
+
+        assert sent_count == 1
+        default_channel.send.assert_awaited_once()
 
     @pytest.mark.asyncio
     @patch("bot.services.background.ActionRepository")

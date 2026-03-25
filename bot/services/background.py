@@ -25,6 +25,7 @@ class BackgroundService:
     """
 
     RLSTORE_NOTIFY_ACTION = "rlstore_daily_notification_sent"
+    RLSTORE_CHANNEL_NAME = "botrl"
     
     def __init__(self, bot, audio_service, sound_service, behavior=None):
         self.bot = bot
@@ -957,7 +958,7 @@ class BackgroundService:
                 ):
                     continue
 
-                channel = message_service.get_bot_channel(guild)
+                channel = self._get_rlstore_channel(guild, message_service)
                 if channel is None:
                     continue
 
@@ -1019,6 +1020,26 @@ class BackgroundService:
                 )
 
         return sent_count
+
+    def _get_rlstore_channel(
+        self,
+        guild: discord.Guild,
+        message_service,
+    ) -> Optional[discord.TextChannel]:
+        """
+        Resolve the preferred text channel for Rocket League store posts.
+
+        Args:
+            guild: Guild receiving the notification.
+            message_service: Shared message service used for fallback channel lookup.
+
+        Returns:
+            The `#botrl` channel when present, otherwise the standard bot channel.
+        """
+        rlstore_channel = discord.utils.get(guild.text_channels, name=self.RLSTORE_CHANNEL_NAME)
+        if rlstore_channel is not None:
+            return rlstore_channel
+        return message_service.get_bot_channel(guild)
 
     @tasks.loop(seconds=0.5)
     async def performance_telemetry_loop(self):

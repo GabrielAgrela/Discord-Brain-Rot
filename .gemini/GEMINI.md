@@ -200,6 +200,7 @@ Canonical completion command:
 - RL store notifications now also include a shared Merc-status string from `RocketLeagueStoreService.build_merc_status_text()`, and both the scheduled notification and `/rlstore` command notify the configured target user about that yes/no result.
 - RL store notifications and `/rlstore` also include the `rlshop.gg` source URL from `RocketLeagueStoreService.build_source_url_text()`, wrapped as `<https://rlshop.gg>` so Discord does not unfurl it. Keep that helper shared so command and scheduler content stay aligned.
 - The daily RL store notification in `BackgroundService` is intentionally a one-send-per-day catch-up window after the configured reset+5 time (default `19:05 UTC`), not an exact-minute-only fire. Dedupe is stored via `ActionRepository` with action `rlstore_daily_notification_sent`, so restarts later that day still send once instead of skipping the day entirely.
+- The daily RL store notification now prefers a text channel named `botrl`; if `#botrl` does not exist in a guild, it falls back to the standard configured bot text channel via `MessageService.get_bot_channel()`.
 
 ### Requirements File Encoding
 - `requirements.txt` is currently encoded as UTF-16 LE (with BOM), not UTF-8
