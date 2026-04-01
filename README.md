@@ -104,6 +104,7 @@ This README is based on the current codebase behavior (not historical README ass
 ### Web Soundboard
 - `GET /` shows recent actions, favorites, and all sounds.
 - Queue playback from web via `POST /api/play_sound` into `playback_queue`.
+- If `DEFAULT_GUILD_ID` is unset, web playback now auto-resolves the guild only when exactly one known guild ID exists in stable bot data (`guild_settings`, `sounds`, or `actions`); `playback_queue` is used only as a last-resort fallback when those tables are empty, and multi-guild callers must send `guild_id` explicitly.
 - Bot background task consumes queued playback requests.
 
 ### Operations and Admin

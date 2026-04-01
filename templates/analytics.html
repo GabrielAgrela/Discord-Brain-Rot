@@ -896,9 +896,15 @@
                             </div>
                         </div>
                         <div class="item-count">${sound.count}</div>
-                        <button class="play-btn" onclick="playSound('${escapeHtml(sound.filename)}')" title="Play">▶</button>
+                        <button class="play-btn" data-filename="${encodeURIComponent(sound.filename)}" title="Play">▶</button>
                     </div>
                 `).join('');
+
+                container.querySelectorAll('.play-btn').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        playSound(decodeURIComponent(btn.dataset.filename || ''), btn);
+                    });
+                });
             } catch (err) {
                 console.error('Error loading top sounds:', err);
             }
@@ -1119,21 +1125,32 @@
             return date.toLocaleDateString();
         }
 
-        function playSound(filename) {
-            fetch('/api/play_sound', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ sound_filename: filename })
-            }).then(res => {
-                if (res.ok) {
-                    // Visual feedback
-                    const btn = event.target;
-                    btn.style.background = 'var(--success)';
-                    setTimeout(() => {
-                        btn.style.background = '';
-                    }, 1000);
-                }
-            }).catch(err => console.error('Error playing sound:', err));
+        async function playSound(filename, button) {
+            if (!filename || !button) return;
+
+            button.disabled = true;
+            const originalText = button.textContent;
+            const originalBackground = button.style.background;
+            button.textContent = '⏳';
+
+            try {
+                const res = await fetch('/api/play_sound', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sound_filename: filename })
+                });
+
+                button.style.background = res.ok ? 'var(--success)' : 'var(--error)';
+            } catch (err) {
+                console.error('Error playing sound:', err);
+                button.style.background = 'var(--error)';
+            } finally {
+                setTimeout(() => {
+                    button.textContent = originalText;
+                    button.style.background = originalBackground;
+                    button.disabled = false;
+                }, 1000);
+            }
         }
     </script>
 </body>

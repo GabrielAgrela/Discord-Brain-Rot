@@ -30,6 +30,7 @@ from bot.commands.onthisday import OnThisDayCog
 from bot.commands.rlstore import RocketLeagueStoreCog
 from bot.commands.settings import SettingsCog
 from bot.repositories import VoiceActivityRepository
+from bot.services.web_playback import process_playback_queue_request
 import random
 import time
 from collections import defaultdict
@@ -75,14 +76,8 @@ voice_activity_repo = VoiceActivityRepository()
 @tasks.loop(seconds=5.0)
 async def check_playback_queue():
     """Process queued playback requests from the web interface."""
-    # Use the shared database connection to avoid "database is locked"
-    # The commands are executed, but commit is handled carefully or rely on autocommit if set
-    # Using the shared connection means we need to be careful about threading if this task runs in a diff thread
-    # discord.py tasks run in the main event loop, so it is safe to use the same sqlite3 connection
     try:
-        # We can actully just use db.cursor directly since we are on the same thread
         cursor = db.cursor
-        
         cursor.execute(
             """
             SELECT id, guild_id, sound_filename
@@ -98,77 +93,18 @@ async def check_playback_queue():
 
         print(f"[Playback Queue] Found {len(pending_requests)} pending requests.")
 
+        sound_folder = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "Sounds")
+        )
         for request in pending_requests:
-            # Results are tuples: (id, guild_id, sound_filename)
-            req_id = request[0]
-            guild_id = request[1]
-            sound_filename = request[2]
-
-            print(
-                f"[Playback Queue] Processing request ID {req_id}: Play '{sound_filename}' in guild {guild_id}"
+            await process_playback_queue_request(
+                request,
+                bot=bot,
+                behavior=behavior,
+                db=db,
+                sound_folder=sound_folder,
+                action_logger_factory=Database,
             )
-
-            guild = bot.get_guild(guild_id)
-            if not guild:
-                print(
-                    f"[Playback Queue] Error: Bot is not in guild {guild_id}. Skipping request {req_id}."
-                )
-                cursor.execute(
-                    "UPDATE playback_queue SET played_at = ? WHERE id = ?",
-                    (datetime.datetime.now(), req_id),
-                )
-                db.conn.commit()
-                continue
-
-                sound_data = db.get_sound(sound_filename, guild_id=guild_id)
-            if not sound_data:
-                print(
-                    f"[Playback Queue] Error: Sound '{sound_filename}' not found in database. Skipping request {req_id}."
-                )
-                cursor.execute(
-                    "UPDATE playback_queue SET played_at = ? WHERE id = ?",
-                    (datetime.datetime.now(), req_id),
-                )
-                db.conn.commit()
-                continue
-
-            sound_folder = os.path.abspath(
-                os.path.join(os.path.dirname(__file__), "Sounds")
-            )
-            sound_path = os.path.join(sound_folder, sound_filename)
-
-            if not os.path.exists(sound_path):
-                print(
-                    f"[Playback Queue] Error: Sound file not found at '{sound_path}'. Skipping request {req_id}."
-                )
-                cursor.execute(
-                    "UPDATE playback_queue SET played_at = ? WHERE id = ?",
-                    (datetime.datetime.now(), req_id),
-                )
-                db.conn.commit()
-                continue
-
-            try:
-                channel = behavior.get_largest_voice_channel(guild)
-                if channel is not None:
-                    await behavior.play_audio(channel, sound_filename, "webpage")
-                    Database().insert_action("admin", "play_sound_periodically", sound_filename, guild_id=guild_id)
-
-                cursor.execute(
-                    "UPDATE playback_queue SET played_at = ? WHERE id = ?",
-                    (datetime.datetime.now(), req_id),
-                )
-                db.conn.commit()
-
-                await asyncio.sleep(1)
-
-            except Exception as e:
-                print(f"[Playback Queue] Error playing sound for request {req_id}: {e}")
-                cursor.execute(
-                    "UPDATE playback_queue SET played_at = ? WHERE id = ?",
-                    (datetime.datetime.now(), req_id),
-                )
-                db.conn.commit()
     except sqlite3.Error as db_err:
         print(f"[Playback Queue] Database error: {db_err}")
     except Exception as e:

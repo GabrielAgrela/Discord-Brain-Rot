@@ -2,9 +2,11 @@ from flask import Flask, render_template, jsonify, request
 import sqlite3
 import math
 import datetime
-import os
+
+from bot.services.web_playback import queue_playback_request
 
 app = Flask(__name__)
+app.config.setdefault("DATABASE_PATH", "Data/database.db")
 
 @app.route('/')
 def index():
@@ -203,34 +205,21 @@ def get_all_sounds():
 # New endpoint to request sound playback
 @app.route('/api/play_sound', methods=['POST'])
 def request_play_sound():
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     sound_filename = data.get('sound_filename')
-    requested_guild_id = data.get('guild_id')
 
     if not sound_filename:
         return jsonify({'error': 'Missing sound_filename'}), 400
 
-    guild_id_raw = requested_guild_id or os.getenv("DEFAULT_GUILD_ID", "")
-    if not guild_id_raw:
-        return jsonify({'error': 'Missing guild_id'}), 400
     try:
-        guild_id = int(guild_id_raw)
-    except (TypeError, ValueError):
-        return jsonify({'error': 'Invalid guild_id'}), 400
-
-    try:
-        conn = sqlite3.connect('Data/database.db')
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            INSERT INTO playback_queue (guild_id, sound_filename)
-            VALUES (?, ?)
-        """,
-            (guild_id, sound_filename),
+        queue_playback_request(
+            sound_filename=sound_filename,
+            requested_guild_id=data.get('guild_id'),
+            db_path=app.config["DATABASE_PATH"],
         )
-        conn.commit()
-        conn.close()
         return jsonify({'message': 'Playback request queued'}), 200
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
     except sqlite3.Error as e:
         print(f"Database error queuing playback: {e}")
         return jsonify({'error': 'Database error'}), 500

@@ -188,6 +188,10 @@ Canonical completion command:
 - Attribute name mismatches and service access patterns are only caught at runtime
 - When adding new commands/UI, manually test the full flow to catch integration issues
 
+### Web Playback Queueing
+- `WebPage.py` now accepts omitted `guild_id` only when exactly one non-null guild ID can be inferred from stable persisted bot data (`guild_settings`, `sounds`, or `actions`). `playback_queue` is only a last-resort fallback if those tables are empty, so stale queue rows do not poison single-guild web playback. Multi-guild web callers must send `guild_id` explicitly or `/api/play_sound` returns `400`.
+- Do not embed raw sound filenames inside inline web `onclick` handlers. Many filenames contain apostrophes/quotes, so use `data-*` attributes plus JS event listeners for play buttons.
+
 ### Rocket League Store Data Source
 - `/rlstore` uses `https://rlshop.gg/__data.json` for the featured shop and `https://rlshop.gg/<shop_id>/__data.json` for other active shops.
 - Do not assume every active shop with `Type == "Featured"` uses the root `__data.json` node. The homepage node currently maps only to the shop whose `activeShops[].Name` matches decoded `shopName` (for example `Featured Shop` / id `52`), while other featured-type sections like `GARAGE GRAB` still require their own `/<shop_id>/__data.json` fetch.
