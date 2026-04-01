@@ -51,13 +51,14 @@ class RocketLeagueStoreService:
             featured_shop_data = self._decode_data_node(root_payload, node_index=1)
 
             active_shops = root_meta.get("activeShops") or []
+            root_shop_id = self._resolve_root_shop_id(active_shops, featured_shop_data)
             last_updated = self._parse_datetime(root_meta.get("lastUpdated"))
             if last_updated is None:
                 raise ValueError("Rocket League store payload missing lastUpdated timestamp")
 
             non_featured = [
                 shop for shop in active_shops
-                if not self._is_featured_shop(shop)
+                if int(shop["ID"]) != root_shop_id
             ]
             fetch_tasks = {
                 int(shop["ID"]): asyncio.create_task(self._fetch_shop_data(session, int(shop["ID"])))
@@ -67,7 +68,7 @@ class RocketLeagueStoreService:
             shops: list[RocketLeagueStoreShop] = []
             for shop_meta in active_shops:
                 try:
-                    if self._is_featured_shop(shop_meta):
+                    if int(shop_meta["ID"]) == root_shop_id:
                         shop_data = featured_shop_data
                     else:
                         shop_data = await fetch_tasks[int(shop_meta["ID"])]
@@ -132,6 +133,34 @@ class RocketLeagueStoreService:
             Clickable source URL text without Discord unfurl.
         """
         return f"<{self.BASE_URL}>"
+
+    def _resolve_root_shop_id(
+        self,
+        active_shops: list[dict[str, Any]],
+        root_shop_data: dict[str, Any],
+    ) -> Optional[int]:
+        """
+        Resolve which active shop is represented by the root ``/__data.json`` node.
+
+        Args:
+            active_shops: Active shop metadata from the root payload.
+            root_shop_data: Decoded root node payload for the homepage shop.
+
+        Returns:
+            The matching shop ID when a root-backed shop can be identified.
+        """
+        root_shop_name = str(root_shop_data.get("shopName") or "").strip().casefold()
+
+        for shop in active_shops:
+            shop_name = str(shop.get("Name") or "").strip().casefold()
+            if shop_name and shop_name == root_shop_name:
+                return int(shop["ID"])
+
+        for shop in active_shops:
+            if str(shop.get("Type") or "").strip() == "Featured":
+                return int(shop["ID"])
+
+        return None
 
     async def _fetch_shop_data(
         self,
@@ -277,8 +306,5 @@ class RocketLeagueStoreService:
 
     def _is_merc_body_item(self, item: RocketLeagueStoreItem) -> bool:
         """Return whether a store item appears to be the Merc car body."""
-        return item.category.strip().lower() == "body" and "merc" in item.label.strip().lower()
-
-    def _is_featured_shop(self, shop_meta: dict[str, Any]) -> bool:
-        """Return whether this shop uses the root featured-shop page data."""
-        return str(shop_meta.get("Type")) == "Featured"
+        normalized_label = " ".join(item.label.split()).casefold()
+        return item.category.strip().casefold() == "body" and normalized_label == "merc"

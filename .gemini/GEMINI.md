@@ -190,6 +190,7 @@ Canonical completion command:
 
 ### Rocket League Store Data Source
 - `/rlstore` uses `https://rlshop.gg/__data.json` for the featured shop and `https://rlshop.gg/<shop_id>/__data.json` for other active shops.
+- Do not assume every active shop with `Type == "Featured"` uses the root `__data.json` node. The homepage node currently maps only to the shop whose `activeShops[].Name` matches decoded `shopName` (for example `Featured Shop` / id `52`), while other featured-type sections like `GARAGE GRAB` still require their own `/<shop_id>/__data.json` fetch.
 - These payloads are SvelteKit/devalue-encoded: decode node `0` for `activeShops`/`lastUpdated` and node `1` for the selected shop body.
 - The linked `dank/rlapi` repo is the upstream project behind `rlshop.gg`; using `rlshop.gg` avoids adding Epic auth/PsyNet session handling to this bot for read-only shop browsing.
 - The interactive RL store UI now sends file attachments, not embeds, for the normal path. `RocketLeagueStoreView` renders a dedicated image card through `ImageGeneratorService.generate_rl_store_card()` so page buttons must replace the attached file (`attachments=[]` + `file=...`) when editing.

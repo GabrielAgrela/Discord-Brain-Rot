@@ -59,6 +59,35 @@ ROOT_PAYLOAD = {
 }
 
 
+MULTI_FEATURED_ROOT_PAYLOAD = {
+    "type": "data",
+    "nodes": [
+        {
+            "type": "data",
+            "data": [
+                {"activeShops": 1, "lastUpdated": 4},
+                [2, 3],
+                {"ID": 5, "Type": 6, "StartDate": 7, "EndDate": 8, "LogoURL": 9, "Name": 10, "Title": 9},
+                {"ID": 11, "Type": 6, "StartDate": 12, "EndDate": 13, "LogoURL": 9, "Name": 14, "Title": 9},
+                ["Date", "2026-04-01T19:00:24.000Z"],
+                52,
+                "Featured",
+                1568070623,
+                None,
+                None,
+                "Featured Shop",
+                420,
+                1774638000,
+                1775674800,
+                "GARAGE GRAB",
+            ],
+            "uses": {},
+        },
+        ROOT_PAYLOAD["nodes"][1],
+    ],
+}
+
+
 BUNDLE_PAYLOAD = {
     "type": "data",
     "nodes": [
@@ -86,6 +115,31 @@ BUNDLE_PAYLOAD = {
                 "Miku Pop",
                 "Goal Explosion",
                 "800",
+            ],
+            "uses": {"params": ["id"]},
+        },
+    ],
+}
+
+
+GARAGE_GRAB_PAYLOAD = {
+    "type": "data",
+    "nodes": [
+        {"type": "data", "data": [{"unused": 1}, "noop"], "uses": {}},
+        {
+            "type": "data",
+            "data": [
+                {"shopName": 1, "isRLCS": 2, "groups": 3, "items": 4},
+                "GARAGE GRAB",
+                False,
+                [],
+                [5],
+                {"thumbnail": 6, "label": 7, "category": 8, "price": 9, "paint": -1, "endTime": 10},
+                "/garage-grab.png",
+                "Interstellar",
+                "Animated Decal",
+                "2000",
+                1775674800,
             ],
             "uses": {"params": ["id"]},
         },
@@ -123,6 +177,26 @@ class TestRocketLeagueStoreService:
         assert bundle_shop.items[0].label == "Miku Pop"
         assert bundle_shop.items[0].price == 800
 
+    @pytest.mark.asyncio
+    async def test_fetch_store_snapshot_fetches_additional_featured_sections_from_their_own_pages(self):
+        """Only the root-matched featured shop should reuse the homepage data node."""
+        from bot.services.rl_store import RocketLeagueStoreService
+
+        service = RocketLeagueStoreService()
+        service._fetch_json = AsyncMock(side_effect=[MULTI_FEATURED_ROOT_PAYLOAD, GARAGE_GRAB_PAYLOAD])
+
+        snapshot = await service.fetch_store_snapshot()
+
+        assert [shop.shop_id for shop in snapshot.shops] == [52, 420]
+        assert snapshot.shops[0].display_name == "Featured Shop"
+        assert snapshot.shops[0].items[0].label == "Scarab"
+        assert snapshot.shops[1].display_name == "GARAGE GRAB"
+        assert snapshot.shops[1].items[0].label == "Interstellar"
+        assert [call.args[1] for call in service._fetch_json.await_args_list] == [
+            service.ROOT_PATH,
+            "/420/__data.json",
+        ]
+
     def test_decode_data_node_handles_sveltekit_references_and_dates(self):
         """The devalue decoder should resolve reference pools and date sentinels."""
         from bot.services.rl_store import RocketLeagueStoreService
@@ -135,8 +209,8 @@ class TestRocketLeagueStoreService:
         assert decoded["activeShops"][1]["ID"] == 340
         assert decoded["lastUpdated"] == "2026-03-17T19:00:01.000Z"
 
-    def test_build_merc_status_text_reports_yes_only_for_body_items(self):
-        """Merc status should only match body items named Merc."""
+    def test_build_merc_status_text_reports_yes_only_for_exact_merc_body_matches(self):
+        """Merc status should ignore Mercedes bodies and non-body Merc cosmetics."""
         from bot.models.rl_store import (
             RocketLeagueStoreGroup,
             RocketLeagueStoreItem,
@@ -155,6 +229,7 @@ class TestRocketLeagueStoreService:
                     shop_type="Featured",
                     items=[
                         RocketLeagueStoreItem(label="Merc", category="Body"),
+                        RocketLeagueStoreItem(label="Mercedes-AMG GT 63 S", category="Body"),
                         RocketLeagueStoreItem(label="Merc: Warlock", category="Decal"),
                     ],
                     groups=[
