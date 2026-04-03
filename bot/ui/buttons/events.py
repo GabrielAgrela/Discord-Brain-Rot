@@ -1,6 +1,7 @@
 import discord
 from discord.ui import Button
 from bot.database import Database
+from bot.repositories import ActionRepository
 
 class ConfirmUserEventButton(Button):
     def __init__(self, bot_behavior, audio_file, **kwargs):
@@ -41,10 +42,16 @@ class ConfirmUserEventButton(Button):
         sound_name = self.audio_file.split('/')[-1].replace('.mp3', '')
         try:
             guild_id = interaction.guild.id if interaction.guild else None
-            Database().toggle_user_event_sound(
+            added = Database().toggle_user_event_sound(
                 selected_user_id_for_db,
                 selected_event_type,
                 sound_name,
+                guild_id=guild_id,
+            )
+            ActionRepository().insert(
+                interaction.user.name,
+                f"add_{selected_event_type}_sound" if added else f"delete_{selected_event_type}_event",
+                f"{selected_user_id_for_db}:{sound_name}",
                 guild_id=guild_id,
             )
             if self.view.message_to_edit:

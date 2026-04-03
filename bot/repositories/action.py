@@ -170,7 +170,10 @@ class ActionRepository(BaseRepository):
         Returns:
             Tuple of (list of (filename, count) tuples, total plays)
         """
-        conditions = ["a.action IN ('play_sound_periodically','play_random_sound', 'replay_sound', 'play_random_favorite_sound', 'play_request')"]
+        conditions = [
+            "a.action IN ('play_sound_periodically', 'play_random_sound', 'replay_sound', "
+            "'play_random_favorite_sound', 'play_request', 'play_from_list', 'play_similar_sound')"
+        ]
         params = []
         
         if days > 0:

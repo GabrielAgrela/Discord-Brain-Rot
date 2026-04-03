@@ -194,6 +194,10 @@ Canonical completion command:
 - Web routes should read SQLite via `app.config["DATABASE_PATH"]`, not a hardcoded `Data/database.db` path, so Flask tests and alternate DB configs hit the same code paths.
 - When a web label can be censored or otherwise transformed for display, send `sound_id` back to `/api/play_sound` and resolve the real filename server-side instead of trusting the displayed string.
 
+### Action Analytics Tracking
+- For action rows that represent a sound play, store the sound database `id` in `actions.target`, not the filename. The stats/top/on-this-day queries join `actions.target` back to `sounds.id`, so filename targets make those plays disappear from analytics.
+- Standardize list playback under action `play_from_list`. Do not invent per-list names like `play_random_from_<list_name>` unless you also update every stats query; existing leaderboards/year-review/on-this-day logic only recognizes `play_from_list`.
+
 ### Rocket League Store Data Source
 - `/rlstore` uses `https://rlshop.gg/__data.json` for the featured shop and `https://rlshop.gg/<shop_id>/__data.json` for other active shops.
 - Do not assume every active shop with `Type == "Featured"` uses the root `__data.json` node. The homepage node currently maps only to the shop whose `activeShops[].Name` matches decoded `shopName` (for example `Featured Shop` / id `52`), while other featured-type sections like `GARAGE GRAB` still require their own `/<shop_id>/__data.json` fetch.

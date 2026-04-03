@@ -218,7 +218,7 @@ async def test_process_playback_queue_request_marks_played_and_starts_audio(tmp_
     action_logger.insert_action.assert_called_once_with(
         "admin",
         "play_sound_periodically",
-        "test.mp3",
+        123,
         guild_id=42,
     )
     sleep_fn.assert_awaited_once_with(1)

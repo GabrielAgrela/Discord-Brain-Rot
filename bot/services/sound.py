@@ -220,9 +220,8 @@ class SoundService:
                 await self.message_service.send_error(f"No sounds found in list '{list_name}'.")
                 return
             
-            self.action_repo.insert(username, f"play_random_from_{list_name}", random_sound[0], guild_id=guild_id)
-            # random_sound[1] is filename
-            await self.audio_service.play_audio(channel, random_sound[1], username)
+            await self.audio_service.play_audio(channel, random_sound[2], username)
+            self.action_repo.insert(username, "play_from_list", random_sound[0], guild_id=guild_id)
         except Exception as e:
             print(f"[SoundService] Error playing random sound from list {list_name}: {e}")
 

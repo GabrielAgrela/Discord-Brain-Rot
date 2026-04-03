@@ -45,6 +45,12 @@ class OnThisDayButton(Button):
                         user=interaction.user.name,
                         show_suggestions=True
                     )
+                    view.sound_service.action_repo.insert(
+                        interaction.user.name,
+                        "play_request",
+                        sound[0],
+                        guild_id=interaction.guild.id if interaction.guild else None,
+                    )
             else:
                 await interaction.followup.send(
                     "You need to be in a voice channel!", ephemeral=True

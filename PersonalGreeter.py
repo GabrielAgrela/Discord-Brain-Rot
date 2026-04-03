@@ -204,8 +204,11 @@ async def on_ready():
                 if not bot.startup_sound_played:
                     try:
                         from bot.repositories import SoundRepository
-                        random_sound = SoundRepository().get_random_sounds(num_sounds=1)[0][2]
-                        await behavior.play_audio(channel_to_join, random_sound, "startup")
+                        startup_sounds = SoundRepository().get_random_sounds(num_sounds=1, guild_id=guild.id)
+                        if startup_sounds:
+                            startup_sound = startup_sounds[0]
+                            await behavior.play_audio(channel_to_join, startup_sound[2], "startup")
+                            db.insert_action("startup", "play_startup_sound", startup_sound[0], guild_id=guild.id)
                         # Wait for sound to start playing
                         await asyncio.sleep(3)
                     except Exception as e:

@@ -3,6 +3,7 @@ from discord import ui
 import asyncio
 import sqlite3
 from bot.database import Database
+from bot.repositories import ActionRepository
 
 
 class EventTypeSelect(ui.Select):
@@ -118,16 +119,18 @@ class SoundSelect(ui.Select):
     async def callback(self, interaction: discord.Interaction):
         await interaction.response.defer()
         sound_filename = self.values[0]
+        guild_id = interaction.guild.id if interaction.guild else None
         channel = self.bot_behavior._audio_service.get_user_voice_channel(interaction.guild, interaction.user.name)
         if not channel:
             channel = self.bot_behavior._audio_service.get_largest_voice_channel(interaction.guild)
         if channel:
             asyncio.create_task(self.bot_behavior._audio_service.play_audio(channel, sound_filename, interaction.user.name))
+            sound = Database().get_sound(sound_filename, False, guild_id=guild_id)
             Database().insert_action(
                 interaction.user.name,
-                "select_play_sound",
-                sound_filename,
-                guild_id=interaction.guild.id if interaction.guild else None,
+                "play_request",
+                sound[0] if sound else sound_filename,
+                guild_id=guild_id,
             )
 
 
@@ -176,6 +179,12 @@ class AddToListSelect(ui.Select):
             return
         success = Database().add_sound_to_list(list_id, self.sound_filename)
         if success:
+            ActionRepository().insert(
+                interaction.user.name,
+                "add_sound_to_list",
+                f"{list_info[1]}:{self.sound_filename}",
+                guild_id=guild_id,
+            )
             return
         else:
             await interaction.followup.send(f"Sound is already in list '{list_info[1]}'.", ephemeral=True)
@@ -243,16 +252,6 @@ class STSCharacterSelect(ui.Select):
             requester_avatar_url=requester_avatar_url,
             sts_thumbnail_url=sts_thumbnail_url
         ))
-        
-        try:
-            Database().insert_action(
-                interaction.user.name,
-                "sts_EL",
-                Database().get_sound(self.audio_file, True, guild_id=interaction.guild.id if interaction.guild else None)[0],
-                guild_id=interaction.guild.id if interaction.guild else None,
-            )
-        except:
-            pass
 
 
 class SimilarSoundsSelect(ui.Select):
@@ -295,16 +294,18 @@ class SimilarSoundsSelect(ui.Select):
     async def callback(self, interaction: discord.Interaction):
         await interaction.response.defer()
         sound_name = self.values[0]
+        guild_id = interaction.guild.id if interaction.guild else None
         channel = self.bot_behavior._audio_service.get_user_voice_channel(interaction.guild, interaction.user.name)
         if not channel:
             channel = self.bot_behavior._audio_service.get_largest_voice_channel(interaction.guild)
         if channel:
             asyncio.create_task(self.bot_behavior._audio_service.play_audio(channel, sound_name, interaction.user.name))
+            sound = Database().get_sound(sound_name, False, guild_id=guild_id)
             Database().insert_action(
                 interaction.user.name,
-                "select_similar_sound",
-                sound_name,
-                guild_id=interaction.guild.id if interaction.guild else None,
+                "play_similar_sound",
+                sound[0] if sound else sound_name,
+                guild_id=guild_id,
             )
 
 

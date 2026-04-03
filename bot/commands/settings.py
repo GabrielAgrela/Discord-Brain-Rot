@@ -6,6 +6,8 @@ import discord
 from discord.ext import commands
 from discord.commands import Option, SlashCommandGroup
 
+from bot.repositories import ActionRepository
+
 
 class SettingsCog(commands.Cog):
     """Guild setup and settings commands."""
@@ -15,6 +17,16 @@ class SettingsCog(commands.Cog):
     def __init__(self, bot: discord.Bot, behavior):
         self.bot = bot
         self.behavior = behavior
+        self.action_repo = ActionRepository()
+
+    def _log_action(self, ctx: discord.ApplicationContext, action: str, target: str) -> None:
+        """Log a guild settings action."""
+        self.action_repo.insert(
+            ctx.author.name,
+            action,
+            target,
+            guild_id=ctx.guild.id if ctx.guild else None,
+        )
 
     def _ensure_admin(self, ctx: discord.ApplicationContext) -> bool:
         """Check if the invoker can manage guild-level bot settings."""
@@ -47,6 +59,18 @@ class SettingsCog(commands.Cog):
             )
 
         current = settings_service.get(ctx.guild.id)
+        self._log_action(
+            ctx,
+            "setup_guild",
+            (
+                f"text={current.bot_text_channel_id or 'default'};"
+                f"voice={current.default_voice_channel_id or 'auto'};"
+                f"autojoin={current.autojoin_enabled};"
+                f"periodic={current.periodic_enabled};"
+                f"stt={current.stt_enabled};"
+                f"audio_policy={current.audio_policy}"
+            ),
+        )
         await ctx.respond(
             (
                 "Setup saved.\n"
@@ -89,6 +113,7 @@ class SettingsCog(commands.Cog):
         if action == "clear":
             field_name = "bot_text_channel_id" if channel_type == "text" else "default_voice_channel_id"
             settings_service.clear_channel(ctx.guild.id, field_name)
+            self._log_action(ctx, "settings_channel_clear", channel_type)
             await ctx.respond(f"Cleared `{channel_type}` channel setting.", ephemeral=True)
             return
 
@@ -97,6 +122,7 @@ class SettingsCog(commands.Cog):
                 await ctx.respond("Provide `text_channel` when channel_type is text.", ephemeral=True)
                 return
             settings_service.set_channels(ctx.guild.id, bot_text_channel_id=text_channel.id)
+            self._log_action(ctx, "settings_channel_set", f"text:{text_channel.id}")
             await ctx.respond(f"Configured bot text channel as {text_channel.mention}.", ephemeral=True)
             return
 
@@ -104,6 +130,7 @@ class SettingsCog(commands.Cog):
             await ctx.respond("Provide `voice_channel` when channel_type is voice.", ephemeral=True)
             return
         settings_service.set_channels(ctx.guild.id, default_voice_channel_id=voice_channel.id)
+        self._log_action(ctx, "settings_channel_set", f"voice:{voice_channel.id}")
         await ctx.respond(f"Configured default voice channel as {voice_channel.mention}.", ephemeral=True)
 
     @settings.command(name="feature", description="Enable or disable guild features")
@@ -127,6 +154,7 @@ class SettingsCog(commands.Cog):
             return
 
         settings = self.behavior._guild_settings_service.set_feature(ctx.guild.id, feature, enabled)
+        self._log_action(ctx, "settings_feature_toggle", f"{feature}={enabled}")
 
         if feature == "stt_enabled":
             try:
@@ -157,6 +185,7 @@ class SettingsCog(commands.Cog):
             return
 
         settings = self.behavior._guild_settings_service.set_audio_policy(ctx.guild.id, policy)
+        self._log_action(ctx, "settings_audio_policy", settings.audio_policy)
         await ctx.respond(
             f"Audio policy updated to `{settings.audio_policy}` for this guild.",
             ephemeral=True,

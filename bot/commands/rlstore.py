@@ -8,6 +8,7 @@ import os
 import discord
 from discord.ext import commands
 
+from bot.repositories import ActionRepository
 from bot.services.image_generator import ImageGeneratorService
 from bot.services.rl_store import RocketLeagueStoreService
 from bot.ui import RocketLeagueStoreView
@@ -34,6 +35,7 @@ class RocketLeagueStoreCog(commands.Cog):
             if behavior is not None
             else RocketLeagueStoreService()
         )
+        self.action_repo = ActionRepository()
         self.image_generator = (
             behavior._audio_service.image_generator
             if behavior is not None
@@ -56,6 +58,12 @@ class RocketLeagueStoreCog(commands.Cog):
             )
             return
 
+        self.action_repo.insert(
+            ctx.user.name,
+            "view_rlstore",
+            snapshot.last_updated.isoformat(),
+            guild_id=ctx.guild.id if ctx.guild else None,
+        )
         content, allowed_mentions = self._build_notify_content(snapshot, ctx.guild)
         view = RocketLeagueStoreView(
             snapshot=snapshot,

@@ -16,6 +16,8 @@ from discord.ext import commands
 from discord.commands import Option
 from config import LOGS_DIR
 
+from bot.repositories import ActionRepository
+
 
 class AdminCog(commands.Cog):
     """Cog for administrative commands."""
@@ -30,6 +32,16 @@ class AdminCog(commands.Cog):
         """
         self.bot = bot
         self.behavior = behavior
+        self.action_repo = ActionRepository()
+
+    def _log_action(self, ctx: discord.ApplicationContext, action: str, target: str) -> None:
+        """Log an administrative command action."""
+        self.action_repo.insert(
+            ctx.author.name,
+            action,
+            target,
+            guild_id=ctx.guild.id if ctx.guild else None,
+        )
     
     def _is_admin(self, member: discord.Member) -> bool:
         """Check if member has admin/mod permissions."""
@@ -41,6 +53,7 @@ class AdminCog(commands.Cog):
         if not self._is_admin(ctx.author):
             await ctx.respond("You don't have permission to use this command.", ephemeral=True)
             return
+        self._log_action(ctx, "reboot_disabled", "requested")
         await ctx.respond(
             "Host reboot is disabled in public deployments. Use infrastructure tooling for restarts.",
             ephemeral=True,
@@ -56,6 +69,7 @@ class AdminCog(commands.Cog):
     ):
         """Fetch and display service logs."""
         await ctx.respond("Fetching service logs...", delete_after=0)
+        self._log_action(ctx, "view_last_logs", f"lines={lines};service={service or 'default'}")
         
         logs = self._get_service_logs(lines, service)
         if not logs:
@@ -119,6 +133,7 @@ class AdminCog(commands.Cog):
         # Grep for "Command" in logs 
         # (Original implementation logic assumed)
         await ctx.respond("Fetching recent commands...", delete_after=0)
+        self._log_action(ctx, "view_command_logs", "recent")
         
         # This is a simplified version of what might be expected. 
         # Ideally we'd filter the logs for command usage.
@@ -147,6 +162,7 @@ class AdminCog(commands.Cog):
             return
 
         enabled = (state == "Enable")
+        self._log_action(ctx, "set_ventura_state", state.lower())
         
         # Access the service via the private attribute in BotBehavior
         if hasattr(self.behavior, '_ai_commentary_service'):
@@ -163,6 +179,7 @@ class AdminCog(commands.Cog):
             await ctx.respond("You don't have permission to use this command.", ephemeral=True)
             return
 
+        self._log_action(ctx, "backup_project", "requested")
         await self.behavior.perform_backup(ctx)
 
 

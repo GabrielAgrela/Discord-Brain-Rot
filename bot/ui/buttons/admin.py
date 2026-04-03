@@ -4,6 +4,7 @@ import asyncio
 import random
 import os
 from bot.database import Database
+from bot.repositories import ActionRepository
 
 class MuteToggleButton(Button):
     def __init__(self, bot_behavior, **kwargs):
@@ -23,10 +24,11 @@ class MuteToggleButton(Button):
         await interaction.response.defer()
 
         is_muted = self.bot_behavior._mute_service.get_remaining_seconds() > 0
+        guild_id = interaction.guild.id if interaction.guild else None
 
         if is_muted:
             await self.bot_behavior._mute_service.deactivate(requested_by=interaction.user)
-            Database().insert_action(interaction.user.name, "unmute", "")
+            ActionRepository().insert(interaction.user.name, "unmute", "", guild_id=guild_id)
         else:
             slap_sounds = Database().get_sounds(slap=True, num_sounds=100)
             if slap_sounds:
@@ -40,7 +42,7 @@ class MuteToggleButton(Button):
                     asyncio.create_task(self.bot_behavior._audio_service.play_slap(channel, random_slap[2], interaction.user.name))
             
             await self.bot_behavior._mute_service.activate(duration_seconds=1800, requested_by=interaction.user)
-            Database().insert_action(interaction.user.name, "mute_30_minutes", "")
+            ActionRepository().insert(interaction.user.name, "mute_30_minutes", "", guild_id=guild_id)
 
         self._refresh_state()
         if interaction.message and self.view:
@@ -48,4 +50,3 @@ class MuteToggleButton(Button):
                 await interaction.message.edit(view=self.view)
             except discord.NotFound:
                 pass
-

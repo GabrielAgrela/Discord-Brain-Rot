@@ -175,6 +175,7 @@ class TTSCog(commands.Cog):
             await self.behavior._voice_transformation_service.isolate_voice(
                 sound_name=sound,
                 guild_id=ctx.guild.id if ctx.guild else None,
+                requested_by=ctx.user,
             )
         except Exception as e:
             await self.behavior._message_service.send_error(str(e))

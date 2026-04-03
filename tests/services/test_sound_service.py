@@ -76,6 +76,28 @@ class TestSoundService:
         assert hasattr(sound_service, 'action_repo')
         assert hasattr(sound_service, 'list_repo')
 
+    @pytest.mark.asyncio
+    async def test_play_random_sound_from_list_logs_standard_action(self, sound_service):
+        """List playback should use the shared play_from_list action expected by stats."""
+        guild = Mock(id=321)
+        channel = Mock()
+        sound_service.audio_service.get_user_voice_channel.return_value = channel
+        sound_service.list_repo.get_random_sound_from_list = Mock(
+            return_value=(7, "orig.mp3", "clip.mp3", 0, 0, 0, 0)
+        )
+        sound_service.audio_service.play_audio = AsyncMock()
+        sound_service.action_repo.insert = Mock()
+
+        await sound_service.play_random_sound_from_list("mix", "user", guild=guild)
+
+        sound_service.audio_service.play_audio.assert_awaited_once_with(channel, "clip.mp3", "user")
+        sound_service.action_repo.insert.assert_called_once_with(
+            "user",
+            "play_from_list",
+            7,
+            guild_id=321,
+        )
+
 
 class TestSoundServiceFilename:
     """Tests for filename-related operations in SoundService."""

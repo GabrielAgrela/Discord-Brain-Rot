@@ -3,6 +3,7 @@ import os
 import re
 import asyncio
 from bot.database import Database
+from bot.repositories import ActionRepository
 
 class UploadSoundModal(discord.ui.Modal):
     def __init__(self, bot_behavior):
@@ -82,7 +83,13 @@ class UploadSoundModal(discord.ui.Modal):
                         await interaction.followup.send("Upload completed but file verification failed. Please try again.", ephemeral=True)
                         return
                     
-                    Database().insert_action(interaction.user.name, "upload_sound", file_path)
+                    filename = os.path.basename(file_path)
+                    ActionRepository().insert(
+                        interaction.user.name,
+                        "upload_sound",
+                        filename,
+                        guild_id=interaction.guild.id if interaction.guild else None,
+                    )
                     await interaction.followup.send("Sound uploaded successfully! (may take up to 10s to be available)", ephemeral=True, delete_after=10)
                     
                 except Exception as e:
@@ -146,20 +153,34 @@ class CreateListModalWithSoundAdd(discord.ui.Modal):
     async def callback(self, interaction):
         try:
             list_name = self.list_name.value
-            existing_list = Database().get_list_by_name(list_name, interaction.user.name)
+            guild_id = interaction.guild.id if interaction.guild else None
+            existing_list = Database().get_list_by_name(list_name, interaction.user.name, guild_id=guild_id)
             if existing_list:
                 await interaction.response.send_message(f"You already have a list named '{list_name}'.", ephemeral=True)
                 return
                 
-            list_id = Database().create_sound_list(list_name, interaction.user.name)
+            list_id = Database().create_sound_list(list_name, interaction.user.name, guild_id=guild_id)
             if list_id:
+                action_repo = ActionRepository()
+                action_repo.insert(
+                    interaction.user.name,
+                    "create_sound_list",
+                    list_name,
+                    guild_id=guild_id,
+                )
                 success_message = f"Created list '{list_name}'."
                 if self.sound_filename:
-                    success, message = Database().add_sound_to_list(list_id, self.sound_filename)
+                    success = Database().add_sound_to_list(list_id, self.sound_filename)
                     if success:
+                        action_repo.insert(
+                            interaction.user.name,
+                            "add_sound_to_list",
+                            f"{list_name}:{self.sound_filename}",
+                            guild_id=guild_id,
+                        )
                         success_message += f" Sound added to the list."
                     else:
-                        success_message += f" However, failed to add sound: {message}"
+                        success_message += " However, the sound was already in the list."
                 
                 await interaction.response.send_message(success_message, ephemeral=True)
                 asyncio.create_task(self._send_confirmation_message(list_name))
@@ -336,7 +357,12 @@ class UploadSoundWithFileModal(discord.ui.DesignerModal):
                         return
                     
                     filename = os.path.basename(file_path)
-                    Database().insert_action(interaction.user.name, "upload_sound", filename)
+                    ActionRepository().insert(
+                        interaction.user.name,
+                        "upload_sound",
+                        filename,
+                        guild_id=interaction.guild.id if interaction.guild else None,
+                    )
                     await interaction.followup.send(
                         f"Sound `{filename}` uploaded successfully! (may take up to 10s to be available)", 
                         ephemeral=True, 
@@ -351,4 +377,3 @@ class UploadSoundWithFileModal(discord.ui.DesignerModal):
                     )
         except Exception as e:
             print(f"Error in UploadSoundWithFileModal.callback: {e}")
-

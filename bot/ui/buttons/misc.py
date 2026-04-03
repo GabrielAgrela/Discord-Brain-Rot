@@ -1,8 +1,8 @@
 import discord
 from discord.ui import Button
 import asyncio
-import random
 from bot.database import Database
+from bot.repositories import ActionRepository
 
 class SubwaySurfersButton(Button):
     def __init__(self, bot_behavior, **kwargs):
@@ -12,7 +12,12 @@ class SubwaySurfersButton(Button):
     async def callback(self, interaction):
         try:
             await interaction.response.defer()
-            asyncio.create_task(self.bot_behavior._brain_rot_service.subway_surfers(interaction.user))
+            asyncio.create_task(
+                self.bot_behavior._brain_rot_service.subway_surfers(
+                    interaction.user,
+                    guild=interaction.guild,
+                )
+            )
         except Exception as e:
             print(f"[SubwaySurfersButton] Error in callback: {e}")
 
@@ -24,7 +29,12 @@ class SliceAllButton(Button):
     async def callback(self, interaction):
         try:
             await interaction.response.defer()
-            asyncio.create_task(self.bot_behavior._brain_rot_service.slice_all(interaction.user))
+            asyncio.create_task(
+                self.bot_behavior._brain_rot_service.slice_all(
+                    interaction.user,
+                    guild=interaction.guild,
+                )
+            )
         except Exception as e:
             print(f"[SliceAllButton] Error in callback: {e}")
 
@@ -36,7 +46,12 @@ class FamilyGuyButton(Button):
     async def callback(self, interaction):
         try:
             await interaction.response.defer()
-            asyncio.create_task(self.bot_behavior._brain_rot_service.family_guy(interaction.user))
+            asyncio.create_task(
+                self.bot_behavior._brain_rot_service.family_guy(
+                    interaction.user,
+                    guild=interaction.guild,
+                )
+            )
         except Exception as e:
             print(f"[FamilyGuyButton] Error in callback: {e}")
 
@@ -48,44 +63,12 @@ class BrainRotButton(Button):
     async def callback(self, interaction):
         try:
             await interaction.response.defer()
-
-            if self.bot_behavior._brain_rot_service.lock.locked():
-                if self.bot_behavior._brain_rot_service.cooldown_message:
-                    try:
-                        await self.bot_behavior._brain_rot_service.cooldown_message.delete()
-                    except (discord.NotFound, discord.Forbidden):
-                        pass 
-                self.bot_behavior._brain_rot_service.cooldown_message = await self.bot_behavior._message_service.send_message(
-                    title="🧠 Brain Rot Active 🧠",
-                    description="A brain rot function is already in progress. Please wait!",
-                    delete_time=5
+            asyncio.create_task(
+                self.bot_behavior.run_random_brain_rot(
+                    interaction.user,
+                    guild=interaction.guild,
                 )
-                return
-
-            async def run_brain_rot():
-                try:
-                    async with self.bot_behavior._brain_rot_service.lock:
-                        brain_rot_functions = [
-                            self.bot_behavior._brain_rot_service.subway_surfers,
-                            self.bot_behavior._brain_rot_service.slice_all,
-                            self.bot_behavior._brain_rot_service.family_guy
-                        ]
-                        chosen_function = random.choice(brain_rot_functions)
-                        
-                        try:
-                            await chosen_function(interaction.user)
-                            Database().insert_action(interaction.user.name, f"brain_rot_{chosen_function.__name__}", "")
-                        except Exception as e:
-                            print(f"Error during brain rot function '{chosen_function.__name__}': {e}")
-                finally:
-                    if self.bot_behavior._brain_rot_service.cooldown_message:
-                        try:
-                            await self.bot_behavior._brain_rot_service.cooldown_message.delete()
-                        except (discord.NotFound, discord.Forbidden):
-                            pass 
-                        self.bot_behavior._brain_rot_service.cooldown_message = None
-
-            asyncio.create_task(run_brain_rot())
+            )
         except Exception as e:
             print(f"[BrainRotButton] Error in callback: {e}")
 
@@ -97,7 +80,16 @@ class StatsButton(Button):
     async def callback(self, interaction):
         try:
             await interaction.response.defer()
-            asyncio.create_task(self.bot_behavior.display_top_users(interaction.user, number_users=20, number_sounds=5, days=700, by="plays"))
+            asyncio.create_task(
+                self.bot_behavior.display_top_users(
+                    interaction.user,
+                    number_users=20,
+                    number_sounds=5,
+                    days=700,
+                    by="plays",
+                    guild=interaction.guild,
+                )
+            )
         except Exception as e:
             print(f"[StatsButton] Error in callback: {e}")
 
@@ -134,6 +126,7 @@ class ListFavoritesButton(Button):
 
     async def callback(self, interaction):
         await interaction.response.defer()
+        guild_id = interaction.guild.id if interaction.guild else None
         
         if ListFavoritesButton.current_favorites_message:
             try:
@@ -141,8 +134,13 @@ class ListFavoritesButton(Button):
             except:
                 pass 
         
-        favorites = Database().get_sounds(num_sounds=1000, favorite=True)
-        Database().insert_action(interaction.user.name, "list_favorites", len(favorites))
+        favorites = Database().get_sounds(num_sounds=1000, favorite=True, guild_id=guild_id)
+        ActionRepository().insert(
+            interaction.user.name,
+            "list_favorites",
+            len(favorites),
+            guild_id=guild_id,
+        )
         
         if len(favorites) > 0:
             from bot.ui.views.favorites import PaginatedFavoritesView
@@ -166,6 +164,7 @@ class ListUserFavoritesButton(Button):
 
     async def callback(self, interaction):
         await interaction.response.defer()
+        guild_id = interaction.guild.id if interaction.guild else None
         
         if interaction.user.name in ListUserFavoritesButton.current_user_messages:
             try:
@@ -173,8 +172,18 @@ class ListUserFavoritesButton(Button):
             except:
                 pass 
         
-        favorites = Database().get_sounds(num_sounds=1000, favorite_by_user=True, user=interaction.user.name)
-        Database().insert_action(interaction.user.name, "list_user_favorites", len(favorites))
+        favorites = Database().get_sounds(
+            num_sounds=1000,
+            favorite_by_user=True,
+            user=interaction.user.name,
+            guild_id=guild_id,
+        )
+        ActionRepository().insert(
+            interaction.user.name,
+            "list_user_favorites",
+            len(favorites),
+            guild_id=guild_id,
+        )
         
         if len(favorites) > 0:
             from bot.ui.views.favorites import PaginatedFavoritesView

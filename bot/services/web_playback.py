@@ -173,7 +173,7 @@ async def process_playback_queue_request(
                 action_logger_factory().insert_action(
                     "admin",
                     "play_sound_periodically",
-                    sound_filename,
+                    sound_data[0],
                     guild_id=guild_id,
                 )
 

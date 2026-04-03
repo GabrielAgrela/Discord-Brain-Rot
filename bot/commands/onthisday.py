@@ -35,6 +35,12 @@ class OnThisDayCog(commands.Cog):
         
         # Convert period to months
         months_ago = 12 if period == "1 year ago" else 1
+        self.action_repo.insert(
+            ctx.user.name,
+            "view_on_this_day",
+            period,
+            guild_id=ctx.guild.id if ctx.guild else None,
+        )
         
         # Get sounds from that time period
         sounds = self.action_repo.get_sounds_on_this_day(

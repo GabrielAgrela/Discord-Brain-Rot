@@ -7,7 +7,7 @@ from discord.ext import commands
 from discord.commands import Option, SlashCommandGroup
 import re
 
-from bot.repositories import KeywordRepository, ListRepository
+from bot.repositories import ActionRepository, KeywordRepository, ListRepository
 
 class KeywordCog(commands.Cog):
     """Cog for managing trigger keywords."""
@@ -17,8 +17,18 @@ class KeywordCog(commands.Cog):
     def __init__(self, bot: discord.Bot, behavior):
         self.bot = bot
         self.behavior = behavior
+        self.action_repo = ActionRepository()
         self.keyword_repo = KeywordRepository()
         self.list_repo = ListRepository()
+
+    def _log_action(self, ctx: discord.ApplicationContext, action: str, target: str) -> None:
+        """Log a keyword-management action."""
+        self.action_repo.insert(
+            ctx.author.name,
+            action,
+            target,
+            guild_id=ctx.guild.id if ctx.guild else None,
+        )
 
     async def _get_list_autocomplete(self, ctx: discord.AutocompleteContext):
         """Autocomplete for sound lists."""
@@ -68,6 +78,7 @@ class KeywordCog(commands.Cog):
                     sink.refresh_keywords()
             
             action_desc = "random slap" if action == "slap" else f"random from list '{list_name}'"
+            self._log_action(ctx, "add_keyword", f"{keyword}->{action}:{action_value or 'none'}")
             await ctx.respond(f"Keyword '{keyword}' added! Will trigger: {action_desc}.", ephemeral=True)
             
             await self.behavior.send_message(
@@ -100,6 +111,7 @@ class KeywordCog(commands.Cog):
                 for sink in audio_service.keyword_sinks.values():
                     sink.refresh_keywords()
                     
+            self._log_action(ctx, "remove_keyword", keyword)
             await ctx.respond(f"Keyword '{keyword}' removed.", ephemeral=True)
             
             await self.behavior.send_message(
@@ -113,6 +125,7 @@ class KeywordCog(commands.Cog):
     async def list_keywords(self, ctx: discord.ApplicationContext):
         """List all keywords."""
         keywords = self.keyword_repo.get_all()
+        self._log_action(ctx, "list_keywords", str(len(keywords)))
         
         if not keywords:
             await ctx.respond("No keywords configured.", ephemeral=True)

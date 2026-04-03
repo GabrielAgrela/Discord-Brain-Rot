@@ -2,6 +2,7 @@ import discord
 from discord.ui import Button
 import asyncio
 from bot.database import Database
+from bot.repositories import ActionRepository
 
 class ListSoundsButton(Button):
     def __init__(self, bot_behavior, **kwargs):
@@ -20,7 +21,12 @@ class ListLastScrapedSoundsButton(Button):
     async def callback(self, interaction):
         await interaction.response.defer()
         asyncio.create_task(self.bot_behavior._sound_service.list_sounds(interaction.user, 25))
-        Database().insert_action(interaction.user.name, "list_last_scraped_sounds", "")
+        ActionRepository().insert(
+            interaction.user.name,
+            "list_last_scraped_sounds",
+            "",
+            guild_id=interaction.guild.id if interaction.guild else None,
+        )
 
 class SoundListButton(Button):
     def __init__(self, bot_behavior, list_id, list_name, label, **kwargs):
@@ -52,7 +58,12 @@ class SoundListButton(Button):
             view=view,
             ephemeral=True
         )
-        Database().insert_action(interaction.user.name, "view_sound_list", str(self.list_id))
+        ActionRepository().insert(
+            interaction.user.name,
+            "view_sound_list",
+            str(self.list_id),
+            guild_id=interaction.guild.id if interaction.guild else None,
+        )
 
 class CreateListButton(Button):
     def __init__(self, bot_behavior, **kwargs):
@@ -74,6 +85,12 @@ class DeleteListButton(Button):
     async def callback(self, interaction):
         success = Database().delete_sound_list(self.list_id, interaction.user.name)
         if success:
+            ActionRepository().insert(
+                interaction.user.name,
+                "delete_sound_list",
+                self.list_name,
+                guild_id=interaction.guild.id if interaction.guild else None,
+            )
             await interaction.response.send_message(f"List '{self.list_name}' deleted.", ephemeral=True)
             try:
                 await interaction.message.delete()
@@ -117,11 +134,20 @@ class SoundListItemButton(Button):
 
     async def callback(self, interaction):
         await interaction.response.defer()
+        guild_id = interaction.guild.id if interaction.guild else None
         channel = self.bot_behavior._audio_service.get_user_voice_channel(interaction.guild, interaction.user.name)
         if not channel:
             channel = self.bot_behavior._audio_service.get_largest_voice_channel(interaction.guild)
         if channel:
             asyncio.create_task(self.bot_behavior._audio_service.play_audio(channel, self.sound_filename, interaction.user.name))
+            sound = Database().get_sound(self.sound_filename, False, guild_id=guild_id)
+            if sound:
+                ActionRepository().insert(
+                    interaction.user.name,
+                    "play_from_list",
+                    sound[0],
+                    guild_id=guild_id,
+                )
         else:
             await interaction.followup.send("No voice channel available! 😭", ephemeral=True)
 
@@ -136,6 +162,12 @@ class RemoveFromListButton(Button):
     async def callback(self, interaction):
         success = Database().remove_sound_from_list(self.list_id, self.sound_filename)
         if success:
+            ActionRepository().insert(
+                interaction.user.name,
+                "remove_sound_from_list",
+                f"{self.list_name}:{self.sound_filename}",
+                guild_id=interaction.guild.id if interaction.guild else None,
+            )
             await interaction.response.send_message(f"Removed from '{self.list_name}'.", ephemeral=True)
             
             sounds = Database().get_sounds_in_list(self.list_id)

@@ -36,7 +36,6 @@ class STSButton(Button):
 
     async def callback(self, interaction):
         await interaction.response.defer()
-        guild_id = interaction.guild.id if interaction.guild else None
         
         # Get avatar URL and character thumbnail
         avatar = getattr(interaction.user, "display_avatar", None)
@@ -66,10 +65,6 @@ class STSButton(Button):
             requester_avatar_url=requester_avatar_url,
             sts_thumbnail_url=sts_thumbnail_url
         ))
-        # Record the action
-        sound = Database().get_sound(self.audio_file, False, guild_id=guild_id)
-        if sound:
-            Database().insert_action(interaction.user.name, "sts_EL", sound[0], guild_id=guild_id)
         # Delete the character selection message
         try:
             await interaction.message.delete()
@@ -86,12 +81,13 @@ class IsolateButton(Button):
     async def callback(self, interaction):
         await interaction.response.defer()
         guild_id = interaction.guild.id if interaction.guild else None
-        asyncio.create_task(self.bot_behavior._audio_service.isolate_voice(interaction.message.channel, self.audio_file))
-        similar_sounds = Database().get_sounds_by_similarity(self.audio_file, guild_id=guild_id)
-        if similar_sounds and similar_sounds[0]:
-            sound_data = similar_sounds[0][0]
-            sound_id = sound_data["id"] if isinstance(sound_data, dict) else sound_data[0]
-            Database().insert_action(interaction.user.name, "isolate", sound_id, guild_id=guild_id)
+        asyncio.create_task(
+            self.bot_behavior._voice_transformation_service.isolate_voice(
+                sound_name=self.audio_file,
+                guild_id=guild_id,
+                requested_by=interaction.user,
+            )
+        )
 
 class FavoriteButton(Button):
     def __init__(self, bot_behavior, audio_file, **kwargs):

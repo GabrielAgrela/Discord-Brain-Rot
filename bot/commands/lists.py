@@ -16,7 +16,7 @@ from discord.commands import Option
 import re
 import sqlite3
 
-from bot.repositories import ListRepository, SoundRepository
+from bot.repositories import ActionRepository, ListRepository, SoundRepository
 from bot.database import Database  # Keep for get_sounds_by_similarity until migrated
 from bot.ui import PaginatedSoundListView
 
@@ -98,11 +98,21 @@ class ListCog(commands.Cog):
         self.behavior = behavior
         
         # Repositories
+        self.action_repo = ActionRepository()
         self.list_repo = ListRepository()
         self.sound_repo = SoundRepository()
         
         # Keep Database for get_sounds_by_similarity until migrated
         self.db = Database()
+
+    def _log_action(self, ctx: discord.ApplicationContext, action: str, target: str) -> None:
+        """Log a list-management action."""
+        self.action_repo.insert(
+            ctx.author.name,
+            action,
+            target,
+            guild_id=ctx.guild.id if ctx.guild else None,
+        )
     
     @commands.slash_command(name="createlist", description="Create a new sound list")
     async def create_list(
@@ -120,6 +130,7 @@ class ListCog(commands.Cog):
         # Create the list
         list_id = self.list_repo.create(list_name, ctx.author.name, guild_id=ctx.guild.id if ctx.guild else None)
         if list_id:
+            self._log_action(ctx, "create_sound_list", list_name)
             await ctx.respond(f"Created list '{list_name}'.", ephemeral=True)
             
             # Send a message confirming the creation
@@ -163,6 +174,7 @@ class ListCog(commands.Cog):
         success = self.list_repo.add_sound(sound_list[0], soundid)
         
         if success:
+            self._log_action(ctx, "add_sound_to_list", f"{actual_name}:{soundid}")
             list_creator = sound_list[2]
             
             if list_creator != ctx.author.name:
@@ -202,6 +214,7 @@ class ListCog(commands.Cog):
         success = self.list_repo.remove_sound(sound_list[0], sound)
         
         if success:
+            self._log_action(ctx, "remove_sound_from_list", f"{actual_name}:{sound}")
             await ctx.respond(f"Removed sound '{sound}' from list '{actual_name}'.", ephemeral=True)
         else:
             await ctx.respond("Failed to remove sound from list. Make sure the name is exact.", ephemeral=True)
@@ -230,6 +243,7 @@ class ListCog(commands.Cog):
         # Delete the list
         success = self.list_repo.delete(sound_list[0])
         if success:
+            self._log_action(ctx, "delete_sound_list", actual_name)
             await ctx.respond(f"Deleted list '{actual_name}'.", ephemeral=True)
             
             await self.behavior.send_message(
@@ -259,6 +273,7 @@ class ListCog(commands.Cog):
             
         list_id = sound_list[0]
         display_name = sound_list[1]
+        self._log_action(ctx, "view_sound_list", str(list_id))
         
         # Get the sounds in the list
         sounds = self.list_repo.get_sounds_in_list(list_id)

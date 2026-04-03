@@ -75,6 +75,26 @@ class TestActionRepository:
         # Should return results based on our sample data
         assert isinstance(top_sounds, list)
         assert isinstance(total, int)
+
+    def test_get_top_sounds_includes_list_and_similar_plays(self, action_repository, sample_sounds, db_connection):
+        """Top sound aggregation should count list and similar playback actions too."""
+        cursor = db_connection.cursor()
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cursor.executemany(
+            "INSERT INTO actions (username, action, target, timestamp) VALUES (?, ?, ?, ?)",
+            [
+                ("user1", "play_from_list", str(sample_sounds[0]), now),
+                ("user2", "play_similar_sound", str(sample_sounds[1]), now),
+            ],
+        )
+        db_connection.commit()
+
+        top_sounds, total = action_repository.get_top_sounds(days=0, limit=5)
+        counts = dict(top_sounds)
+
+        assert total == 2
+        assert counts["sound1.mp3"] == 1
+        assert counts["sound2.mp3"] == 1
     
     def test_get_sound_play_count(self, action_repository, sample_actions):
         """Test getting play count for a specific sound."""

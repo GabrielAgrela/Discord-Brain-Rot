@@ -25,6 +25,16 @@ class StatsCog(commands.Cog):
         self.action_repo = ActionRepository()
         self.stats_repo = StatsRepository()
 
+    def _log_action(
+        self,
+        username: str,
+        action: str,
+        target: str,
+        guild: Optional[discord.Guild],
+    ) -> None:
+        """Persist a command action scoped to the current guild when available."""
+        self.action_repo.insert(username, action, target, guild_id=guild.id if guild else None)
+
     @commands.slash_command(name="top", description="Leaderboard of sounds or users")
     async def top(
         self, 
@@ -42,6 +52,7 @@ class StatsCog(commands.Cog):
         await ctx.respond("Processing your request...", delete_after=0)
         guild_id = ctx.guild.id if ctx.guild else None
         if option == "sounds":
+            self._log_action(ctx.user.name, "list_top_sounds", f"{numberdays}d:{number}", ctx.guild)
             # Note: The original code used a method write_top_played_sounds on behavior.player_history_db
             # But in database.py we only see get_top_sounds.
             # Behavior MUST implement logic to format this or database should.
@@ -72,6 +83,7 @@ class StatsCog(commands.Cog):
             )
             
         elif option == "users":
+            self._log_action(ctx.user.name, "list_top_users", f"{numberdays}d:{number}", ctx.guild)
             top_users = self.action_repo.get_top_users(numberdays, number, guild_id=guild_id)
             
             description = ""
@@ -88,6 +100,7 @@ class StatsCog(commands.Cog):
             )
 
         elif option == "voice users":
+            self._log_action(ctx.user.name, "list_top_voice_users", f"{numberdays}d:{number}", ctx.guild)
             top_voice_users = self.stats_repo.get_top_voice_users(days=numberdays, limit=number, guild_id=guild_id)
 
             description = ""
@@ -108,6 +121,7 @@ class StatsCog(commands.Cog):
             )
 
         elif option == "voice channels":
+            self._log_action(ctx.user.name, "list_top_voice_channels", f"{numberdays}d:{number}", ctx.guild)
             top_voice_channels = self.stats_repo.get_top_voice_channels(days=numberdays, limit=number, guild_id=guild_id)
 
             description = ""
@@ -207,6 +221,7 @@ class StatsCog(commands.Cog):
         
         username = target_user.name
         guild_id = ctx.guild.id if ctx.guild else None
+        self._log_action(ctx.user.name, "year_review", f"{username}:{review_year}", ctx.guild)
         
         # We need to implement the get_user_year_stats logic or assume it exists in DB
         # If it doesn't exist in the truncated DB code I saw earlier, I should try to call it
@@ -326,6 +341,8 @@ class StatsCog(commands.Cog):
             return
             
         await ctx.respond(f"Generating year review for {user.display_name}... 📬", ephemeral=True)
+        review_year = year if year else datetime.datetime.now().year
+        self._log_action(ctx.user.name, "send_year_review", f"{user.name}:{review_year}", ctx.guild)
         # Logic would mirror year_review but send to DM
         await ctx.followup.send("Year review sent (placeholder).", ephemeral=True)
 

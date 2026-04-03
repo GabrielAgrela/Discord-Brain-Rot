@@ -1,5 +1,5 @@
 import discord
-from bot.repositories import ActionRepository
+from bot.repositories import ActionRepository, SoundRepository
 from bot.tts import TTS
 from typing import Optional
 import asyncio
@@ -18,6 +18,7 @@ class VoiceTransformationService:
         self.audio_service = audio_service
         self.message_service = message_service
         self.action_repo = ActionRepository()
+        self.sound_repo = SoundRepository()
         self._guild_locks: dict[int, asyncio.Lock] = {}
         self._tts_max_jobs = max(1, int(os.getenv("TTS_MAX_CONCURRENT_JOBS", "2")))
         self._tts_semaphore = asyncio.Semaphore(self._tts_max_jobs)
@@ -39,6 +40,20 @@ class VoiceTransformationService:
         if guild_id not in self._guild_locks:
             self._guild_locks[guild_id] = asyncio.Lock()
         return self._guild_locks[guild_id]
+
+    def _resolve_sound_action_target(self, sound_name: str, guild_id: Optional[int]) -> str:
+        """Resolve a sound name to a stable sound ID for analytics when possible."""
+        sound = self.sound_repo.get_sound_by_name(sound_name, guild_id=guild_id)
+        if sound:
+            return str(sound[0])
+        return sound_name
+
+    @staticmethod
+    def _resolve_actor_name(user) -> str:
+        """Resolve a Discord user/member/string into a username for action logging."""
+        if user is None:
+            return "admin"
+        return getattr(user, "name", str(user))
 
     async def _run_tts_job(self, guild_id: Optional[int], job_coro):
         """Run a TTS/STS job with global and per-guild concurrency control."""
@@ -83,6 +98,12 @@ class VoiceTransformationService:
                      loading_message=None, requester_avatar_url=None, sts_thumbnail_url=None):
         """ElevenLabs speech-to-speech voice transformation."""
         guild_id = self._resolve_guild_id(user)
+        self.action_repo.insert(
+            user.name,
+            "sts_EL",
+            self._resolve_sound_action_target(sound, guild_id),
+            guild_id=guild_id,
+        )
         requester_name = getattr(user, 'display_name', getattr(user, 'name', str(user)))
         await self._run_tts_job(guild_id, self.tts_engine.speech_to_speech(
             sound, char, region,
@@ -93,8 +114,14 @@ class VoiceTransformationService:
             guild_id=guild_id,
         ))
         
-    async def isolate_voice(self, sound_name: str, guild_id: Optional[int] = None):
+    async def isolate_voice(self, sound_name: str, guild_id: Optional[int] = None, requested_by=None):
         """ElevenLabs voice isolation feature."""
+        self.action_repo.insert(
+            self._resolve_actor_name(requested_by),
+            "isolate",
+            self._resolve_sound_action_target(sound_name, guild_id),
+            guild_id=guild_id,
+        )
         await self._run_tts_job(guild_id, self.tts_engine.isolate_voice(sound_name, guild_id=guild_id))
 
     # --- Compatibility methods for legacy TTS class ---
