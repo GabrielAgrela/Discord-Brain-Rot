@@ -642,13 +642,13 @@
                                     // Filename
                                     let filenameCell = document.createElement('td');
                                     filenameCell.className = 'filename';
-                                    filenameCell.textContent = (item.filename || item.target || '-').replace('.mp3', '');
-                                    filenameCell.title = item.filename || item.target || '';
+                                    filenameCell.textContent = (item.display_filename || '-').replace('.mp3', '');
+                                    filenameCell.title = item.display_filename || '';
                                     row.appendChild(filenameCell);
 
                                     // Username
                                     let usernameCell = document.createElement('td');
-                                    usernameCell.textContent = item.username;
+                                    usernameCell.textContent = item.display_username || '';
                                     row.appendChild(usernameCell);
 
                                     // Time
@@ -660,23 +660,23 @@
                                 } else if (endpoint === 'favorites') {
                                     let filenameCell = document.createElement('td');
                                     filenameCell.className = 'filename';
-                                    filenameCell.textContent = item.filename.replace('.mp3', '');
-                                    filenameCell.title = item.filename;
+                                    filenameCell.textContent = (item.display_filename || '').replace('.mp3', '');
+                                    filenameCell.title = item.display_filename || '';
                                     row.appendChild(filenameCell);
 
                                     const playCell = document.createElement('td');
                                     const playButton = document.createElement('button');
                                     playButton.textContent = '▶ Play';
                                     playButton.className = 'play-button';
-                                    playButton.setAttribute('data-filename', item.filename);
+                                    playButton.setAttribute('data-sound-id', item.sound_id);
                                     playCell.appendChild(playButton);
                                     row.appendChild(playCell);
 
                                 } else if (endpoint === 'all_sounds') {
                                     let filenameCell = document.createElement('td');
                                     filenameCell.className = 'filename';
-                                    filenameCell.textContent = item.filename.replace('.mp3', '');
-                                    filenameCell.title = item.filename;
+                                    filenameCell.textContent = (item.display_filename || '').replace('.mp3', '');
+                                    filenameCell.title = item.display_filename || '';
                                     row.appendChild(filenameCell);
 
                                     let dateCell = document.createElement('td');
@@ -688,7 +688,7 @@
                                     const playButton = document.createElement('button');
                                     playButton.textContent = '▶ Play';
                                     playButton.className = 'play-button';
-                                    playButton.setAttribute('data-filename', item.filename);
+                                    playButton.setAttribute('data-sound-id', item.sound_id);
                                     playCell.appendChild(playButton);
                                     row.appendChild(playCell);
                                 }
@@ -789,8 +789,8 @@
         document.querySelector('.tables-grid').addEventListener('click', async (event) => {
             if (event.target.classList.contains('play-button')) {
                 const button = event.target;
-                const filename = button.getAttribute('data-filename');
-                if (!filename) return;
+                const soundId = button.getAttribute('data-sound-id');
+                if (!soundId) return;
 
                 button.disabled = true;
                 button.textContent = '⏳';
@@ -801,7 +801,7 @@
                         headers: {
                             'Content-Type': 'application/json',
                         },
-                        body: JSON.stringify({ sound_filename: filename })
+                        body: JSON.stringify({ sound_id: soundId })
                     });
 
                     if (response.ok) {

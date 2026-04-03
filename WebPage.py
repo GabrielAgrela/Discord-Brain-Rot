@@ -1,12 +1,53 @@
-from flask import Flask, render_template, jsonify, request
-import sqlite3
-import math
 import datetime
+import math
+import sqlite3
 
+from flask import Flask, jsonify, render_template, request
+
+from bot.repositories.sound import SoundRepository
+from bot.services.text_censor import TextCensorService
 from bot.services.web_playback import queue_playback_request
 
 app = Flask(__name__)
 app.config.setdefault("DATABASE_PATH", "Data/database.db")
+text_censor_service = TextCensorService()
+
+
+def _get_db_connection(*, row_factory: sqlite3.Row | None = None) -> sqlite3.Connection:
+    """Create a SQLite connection using the configured database path."""
+    conn = sqlite3.connect(app.config["DATABASE_PATH"])
+    if row_factory is not None:
+        conn.row_factory = row_factory
+    return conn
+
+
+def _censor_text(value: str | None) -> str | None:
+    """Censor hateful text for web responses."""
+    return text_censor_service.censor_text(value)
+
+
+def _resolve_sound_filename_for_request(payload: dict) -> str:
+    """Resolve a playback request payload into a real sound filename."""
+    sound_filename = str(payload.get("sound_filename", "")).strip()
+    if sound_filename:
+        return sound_filename
+
+    sound_id = payload.get("sound_id")
+    if sound_id in (None, ""):
+        raise ValueError("Missing sound_filename")
+
+    try:
+        sound_id_int = int(sound_id)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Invalid sound_id") from exc
+
+    sound = SoundRepository(
+        db_path=app.config["DATABASE_PATH"],
+        use_shared=False,
+    ).get_by_id(sound_id_int)
+    if sound is None:
+        raise ValueError("Unknown sound_id")
+    return sound.filename
 
 @app.route('/')
 def index():
@@ -23,7 +64,7 @@ def get_actions():
     offset = (page - 1) * per_page
     search_query = request.args.get('search', '').strip()
 
-    conn = sqlite3.connect('Data/database.db')
+    conn = _get_db_connection()
     cursor = conn.cursor()
     
     base_query = """
@@ -47,8 +88,8 @@ def get_actions():
     
     actions = [
         {
-            'filename': row[0] if row[0] else row[3],
-            'username': row[1],
+            'display_filename': _censor_text(row[0] if row[0] else row[3]),
+            'display_username': _censor_text(row[1]),
             'action': row[2],
             'timestamp': row[4]
         }
@@ -65,7 +106,7 @@ def get_actions():
     })
 
 def get_total_count(table_name, search_query=None):
-    conn = sqlite3.connect('Data/database.db')
+    conn = _get_db_connection()
     cursor = conn.cursor()
     params = []
     where_clause = ""
@@ -108,7 +149,7 @@ def get_favorites():
     offset = (page - 1) * per_page
     search_query = request.args.get('search', '').strip()
 
-    conn = sqlite3.connect('Data/database.db')
+    conn = _get_db_connection()
     cursor = conn.cursor()
 
     # Use CTE to get most recent favorite action timestamp for each sound
@@ -121,7 +162,7 @@ def get_favorites():
             WHERE action = 'favorite_sound'
             GROUP BY CAST(target AS INTEGER)
         )
-        SELECT s.Filename, s.originalfilename
+        SELECT s.id, s.Filename, s.originalfilename
         FROM sounds s
         LEFT JOIN LatestFavorite lf ON lf.sound_id = s.id
         WHERE s.favorite = 1 AND s.is_elevenlabs = 0
@@ -142,7 +183,8 @@ def get_favorites():
 
     favorites = [
         {
-            'filename': row[0]
+            'sound_id': row[0],
+            'display_filename': _censor_text(row[1]),
         }
         for row in cursor.fetchall()
     ]
@@ -167,10 +209,10 @@ def get_all_sounds():
     offset = (page - 1) * per_page
     search_query = request.args.get('search', '').strip()
 
-    conn = sqlite3.connect('Data/database.db')
+    conn = _get_db_connection()
     cursor = conn.cursor()
 
-    base_query = "SELECT Filename, originalfilename, timestamp FROM sounds WHERE is_elevenlabs = 0"
+    base_query = "SELECT id, Filename, originalfilename, timestamp FROM sounds WHERE is_elevenlabs = 0"
     where_clause = ""
     params = []
 
@@ -187,8 +229,9 @@ def get_all_sounds():
 
     all_sounds = [
         {
-            'filename': row[0],
-            'timestamp': row[2]
+            'sound_id': row[0],
+            'display_filename': _censor_text(row[1]),
+            'timestamp': row[3]
         }
         for row in cursor.fetchall()
     ]
@@ -206,12 +249,9 @@ def get_all_sounds():
 @app.route('/api/play_sound', methods=['POST'])
 def request_play_sound():
     data = request.get_json(silent=True) or {}
-    sound_filename = data.get('sound_filename')
-
-    if not sound_filename:
-        return jsonify({'error': 'Missing sound_filename'}), 400
 
     try:
+        sound_filename = _resolve_sound_filename_for_request(data)
         queue_playback_request(
             sound_filename=sound_filename,
             requested_guild_id=data.get('guild_id'),
@@ -244,8 +284,7 @@ def get_analytics_summary():
     except ValueError:
         days = 0
     
-    conn = sqlite3.connect('Data/database.db')
-    conn.row_factory = sqlite3.Row
+    conn = _get_db_connection(row_factory=sqlite3.Row)
     cursor = conn.cursor()
     
     stats = {
@@ -316,8 +355,7 @@ def get_analytics_top_users():
         days = 7
         limit = 10
     
-    conn = sqlite3.connect('Data/database.db')
-    conn.row_factory = sqlite3.Row
+    conn = _get_db_connection(row_factory=sqlite3.Row)
     cursor = conn.cursor()
     
     time_filter = ""
@@ -344,7 +382,10 @@ def get_analytics_top_users():
         tuple(params)
     )
     
-    users = [{'username': row['username'], 'count': row['count']} for row in cursor.fetchall()]
+    users = [
+        {'display_username': _censor_text(row['username']), 'count': row['count']}
+        for row in cursor.fetchall()
+    ]
     conn.close()
     return jsonify({'users': users})
 
@@ -359,8 +400,7 @@ def get_analytics_top_sounds():
         days = 7
         limit = 10
     
-    conn = sqlite3.connect('Data/database.db')
-    conn.row_factory = sqlite3.Row
+    conn = _get_db_connection(row_factory=sqlite3.Row)
     cursor = conn.cursor()
     
     time_filter = ""
@@ -375,7 +415,7 @@ def get_analytics_top_sounds():
     
     cursor.execute(
         f"""
-        SELECT s.Filename, COUNT(*) as count
+        SELECT MIN(s.id) as sound_id, s.Filename, COUNT(*) as count
         FROM actions a
         JOIN sounds s ON a.target = s.id
         WHERE a.action IN ('play_random_sound', 'replay_sound', 'play_random_favorite_sound', 
@@ -389,7 +429,14 @@ def get_analytics_top_sounds():
         tuple(params)
     )
     
-    sounds = [{'filename': row['Filename'], 'count': row['count']} for row in cursor.fetchall()]
+    sounds = [
+        {
+            'sound_id': row['sound_id'],
+            'display_filename': _censor_text(row['Filename']),
+            'count': row['count'],
+        }
+        for row in cursor.fetchall()
+    ]
     conn.close()
     return jsonify({'sounds': sounds})
 
@@ -402,8 +449,7 @@ def get_analytics_heatmap():
     except ValueError:
         days = 30
     
-    conn = sqlite3.connect('Data/database.db')
-    conn.row_factory = sqlite3.Row
+    conn = _get_db_connection(row_factory=sqlite3.Row)
     cursor = conn.cursor()
     
     time_filter = ""
@@ -443,8 +489,7 @@ def get_analytics_timeline():
     except ValueError:
         days = 30
     
-    conn = sqlite3.connect('Data/database.db')
-    conn.row_factory = sqlite3.Row
+    conn = _get_db_connection(row_factory=sqlite3.Row)
     cursor = conn.cursor()
     
     from datetime import timedelta
@@ -497,8 +542,7 @@ def get_analytics_recent():
     except ValueError:
         limit = 20
     
-    conn = sqlite3.connect('Data/database.db')
-    conn.row_factory = sqlite3.Row
+    conn = _get_db_connection(row_factory=sqlite3.Row)
     cursor = conn.cursor()
     
     cursor.execute(
@@ -518,10 +562,10 @@ def get_analytics_recent():
     activities = []
     for row in cursor.fetchall():
         activities.append({
-            'username': row['username'],
+            'display_username': _censor_text(row['username']),
             'action': row['action'],
             'timestamp': row['timestamp'],
-            'sound': row['Filename'] if row['Filename'] else None
+            'display_sound': _censor_text(row['Filename']) if row['Filename'] else None
         })
     
     conn.close()

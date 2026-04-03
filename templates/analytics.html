@@ -861,7 +861,7 @@
                     <div class="leaderboard-item">
                         <div class="rank ${i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : ''}">${i + 1}</div>
                         <div class="item-info">
-                            <div class="item-name">${escapeHtml(user.username)}</div>
+                            <div class="item-name">${escapeHtml(user.display_username || '')}</div>
                             <div class="item-bar">
                                 <div class="item-bar-fill" style="width: ${(user.count / maxCount) * 100}%"></div>
                             </div>
@@ -890,19 +890,19 @@
                     <div class="leaderboard-item">
                         <div class="rank ${i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : ''}">${i + 1}</div>
                         <div class="item-info">
-                            <div class="item-name" title="${escapeHtml(sound.filename)}">${escapeHtml(sound.filename.replace('.mp3', ''))}</div>
+                            <div class="item-name" title="${escapeHtml(sound.display_filename || '')}">${escapeHtml((sound.display_filename || '').replace('.mp3', ''))}</div>
                             <div class="item-bar">
                                 <div class="item-bar-fill" style="width: ${(sound.count / maxCount) * 100}%"></div>
                             </div>
                         </div>
                         <div class="item-count">${sound.count}</div>
-                        <button class="play-btn" data-filename="${encodeURIComponent(sound.filename)}" title="Play">▶</button>
+                        <button class="play-btn" data-sound-id="${sound.sound_id}" title="Play">▶</button>
                     </div>
                 `).join('');
 
                 container.querySelectorAll('.play-btn').forEach(btn => {
                     btn.addEventListener('click', () => {
-                        playSound(decodeURIComponent(btn.dataset.filename || ''), btn);
+                        playSound(btn.dataset.soundId || '', btn);
                     });
                 });
             } catch (err) {
@@ -1093,8 +1093,8 @@
         }
 
         function formatActivityText(activity) {
-            const user = `<strong>${escapeHtml(activity.username)}</strong>`;
-            const sound = activity.sound ? `<strong>${escapeHtml(activity.sound.replace('.mp3', ''))}</strong>` : '';
+            const user = `<strong>${escapeHtml(activity.display_username || '')}</strong>`;
+            const sound = activity.display_sound ? `<strong>${escapeHtml(activity.display_sound.replace('.mp3', ''))}</strong>` : '';
 
             switch (activity.action) {
                 case 'play_random_sound': return `${user} played random ${sound}`;
@@ -1125,8 +1125,8 @@
             return date.toLocaleDateString();
         }
 
-        async function playSound(filename, button) {
-            if (!filename || !button) return;
+        async function playSound(soundId, button) {
+            if (!soundId || !button) return;
 
             button.disabled = true;
             const originalText = button.textContent;
@@ -1137,7 +1137,7 @@
                 const res = await fetch('/api/play_sound', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ sound_filename: filename })
+                    body: JSON.stringify({ sound_id: soundId })
                 });
 
                 button.style.background = res.ok ? 'var(--success)' : 'var(--error)';

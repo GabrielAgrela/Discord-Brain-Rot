@@ -191,6 +191,8 @@ Canonical completion command:
 ### Web Playback Queueing
 - `WebPage.py` now accepts omitted `guild_id` only when exactly one non-null guild ID can be inferred from stable persisted bot data (`guild_settings`, `sounds`, or `actions`). `playback_queue` is only a last-resort fallback if those tables are empty, so stale queue rows do not poison single-guild web playback. Multi-guild web callers must send `guild_id` explicitly or `/api/play_sound` returns `400`.
 - Do not embed raw sound filenames inside inline web `onclick` handlers. Many filenames contain apostrophes/quotes, so use `data-*` attributes plus JS event listeners for play buttons.
+- Web routes should read SQLite via `app.config["DATABASE_PATH"]`, not a hardcoded `Data/database.db` path, so Flask tests and alternate DB configs hit the same code paths.
+- When a web label can be censored or otherwise transformed for display, send `sound_id` back to `/api/play_sound` and resolve the real filename server-side instead of trusting the displayed string.
 
 ### Rocket League Store Data Source
 - `/rlstore` uses `https://rlshop.gg/__data.json` for the featured shop and `https://rlshop.gg/<shop_id>/__data.json` for other active shops.
