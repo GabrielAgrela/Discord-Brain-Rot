@@ -86,13 +86,15 @@ def test_queue_playback_request_infers_single_guild_from_saved_data(tmp_path):
         sound_filename="test.mp3",
         requested_guild_id=None,
         db_path=str(db_path),
+        request_username="Discord User",
+        request_user_id="123",
         env={},
     )
 
     conn = sqlite3.connect(db_path)
     try:
-        guild_id, filename = conn.execute(
-            "SELECT guild_id, sound_filename FROM playback_queue WHERE id = ?",
+        guild_id, filename, request_username, request_user_id = conn.execute(
+            "SELECT guild_id, sound_filename, request_username, request_user_id FROM playback_queue WHERE id = ?",
             (row_id,),
         ).fetchone()
     finally:
@@ -100,6 +102,8 @@ def test_queue_playback_request_infers_single_guild_from_saved_data(tmp_path):
 
     assert guild_id == 359077662742020107
     assert filename == "test.mp3"
+    assert request_username == "Discord User"
+    assert request_user_id == "123"
 
 
 def test_queue_playback_request_rejects_ambiguous_guild_resolution(tmp_path):
@@ -121,6 +125,8 @@ def test_queue_playback_request_rejects_ambiguous_guild_resolution(tmp_path):
             sound_filename="test.mp3",
             requested_guild_id=None,
             db_path=str(db_path),
+            request_username="Discord User",
+            request_user_id="123",
             env={},
         )
 
@@ -147,6 +153,8 @@ def test_queue_playback_request_ignores_stale_queue_guilds_when_stable_data_exis
         sound_filename="test.mp3",
         requested_guild_id=None,
         db_path=str(db_path),
+        request_username="Discord User",
+        request_user_id="123",
         env={},
     )
 
@@ -171,14 +179,16 @@ async def test_process_playback_queue_request_marks_played_and_starts_audio(tmp_
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             guild_id INTEGER NOT NULL,
             sound_filename TEXT NOT NULL,
+            request_username TEXT,
+            request_user_id TEXT,
             requested_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             played_at DATETIME
         )
         """
     )
     conn.execute(
-        "INSERT INTO playback_queue (id, guild_id, sound_filename) VALUES (?, ?, ?)",
-        (1, 42, "test.mp3"),
+        "INSERT INTO playback_queue (id, guild_id, sound_filename, request_username, request_user_id) VALUES (?, ?, ?, ?, ?)",
+        (1, 42, "test.mp3", "Discord User", "123"),
     )
     conn.commit()
 
@@ -203,7 +213,7 @@ async def test_process_playback_queue_request_marks_played_and_starts_audio(tmp_
     sound_file.write_bytes(b"fake mp3 data")
 
     result = await process_playback_queue_request(
-        (1, 42, "test.mp3"),
+        (1, 42, "test.mp3", "Discord User", "123"),
         bot=SimpleNamespace(get_guild=lambda guild_id: guild if guild_id == 42 else None),
         behavior=behavior,
         db=FakeDatabase(conn),
@@ -214,10 +224,10 @@ async def test_process_playback_queue_request_marks_played_and_starts_audio(tmp_
     )
 
     assert result is True
-    behavior.play_audio.assert_awaited_once_with(channel, "test.mp3", "webpage")
-    action_logger.insert_action.assert_called_once_with(
-        "admin",
-        "play_sound_periodically",
+    behavior.play_audio.assert_awaited_once_with(channel, "test.mp3", "Discord User")
+    action_logger.insert.assert_called_once_with(
+        "Discord User",
+        "play_request",
         123,
         guild_id=42,
     )
@@ -236,14 +246,16 @@ async def test_process_playback_queue_request_marks_played_when_sound_is_missing
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             guild_id INTEGER NOT NULL,
             sound_filename TEXT NOT NULL,
+            request_username TEXT,
+            request_user_id TEXT,
             requested_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             played_at DATETIME
         )
         """
     )
     conn.execute(
-        "INSERT INTO playback_queue (id, guild_id, sound_filename) VALUES (?, ?, ?)",
-        (1, 42, "missing.mp3"),
+        "INSERT INTO playback_queue (id, guild_id, sound_filename, request_username, request_user_id) VALUES (?, ?, ?, ?, ?)",
+        (1, 42, "missing.mp3", "Discord User", "123"),
     )
     conn.commit()
 
@@ -261,7 +273,7 @@ async def test_process_playback_queue_request_marks_played_when_sound_is_missing
     )
 
     result = await process_playback_queue_request(
-        (1, 42, "missing.mp3"),
+        (1, 42, "missing.mp3", "Discord User", "123"),
         bot=SimpleNamespace(get_guild=lambda guild_id: SimpleNamespace(id=guild_id)),
         behavior=behavior,
         db=FakeDatabase(conn),

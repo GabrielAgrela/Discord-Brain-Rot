@@ -5,6 +5,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Brain Rot Soundboard</title>
+    <link rel="icon"
+        href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ctext y='50' x='50%25' text-anchor='middle' font-size='48'%3E%F0%9F%A7%A0%3C/text%3E%3C/svg%3E">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -25,6 +27,8 @@
             --warning: #f59e0b;
             --error: #ef4444;
             --shadow-glow: 0 0 40px rgba(99, 102, 241, 0.15);
+            --table-header-height: 54px;
+            --table-row-height: 54px;
         }
 
         * {
@@ -114,6 +118,7 @@
         .nav-links {
             display: flex;
             gap: 0.5rem;
+            align-items: center;
         }
 
         .nav-link {
@@ -170,6 +175,62 @@
             display: flex;
             align-items: center;
             gap: 1rem;
+        }
+
+        .auth-pill,
+        .auth-button {
+            border-radius: 999px;
+            padding: 0.6rem 1rem;
+            font-size: 0.85rem;
+            font-weight: 600;
+            border: 1px solid var(--border-color);
+            text-decoration: none;
+        }
+
+        .auth-pill {
+            background: rgba(16, 185, 129, 0.14);
+            color: #6ee7b7;
+        }
+
+        .auth-user-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.4rem 0.7rem 0.4rem 0.4rem;
+            border-radius: 14px;
+            border: 1px solid var(--border-color);
+            background: var(--bg-card);
+            text-decoration: none;
+        }
+
+        .auth-avatar {
+            width: 40px;
+            height: 40px;
+            object-fit: cover;
+            display: block;
+            border-radius: 999px;
+        }
+
+        .auth-user-meta {
+            display: flex;
+            flex-direction: column;
+            line-height: 1.1;
+        }
+
+        .auth-user-name {
+            color: var(--text-primary);
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        .auth-user-logout {
+            color: var(--text-secondary);
+            font-size: 0.75rem;
+        }
+
+        .auth-button {
+            background: var(--accent-gradient);
+            color: white;
         }
 
         .logo {
@@ -332,10 +393,9 @@
         /* Table */
         .table-container {
             flex: 1;
-            overflow-y: auto;
+            overflow-y: hidden;
+            overflow-x: hidden;
             max-height: 500px;
-            scrollbar-width: thin;
-            scrollbar-color: var(--accent-primary) var(--bg-secondary);
         }
 
         @media (min-width: 1201px) {
@@ -345,23 +405,10 @@
             }
         }
 
-        .table-container::-webkit-scrollbar {
-            width: 6px;
-        }
-
-        .table-container::-webkit-scrollbar-track {
-            background: var(--bg-secondary);
-            border-radius: 3px;
-        }
-
-        .table-container::-webkit-scrollbar-thumb {
-            background: var(--accent-primary);
-            border-radius: 3px;
-        }
-
         table {
             width: 100%;
             border-collapse: collapse;
+            table-layout: fixed;
         }
 
         th {
@@ -376,12 +423,29 @@
             position: sticky;
             top: 0;
             background: var(--bg-card);
+            height: var(--table-header-height);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
 
         td {
             padding: 0.75rem;
             font-size: 0.875rem;
             border-bottom: 1px solid var(--border-color);
+            height: var(--table-row-height);
+            line-height: 1.2;
+            vertical-align: middle;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        th:last-child,
+        td:last-child {
+            width: 1%;
+            white-space: nowrap;
+            padding-right: 1rem;
         }
 
         tr {
@@ -398,7 +462,11 @@
 
         /* Play Button */
         .play-button {
-            padding: 0.4rem 0.8rem;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0.4rem 0.7rem;
+            min-width: 2.25rem;
             border: none;
             border-radius: 6px;
             background: var(--accent-gradient);
@@ -417,6 +485,73 @@
         .play-button:disabled {
             opacity: 0.6;
             cursor: not-allowed;
+        }
+
+        .login-modal {
+            position: fixed;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1.5rem;
+            background: rgba(5, 8, 20, 0.72);
+            backdrop-filter: blur(12px);
+            z-index: 2000;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s ease;
+        }
+
+        .login-modal.open {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .login-modal-card {
+            width: min(420px, 100%);
+            border-radius: 20px;
+            border: 1px solid var(--border-color);
+            background: linear-gradient(180deg, rgba(34, 38, 63, 0.98), rgba(21, 23, 39, 0.98));
+            box-shadow: var(--shadow-glow);
+            padding: 1.5rem;
+        }
+
+        .login-modal-title {
+            font-size: 1.2rem;
+            font-weight: 700;
+            margin-bottom: 0.65rem;
+        }
+
+        .login-modal-text {
+            color: var(--text-secondary);
+            line-height: 1.5;
+            margin-bottom: 1.25rem;
+        }
+
+        .login-modal-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 0.75rem;
+        }
+
+        .login-modal-close {
+            border: 1px solid var(--border-color);
+            background: transparent;
+            color: var(--text-secondary);
+            border-radius: 12px;
+            padding: 0.7rem 1rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .login-modal-login {
+            border: none;
+            background: var(--accent-gradient);
+            color: white;
+            border-radius: 12px;
+            padding: 0.7rem 1rem;
+            font-weight: 700;
+            text-decoration: none;
         }
 
         .play-button.queued {
@@ -498,10 +633,66 @@
 
         /* Filename truncation */
         .filename {
-            max-width: 200px;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+        }
+
+        #actionsTable td:nth-child(2),
+        #favoritesTable td:first-child,
+        #allSoundsTable td:first-child {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        #actionsTable th:first-child,
+        #actionsTable td:first-child {
+            width: 116px;
+        }
+
+        #actionsTable th:nth-child(2),
+        #actionsTable td:nth-child(2) {
+            width: calc(100% - 286px);
+        }
+
+        #actionsTable th:nth-child(3),
+        #actionsTable td:nth-child(3) {
+            width: 96px;
+        }
+
+        #actionsTable th:nth-child(4),
+        #actionsTable td:nth-child(4) {
+            width: 74px;
+        }
+
+        #favoritesTable th:first-child,
+        #favoritesTable td:first-child {
+            width: calc(100% - 72px);
+        }
+
+        #favoritesTable th:last-child,
+        #favoritesTable td:last-child {
+            width: 72px;
+            text-align: right;
+            overflow: visible;
+        }
+
+        #allSoundsTable th:first-child,
+        #allSoundsTable td:first-child {
+            width: calc(100% - 152px);
+        }
+
+        #allSoundsTable th:nth-child(2),
+        #allSoundsTable td:nth-child(2) {
+            width: 80px;
+        }
+
+        #allSoundsTable th:last-child,
+        #allSoundsTable td:last-child {
+            width: 72px;
+            text-align: right;
+            overflow: visible;
         }
 
         /* Responsive */
@@ -542,8 +733,17 @@
                 font-size: 0.75rem;
             }
 
+            th:last-child,
+            td:last-child {
+                padding-right: 0.75rem;
+            }
+
             .filename {
-                max-width: 120px;
+                max-width: none;
+            }
+
+            .play-button {
+                padding: 0.35rem 0.55rem;
             }
         }
     </style>
@@ -564,6 +764,19 @@
                 <a href="/analytics" class="nav-link">
                     <span>📊</span> Analytics
                 </a>
+                {% if discord_user %}
+                <a href="/logout?next=/" class="auth-user-link" title="Logout {{ discord_user.global_name }}">
+                    <img class="auth-avatar"
+                        src="https://cdn.discordapp.com/avatars/{{ discord_user.id }}/{{ discord_user.avatar }}.png?size=128"
+                        alt="{{ discord_user.global_name }}">
+                    <span class="auth-user-meta">
+                        <span class="auth-user-name">{{ discord_user.global_name }}</span>
+                        <span class="auth-user-logout">Logout</span>
+                    </span>
+                </a>
+                {% elif discord_oauth_configured %}
+                <a href="{{ discord_login_url }}" class="auth-button">Login with Discord</a>
+                {% endif %}
             </div>
         </div>
     </nav>
@@ -584,7 +797,6 @@
                 <div class="card-header">
                     <h2 class="card-title">⚡ Recent Actions</h2>
                 </div>
-                <input type="text" id="searchActions" class="search-input" placeholder="Search actions...">
                 <div id="filtersActions" class="filters-grid cols-2"></div>
                 <div class="table-container">
                     <table id="actionsTable">
@@ -669,11 +881,35 @@
         </div>
     </div>
 
+    <div id="loginModal" class="login-modal" aria-hidden="true">
+        <div class="login-modal-card" role="dialog" aria-modal="true" aria-labelledby="loginModalTitle">
+            <h2 id="loginModalTitle" class="login-modal-title">Login Required</h2>
+            <p class="login-modal-text">
+                Log in with Discord to play sounds from the website and attribute the play to your account.
+            </p>
+            <div class="login-modal-actions">
+                <button id="loginModalClose" type="button" class="login-modal-close">Not now</button>
+                <a href="{{ discord_login_url }}" class="login-modal-login">Login with Discord</a>
+            </div>
+        </div>
+    </div>
+
     <script>
-        const itemsPerPage = window.matchMedia("(max-width: 768px)").matches ? 10 : 15;
+        const discordUser = {{ discord_user| tojson }};
+        const discordLoginUrl = {{ discord_login_url| tojson }};
         let currentPageActions = 1;
         let currentPageFavorites = 1;
         let currentPageAllSounds = 1;
+        const endpointItemsPerPage = {
+            actions: 8,
+            favorites: 8,
+            all_sounds: 8
+        };
+        const endpointTableBodyIds = {
+            actions: 'actionsTableBody',
+            favorites: 'favoritesTableBody',
+            all_sounds: 'allSoundsTableBody'
+        };
 
         // Store the last fetched data for each endpoint
         const lastFetchedData = {
@@ -704,18 +940,105 @@
             }
         };
 
+        function parseServerTimestamp(timestamp) {
+            if (!timestamp) return new Date(NaN);
+            if (timestamp instanceof Date) return timestamp;
+            const normalized = String(timestamp).trim().replace(' ', 'T');
+            if (/([zZ]|[+-]\d{2}:\d{2})$/.test(normalized)) {
+                return new Date(normalized);
+            }
+            return new Date(`${normalized}Z`);
+        }
+
         // Helper function to format time ago
         function formatTimeAgo(timestamp) {
-            const date = new Date(timestamp);
+            const date = parseServerTimestamp(timestamp);
+            if (Number.isNaN(date.getTime())) {
+                return timestamp || '';
+            }
             const now = new Date();
             const diffMs = now - date;
             const diffMins = Math.floor(diffMs / 60000);
             const diffHours = Math.floor(diffMs / 3600000);
+            const diffDays = Math.floor(diffMs / 86400000);
 
-            if (diffMins < 1) return 'Just now';
-            if (diffMins < 60) return `${diffMins}m ago`;
-            if (diffHours < 24) return `${diffHours}h ago`;
+            if (diffMins < 1) return 'now';
+            if (diffMins < 60) return `${diffMins}m`;
+            if (diffHours < 24) return `${diffHours}h`;
+            if (diffDays < 30) return `${diffDays}d`;
             return date.toLocaleDateString();
+        }
+
+        function applyPlayButtonState(button) {
+            button.disabled = false;
+            button.classList.remove('login-required');
+            button.textContent = '▶';
+        }
+
+        function getBaseTableRowHeight() {
+            const rootStyles = getComputedStyle(document.documentElement);
+            const rowHeight = parseFloat(rootStyles.getPropertyValue('--table-row-height'));
+            return Number.isFinite(rowHeight) && rowHeight > 0 ? rowHeight : 54;
+        }
+
+        function getTableHeaderHeight() {
+            const rootStyles = getComputedStyle(document.documentElement);
+            const headerHeight = parseFloat(rootStyles.getPropertyValue('--table-header-height'));
+            return Number.isFinite(headerHeight) && headerHeight > 0 ? headerHeight : 54;
+        }
+
+        function calculateItemsPerPage(tableBodyId) {
+            const tableBody = document.getElementById(tableBodyId);
+            const container = tableBody ? tableBody.closest('.table-container') : null;
+            const table = container ? container.querySelector('table') : null;
+            const tableHead = table ? table.querySelector('thead') : null;
+
+            if (!container || !tableHead) {
+                return null;
+            }
+
+            const availableHeight = container.clientHeight - getTableHeaderHeight();
+            const rowHeight = getBaseTableRowHeight();
+            if (availableHeight <= 0 || rowHeight <= 0) {
+                return null;
+            }
+
+            return Math.max(1, Math.floor(availableHeight / rowHeight));
+        }
+
+        function applyTableGeometry(endpoint) {
+            const tableBody = document.getElementById(endpointTableBodyIds[endpoint]);
+            const container = tableBody ? tableBody.closest('.table-container') : null;
+            const table = container ? container.querySelector('table') : null;
+            if (!tableBody || !container || !table) {
+                return;
+            }
+
+            const rowCount = tableBody.children.length;
+            if (!rowCount) {
+                table.style.removeProperty('--table-row-height');
+                return;
+            }
+
+            const availableHeight = container.clientHeight - getTableHeaderHeight();
+            if (availableHeight <= 0) {
+                return;
+            }
+
+            const computedRowHeight = Math.floor(availableHeight / rowCount);
+            if (computedRowHeight > 0) {
+                table.style.setProperty('--table-row-height', `${computedRowHeight}px`);
+            }
+        }
+
+        function updateItemsPerPage(endpoint) {
+            const fittedItemsPerPage = calculateItemsPerPage(endpointTableBodyIds[endpoint]);
+            if (!fittedItemsPerPage || fittedItemsPerPage === endpointItemsPerPage[endpoint]) {
+                return false;
+            }
+
+            endpointItemsPerPage[endpoint] = fittedItemsPerPage;
+            return true;
         }
 
         // Get action badge class
@@ -832,10 +1155,10 @@
             const prevButton = document.getElementById(prevButtonId);
             const nextButton = document.getElementById(nextButtonId);
             const searchInput = document.getElementById(searchInputId);
-            const searchQuery = searchInput.value.trim();
+            const searchQuery = searchInput ? searchInput.value.trim() : '';
 
             const filterQuery = buildFilterQuery(endpoint);
-            const apiUrl = `/api/${endpoint}?page=${page}&per_page=${itemsPerPage}&search=${encodeURIComponent(searchQuery)}${filterQuery ? `&${filterQuery}` : ''}`;
+            const apiUrl = `/api/${endpoint}?page=${page}&per_page=${endpointItemsPerPage[endpoint]}&search=${encodeURIComponent(searchQuery)}${filterQuery ? `&${filterQuery}` : ''}`;
 
             return fetch(apiUrl)
                 .then(response => response.json())
@@ -897,9 +1220,9 @@
 
                                     const playCell = document.createElement('td');
                                     const playButton = document.createElement('button');
-                                    playButton.textContent = '▶ Play';
                                     playButton.className = 'play-button';
                                     playButton.setAttribute('data-sound-id', item.sound_id);
+                                    applyPlayButtonState(playButton);
                                     playCell.appendChild(playButton);
                                     row.appendChild(playCell);
 
@@ -917,9 +1240,9 @@
 
                                     const playCell = document.createElement('td');
                                     const playButton = document.createElement('button');
-                                    playButton.textContent = '▶ Play';
                                     playButton.className = 'play-button';
                                     playButton.setAttribute('data-sound-id', item.sound_id);
+                                    applyPlayButtonState(playButton);
                                     playCell.appendChild(playButton);
                                     row.appendChild(playCell);
                                 }
@@ -947,6 +1270,13 @@
                                     row.style.transitionDelay = '';
                                 });
                             }, data.items.length * 50 + 300);
+
+                            applyTableGeometry(endpoint);
+
+                            const pageSizeChanged = updateItemsPerPage(endpoint);
+                            if (pageSizeChanged) {
+                                fetchersByEndpoint[endpoint](null, true);
+                            }
                         }, 100);
                     }
 
@@ -1012,9 +1342,44 @@
             return fetchData('all_sounds', currentPageAllSounds, 'allSoundsTableBody', 'currentPageAllSounds', 'totalPagesAllSounds', 'prevPageAllSounds', 'nextPageAllSounds', 'searchAllSounds');
         }
 
+        const fetchersByEndpoint = {
+            actions: fetchActions,
+            favorites: fetchFavorites,
+            all_sounds: fetchAllSounds
+        };
+
         setupPagination('prevPageActions', 'nextPageActions', fetchActions);
         setupPagination('prevPageFavorites', 'nextPageFavorites', fetchFavorites);
         setupPagination('prevPageAllSounds', 'nextPageAllSounds', fetchAllSounds);
+
+        const loginModal = document.getElementById('loginModal');
+        const loginModalClose = document.getElementById('loginModalClose');
+
+        function openLoginModal() {
+            if (!loginModal) return;
+            loginModal.classList.add('open');
+            loginModal.setAttribute('aria-hidden', 'false');
+        }
+
+        function closeLoginModal() {
+            if (!loginModal) return;
+            loginModal.classList.remove('open');
+            loginModal.setAttribute('aria-hidden', 'true');
+        }
+
+        if (loginModal && loginModalClose) {
+            loginModalClose.addEventListener('click', closeLoginModal);
+            loginModal.addEventListener('click', (event) => {
+                if (event.target === loginModal) {
+                    closeLoginModal();
+                }
+            });
+            document.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape') {
+                    closeLoginModal();
+                }
+            });
+        }
 
         // Event listener for Play buttons
         document.querySelector('.tables-grid').addEventListener('click', async (event) => {
@@ -1022,6 +1387,10 @@
                 const button = event.target;
                 const soundId = button.getAttribute('data-sound-id');
                 if (!soundId) return;
+                if (!discordUser) {
+                    openLoginModal();
+                    return;
+                }
 
                 button.disabled = true;
                 button.textContent = '⏳';
@@ -1036,28 +1405,39 @@
                     });
 
                     if (response.ok) {
-                        button.textContent = '✓ Queued';
+                        button.textContent = '✓';
+                        button.title = 'Queued';
                         button.classList.add('queued');
                         setTimeout(() => {
-                            button.textContent = '▶ Play';
+                            button.textContent = '▶';
+                            button.title = '';
                             button.classList.remove('queued');
                             button.disabled = false;
                         }, 2000);
                     } else {
-                        button.textContent = '✗ Error';
+                        const payload = await response.json().catch(() => ({}));
+                        if (response.status === 401 && payload.login_url) {
+                            window.location.href = payload.login_url;
+                            return;
+                        }
+                        button.textContent = '✗';
+                        button.title = 'Error';
                         button.classList.add('error');
                         setTimeout(() => {
-                            button.textContent = '▶ Play';
+                            button.textContent = '▶';
+                            button.title = '';
                             button.classList.remove('error');
                             button.disabled = false;
                         }, 2000);
                     }
                 } catch (error) {
                     console.error(`Network error:`, error);
-                    button.textContent = '✗ Error';
+                    button.textContent = '✗';
+                    button.title = 'Error';
                     button.classList.add('error');
                     setTimeout(() => {
-                        button.textContent = '▶ Play';
+                        button.textContent = '▶';
+                        button.title = '';
                         button.classList.remove('error');
                         button.disabled = false;
                     }, 2000);
@@ -1068,6 +1448,9 @@
         // Backend Search with debounce
         function setupBackendSearch(inputId, fetchFunction) {
             const searchInput = document.getElementById(inputId);
+            if (!searchInput) {
+                return;
+            }
             let debounceTimer;
 
             searchInput.addEventListener('input', () => {
@@ -1095,6 +1478,18 @@
         fetchActions();
         fetchFavorites();
         fetchAllSounds();
+        window.addEventListener('resize', () => {
+            let shouldRefetch = false;
+            Object.keys(fetchersByEndpoint).forEach((endpoint) => {
+                shouldRefetch = updateItemsPerPage(endpoint) || shouldRefetch;
+                applyTableGeometry(endpoint);
+            });
+            if (shouldRefetch) {
+                fetchActions(null, true);
+                fetchFavorites(null, true);
+                fetchAllSounds(null, true);
+            }
+        });
     </script>
 </body>
 

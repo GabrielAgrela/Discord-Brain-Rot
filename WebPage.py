@@ -15,7 +15,10 @@ from bot.services.web_playback import queue_playback_request
 
 app = Flask(__name__)
 app.config.setdefault("DATABASE_PATH", "Data/database.db")
-app.config.setdefault("SECRET_KEY", os.getenv("WEB_SESSION_SECRET", "discord-brain-rot-web-dev"))
+app.config["SECRET_KEY"] = app.config.get("SECRET_KEY") or os.getenv(
+    "WEB_SESSION_SECRET",
+    "discord-brain-rot-web-dev",
+)
 app.config.setdefault("DISCORD_API_BASE_URL", "https://discord.com/api")
 text_censor_service = TextCensorService()
 
@@ -182,7 +185,6 @@ def login():
             "response_type": "code",
             "scope": "identify",
             "state": state,
-            "prompt": "none",
         }
     )
     return redirect(f"https://discord.com/oauth2/authorize?{query}")

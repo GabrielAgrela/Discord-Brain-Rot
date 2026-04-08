@@ -96,6 +96,14 @@ def test_play_sound_endpoint_queues_request_with_inferred_single_guild(web_clien
     finally:
         conn.close()
 
+    with client.session_transaction() as flask_session:
+        flask_session["discord_user"] = {
+            "id": "123",
+            "username": "discord-user",
+            "global_name": "Discord User",
+            "avatar": "",
+        }
+
     response = client.post("/api/play_sound", json={"sound_filename": "test.mp3"})
 
     assert response.status_code == 200
@@ -104,12 +112,12 @@ def test_play_sound_endpoint_queues_request_with_inferred_single_guild(web_clien
     conn = sqlite3.connect(db_path)
     try:
         row = conn.execute(
-            "SELECT guild_id, sound_filename FROM playback_queue"
+            "SELECT guild_id, sound_filename, request_username, request_user_id FROM playback_queue"
         ).fetchone()
     finally:
         conn.close()
 
-    assert row == (359077662742020107, "test.mp3")
+    assert row == (359077662742020107, "test.mp3", "Discord User", "123")
 
 
 def test_play_sound_endpoint_returns_400_for_ambiguous_guilds(web_client):
@@ -127,6 +135,14 @@ def test_play_sound_endpoint_returns_400_for_ambiguous_guilds(web_client):
         conn.commit()
     finally:
         conn.close()
+
+    with client.session_transaction() as flask_session:
+        flask_session["discord_user"] = {
+            "id": "123",
+            "username": "discord-user",
+            "global_name": "Discord User",
+            "avatar": "",
+        }
 
     response = client.post("/api/play_sound", json={"sound_filename": "test.mp3"})
 
@@ -156,6 +172,14 @@ def test_play_sound_endpoint_accepts_sound_id_payload(web_client):
     finally:
         conn.close()
 
+    with client.session_transaction() as flask_session:
+        flask_session["discord_user"] = {
+            "id": "123",
+            "username": "discord-user",
+            "global_name": "Discord User",
+            "avatar": "",
+        }
+
     response = client.post("/api/play_sound", json={"sound_id": 1})
 
     assert response.status_code == 200
@@ -164,12 +188,24 @@ def test_play_sound_endpoint_accepts_sound_id_payload(web_client):
     conn = sqlite3.connect(db_path)
     try:
         row = conn.execute(
-            "SELECT guild_id, sound_filename FROM playback_queue"
+            "SELECT guild_id, sound_filename, request_username, request_user_id FROM playback_queue"
         ).fetchone()
     finally:
         conn.close()
 
-    assert row == (359077662742020107, "jews did 911.mp3")
+    assert row == (359077662742020107, "jews did 911.mp3", "Discord User", "123")
+
+
+def test_play_sound_endpoint_requires_discord_login(web_client):
+    client, _ = web_client
+
+    response = client.post("/api/play_sound", json={"sound_filename": "test.mp3"})
+
+    assert response.status_code == 401
+    assert response.get_json() == {
+        "error": "Discord login required",
+        "login_url": "/login?next=/api/play_sound",
+    }
 
 
 def test_web_content_endpoints_censor_hateful_strings(web_client):

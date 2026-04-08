@@ -5,6 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Brain Rot Analytics</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ctext y='50' x='50%25' text-anchor='middle' font-size='48'%3E%F0%9F%A7%A0%3C/text%3E%3C/svg%3E">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -98,6 +99,7 @@
         .nav-links {
             display: flex;
             gap: 0.5rem;
+            align-items: center;
         }
 
         .nav-link {
@@ -143,6 +145,68 @@
             display: flex;
             align-items: center;
             gap: 1rem;
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .auth-pill,
+        .auth-button {
+            border-radius: 999px;
+            padding: 0.6rem 1rem;
+            font-size: 0.85rem;
+            font-weight: 600;
+            border: 1px solid var(--border-color);
+            text-decoration: none;
+        }
+
+        .auth-pill {
+            background: rgba(16, 185, 129, 0.14);
+            color: #6ee7b7;
+        }
+
+        .auth-user-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.4rem 0.7rem 0.4rem 0.4rem;
+            border-radius: 14px;
+            border: 1px solid var(--border-color);
+            background: var(--bg-card);
+            text-decoration: none;
+        }
+
+        .auth-avatar {
+            width: 40px;
+            height: 40px;
+            object-fit: cover;
+            display: block;
+            border-radius: 999px;
+        }
+
+        .auth-user-meta {
+            display: flex;
+            flex-direction: column;
+            line-height: 1.1;
+        }
+
+        .auth-user-name {
+            color: var(--text-primary);
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        .auth-user-logout {
+            color: var(--text-secondary);
+            font-size: 0.75rem;
+        }
+
+        .auth-button {
+            background: var(--accent-gradient);
+            color: white;
         }
 
         .logo {
@@ -387,6 +451,12 @@
         .play-btn:hover {
             transform: scale(1.1);
             box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
+        }
+
+        .play-btn.login-required {
+            background: rgba(245, 158, 11, 0.2);
+            color: #fbbf24;
+            border: 1px solid rgba(245, 158, 11, 0.35);
         }
 
         /* Heatmap - Fixed to fit container */
@@ -682,6 +752,21 @@
                 <a href="/analytics" class="nav-link active">
                     <span>📊</span> Analytics
                 </a>
+                {% if discord_user %}
+                <a href="/logout?next=/analytics" class="auth-user-link" title="Logout {{ discord_user.global_name }}">
+                    <img
+                        class="auth-avatar"
+                        src="https://cdn.discordapp.com/avatars/{{ discord_user.id }}/{{ discord_user.avatar }}.png?size=128"
+                        alt="{{ discord_user.global_name }}"
+                    >
+                    <span class="auth-user-meta">
+                        <span class="auth-user-name">{{ discord_user.global_name }}</span>
+                        <span class="auth-user-logout">Logout</span>
+                    </span>
+                </a>
+                {% elif discord_oauth_configured %}
+                <a href="{{ discord_login_url }}" class="auth-button">Login with Discord</a>
+                {% endif %}
             </div>
         </div>
     </nav>
@@ -692,6 +777,11 @@
             <div class="header-left">
                 <span class="logo-emoji">📊</span>
                 <h1 class="logo">Analytics Dashboard</h1>
+            </div>
+            <div class="header-right">
+                {% if not discord_user and discord_oauth_configured %}
+                <a href="{{ discord_login_url }}" class="auth-button">Login to Play Sounds</a>
+                {% endif %}
             </div>
         </header>
 
@@ -795,6 +885,8 @@
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script>
+        const discordUser = {{ discord_user|tojson }};
+        const discordLoginUrl = {{ discord_login_url|tojson }};
         // State
         let currentDays = 7;
         let timelineChart = null;
@@ -828,6 +920,19 @@
             loadHeatmap();
             loadTimeline();
             loadRecentActivity();
+        }
+
+        function applyPlayButtonState(button) {
+            if (discordUser) {
+                button.disabled = false;
+                button.classList.remove('login-required');
+                button.title = 'Play';
+                return;
+            }
+
+            button.disabled = false;
+            button.classList.add('login-required');
+            button.title = 'Login with Discord to play';
         }
 
         // API calls
@@ -896,11 +1001,12 @@
                             </div>
                         </div>
                         <div class="item-count">${sound.count}</div>
-                        <button class="play-btn" data-sound-id="${sound.sound_id}" title="Play">▶</button>
+                        <button class="play-btn ${discordUser ? '' : 'login-required'}" data-sound-id="${sound.sound_id}" title="${discordUser ? 'Play' : 'Login with Discord to play'}">${discordUser ? '▶' : '↗'}</button>
                     </div>
                 `).join('');
 
                 container.querySelectorAll('.play-btn').forEach(btn => {
+                    applyPlayButtonState(btn);
                     btn.addEventListener('click', () => {
                         playSound(btn.dataset.soundId || '', btn);
                     });
@@ -1112,21 +1218,40 @@
             }
         }
 
+        function parseServerTimestamp(timestamp) {
+            if (!timestamp) return new Date(NaN);
+            if (timestamp instanceof Date) return timestamp;
+            const normalized = String(timestamp).trim().replace(' ', 'T');
+            if (/([zZ]|[+-]\d{2}:\d{2})$/.test(normalized)) {
+                return new Date(normalized);
+            }
+            return new Date(`${normalized}Z`);
+        }
+
         function formatTime(timestamp) {
-            const date = new Date(timestamp);
+            const date = parseServerTimestamp(timestamp);
+            if (Number.isNaN(date.getTime())) {
+                return timestamp || '';
+            }
             const now = new Date();
             const diffMs = now - date;
             const diffMins = Math.floor(diffMs / 60000);
             const diffHours = Math.floor(diffMs / 3600000);
+            const diffDays = Math.floor(diffMs / 86400000);
 
             if (diffMins < 1) return 'Just now';
             if (diffMins < 60) return `${diffMins}m ago`;
             if (diffHours < 24) return `${diffHours}h ago`;
+            if (diffDays < 30) return `${diffDays}d ago`;
             return date.toLocaleDateString();
         }
 
         async function playSound(soundId, button) {
             if (!soundId || !button) return;
+            if (!discordUser) {
+                window.location.href = discordLoginUrl;
+                return;
+            }
 
             button.disabled = true;
             const originalText = button.textContent;
@@ -1139,6 +1264,14 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ sound_id: soundId })
                 });
+
+                if (!res.ok) {
+                    const payload = await res.json().catch(() => ({}));
+                    if (res.status === 401 && payload.login_url) {
+                        window.location.href = payload.login_url;
+                        return;
+                    }
+                }
 
                 button.style.background = res.ok ? 'var(--success)' : 'var(--error)';
             } catch (err) {

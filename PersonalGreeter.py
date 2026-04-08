@@ -30,7 +30,11 @@ from bot.commands.onthisday import OnThisDayCog
 from bot.commands.rlstore import RocketLeagueStoreCog
 from bot.commands.settings import SettingsCog
 from bot.repositories import VoiceActivityRepository
-from bot.services.web_playback import process_playback_queue_request
+from bot.repositories.action import ActionRepository
+from bot.services.web_playback import (
+    ensure_playback_queue_identity_columns,
+    process_playback_queue_request,
+)
 import random
 import time
 from collections import defaultdict
@@ -77,10 +81,11 @@ voice_activity_repo = VoiceActivityRepository()
 async def check_playback_queue():
     """Process queued playback requests from the web interface."""
     try:
+        ensure_playback_queue_identity_columns(db.db_path)
         cursor = db.cursor
         cursor.execute(
             """
-            SELECT id, guild_id, sound_filename
+            SELECT id, guild_id, sound_filename, request_username, request_user_id
             FROM playback_queue
             WHERE played_at IS NULL
             ORDER BY requested_at ASC
@@ -103,7 +108,7 @@ async def check_playback_queue():
                 behavior=behavior,
                 db=db,
                 sound_folder=sound_folder,
-                action_logger_factory=Database,
+                action_logger_factory=ActionRepository,
             )
     except sqlite3.Error as db_err:
         print(f"[Playback Queue] Database error: {db_err}")
