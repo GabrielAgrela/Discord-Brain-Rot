@@ -33,6 +33,11 @@
             box-sizing: border-box;
         }
 
+        html,
+        body {
+            height: 100%;
+        }
+
         body {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
             background: var(--bg-primary);
@@ -41,6 +46,16 @@
             background-image:
                 radial-gradient(ellipse at 20% 20%, rgba(99, 102, 241, 0.08) 0%, transparent 50%),
                 radial-gradient(ellipse at 80% 80%, rgba(139, 92, 246, 0.08) 0%, transparent 50%);
+        }
+
+        @media (min-width: 1201px) {
+            body {
+                min-height: 100dvh;
+                height: 100dvh;
+                overflow: hidden;
+                display: flex;
+                flex-direction: column;
+            }
         }
 
         /* Navigation */
@@ -52,6 +67,7 @@
             top: 0;
             z-index: 1000;
             backdrop-filter: blur(10px);
+            flex-shrink: 0;
         }
 
         .nav-container {
@@ -129,6 +145,17 @@
             padding: 2rem;
         }
 
+        @media (min-width: 1201px) {
+            .container {
+                width: 100%;
+                flex: 1;
+                min-height: 0;
+                display: flex;
+                flex-direction: column;
+                overflow: hidden;
+            }
+        }
+
         /* Header */
         .header {
             display: flex;
@@ -165,6 +192,13 @@
             gap: 1.5rem;
         }
 
+        @media (min-width: 1201px) {
+            .tables-grid {
+                flex: 1;
+                min-height: 0;
+            }
+        }
+
         @media (max-width: 1200px) {
             .tables-grid {
                 grid-template-columns: 1fr;
@@ -180,6 +214,12 @@
             padding: 1.5rem;
             display: flex;
             flex-direction: column;
+        }
+
+        @media (min-width: 1201px) {
+            .card {
+                min-height: 0;
+            }
         }
 
         .card-header {
@@ -220,6 +260,75 @@
             color: var(--text-muted);
         }
 
+        .filters-grid {
+            display: grid;
+            gap: 0.75rem;
+            margin-bottom: 1rem;
+        }
+
+        .filters-grid.cols-1 {
+            grid-template-columns: 1fr;
+        }
+
+        .filters-grid.cols-2 {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .filters-grid.cols-3 {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+
+        .filter-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.35rem;
+            min-width: 0;
+        }
+
+        .filter-label {
+            font-size: 0.72rem;
+            font-weight: 600;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            color: var(--text-muted);
+        }
+
+        .filter-select {
+            width: 100%;
+            max-width: 100%;
+            padding: 0.6rem 0.75rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            color: var(--text-primary);
+            font-size: 0.8rem;
+            min-height: 2.75rem;
+            appearance: none;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            overflow: hidden;
+            background-image:
+                linear-gradient(45deg, transparent 50%, var(--text-muted) 50%),
+                linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
+            background-position:
+                calc(100% - 18px) calc(50% - 3px),
+                calc(100% - 12px) calc(50% - 3px);
+            background-size: 6px 6px, 6px 6px;
+            background-repeat: no-repeat;
+            padding-right: 2.25rem;
+        }
+
+        .filter-select:focus {
+            outline: none;
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+        }
+
+        .filter-select option {
+            color: var(--text-primary);
+            background: var(--bg-secondary);
+        }
+
         /* Table */
         .table-container {
             flex: 1;
@@ -227,6 +336,13 @@
             max-height: 500px;
             scrollbar-width: thin;
             scrollbar-color: var(--accent-primary) var(--bg-secondary);
+        }
+
+        @media (min-width: 1201px) {
+            .table-container {
+                max-height: none;
+                min-height: 0;
+            }
         }
 
         .table-container::-webkit-scrollbar {
@@ -415,6 +531,11 @@
                 max-height: 350px;
             }
 
+            .filters-grid.cols-2,
+            .filters-grid.cols-3 {
+                grid-template-columns: 1fr;
+            }
+
             th,
             td {
                 padding: 0.5rem;
@@ -464,6 +585,7 @@
                     <h2 class="card-title">⚡ Recent Actions</h2>
                 </div>
                 <input type="text" id="searchActions" class="search-input" placeholder="Search actions...">
+                <div id="filtersActions" class="filters-grid cols-2"></div>
                 <div class="table-container">
                     <table id="actionsTable">
                         <thead>
@@ -560,6 +682,28 @@
             all_sounds: null
         };
 
+        const lastRenderedFilters = {
+            actions: null,
+            favorites: null,
+            all_sounds: null
+        };
+
+        const filterState = {
+            actions: {},
+            favorites: {},
+            all_sounds: {}
+        };
+
+        const filterConfigs = {
+            actions: {
+                containerId: 'filtersActions',
+                columns: [
+                    { key: 'action', label: 'Action', formatOption: formatAction },
+                    { key: 'user', label: 'User' }
+                ]
+            }
+        };
+
         // Helper function to format time ago
         function formatTimeAgo(timestamp) {
             const date = new Date(timestamp);
@@ -601,6 +745,88 @@
             return actionMap[action] || action;
         }
 
+        function formatFilenameOption(value) {
+            return (value || '').replace('.mp3', '');
+        }
+
+        function buildFilterQuery(endpoint) {
+            const params = new URLSearchParams();
+            const filters = filterState[endpoint] || {};
+
+            Object.entries(filters).forEach(([key, values]) => {
+                values.forEach(value => params.append(key, value));
+            });
+
+            return params.toString();
+        }
+
+        function renderFilterControls(endpoint, filters, fetchFunction) {
+            const config = filterConfigs[endpoint];
+            if (!config) return;
+
+            const container = document.getElementById(config.containerId);
+            if (!container) return;
+
+            const serializedFilters = JSON.stringify(filters || {});
+            if (lastRenderedFilters[endpoint] === serializedFilters) {
+                return;
+            }
+
+            const activeElement = document.activeElement;
+            if (activeElement && container.contains(activeElement)) {
+                return;
+            }
+
+            const currentSelections = filterState[endpoint] || {};
+            const fragment = document.createDocumentFragment();
+
+            config.columns.forEach(column => {
+                const wrapper = document.createElement('div');
+                wrapper.className = 'filter-group';
+
+                const label = document.createElement('label');
+                label.className = 'filter-label';
+                label.textContent = column.label;
+                label.setAttribute('for', `${endpoint}-${column.key}-filter`);
+                wrapper.appendChild(label);
+
+                const select = document.createElement('select');
+                select.id = `${endpoint}-${column.key}-filter`;
+                select.className = 'filter-select';
+                select.dataset.endpoint = endpoint;
+                select.dataset.filterKey = column.key;
+
+                const options = filters[column.key] || [];
+                const selectedValue = (currentSelections[column.key] || [])[0] || '';
+                const formatter = column.formatOption || (value => value);
+
+                const allOption = document.createElement('option');
+                allOption.value = '';
+                allOption.textContent = `All ${column.label}`;
+                allOption.selected = selectedValue === '';
+                select.appendChild(allOption);
+
+                options.forEach(value => {
+                    const option = document.createElement('option');
+                    option.value = value;
+                    option.textContent = formatter(value);
+                    option.selected = selectedValue === value;
+                    select.appendChild(option);
+                });
+
+                select.addEventListener('change', () => {
+                    filterState[endpoint][column.key] = select.value ? [select.value] : [];
+                    fetchFunction(null, true);
+                });
+
+                wrapper.appendChild(select);
+                fragment.appendChild(wrapper);
+            });
+
+            container.replaceChildren(fragment);
+            lastRenderedFilters[endpoint] = serializedFilters;
+        }
+
         function fetchData(endpoint, page, tableBodyId, currentPageId, totalPagesId, prevButtonId, nextButtonId, searchInputId) {
             const tableBody = document.getElementById(tableBodyId);
             const prevButton = document.getElementById(prevButtonId);
@@ -608,11 +834,16 @@
             const searchInput = document.getElementById(searchInputId);
             const searchQuery = searchInput.value.trim();
 
-            const apiUrl = `/api/${endpoint}?page=${page}&per_page=${itemsPerPage}&search=${encodeURIComponent(searchQuery)}`;
+            const filterQuery = buildFilterQuery(endpoint);
+            const apiUrl = `/api/${endpoint}?page=${page}&per_page=${itemsPerPage}&search=${encodeURIComponent(searchQuery)}${filterQuery ? `&${filterQuery}` : ''}`;
 
             return fetch(apiUrl)
                 .then(response => response.json())
                 .then(data => {
+                    if (endpoint === 'actions') {
+                        renderFilterControls(endpoint, data.filters || {}, fetchActions);
+                    }
+
                     const hasNewEntries = JSON.stringify(data.items) !== JSON.stringify(lastFetchedData[endpoint]);
 
                     if (hasNewEntries) {
@@ -853,6 +1084,10 @@
 
         // Auto-refresh every 2 seconds
         setInterval(() => {
+            const isInteractingWithFilters = document.activeElement && document.activeElement.classList.contains('filter-select');
+            if (isInteractingWithFilters) {
+                return;
+            }
             Promise.all([fetchActions(), fetchFavorites(), fetchAllSounds()]);
         }, 2000);
 

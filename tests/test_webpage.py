@@ -221,6 +221,92 @@ def test_web_content_endpoints_censor_hateful_strings(web_client):
     }
 
 
+def test_web_table_endpoints_return_filter_options_and_apply_column_filters(web_client):
+    client, db_path = web_client
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executemany(
+            """
+            INSERT INTO sounds (id, originalfilename, Filename, favorite, slap, is_elevenlabs, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (1, "alpha.mp3", "alpha.mp3", 1, 0, 0, "2026-04-01 12:00:00"),
+                (2, "beta.mp3", "beta.mp3", 1, 0, 0, "2026-04-02 12:00:00"),
+                (3, "gamma.mp3", "gamma.mp3", 0, 0, 0, "2026-04-03 12:00:00"),
+            ],
+        )
+        conn.executemany(
+            """
+            INSERT INTO actions (username, action, target, timestamp, guild_id)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            [
+                ("alice", "play_request", "1", "2026-04-04 12:00:00", "111"),
+                ("bob", "favorite_sound", "2", "2026-04-04 12:05:00", "111"),
+                ("alice", "play_from_list", "3", "2026-04-04 12:10:00", "111"),
+            ],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    actions_response = client.get(
+        "/api/actions?action=play_request&user=alice&sound=alpha.mp3"
+    )
+    favorites_response = client.get("/api/favorites?sound=beta.mp3")
+    all_sounds_response = client.get("/api/all_sounds?sound=gamma.mp3&date=2026-04-03")
+
+    assert actions_response.status_code == 200
+    assert actions_response.get_json() == {
+        "items": [
+            {
+                "display_filename": "alpha.mp3",
+                "display_username": "alice",
+                "action": "play_request",
+                "timestamp": "2026-04-04 12:00:00",
+            }
+        ],
+        "total_pages": 1,
+        "filters": {
+            "action": ["favorite_sound", "play_from_list", "play_request"],
+            "user": ["alice", "bob"],
+            "sound": ["alpha.mp3", "beta.mp3", "gamma.mp3"],
+        },
+    }
+
+    assert favorites_response.status_code == 200
+    assert favorites_response.get_json() == {
+        "items": [
+            {
+                "sound_id": 2,
+                "display_filename": "beta.mp3",
+            }
+        ],
+        "total_pages": 1,
+        "filters": {
+            "sound": ["alpha.mp3", "beta.mp3"],
+        },
+    }
+
+    assert all_sounds_response.status_code == 200
+    assert all_sounds_response.get_json() == {
+        "items": [
+            {
+                "sound_id": 3,
+                "display_filename": "gamma.mp3",
+                "timestamp": "2026-04-03 12:00:00",
+            }
+        ],
+        "total_pages": 1,
+        "filters": {
+            "sound": ["alpha.mp3", "beta.mp3", "gamma.mp3"],
+            "date": ["2026-04-03", "2026-04-02", "2026-04-01"],
+        },
+    }
+
+
 def test_analytics_endpoints_censor_hateful_strings(web_client):
     client, db_path = web_client
 

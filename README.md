@@ -103,6 +103,7 @@ This README is based on the current codebase behavior (not historical README ass
 
 ### Web Soundboard
 - `GET /` shows recent actions, favorites, and all sounds.
+- Each web table now includes prepopulated per-column filters so you can narrow by action/user/sound/date without losing server-side pagination.
 - The web soundboard and analytics dashboard now replace matched racist/hateful usernames and sound titles with `[censored]`.
 - Queue playback from web via `POST /api/play_sound` into `playback_queue`.
 - Web play buttons use `sound_id` under the hood so censored labels still queue the real sound correctly.
