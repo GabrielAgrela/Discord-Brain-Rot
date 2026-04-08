@@ -5,7 +5,9 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from bot.models.web import DiscordWebUser
 from bot.services.web_playback import (
+    WebPlaybackService,
     process_playback_queue_request,
     queue_playback_request,
 )
@@ -168,6 +170,54 @@ def test_queue_playback_request_ignores_stale_queue_guilds_when_stable_data_exis
         conn.close()
 
     assert guild_id == 359077662742020107
+
+
+def test_web_playback_service_resolves_sound_id_via_repository(tmp_path):
+    sound_repository = Mock()
+    sound_repository.get_by_id.return_value = SimpleNamespace(filename="alpha.mp3")
+
+    service = WebPlaybackService(
+        sound_repository=sound_repository,
+        db_path=str(tmp_path / "web.db"),
+        env={"DEFAULT_GUILD_ID": "359077662742020107"},
+    )
+
+    sound_filename = service.resolve_sound_filename({"sound_id": 7})
+
+    assert sound_filename == "alpha.mp3"
+    sound_repository.get_by_id.assert_called_once_with(7)
+
+
+def test_web_playback_service_queues_authenticated_user_request(tmp_path):
+    db_path = tmp_path / "web.db"
+    _create_web_tables(db_path)
+
+    service = WebPlaybackService(
+        sound_repository=Mock(),
+        db_path=str(db_path),
+        env={"DEFAULT_GUILD_ID": "359077662742020107"},
+    )
+
+    row_id = service.queue_request(
+        {"sound_filename": "test.mp3"},
+        DiscordWebUser(
+            id="123",
+            username="discord-user",
+            global_name="Discord User",
+            avatar="",
+        ),
+    )
+
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute(
+            "SELECT guild_id, sound_filename, request_username, request_user_id FROM playback_queue WHERE id = ?",
+            (row_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert row == (359077662742020107, "test.mp3", "Discord User", "123")
 
 
 @pytest.mark.asyncio

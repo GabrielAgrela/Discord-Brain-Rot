@@ -12,6 +12,89 @@ from pathlib import Path
 import sqlite3
 from typing import Any
 
+from bot.models.web import DiscordWebUser
+from bot.repositories.sound import SoundRepository
+
+
+class WebPlaybackService:
+    """
+    Service for web-triggered playback requests.
+    """
+
+    def __init__(
+        self,
+        sound_repository: SoundRepository,
+        db_path: str,
+        env: Mapping[str, str] | None = None,
+    ) -> None:
+        """
+        Initialize the service.
+
+        Args:
+            sound_repository: Repository used to resolve sound IDs.
+            db_path: Path to the SQLite database.
+            env: Optional environment mapping for tests.
+        """
+        self.sound_repository = sound_repository
+        self.db_path = db_path
+        self.env = env
+
+    def resolve_sound_filename(self, payload: Mapping[str, Any]) -> str:
+        """
+        Resolve a playback payload into a concrete filename.
+
+        Args:
+            payload: JSON request payload.
+
+        Returns:
+            Sound filename to queue.
+
+        Raises:
+            ValueError: If the payload is invalid or the sound ID is unknown.
+        """
+        sound_filename = str(payload.get("sound_filename", "")).strip()
+        if sound_filename:
+            return sound_filename
+
+        sound_id = payload.get("sound_id")
+        if sound_id in (None, ""):
+            raise ValueError("Missing sound_filename")
+
+        try:
+            sound_id_int = int(sound_id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Invalid sound_id") from exc
+
+        sound = self.sound_repository.get_by_id(sound_id_int)
+        if sound is None:
+            raise ValueError("Unknown sound_id")
+        return sound.filename
+
+    def queue_request(
+        self,
+        payload: Mapping[str, Any],
+        current_user: DiscordWebUser,
+    ) -> int:
+        """
+        Queue a web playback request for an authenticated Discord user.
+
+        Args:
+            payload: JSON request payload.
+            current_user: Authenticated Discord user.
+
+        Returns:
+            Inserted playback queue row ID.
+        """
+        sound_filename = self.resolve_sound_filename(payload)
+        return queue_playback_request(
+            sound_filename=sound_filename,
+            requested_guild_id=payload.get("guild_id"),
+            db_path=self.db_path,
+            request_username=current_user.global_name,
+            request_user_id=current_user.id,
+            env=self.env,
+        )
+
 
 def resolve_requested_guild_id(
     requested_guild_id: Any,
