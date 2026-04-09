@@ -57,6 +57,7 @@ def register_web_routes(app: Flask) -> None:
         if not auth_service.oauth_is_configured():
             return "Discord OAuth is not configured on this server.", 503
 
+        session.permanent = True
         next_path = auth_service.sanitize_next_path(
             request.args.get("next"),
             url_for("index"),
@@ -100,6 +101,7 @@ def register_web_routes(app: Flask) -> None:
         except DiscordOAuthError as exc:
             return str(exc), exc.status_code
 
+        session.permanent = True
         session["discord_user"] = user.to_session_payload()
         return redirect(
             auth_service.sanitize_next_path(

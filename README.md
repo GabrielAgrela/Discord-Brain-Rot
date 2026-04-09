@@ -249,6 +249,7 @@ This README is based on the current codebase behavior (not historical README ass
 - `FFMPEG_PATH` (local run default: `ffmpeg`; Docker sets `/usr/bin/ffmpeg`)
 - `CHROMEDRIVER_PATH` (Docker sets `/usr/bin/chromedriver`)
 - `WEB_SESSION_SECRET` (Flask session secret for Discord web login; set this in production)
+- `WEB_SESSION_LIFETIME_DAYS` (optional; how long the Discord web login cookie persists across browser/PC restarts, defaults to `30`)
 - `DISCORD_OAUTH_CLIENT_ID` (required to enable Discord login on the web UI)
 - `DISCORD_OAUTH_CLIENT_SECRET` (required to enable Discord login on the web UI)
 - `DISCORD_OAUTH_REDIRECT_URI` (recommended public callback URL for Discord OAuth; falls back to Flask external URL generation if unset)

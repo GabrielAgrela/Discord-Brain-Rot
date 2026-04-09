@@ -4,6 +4,7 @@ Flask app factory for the optional web UI.
 
 from __future__ import annotations
 
+from datetime import timedelta
 import os
 from pathlib import Path
 
@@ -32,9 +33,46 @@ def create_app() -> Flask:
         "discord-brain-rot-web-dev",
     )
     app.config.setdefault("DISCORD_API_BASE_URL", "https://discord.com/api")
+    app.config["SESSION_PERMANENT"] = app.config.get("SESSION_PERMANENT", True)
+    app.config["SESSION_COOKIE_HTTPONLY"] = app.config.get(
+        "SESSION_COOKIE_HTTPONLY",
+        True,
+    )
+    app.config["SESSION_COOKIE_SAMESITE"] = (
+        app.config.get("SESSION_COOKIE_SAMESITE") or "Lax"
+    )
+    app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(
+        days=_get_web_session_lifetime_days()
+    )
+
+    if os.getenv("FLASK_ENV", "").strip().lower() == "development":
+        app.config["SESSION_COOKIE_SECURE"] = app.config.get(
+            "SESSION_COOKIE_SECURE",
+            False,
+        )
+    else:
+        app.config["SESSION_COOKIE_SECURE"] = app.config.get(
+            "SESSION_COOKIE_SECURE",
+            True,
+        )
 
     app.extensions["web_auth_service"] = WebAuthService()
     app.extensions["web_text_censor_service"] = TextCensorService()
 
     register_web_routes(app)
     return app
+
+
+def _get_web_session_lifetime_days() -> int:
+    """
+    Return the configured persistent login lifetime in days.
+
+    Returns:
+        Positive number of days to keep Discord web sessions signed in.
+    """
+    raw_value = os.getenv("WEB_SESSION_LIFETIME_DAYS", "30").strip()
+    try:
+        lifetime_days = int(raw_value)
+    except ValueError:
+        lifetime_days = 30
+    return max(1, lifetime_days)

@@ -1,4 +1,5 @@
 import sqlite3
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -206,6 +207,81 @@ def test_play_sound_endpoint_requires_discord_login(web_client):
         "error": "Discord login required",
         "login_url": "/login?next=/api/play_sound",
     }
+
+
+def test_login_route_marks_session_permanent(web_client, monkeypatch):
+    client, _ = web_client
+
+    monkeypatch.setenv("DISCORD_OAUTH_CLIENT_ID", "client-id")
+    monkeypatch.setenv("DISCORD_OAUTH_CLIENT_SECRET", "client-secret")
+    app.config["SERVER_NAME"] = "brainrot.example"
+
+    response = client.get("/login?next=/analytics")
+
+    assert response.status_code == 302
+    with client.session_transaction() as flask_session:
+        assert flask_session.permanent is True
+        assert flask_session["oauth_next_path"] == "/analytics"
+        assert flask_session["discord_oauth_state"]
+
+    app.config["SERVER_NAME"] = None
+
+
+def test_discord_callback_persists_user_in_permanent_session(web_client, monkeypatch):
+    client, _ = web_client
+
+    monkeypatch.setenv("DISCORD_OAUTH_CLIENT_ID", "client-id")
+    monkeypatch.setenv("DISCORD_OAUTH_CLIENT_SECRET", "client-secret")
+
+    fake_user = {
+        "id": "123",
+        "username": "discord-user",
+        "global_name": "Discord User",
+        "avatar": "avatar-hash",
+    }
+
+    class _FakeResponse:
+        def __init__(self, payload):
+            self._payload = payload
+            self.ok = True
+
+        def json(self):
+            return self._payload
+
+    class _FakeRequestsSession:
+        @staticmethod
+        def post(*args, **kwargs):
+            return _FakeResponse({"access_token": "token"})
+
+        @staticmethod
+        def get(*args, **kwargs):
+            return _FakeResponse(fake_user)
+
+    original_auth_service = app.extensions["web_auth_service"]
+    app.extensions["web_auth_service"] = original_auth_service.__class__(
+        requests_session=_FakeRequestsSession()
+    )
+    try:
+        with client.session_transaction() as flask_session:
+            flask_session["discord_oauth_state"] = "expected-state"
+            flask_session["oauth_next_path"] = "/analytics"
+
+        response = client.get("/auth/discord/callback?state=expected-state&code=test-code")
+
+        assert response.status_code == 302
+        assert response.headers["Location"].endswith("/analytics")
+        with client.session_transaction() as flask_session:
+            assert flask_session.permanent is True
+            assert flask_session["discord_user"] == fake_user
+    finally:
+        app.extensions["web_auth_service"] = original_auth_service
+
+
+def test_web_app_configures_persistent_session_defaults():
+    assert app.config["SESSION_PERMANENT"] is True
+    assert app.config["SESSION_COOKIE_HTTPONLY"] is True
+    assert app.config["SESSION_COOKIE_SAMESITE"] == "Lax"
+    assert app.config["PERMANENT_SESSION_LIFETIME"] == timedelta(days=30)
 
 
 def test_web_content_endpoints_censor_hateful_strings(web_client):
