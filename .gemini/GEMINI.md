@@ -196,6 +196,12 @@ Canonical completion command:
 - Do not embed raw sound filenames inside inline web `onclick` handlers. Many filenames contain apostrophes/quotes, so use `data-*` attributes plus JS event listeners for play buttons.
 - Web routes should read SQLite via `app.config["DATABASE_PATH"]`, not a hardcoded `Data/database.db` path, so Flask tests and alternate DB configs hit the same code paths.
 - When a web label can be censored or otherwise transformed for display, send `sound_id` back to `/api/play_sound` and resolve the real filename server-side instead of trusting the displayed string.
+- The soundboard desktop layout should use the viewport as a maximum, not stretch tables to fill the viewport. Keep rows at their natural CSS height, keep `.table-container` as `flex: 0 1 auto` with a max-height, and keep `per_page` fixed to the chosen safe value. Stretching row heights or dynamically shrinking page size from JS caused bottom dead space, clipping, and `per_page` oscillation.
+- The soundboard rounded-bottom padding (`--table-bottom-inset`) is only visual breathing room. Clip detection should compare the last row against the actual `.table-container` bottom, not subtract that padding, or every natural-height table can look falsely clipped and collapse `per_page` down to 1.
+- The soundboard first paint must stay layout-stable before API responses arrive. Render the first page of actions/favorites/all-sounds and visible action filters server-side in `index.html`, seed the JS cache from `initial_soundboard_data`, and do not immediately refetch/repaint on load. Keep initial filter payloads trimmed to visible controls; embedding unused sound/date filter lists can make first paint heavier and can cause the refresh loop to repaint filters. Falling back to placeholder rows or `display=swap` web fonts creates a visible opening adjustment even when the settled layout is correct.
+- Keep the desktop soundboard page size at 7 rows unless the card layout is redesigned. 8 natural-height rows fit only mathematically and can still clip visually against the rounded table/card bottom on real 1920x1080 browser chrome.
+- Do not reintroduce click-time auto-shrink for soundboard `per_page`. The old `isLastTableRowClipped()` / `isCardOverflowingViewport()` reduction path made pagination keep getting smaller after Next/Prev clicks when browser chrome or responsive widths changed the measured geometry.
+- Soundboard pagination must support direct `touchend` handling and should make exactly one fetch per tap/click. The old cooldown handler disabled both buttons and scheduled a second refresh after 500ms, which made mobile taps feel ignored or flaky.
 
 ### Action Analytics Tracking
 - For action rows that represent a sound play, store the sound database `id` in `actions.target`, not the filename. The stats/top/on-this-day queries join `actions.target` back to `sounds.id`, so filename targets make those plays disappear from analytics.
@@ -300,6 +306,10 @@ The bot runs in Docker, so changes to Python files won't take effect until the c
 - The `web` service is now profile-gated (`profiles: ["web"]`) for public launch. In normal production flow, restart only the bot service:
 ```bash
 docker-compose restart bot
+```
+- `./scripts/verify_and_deploy.sh` uses `docker-compose restart`, which may only restart default-profile services. After web UI/template/static changes, explicitly restart `web` too when that profile-gated container is running:
+```bash
+docker-compose restart web
 ```
 - Compose profiles do not auto-stop already running containers. If `web` was previously started, explicitly stop it when launching bot-only mode:
 ```bash

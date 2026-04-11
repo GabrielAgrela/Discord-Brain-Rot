@@ -32,12 +32,19 @@ class WebContentService:
         self.repository = repository
         self.text_censor_service = text_censor_service
 
-    def get_actions(self, query: PaginatedQuery) -> dict[str, Any]:
+    def get_actions(
+        self,
+        query: PaginatedQuery,
+        include_filters: bool = True,
+        filter_keys: tuple[str, ...] | None = None,
+    ) -> dict[str, Any]:
         """
         Build the JSON payload for the web actions table.
 
         Args:
             query: Pagination, search, and filter parameters.
+            include_filters: Whether to include filter metadata in the response.
+            filter_keys: Optional subset of action filter groups to fetch.
 
         Returns:
             API response payload.
@@ -55,15 +62,24 @@ class WebContentService:
                 for row in rows
             ],
             "total_pages": self._calculate_total_pages(total_count, query.per_page),
-            "filters": self.repository.get_action_filters(),
+            "filters": (
+                self.repository.get_action_filters(filter_keys)
+                if include_filters
+                else {}
+            ),
         }
 
-    def get_favorites(self, query: PaginatedQuery) -> dict[str, Any]:
+    def get_favorites(
+        self,
+        query: PaginatedQuery,
+        include_filters: bool = True,
+    ) -> dict[str, Any]:
         """
         Build the JSON payload for the favorites table.
 
         Args:
             query: Pagination, search, and filter parameters.
+            include_filters: Whether to include filter metadata in the response.
 
         Returns:
             API response payload.
@@ -79,15 +95,20 @@ class WebContentService:
                 for row in rows
             ],
             "total_pages": self._calculate_total_pages(total_count, query.per_page),
-            "filters": self.repository.get_favorite_filters(),
+            "filters": self.repository.get_favorite_filters() if include_filters else {},
         }
 
-    def get_all_sounds(self, query: PaginatedQuery) -> dict[str, Any]:
+    def get_all_sounds(
+        self,
+        query: PaginatedQuery,
+        include_filters: bool = True,
+    ) -> dict[str, Any]:
         """
         Build the JSON payload for the all-sounds table.
 
         Args:
             query: Pagination, search, and filter parameters.
+            include_filters: Whether to include filter metadata in the response.
 
         Returns:
             API response payload.
@@ -104,7 +125,7 @@ class WebContentService:
                 for row in rows
             ],
             "total_pages": self._calculate_total_pages(total_count, query.per_page),
-            "filters": self.repository.get_all_sound_filters(),
+            "filters": self.repository.get_all_sound_filters() if include_filters else {},
         }
 
     def _censor_text(self, value: str | None) -> str | None:

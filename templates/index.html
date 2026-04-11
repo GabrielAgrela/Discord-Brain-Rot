@@ -4,800 +4,124 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Brain Rot Soundboard</title>
+    <title>Brain Rot Web Soundboard</title>
     <link rel="icon"
         href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ctext y='50' x='50%25' text-anchor='middle' font-size='48'%3E%F0%9F%A7%A0%3C/text%3E%3C/svg%3E">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <style>
-        :root {
-            --bg-primary: #0f0f1a;
-            --bg-secondary: #1a1a2e;
-            --bg-card: rgba(30, 30, 50, 0.8);
-            --bg-card-hover: rgba(40, 40, 70, 0.9);
-            --accent-primary: #6366f1;
-            --accent-secondary: #8b5cf6;
-            --accent-gradient: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #a855f7 100%);
-            --text-primary: #ffffff;
-            --text-secondary: #a0a0b0;
-            --text-muted: #6b7280;
-            --border-color: rgba(99, 102, 241, 0.2);
-            --success: #10b981;
-            --warning: #f59e0b;
-            --error: #ef4444;
-            --shadow-glow: 0 0 40px rgba(99, 102, 241, 0.15);
-            --table-header-height: 54px;
-            --table-row-height: 54px;
-        }
-
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        html,
-        body {
-            height: 100%;
-        }
-
-        body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-            background: var(--bg-primary);
-            color: var(--text-primary);
-            min-height: 100vh;
-            background-image:
-                radial-gradient(ellipse at 20% 20%, rgba(99, 102, 241, 0.08) 0%, transparent 50%),
-                radial-gradient(ellipse at 80% 80%, rgba(139, 92, 246, 0.08) 0%, transparent 50%);
-        }
-
-        @media (min-width: 1201px) {
-            body {
-                min-height: 100dvh;
-                height: 100dvh;
-                overflow: hidden;
-                display: flex;
-                flex-direction: column;
-            }
-        }
-
-        /* Navigation */
-        .nav {
-            background: var(--bg-secondary);
-            border-bottom: 1px solid var(--border-color);
-            padding: 0.75rem 2rem;
-            position: sticky;
-            top: 0;
-            z-index: 1000;
-            backdrop-filter: blur(10px);
-            flex-shrink: 0;
-        }
-
-        .nav-container {
-            max-width: 1400px;
-            margin: 0 auto;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .nav-brand {
-            display: flex;
-            align-items: center;
-            gap: 0.75rem;
-            text-decoration: none;
-        }
-
-        .nav-brand-emoji {
-            font-size: 1.75rem;
-            animation: pulse 2s infinite;
-        }
-
-        .nav-brand-text {
-            font-size: 1.25rem;
-            font-weight: 700;
-            background: var(--accent-gradient);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
-
-        @keyframes pulse {
-
-            0%,
-            100% {
-                transform: scale(1);
-            }
-
-            50% {
-                transform: scale(1.1);
-            }
-        }
-
-        .nav-links {
-            display: flex;
-            gap: 0.5rem;
-            align-items: center;
-        }
-
-        .nav-link {
-            color: var(--text-secondary);
-            text-decoration: none;
-            padding: 0.5rem 1rem;
-            border-radius: 8px;
-            font-size: 0.875rem;
-            font-weight: 500;
-            transition: all 0.3s ease;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-        }
-
-        .nav-link:hover {
-            background: var(--bg-card);
-            color: var(--text-primary);
-        }
-
-        .nav-link.active {
-            background: var(--accent-gradient);
-            color: white;
-        }
-
-        .container {
-            max-width: 1400px;
-            margin: 0 auto;
-            padding: 2rem;
-        }
-
-        @media (min-width: 1201px) {
-            .container {
-                width: 100%;
-                flex: 1;
-                min-height: 0;
-                display: flex;
-                flex-direction: column;
-                overflow: hidden;
-            }
-        }
-
-        /* Header */
-        .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 2rem;
-            flex-wrap: wrap;
-            gap: 1rem;
-        }
-
-        .header-left {
-            display: flex;
-            align-items: center;
-            gap: 1rem;
-        }
-
-        .auth-pill,
-        .auth-button {
-            border-radius: 999px;
-            padding: 0.6rem 1rem;
-            font-size: 0.85rem;
-            font-weight: 600;
-            border: 1px solid var(--border-color);
-            text-decoration: none;
-        }
-
-        .auth-pill {
-            background: rgba(16, 185, 129, 0.14);
-            color: #6ee7b7;
-        }
-
-        .auth-user-link {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.75rem;
-            padding: 0.4rem 0.7rem 0.4rem 0.4rem;
-            border-radius: 14px;
-            border: 1px solid var(--border-color);
-            background: var(--bg-card);
-            text-decoration: none;
-        }
-
-        .auth-avatar {
-            width: 40px;
-            height: 40px;
-            object-fit: cover;
-            display: block;
-            border-radius: 999px;
-        }
-
-        .auth-user-meta {
-            display: flex;
-            flex-direction: column;
-            line-height: 1.1;
-        }
-
-        .auth-user-name {
-            color: var(--text-primary);
-            font-size: 0.8rem;
-            font-weight: 600;
-        }
-
-        .auth-user-logout {
-            color: var(--text-secondary);
-            font-size: 0.75rem;
-        }
-
-        .auth-button {
-            background: var(--accent-gradient);
-            color: white;
-        }
-
-        .logo {
-            font-size: 2rem;
-            font-weight: 700;
-            background: var(--accent-gradient);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
-
-        .logo-emoji {
-            font-size: 2.5rem;
-        }
-
-        /* Tables Grid Layout */
-        .tables-grid {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 1.5rem;
-        }
-
-        @media (min-width: 1201px) {
-            .tables-grid {
-                flex: 1;
-                min-height: 0;
-            }
-        }
-
-        @media (max-width: 1200px) {
-            .tables-grid {
-                grid-template-columns: 1fr;
-            }
-        }
-
-        /* Card Component */
-        .card {
-            background: var(--bg-card);
-            backdrop-filter: blur(10px);
-            border: 1px solid var(--border-color);
-            border-radius: 16px;
-            padding: 1.5rem;
-            display: flex;
-            flex-direction: column;
-        }
-
-        @media (min-width: 1201px) {
-            .card {
-                min-height: 0;
-            }
-        }
-
-        .card-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 1rem;
-        }
-
-        .card-title {
-            font-size: 1.125rem;
-            font-weight: 600;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-        }
-
-        /* Search Input */
-        .search-input {
-            width: 100%;
-            padding: 0.75rem 1rem;
-            background: var(--bg-secondary);
-            border: 1px solid var(--border-color);
-            border-radius: 10px;
-            color: var(--text-primary);
-            font-size: 0.875rem;
-            margin-bottom: 1rem;
-            transition: all 0.3s ease;
-        }
-
-        .search-input:focus {
-            outline: none;
-            border-color: var(--accent-primary);
-            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
-        }
-
-        .search-input::placeholder {
-            color: var(--text-muted);
-        }
-
-        .filters-grid {
-            display: grid;
-            gap: 0.75rem;
-            margin-bottom: 1rem;
-        }
-
-        .filters-grid.cols-1 {
-            grid-template-columns: 1fr;
-        }
-
-        .filters-grid.cols-2 {
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-
-        .filters-grid.cols-3 {
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-        }
-
-        .filter-group {
-            display: flex;
-            flex-direction: column;
-            gap: 0.35rem;
-            min-width: 0;
-        }
-
-        .filter-label {
-            font-size: 0.72rem;
-            font-weight: 600;
-            letter-spacing: 0.04em;
-            text-transform: uppercase;
-            color: var(--text-muted);
-        }
-
-        .filter-select {
-            width: 100%;
-            max-width: 100%;
-            padding: 0.6rem 0.75rem;
-            background: var(--bg-secondary);
-            border: 1px solid var(--border-color);
-            border-radius: 10px;
-            color: var(--text-primary);
-            font-size: 0.8rem;
-            min-height: 2.75rem;
-            appearance: none;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-            overflow: hidden;
-            background-image:
-                linear-gradient(45deg, transparent 50%, var(--text-muted) 50%),
-                linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
-            background-position:
-                calc(100% - 18px) calc(50% - 3px),
-                calc(100% - 12px) calc(50% - 3px);
-            background-size: 6px 6px, 6px 6px;
-            background-repeat: no-repeat;
-            padding-right: 2.25rem;
-        }
-
-        .filter-select:focus {
-            outline: none;
-            border-color: var(--accent-primary);
-            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
-        }
-
-        .filter-select option {
-            color: var(--text-primary);
-            background: var(--bg-secondary);
-        }
-
-        /* Table */
-        .table-container {
-            flex: 1;
-            overflow-y: hidden;
-            overflow-x: hidden;
-            max-height: 500px;
-        }
-
-        @media (min-width: 1201px) {
-            .table-container {
-                max-height: none;
-                min-height: 0;
-            }
-        }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            table-layout: fixed;
-        }
-
-        th {
-            text-align: left;
-            padding: 0.75rem;
-            font-size: 0.75rem;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            color: var(--text-muted);
-            border-bottom: 1px solid var(--border-color);
-            position: sticky;
-            top: 0;
-            background: var(--bg-card);
-            height: var(--table-header-height);
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-
-        td {
-            padding: 0.75rem;
-            font-size: 0.875rem;
-            border-bottom: 1px solid var(--border-color);
-            height: var(--table-row-height);
-            line-height: 1.2;
-            vertical-align: middle;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-
-        th:last-child,
-        td:last-child {
-            width: 1%;
-            white-space: nowrap;
-            padding-right: 1rem;
-        }
-
-        tr {
-            transition: all 0.2s ease;
-        }
-
-        tr:hover {
-            background: var(--bg-secondary);
-        }
-
-        tr:last-child td {
-            border-bottom: none;
-        }
-
-        /* Play Button */
-        .play-button {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            padding: 0.4rem 0.7rem;
-            min-width: 2.25rem;
-            border: none;
-            border-radius: 6px;
-            background: var(--accent-gradient);
-            color: white;
-            font-size: 0.75rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-        }
-
-        .play-button:hover:not(:disabled) {
-            transform: scale(1.05);
-            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
-        }
-
-        .play-button:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
-        }
-
-        .login-modal {
-            position: fixed;
-            inset: 0;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 1.5rem;
-            background: rgba(5, 8, 20, 0.72);
-            backdrop-filter: blur(12px);
-            z-index: 2000;
-            opacity: 0;
-            pointer-events: none;
-            transition: opacity 0.2s ease;
-        }
-
-        .login-modal.open {
-            opacity: 1;
-            pointer-events: auto;
-        }
-
-        .login-modal-card {
-            width: min(420px, 100%);
-            border-radius: 20px;
-            border: 1px solid var(--border-color);
-            background: linear-gradient(180deg, rgba(34, 38, 63, 0.98), rgba(21, 23, 39, 0.98));
-            box-shadow: var(--shadow-glow);
-            padding: 1.5rem;
-        }
-
-        .login-modal-title {
-            font-size: 1.2rem;
-            font-weight: 700;
-            margin-bottom: 0.65rem;
-        }
-
-        .login-modal-text {
-            color: var(--text-secondary);
-            line-height: 1.5;
-            margin-bottom: 1.25rem;
-        }
-
-        .login-modal-actions {
-            display: flex;
-            justify-content: flex-end;
-            gap: 0.75rem;
-        }
-
-        .login-modal-close {
-            border: 1px solid var(--border-color);
-            background: transparent;
-            color: var(--text-secondary);
-            border-radius: 12px;
-            padding: 0.7rem 1rem;
-            font-weight: 600;
-            cursor: pointer;
-        }
-
-        .login-modal-login {
-            border: none;
-            background: var(--accent-gradient);
-            color: white;
-            border-radius: 12px;
-            padding: 0.7rem 1rem;
-            font-weight: 700;
-            text-decoration: none;
-        }
-
-        .play-button.queued {
-            background: var(--success);
-        }
-
-        .play-button.error {
-            background: var(--error);
-        }
-
-        /* Pagination */
-        .pagination {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 1rem;
-            margin-top: 1rem;
-            padding-top: 1rem;
-            border-top: 1px solid var(--border-color);
-        }
-
-        .pagination button {
-            padding: 0.5rem 1rem;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            background: var(--bg-secondary);
-            color: var(--text-secondary);
-            font-size: 0.75rem;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.3s ease;
-        }
-
-        .pagination button:hover:not(:disabled) {
-            background: var(--bg-card-hover);
-            color: var(--text-primary);
-            border-color: var(--accent-primary);
-        }
-
-        .pagination button:disabled {
-            opacity: 0.4;
-            cursor: not-allowed;
-        }
-
-        .pagination-info {
-            font-size: 0.75rem;
-            color: var(--text-muted);
-        }
-
-        /* Action Badge */
-        .action-badge {
-            display: inline-block;
-            padding: 0.25rem 0.5rem;
-            border-radius: 4px;
-            font-size: 0.7rem;
-            font-weight: 500;
-            background: var(--bg-secondary);
-        }
-
-        .action-badge.play {
-            background: rgba(16, 185, 129, 0.2);
-            color: #10b981;
-        }
-
-        .action-badge.favorite {
-            background: rgba(245, 158, 11, 0.2);
-            color: #f59e0b;
-        }
-
-        .action-badge.join {
-            background: rgba(99, 102, 241, 0.2);
-            color: #6366f1;
-        }
-
-        .action-badge.leave {
-            background: rgba(239, 68, 68, 0.2);
-            color: #ef4444;
-        }
-
-        /* Filename truncation */
-        .filename {
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-
-        #actionsTable td:nth-child(2),
-        #favoritesTable td:first-child,
-        #allSoundsTable td:first-child {
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-
-        #actionsTable th:first-child,
-        #actionsTable td:first-child {
-            width: 116px;
-        }
-
-        #actionsTable th:nth-child(2),
-        #actionsTable td:nth-child(2) {
-            width: calc(100% - 286px);
-        }
-
-        #actionsTable th:nth-child(3),
-        #actionsTable td:nth-child(3) {
-            width: 96px;
-        }
-
-        #actionsTable th:nth-child(4),
-        #actionsTable td:nth-child(4) {
-            width: 74px;
-        }
-
-        #favoritesTable th:first-child,
-        #favoritesTable td:first-child {
-            width: calc(100% - 72px);
-        }
-
-        #favoritesTable th:last-child,
-        #favoritesTable td:last-child {
-            width: 72px;
-            text-align: right;
-            overflow: visible;
-        }
-
-        #allSoundsTable th:first-child,
-        #allSoundsTable td:first-child {
-            width: calc(100% - 152px);
-        }
-
-        #allSoundsTable th:nth-child(2),
-        #allSoundsTable td:nth-child(2) {
-            width: 80px;
-        }
-
-        #allSoundsTable th:last-child,
-        #allSoundsTable td:last-child {
-            width: 72px;
-            text-align: right;
-            overflow: visible;
-        }
-
-        /* Responsive */
-        @media (max-width: 768px) {
-            .container {
-                padding: 1rem;
-            }
-
-            .nav {
-                padding: 0.75rem 1rem;
-            }
-
-            .nav-links {
-                gap: 0.25rem;
-            }
-
-            .nav-link {
-                padding: 0.4rem 0.6rem;
-                font-size: 0.8rem;
-            }
-
-            .nav-link span:first-child {
-                display: none;
-            }
-
-            .table-container {
-                max-height: 350px;
-            }
-
-            .filters-grid.cols-2,
-            .filters-grid.cols-3 {
-                grid-template-columns: 1fr;
-            }
-
-            th,
-            td {
-                padding: 0.5rem;
-                font-size: 0.75rem;
-            }
-
-            th:last-child,
-            td:last-child {
-                padding-right: 0.75rem;
-            }
-
-            .filename {
-                max-width: none;
-            }
-
-            .play-button {
-                padding: 0.35rem 0.55rem;
-            }
-        }
-    </style>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Space+Grotesk:wght@400;500;700&display=optional"
+        rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='web.css') }}">
 </head>
 
-<body>
-    <!-- Navigation -->
+<body class="page page-soundboard">
+    {% if discord_user %}
+    {% set display_name = discord_user.global_name or discord_user.username %}
+    {% set avatar_url = 'https://cdn.discordapp.com/avatars/' ~ discord_user.id ~ '/' ~ discord_user.avatar ~ '.png?size=128' if discord_user.avatar else 'https://cdn.discordapp.com/embed/avatars/0.png' %}
+    {% endif %}
+    {% set soundboard_data = initial_soundboard_data or {} %}
+    {% set actions_data = soundboard_data.get('actions', {'items': [], 'total_pages': 1, 'filters': {}}) %}
+    {% set favorites_data = soundboard_data.get('favorites', {'items': [], 'total_pages': 1, 'filters': {}}) %}
+    {% set all_sounds_data = soundboard_data.get('all_sounds', {'items': [], 'total_pages': 1, 'filters': {}}) %}
+    {% set action_labels = {
+        'play_random_sound': 'Random',
+        'play_request': 'Played',
+        'replay_sound': 'Replayed',
+        'play_from_list': 'List',
+        'play_similar_sound': 'Similar',
+        'play_sound_periodically': 'Auto',
+        'play_random_favorite_sound': 'Favorite',
+        'favorite_sound': 'Favorited',
+        'unfavorite_sound': 'Unfavorited',
+        'join': 'Joined',
+        'leave': 'Left'
+    } %}
+    {% macro action_badge_class(action_value) -%}
+        {%- if 'play' in action_value -%}play
+        {%- elif 'favorite' in action_value -%}favorite
+        {%- elif action_value == 'join' -%}join
+        {%- elif action_value == 'leave' -%}leave
+        {%- elif action_value.startswith('keyword') -%}keyword
+        {%- elif 'startup' in action_value or 'periodic' in action_value or 'scheduler' in action_value or 'auto' in action_value -%}system
+        {%- else -%}other
+        {%- endif -%}
+    {%- endmacro %}
+
     <nav class="nav">
         <div class="nav-container">
             <a href="/" class="nav-brand">
-                <span class="nav-brand-emoji">🧠</span>
-                <span class="nav-brand-text">Brain Rot</span>
+                <span class="nav-brand-mark">BR</span>
+                <span class="nav-brand-copy">
+                    <span class="nav-brand-label">Discord Brain Rot</span>
+                    <span class="nav-brand-subtitle">Web Sound Desk</span>
+                </span>
             </a>
             <div class="nav-links">
                 <a href="/" class="nav-link active">
-                    <span>🎵</span> Soundboard
+                    <span class="nav-link-index">01</span>
+                    <span>Soundboard</span>
                 </a>
                 <a href="/analytics" class="nav-link">
-                    <span>📊</span> Analytics
+                    <span class="nav-link-index">02</span>
+                    <span>Analytics</span>
                 </a>
                 {% if discord_user %}
-                <a href="/logout?next=/" class="auth-user-link" title="Logout {{ discord_user.global_name }}">
-                    <img class="auth-avatar"
-                        src="https://cdn.discordapp.com/avatars/{{ discord_user.id }}/{{ discord_user.avatar }}.png?size=128"
-                        alt="{{ discord_user.global_name }}">
+                <a href="/logout?next=/" class="auth-user-link" title="Logout {{ display_name }}">
+                    <img class="auth-avatar" src="{{ avatar_url }}" alt="{{ display_name }}">
                     <span class="auth-user-meta">
-                        <span class="auth-user-name">{{ discord_user.global_name }}</span>
+                        <span class="auth-user-name">{{ display_name }}</span>
                         <span class="auth-user-logout">Logout</span>
                     </span>
                 </a>
                 {% elif discord_oauth_configured %}
-                <a href="{{ discord_login_url }}" class="auth-button">Login with Discord</a>
+                <a href="{{ discord_login_url }}" class="auth-button">
+                    <span class="auth-button-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" role="presentation" focusable="false">
+                            <path fill="currentColor"
+                                d="M20.317 4.369A19.791 19.791 0 0 0 15.885 3a13.92 13.92 0 0 0-.602 1.245a18.27 18.27 0 0 0-5.566 0A13.92 13.92 0 0 0 9.115 3a19.736 19.736 0 0 0-4.433 1.369C1.88 8.58 1.12 12.686 1.5 16.734A19.92 19.92 0 0 0 6.818 19a14.99 14.99 0 0 0 1.143-1.873a12.93 12.93 0 0 1-1.798-.868c.151-.113.3-.231.441-.353c3.467 1.628 7.235 1.628 10.661 0c.143.122.29.24.441.353c-.576.336-1.178.627-1.798.868A14.7 14.7 0 0 0 17.051 19a19.856 19.856 0 0 0 5.449-2.266c.456-4.694-.778-8.762-2.183-12.365ZM8.261 14.228c-1.037 0-1.887-.949-1.887-2.114c0-1.165.831-2.114 1.887-2.114c1.055 0 1.905.949 1.887 2.114c0 1.165-.832 2.114-1.887 2.114Zm7.478 0c-1.037 0-1.887-.949-1.887-2.114c0-1.165.831-2.114 1.887-2.114s1.905.949 1.887 2.114c0 1.165-.831 2.114-1.887 2.114Z" />
+                        </svg>
+                    </span>
+                    <span class="auth-button-label">Login <span class="auth-button-label-extended">with Discord</span></span>
+                </a>
                 {% endif %}
             </div>
         </div>
     </nav>
 
-    <div class="container">
-        <!-- Header -->
-        <header class="header">
-            <div class="header-left">
-                <span class="logo-emoji">🎵</span>
-                <h1 class="logo">Soundboard</h1>
-            </div>
-        </header>
-
-        <!-- Tables Grid -->
+    <main class="page-shell">
         <div class="tables-grid">
-            <!-- Recent Actions -->
-            <div class="card">
+            <section class="card card--recent">
                 <div class="card-header">
-                    <h2 class="card-title">⚡ Recent Actions</h2>
+                    <div class="card-title-stack">
+                        <p class="card-kicker">Live Feed</p>
+                        <h2 class="card-title">Recent Actions</h2>
+                    </div>
                 </div>
-                <div id="filtersActions" class="filters-grid cols-2"></div>
+
+                <div id="filtersActions" class="filters-grid cols-2">
+                    <div class="filter-group">
+                        <label class="filter-label" for="actions-action-filter">Action</label>
+                        <select id="actions-action-filter" class="filter-select" data-endpoint="actions"
+                            data-filter-key="action">
+                            <option value="" selected>All Action</option>
+                            {% for value in actions_data.get('filters', {}).get('action', []) %}
+                            <option value="{{ value }}">{{ action_labels.get(value, value) }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label class="filter-label" for="actions-user-filter">User</label>
+                        <select id="actions-user-filter" class="filter-select" data-endpoint="actions"
+                            data-filter-key="user">
+                            <option value="" selected>All User</option>
+                            {% for value in actions_data.get('filters', {}).get('user', []) %}
+                            <option value="{{ value }}">{{ value }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+
                 <div class="table-container">
                     <table id="actionsTable">
                         <thead>
@@ -809,25 +133,47 @@
                             </tr>
                         </thead>
                         <tbody id="actionsTableBody">
-                            <!-- Data will be inserted here dynamically -->
+                            {% for item in actions_data.get('items', []) %}
+                            {% set action_value = item.get('action') or '' %}
+                            {% set filename_value = item.get('display_filename') or '-' %}
+                            {% set username_value = item.get('display_username') or '' %}
+                            <tr>
+                                <td>
+                                    <span
+                                        class="action-badge {{ action_badge_class(action_value) }}"
+                                        title="{{ action_value }}"
+                                    >
+                                        {{ action_labels.get(action_value, action_value) }}
+                                    </span>
+                                </td>
+                                <td class="filename" title="{{ filename_value }}">{{ filename_value|replace('.mp3', '') }}</td>
+                                <td>{{ username_value }}</td>
+                                <td title="{{ item.get('timestamp') or '' }}">{{ item.get('display_time_ago') or item.get('timestamp') or '' }}</td>
+                            </tr>
+                            {% endfor %}
                         </tbody>
                     </table>
                 </div>
-                <div class="pagination">
-                    <button id="prevPageActions">← Prev</button>
-                    <span class="pagination-info">
-                        <span id="currentPageActions">1</span> / <span id="totalPagesActions">1</span>
-                    </span>
-                    <button id="nextPageActions">Next →</button>
-                </div>
-            </div>
 
-            <!-- Favorite Sounds -->
-            <div class="card">
-                <div class="card-header">
-                    <h2 class="card-title">⭐ Favorites</h2>
+                <div class="pagination">
+                    <button id="prevPageActions" disabled>Prev</button>
+                    <span class="pagination-info">
+                        <span id="currentPageActions">1</span> / <span id="totalPagesActions">{{ actions_data.get('total_pages', 1) }}</span>
+                    </span>
+                    <button id="nextPageActions" {% if actions_data.get('total_pages', 1) <= 1 %}disabled{% endif %}>Next</button>
                 </div>
+            </section>
+
+            <section class="card card--favorites">
+                <div class="card-header">
+                    <div class="card-title-stack">
+                        <p class="card-kicker">Quick Picks</p>
+                        <h2 class="card-title">Favorites</h2>
+                    </div>
+                </div>
+
                 <input type="text" id="searchFavorites" class="search-input" placeholder="Search favorites...">
+
                 <div class="table-container">
                     <table id="favoritesTable">
                         <thead>
@@ -837,25 +183,43 @@
                             </tr>
                         </thead>
                         <tbody id="favoritesTableBody">
-                            <!-- Data will be inserted here dynamically -->
+                            {% for item in favorites_data.get('items', []) %}
+                            {% set filename_value = item.get('display_filename') or '' %}
+                            <tr>
+                                <td class="filename" title="{{ filename_value }}">{{ filename_value|replace('.mp3', '') }}</td>
+                                <td>
+                                    <button class="play-button{% if not discord_user %} login-required{% endif %}"
+                                        data-sound-id="{{ item.get('sound_id') }}"
+                                        title="{% if discord_user %}Queue sound{% else %}Login with Discord to queue{% endif %}"
+                                        aria-label="{% if discord_user %}Queue sound{% else %}Login with Discord to queue{% endif %}">
+                                        {% if discord_user %}▶{% else %}↗{% endif %}
+                                    </button>
+                                </td>
+                            </tr>
+                            {% endfor %}
                         </tbody>
                     </table>
                 </div>
-                <div class="pagination">
-                    <button id="prevPageFavorites">← Prev</button>
-                    <span class="pagination-info">
-                        <span id="currentPageFavorites">1</span> / <span id="totalPagesFavorites">1</span>
-                    </span>
-                    <button id="nextPageFavorites">Next →</button>
-                </div>
-            </div>
 
-            <!-- All Sounds -->
-            <div class="card">
-                <div class="card-header">
-                    <h2 class="card-title">🎵 All Sounds</h2>
+                <div class="pagination">
+                    <button id="prevPageFavorites" disabled>Prev</button>
+                    <span class="pagination-info">
+                        <span id="currentPageFavorites">1</span> / <span id="totalPagesFavorites">{{ favorites_data.get('total_pages', 1) }}</span>
+                    </span>
+                    <button id="nextPageFavorites" {% if favorites_data.get('total_pages', 1) <= 1 %}disabled{% endif %}>Next</button>
                 </div>
-                <input type="text" id="searchAllSounds" class="search-input" placeholder="Search sounds...">
+            </section>
+
+            <section class="card card--library">
+                <div class="card-header">
+                    <div class="card-title-stack">
+                        <p class="card-kicker">Deep Cut Archive</p>
+                        <h2 class="card-title">All Sounds</h2>
+                    </div>
+                </div>
+
+                <input type="text" id="searchAllSounds" class="search-input" placeholder="Search the full library...">
+
                 <div class="table-container">
                     <table id="allSoundsTable">
                         <thead>
@@ -866,62 +230,110 @@
                             </tr>
                         </thead>
                         <tbody id="allSoundsTableBody">
-                            <!-- Data will be inserted here dynamically -->
+                            {% for item in all_sounds_data.get('items', []) %}
+                            {% set filename_value = item.get('display_filename') or '' %}
+                            <tr>
+                                <td class="filename" title="{{ filename_value }}">{{ filename_value|replace('.mp3', '') }}</td>
+                                <td title="{{ item.get('timestamp') or '' }}">{{ item.get('display_time_ago') or item.get('timestamp') or '' }}</td>
+                                <td>
+                                    <button class="play-button{% if not discord_user %} login-required{% endif %}"
+                                        data-sound-id="{{ item.get('sound_id') }}"
+                                        title="{% if discord_user %}Queue sound{% else %}Login with Discord to queue{% endif %}"
+                                        aria-label="{% if discord_user %}Queue sound{% else %}Login with Discord to queue{% endif %}">
+                                        {% if discord_user %}▶{% else %}↗{% endif %}
+                                    </button>
+                                </td>
+                            </tr>
+                            {% endfor %}
                         </tbody>
                     </table>
                 </div>
+
                 <div class="pagination">
-                    <button id="prevPageAllSounds">← Prev</button>
+                    <button id="prevPageAllSounds" disabled>Prev</button>
                     <span class="pagination-info">
-                        <span id="currentPageAllSounds">1</span> / <span id="totalPagesAllSounds">1</span>
+                        <span id="currentPageAllSounds">1</span> / <span id="totalPagesAllSounds">{{ all_sounds_data.get('total_pages', 1) }}</span>
                     </span>
-                    <button id="nextPageAllSounds">Next →</button>
+                    <button id="nextPageAllSounds" {% if all_sounds_data.get('total_pages', 1) <= 1 %}disabled{% endif %}>Next</button>
                 </div>
-            </div>
+            </section>
         </div>
-    </div>
+    </main>
 
     <div id="loginModal" class="login-modal" aria-hidden="true">
         <div class="login-modal-card" role="dialog" aria-modal="true" aria-labelledby="loginModalTitle">
             <h2 id="loginModalTitle" class="login-modal-title">Login Required</h2>
             <p class="login-modal-text">
-                Log in with Discord to play sounds from the website and attribute the play to your account.
+                Log in with Discord to queue sounds from the website and attach the request to your account.
             </p>
             <div class="login-modal-actions">
-                <button id="loginModalClose" type="button" class="login-modal-close">Not now</button>
-                <a href="{{ discord_login_url }}" class="login-modal-login">Login with Discord</a>
+                <button id="loginModalClose" type="button" class="login-modal-close">Not Now</button>
+                <a href="{{ discord_login_url }}" class="login-modal-login auth-button">
+                    <span class="auth-button-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" role="presentation" focusable="false">
+                            <path fill="currentColor"
+                                d="M20.317 4.369A19.791 19.791 0 0 0 15.885 3a13.92 13.92 0 0 0-.602 1.245a18.27 18.27 0 0 0-5.566 0A13.92 13.92 0 0 0 9.115 3a19.736 19.736 0 0 0-4.433 1.369C1.88 8.58 1.12 12.686 1.5 16.734A19.92 19.92 0 0 0 6.818 19a14.99 14.99 0 0 0 1.143-1.873a12.93 12.93 0 0 1-1.798-.868c.151-.113.3-.231.441-.353c3.467 1.628 7.235 1.628 10.661 0c.143.122.29.24.441.353c-.576.336-1.178.627-1.798.868A14.7 14.7 0 0 0 17.051 19a19.856 19.856 0 0 0 5.449-2.266c.456-4.694-.778-8.762-2.183-12.365ZM8.261 14.228c-1.037 0-1.887-.949-1.887-2.114c0-1.165.831-2.114 1.887-2.114c1.055 0 1.905.949 1.887 2.114c0 1.165-.832 2.114-1.887 2.114Zm7.478 0c-1.037 0-1.887-.949-1.887-2.114c0-1.165.831-2.114 1.887-2.114s1.905.949 1.887 2.114c0 1.165-.831 2.114-1.887 2.114Z" />
+                        </svg>
+                    </span>
+                    <span class="auth-button-label">Login <span class="auth-button-label-extended">with Discord</span></span>
+                </a>
             </div>
         </div>
     </div>
 
     <script>
-        const discordUser = {{ discord_user| tojson }};
-        const discordLoginUrl = {{ discord_login_url| tojson }};
+        const discordUser = {{ discord_user|tojson }};
+        const discordLoginUrl = {{ discord_login_url|tojson }};
+        const initialSoundboardData = {{ initial_soundboard_data|tojson }};
         let currentPageActions = 1;
         let currentPageFavorites = 1;
         let currentPageAllSounds = 1;
+        const endpointMaxItemsPerPage = {
+            actions: 7,
+            favorites: 7,
+            all_sounds: 7
+        };
         const endpointItemsPerPage = {
-            actions: 8,
-            favorites: 8,
-            all_sounds: 8
+            ...endpointMaxItemsPerPage
         };
         const endpointTableBodyIds = {
             actions: 'actionsTableBody',
             favorites: 'favoritesTableBody',
             all_sounds: 'allSoundsTableBody'
         };
+        const endpointStableItemsPerPageCeilings = {
+            ...endpointMaxItemsPerPage
+        };
+        const filterColumnKeysByEndpoint = {
+            actions: ['action', 'user']
+        };
 
-        // Store the last fetched data for each endpoint
+        function getInitialFetchedItems(endpoint) {
+            return (initialSoundboardData?.[endpoint]?.items || []).map(item => {
+                const copy = { ...item };
+                delete copy.display_time_ago;
+                return copy;
+            });
+        }
+
+        function getRenderableFilterSnapshot(endpoint, filters) {
+            const keys = filterColumnKeysByEndpoint[endpoint] || [];
+            return keys.reduce((snapshot, key) => {
+                snapshot[key] = filters?.[key] || [];
+                return snapshot;
+            }, {});
+        }
+
         const lastFetchedData = {
-            actions: null,
-            favorites: null,
-            all_sounds: null
+            actions: getInitialFetchedItems('actions'),
+            favorites: getInitialFetchedItems('favorites'),
+            all_sounds: getInitialFetchedItems('all_sounds')
         };
 
         const lastRenderedFilters = {
-            actions: null,
-            favorites: null,
-            all_sounds: null
+            actions: JSON.stringify(getRenderableFilterSnapshot('actions', initialSoundboardData?.actions?.filters)),
+            favorites: JSON.stringify(getRenderableFilterSnapshot('favorites', initialSoundboardData?.favorites?.filters)),
+            all_sounds: JSON.stringify(getRenderableFilterSnapshot('all_sounds', initialSoundboardData?.all_sounds?.filters))
         };
 
         const filterState = {
@@ -950,7 +362,6 @@
             return new Date(`${normalized}Z`);
         }
 
-        // Helper function to format time ago
         function formatTimeAgo(timestamp) {
             const date = parseServerTimestamp(timestamp);
             if (Number.isNaN(date.getTime())) {
@@ -971,8 +382,10 @@
 
         function applyPlayButtonState(button) {
             button.disabled = false;
-            button.classList.remove('login-required');
-            button.textContent = '▶';
+            button.classList.toggle('login-required', !discordUser);
+            button.textContent = discordUser ? '▶' : '↗';
+            button.title = discordUser ? 'Queue sound' : 'Login with Discord to queue';
+            button.setAttribute('aria-label', button.title);
         }
 
         function getBaseTableRowHeight() {
@@ -987,23 +400,64 @@
             return Number.isFinite(headerHeight) && headerHeight > 0 ? headerHeight : 54;
         }
 
+        function getTableHeaderFootprint(tableHead) {
+            const measuredHeight = tableHead ? Math.ceil(tableHead.getBoundingClientRect().height) : 0;
+            return measuredHeight > 0 ? measuredHeight : getTableHeaderHeight() + 1;
+        }
+
+        function getTableRowBorderAllowance(rowCount) {
+            return Math.max(0, rowCount - 1);
+        }
+
+        function getTableBottomInset(container) {
+            const containerStyles = getComputedStyle(container);
+            const inset = parseFloat(containerStyles.getPropertyValue('--table-bottom-inset'));
+            return Number.isFinite(inset) && inset >= 0 ? inset : 0;
+        }
+
+        function getMeasuredTableRowFootprint(tableBody) {
+            const firstRow = tableBody?.querySelector('tr');
+            const measuredHeight = firstRow ? Math.ceil(firstRow.getBoundingClientRect().height) : 0;
+            const baseRowHeight = getBaseTableRowHeight();
+            if (measuredHeight > 0) {
+                return Math.min(measuredHeight, baseRowHeight) + 1;
+            }
+
+            return baseRowHeight + 1;
+        }
+
+        function getEndpointForTableBodyId(tableBodyId) {
+            return Object.entries(endpointTableBodyIds)
+                .find(([, bodyId]) => bodyId === tableBodyId)?.[0] || null;
+        }
+
+        function getTableFitSafetyBuffer() {
+            return 0;
+        }
+
+        function isLastTableRowClipped(container, tableBody) {
+            const lastRow = tableBody?.lastElementChild;
+            if (!container || !lastRow) {
+                return false;
+            }
+
+            const containerRect = container.getBoundingClientRect();
+            const lastRowRect = lastRow.getBoundingClientRect();
+            return lastRowRect.bottom > (containerRect.bottom - 2);
+        }
+
+        function isCardOverflowingViewport(container) {
+            const card = container ? container.closest('.card') : null;
+            if (!card) {
+                return false;
+            }
+
+            return card.getBoundingClientRect().bottom > (window.innerHeight - 12);
+        }
+
         function calculateItemsPerPage(tableBodyId) {
-            const tableBody = document.getElementById(tableBodyId);
-            const container = tableBody ? tableBody.closest('.table-container') : null;
-            const table = container ? container.querySelector('table') : null;
-            const tableHead = table ? table.querySelector('thead') : null;
-
-            if (!container || !tableHead) {
-                return null;
-            }
-
-            const availableHeight = container.clientHeight - getTableHeaderHeight();
-            const rowHeight = getBaseTableRowHeight();
-            if (availableHeight <= 0 || rowHeight <= 0) {
-                return null;
-            }
-
-            return Math.max(1, Math.floor(availableHeight / rowHeight));
+            const endpoint = getEndpointForTableBodyId(tableBodyId);
+            return endpoint ? endpointStableItemsPerPageCeilings[endpoint] : null;
         }
 
         function applyTableGeometry(endpoint) {
@@ -1014,21 +468,86 @@
                 return;
             }
 
-            const rowCount = tableBody.children.length;
-            if (!rowCount) {
-                table.style.removeProperty('--table-row-height');
+            const visibleRows = Math.max(1, endpointItemsPerPage[endpoint] || endpointMaxItemsPerPage[endpoint]);
+            const targetHeight = Math.ceil(
+                getTableHeaderHeight()
+                + (getBaseTableRowHeight() * visibleRows)
+                + getTableBottomInset(container)
+                + 2
+            );
+            container.style.setProperty('--soundboard-table-height', `${targetHeight}px`);
+            table.style.removeProperty('--table-row-height');
+        }
+
+        function getEndpointColumnCount(endpoint) {
+            return {
+                actions: 4,
+                favorites: 2,
+                all_sounds: 3
+            }[endpoint] || 1;
+        }
+
+        function renderInitialTablePlaceholders(endpoint) {
+            const tableBody = document.getElementById(endpointTableBodyIds[endpoint]);
+            if (!tableBody || tableBody.children.length) {
                 return;
             }
 
-            const availableHeight = container.clientHeight - getTableHeaderHeight();
-            if (availableHeight <= 0) {
+            const fragment = document.createDocumentFragment();
+            const columnCount = getEndpointColumnCount(endpoint);
+            const rowCount = endpointItemsPerPage[endpoint] || endpointMaxItemsPerPage[endpoint];
+
+            for (let rowIndex = 0; rowIndex < rowCount; rowIndex++) {
+                const row = document.createElement('tr');
+                row.className = 'placeholder-row';
+                for (let columnIndex = 0; columnIndex < columnCount; columnIndex++) {
+                    row.appendChild(document.createElement('td'));
+                }
+                fragment.appendChild(row);
+            }
+
+            tableBody.replaceChildren(fragment);
+            applyTableGeometry(endpoint);
+        }
+
+        function renderInitialTablePlaceholdersForAllEndpoints() {
+            Object.keys(endpointTableBodyIds).forEach(renderInitialTablePlaceholders);
+        }
+
+        const pendingInitialRenderEndpoints = new Set();
+        const queuedInitialRenders = {};
+
+        function flushInitialRendersIfReady() {
+            if (pendingInitialRenderEndpoints.size > 0) {
                 return;
             }
 
-            const computedRowHeight = Math.floor(availableHeight / rowCount);
-            if (computedRowHeight > 0) {
-                table.style.setProperty('--table-row-height', `${computedRowHeight}px`);
+            Object.keys(endpointTableBodyIds).forEach(endpoint => {
+                if (queuedInitialRenders[endpoint]) {
+                    queuedInitialRenders[endpoint]();
+                    delete queuedInitialRenders[endpoint];
+                }
+            });
+        }
+
+        function queueOrRunEndpointRender(endpoint, renderCallback) {
+            if (!pendingInitialRenderEndpoints.has(endpoint)) {
+                renderCallback();
+                return;
             }
+
+            queuedInitialRenders[endpoint] = renderCallback;
+            pendingInitialRenderEndpoints.delete(endpoint);
+            flushInitialRendersIfReady();
+        }
+
+        function markInitialEndpointDone(endpoint) {
+            if (!pendingInitialRenderEndpoints.has(endpoint)) {
+                return;
+            }
+
+            pendingInitialRenderEndpoints.delete(endpoint);
+            flushInitialRendersIfReady();
         }
 
         function updateItemsPerPage(endpoint) {
@@ -1041,16 +560,16 @@
             return true;
         }
 
-        // Get action badge class
         function getActionClass(action) {
             if (action.includes('play')) return 'play';
             if (action.includes('favorite')) return 'favorite';
             if (action === 'join') return 'join';
             if (action === 'leave') return 'leave';
-            return '';
+            if (action.startsWith('keyword')) return 'keyword';
+            if (action.includes('startup') || action.includes('periodic') || action.includes('scheduler') || action.includes('auto')) return 'system';
+            return 'other';
         }
 
-        // Format action name
         function formatAction(action) {
             const actionMap = {
                 'play_random_sound': 'Random',
@@ -1066,10 +585,6 @@
                 'leave': 'Left'
             };
             return actionMap[action] || action;
-        }
-
-        function formatFilenameOption(value) {
-            return (value || '').replace('.mp3', '');
         }
 
         function buildFilterQuery(endpoint) {
@@ -1090,7 +605,7 @@
             const container = document.getElementById(config.containerId);
             if (!container) return;
 
-            const serializedFilters = JSON.stringify(filters || {});
+            const serializedFilters = JSON.stringify(getRenderableFilterSnapshot(endpoint, filters));
             if (lastRenderedFilters[endpoint] === serializedFilters) {
                 return;
             }
@@ -1137,11 +652,6 @@
                     select.appendChild(option);
                 });
 
-                select.addEventListener('change', () => {
-                    filterState[endpoint][column.key] = select.value ? [select.value] : [];
-                    fetchFunction(null, true);
-                });
-
                 wrapper.appendChild(select);
                 fragment.appendChild(wrapper);
             });
@@ -1152,18 +662,20 @@
 
         function fetchData(endpoint, page, tableBodyId, currentPageId, totalPagesId, prevButtonId, nextButtonId, searchInputId) {
             const tableBody = document.getElementById(tableBodyId);
+            const container = tableBody ? tableBody.closest('.table-container') : null;
             const prevButton = document.getElementById(prevButtonId);
             const nextButton = document.getElementById(nextButtonId);
             const searchInput = document.getElementById(searchInputId);
             const searchQuery = searchInput ? searchInput.value.trim() : '';
 
             const filterQuery = buildFilterQuery(endpoint);
-            const apiUrl = `/api/${endpoint}?page=${page}&per_page=${endpointItemsPerPage[endpoint]}&search=${encodeURIComponent(searchQuery)}${filterQuery ? `&${filterQuery}` : ''}`;
+            const includeFiltersQuery = endpoint === 'actions' ? '&include_filters=0' : '';
+            const apiUrl = `/api/${endpoint}?page=${page}&per_page=${endpointItemsPerPage[endpoint]}&search=${encodeURIComponent(searchQuery)}${includeFiltersQuery}${filterQuery ? `&${filterQuery}` : ''}`;
 
             return fetch(apiUrl)
                 .then(response => response.json())
                 .then(data => {
-                    if (endpoint === 'actions') {
+                    if (endpoint === 'actions' && !pendingInitialRenderEndpoints.has(endpoint)) {
                         renderFilterControls(endpoint, data.filters || {}, fetchActions);
                     }
 
@@ -1172,47 +684,40 @@
                     if (hasNewEntries) {
                         lastFetchedData[endpoint] = data.items;
 
-                        tableBody.style.opacity = '0';
-                        tableBody.style.transition = 'opacity 0.2s';
+                        const renderFetchedData = () => {
+                            if (endpoint === 'actions') {
+                                renderFilterControls(endpoint, data.filters || {}, fetchActions);
+                            }
 
-                        setTimeout(() => {
                             tableBody.innerHTML = '';
 
                             data.items.forEach((item, index) => {
-                                let row = document.createElement('tr');
-                                row.style.opacity = '0';
-                                row.style.transition = 'opacity 0.3s';
-                                row.style.transitionDelay = `${index * 20}ms`;
+                                const row = document.createElement('tr');
 
                                 if (endpoint === 'actions') {
-                                    // Action badge
-                                    let actionCell = document.createElement('td');
+                                    const actionCell = document.createElement('td');
                                     const badge = document.createElement('span');
                                     badge.className = `action-badge ${getActionClass(item.action)}`;
                                     badge.textContent = formatAction(item.action);
                                     actionCell.appendChild(badge);
                                     row.appendChild(actionCell);
 
-                                    // Filename
-                                    let filenameCell = document.createElement('td');
+                                    const filenameCell = document.createElement('td');
                                     filenameCell.className = 'filename';
                                     filenameCell.textContent = (item.display_filename || '-').replace('.mp3', '');
                                     filenameCell.title = item.display_filename || '';
                                     row.appendChild(filenameCell);
 
-                                    // Username
-                                    let usernameCell = document.createElement('td');
+                                    const usernameCell = document.createElement('td');
                                     usernameCell.textContent = item.display_username || '';
                                     row.appendChild(usernameCell);
 
-                                    // Time
-                                    let timestampCell = document.createElement('td');
+                                    const timestampCell = document.createElement('td');
                                     timestampCell.textContent = formatTimeAgo(item.timestamp);
                                     timestampCell.title = item.timestamp;
                                     row.appendChild(timestampCell);
-
                                 } else if (endpoint === 'favorites') {
-                                    let filenameCell = document.createElement('td');
+                                    const filenameCell = document.createElement('td');
                                     filenameCell.className = 'filename';
                                     filenameCell.textContent = (item.display_filename || '').replace('.mp3', '');
                                     filenameCell.title = item.display_filename || '';
@@ -1225,15 +730,14 @@
                                     applyPlayButtonState(playButton);
                                     playCell.appendChild(playButton);
                                     row.appendChild(playCell);
-
                                 } else if (endpoint === 'all_sounds') {
-                                    let filenameCell = document.createElement('td');
+                                    const filenameCell = document.createElement('td');
                                     filenameCell.className = 'filename';
                                     filenameCell.textContent = (item.display_filename || '').replace('.mp3', '');
                                     filenameCell.title = item.display_filename || '';
                                     row.appendChild(filenameCell);
 
-                                    let dateCell = document.createElement('td');
+                                    const dateCell = document.createElement('td');
                                     dateCell.textContent = formatTimeAgo(item.timestamp);
                                     dateCell.title = item.timestamp;
                                     row.appendChild(dateCell);
@@ -1256,34 +760,22 @@
                             prevButton.disabled = (page <= 1);
                             nextButton.disabled = (page >= data.total_pages);
 
-                            void tableBody.offsetWidth;
-
-                            tableBody.style.opacity = '1';
-                            Array.from(tableBody.children).forEach(row => {
-                                row.style.opacity = '1';
-                            });
-
-                            setTimeout(() => {
-                                tableBody.style.transition = '';
-                                Array.from(tableBody.children).forEach(row => {
-                                    row.style.transition = '';
-                                    row.style.transitionDelay = '';
-                                });
-                            }, data.items.length * 50 + 300);
-
                             applyTableGeometry(endpoint);
 
                             const pageSizeChanged = updateItemsPerPage(endpoint);
                             if (pageSizeChanged) {
                                 fetchersByEndpoint[endpoint](null, true);
                             }
-                        }, 100);
+                        };
+
+                        queueOrRunEndpointRender(endpoint, renderFetchedData);
                     }
 
                     return hasNewEntries;
                 })
                 .catch(error => {
                     console.error('Error:', error);
+                    markInitialEndpointDone(endpoint);
                     return false;
                 });
         }
@@ -1291,25 +783,37 @@
         function setupPagination(prevButtonId, nextButtonId, fetchFunction) {
             const prevButton = document.getElementById(prevButtonId);
             const nextButton = document.getElementById(nextButtonId);
-            let isButtonCooldown = false;
+            let requestInFlight = false;
+            let lastTouchHandledAt = 0;
 
-            function handleButtonClick(increment) {
-                if (!isButtonCooldown && !this.disabled) {
-                    isButtonCooldown = true;
-                    fetchFunction(increment);
+            async function handleButtonClick(button, increment, event) {
+                if (event) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                }
 
-                    prevButton.disabled = true;
-                    nextButton.disabled = true;
+                if (requestInFlight || button.disabled) {
+                    return;
+                }
 
-                    setTimeout(() => {
-                        isButtonCooldown = false;
-                        fetchFunction();
-                    }, 500);
+                if (event?.type === 'touchend') {
+                    lastTouchHandledAt = Date.now();
+                } else if (event?.type === 'click' && Date.now() - lastTouchHandledAt < 700) {
+                    return;
+                }
+
+                requestInFlight = true;
+                try {
+                    await fetchFunction(increment);
+                } finally {
+                    requestInFlight = false;
                 }
             }
 
-            prevButton.addEventListener('click', () => handleButtonClick.call(prevButton, false));
-            nextButton.addEventListener('click', () => handleButtonClick.call(nextButton, true));
+            prevButton.addEventListener('click', event => handleButtonClick(prevButton, false, event));
+            nextButton.addEventListener('click', event => handleButtonClick(nextButton, true, event));
+            prevButton.addEventListener('touchend', event => handleButtonClick(prevButton, false, event), { passive: false });
+            nextButton.addEventListener('touchend', event => handleButtonClick(nextButton, true, event), { passive: false });
         }
 
         function fetchActions(increment = null, forcePageOne = false) {
@@ -1348,6 +852,32 @@
             all_sounds: fetchAllSounds
         };
 
+        function setupFilterControlDelegation() {
+            Object.values(filterConfigs).forEach(config => {
+                const container = document.getElementById(config.containerId);
+                if (!container) {
+                    return;
+                }
+
+                container.addEventListener('change', event => {
+                    const select = event.target.closest('.filter-select');
+                    if (!select) {
+                        return;
+                    }
+
+                    const endpoint = select.dataset.endpoint;
+                    const filterKey = select.dataset.filterKey;
+                    if (!endpoint || !filterKey || !fetchersByEndpoint[endpoint]) {
+                        return;
+                    }
+
+                    filterState[endpoint][filterKey] = select.value ? [select.value] : [];
+                    fetchersByEndpoint[endpoint](null, true);
+                });
+            });
+        }
+
+        setupFilterControlDelegation();
         setupPagination('prevPageActions', 'nextPageActions', fetchActions);
         setupPagination('prevPageFavorites', 'nextPageFavorites', fetchFavorites);
         setupPagination('prevPageAllSounds', 'nextPageAllSounds', fetchAllSounds);
@@ -1381,7 +911,6 @@
             });
         }
 
-        // Event listener for Play buttons
         document.querySelector('.tables-grid').addEventListener('click', async (event) => {
             if (event.target.classList.contains('play-button')) {
                 const button = event.target;
@@ -1409,10 +938,8 @@
                         button.title = 'Queued';
                         button.classList.add('queued');
                         setTimeout(() => {
-                            button.textContent = '▶';
-                            button.title = '';
+                            applyPlayButtonState(button);
                             button.classList.remove('queued');
-                            button.disabled = false;
                         }, 2000);
                     } else {
                         const payload = await response.json().catch(() => ({}));
@@ -1424,28 +951,23 @@
                         button.title = 'Error';
                         button.classList.add('error');
                         setTimeout(() => {
-                            button.textContent = '▶';
-                            button.title = '';
+                            applyPlayButtonState(button);
                             button.classList.remove('error');
-                            button.disabled = false;
                         }, 2000);
                     }
                 } catch (error) {
-                    console.error(`Network error:`, error);
+                    console.error('Network error:', error);
                     button.textContent = '✗';
                     button.title = 'Error';
                     button.classList.add('error');
                     setTimeout(() => {
-                        button.textContent = '▶';
-                        button.title = '';
+                        applyPlayButtonState(button);
                         button.classList.remove('error');
-                        button.disabled = false;
                     }, 2000);
                 }
             }
         });
 
-        // Backend Search with debounce
         function setupBackendSearch(inputId, fetchFunction) {
             const searchInput = document.getElementById(inputId);
             if (!searchInput) {
@@ -1465,7 +987,6 @@
         setupBackendSearch('searchFavorites', fetchFavorites);
         setupBackendSearch('searchAllSounds', fetchAllSounds);
 
-        // Auto-refresh every 2 seconds
         setInterval(() => {
             const isInteractingWithFilters = document.activeElement && document.activeElement.classList.contains('filter-select');
             if (isInteractingWithFilters) {
@@ -1474,13 +995,13 @@
             Promise.all([fetchActions(), fetchFavorites(), fetchAllSounds()]);
         }, 2000);
 
-        // Initial data fetch
-        fetchActions();
-        fetchFavorites();
-        fetchAllSounds();
+        Object.keys(fetchersByEndpoint).forEach(applyTableGeometry);
+        document.querySelectorAll('.play-button').forEach(applyPlayButtonState);
+
         window.addEventListener('resize', () => {
             let shouldRefetch = false;
             Object.keys(fetchersByEndpoint).forEach((endpoint) => {
+                endpointStableItemsPerPageCeilings[endpoint] = endpointMaxItemsPerPage[endpoint];
                 shouldRefetch = updateItemsPerPage(endpoint) || shouldRefetch;
                 applyTableGeometry(endpoint);
             });

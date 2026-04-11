@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import datetime, timezone
 from functools import wraps
 from typing import Any, Callable
 
@@ -126,13 +127,21 @@ def register_web_routes(app: Flask) -> None:
     @app.route("/")
     def index() -> str:
         """Render the soundboard page."""
-        return render_template("index.html")
+        return render_template(
+            "index.html",
+            initial_soundboard_data=_build_initial_soundboard_data(),
+        )
 
     @app.route("/api/actions")
     def get_actions() -> Any:
         """Return paginated recent actions for the web soundboard."""
         query = _build_paginated_query(filter_names=("action", "user", "sound"))
-        return jsonify(_get_web_content_service().get_actions(query))
+        include_filters = request.args.get("include_filters", "1").strip().lower() not in {
+            "0",
+            "false",
+            "no",
+        }
+        return jsonify(_get_web_content_service().get_actions(query, include_filters=include_filters))
 
     @app.route("/api/favorites")
     def get_favorites() -> Any:
@@ -318,3 +327,89 @@ def _parse_int_arg(name: str, default: int) -> int:
 def _get_filter_values(param_name: str) -> list[str]:
     """Return normalized multi-value filters from the query string."""
     return [value.strip() for value in request.args.getlist(param_name) if value.strip()]
+
+
+def _build_initial_soundboard_data() -> dict[str, dict[str, Any]]:
+    """Return first-page soundboard data for the initial HTML paint."""
+    service = _get_web_content_service()
+    base_query = PaginatedQuery(page=1, per_page=7)
+
+    return {
+        "actions": _prepare_initial_payload(
+            service.get_actions(base_query, filter_keys=("action", "user")),
+            filter_keys=("action", "user"),
+        ),
+        "favorites": _prepare_initial_payload(
+            service.get_favorites(base_query, include_filters=False),
+            filter_keys=(),
+        ),
+        "all_sounds": _prepare_initial_payload(
+            service.get_all_sounds(base_query, include_filters=False),
+            filter_keys=(),
+        ),
+    }
+
+
+def _prepare_initial_payload(
+    payload: dict[str, Any],
+    filter_keys: tuple[str, ...],
+) -> dict[str, Any]:
+    """Add template-only display fields without changing API payloads."""
+    items = []
+    for item in payload.get("items", []):
+        display_item = dict(item)
+        if display_item.get("timestamp"):
+            display_item["display_time_ago"] = _format_time_ago(display_item["timestamp"])
+        items.append(display_item)
+
+    filters = payload.get("filters", {})
+    visible_filters = {key: filters.get(key, []) for key in filter_keys}
+
+    return {
+        **payload,
+        "items": items,
+        "filters": visible_filters,
+    }
+
+
+def _format_time_ago(timestamp: str) -> str:
+    """Format a database timestamp similarly to the browser table renderer."""
+    parsed_timestamp = _parse_web_timestamp(timestamp)
+    if parsed_timestamp is None:
+        return timestamp or ""
+
+    now = datetime.now(timezone.utc)
+    diff_seconds = max(0, int((now - parsed_timestamp).total_seconds()))
+    diff_minutes = diff_seconds // 60
+    diff_hours = diff_seconds // 3600
+    diff_days = diff_seconds // 86400
+
+    if diff_minutes < 1:
+        return "now"
+    if diff_minutes < 60:
+        return f"{diff_minutes}m"
+    if diff_hours < 24:
+        return f"{diff_hours}h"
+    if diff_days < 30:
+        return f"{diff_days}d"
+    return parsed_timestamp.strftime("%x")
+
+
+def _parse_web_timestamp(timestamp: str) -> datetime | None:
+    """Parse a SQLite timestamp as UTC unless it already has a timezone."""
+    value = str(timestamp or "").strip()
+    if not value:
+        return None
+
+    normalized = value.replace(" ", "T")
+    if normalized.endswith(("Z", "z")):
+        normalized = f"{normalized[:-1]}+00:00"
+
+    try:
+        parsed_timestamp = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+
+    if parsed_timestamp.tzinfo is None:
+        return parsed_timestamp.replace(tzinfo=timezone.utc)
+    return parsed_timestamp.astimezone(timezone.utc)

@@ -5,788 +5,65 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Brain Rot Analytics</title>
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ctext y='50' x='50%25' text-anchor='middle' font-size='48'%3E%F0%9F%A7%A0%3C/text%3E%3C/svg%3E">
+    <link rel="icon"
+        href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ctext y='50' x='50%25' text-anchor='middle' font-size='48'%3E%F0%9F%A7%A0%3C/text%3E%3C/svg%3E">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <style>
-        :root {
-            --bg-primary: #0f0f1a;
-            --bg-secondary: #1a1a2e;
-            --bg-card: rgba(30, 30, 50, 0.8);
-            --bg-card-hover: rgba(40, 40, 70, 0.9);
-            --accent-primary: #6366f1;
-            --accent-secondary: #8b5cf6;
-            --accent-gradient: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #a855f7 100%);
-            --text-primary: #ffffff;
-            --text-secondary: #a0a0b0;
-            --text-muted: #6b7280;
-            --border-color: rgba(99, 102, 241, 0.2);
-            --success: #10b981;
-            --warning: #f59e0b;
-            --error: #ef4444;
-            --shadow-glow: 0 0 40px rgba(99, 102, 241, 0.15);
-        }
-
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-            background: var(--bg-primary);
-            color: var(--text-primary);
-            min-height: 100vh;
-            background-image:
-                radial-gradient(ellipse at 20% 20%, rgba(99, 102, 241, 0.08) 0%, transparent 50%),
-                radial-gradient(ellipse at 80% 80%, rgba(139, 92, 246, 0.08) 0%, transparent 50%);
-        }
-
-        /* Navigation */
-        .nav {
-            background: var(--bg-secondary);
-            border-bottom: 1px solid var(--border-color);
-            padding: 0.75rem 2rem;
-            position: sticky;
-            top: 0;
-            z-index: 1000;
-            backdrop-filter: blur(10px);
-        }
-
-        .nav-container {
-            max-width: 1400px;
-            margin: 0 auto;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .nav-brand {
-            display: flex;
-            align-items: center;
-            gap: 0.75rem;
-            text-decoration: none;
-        }
-
-        .nav-brand-emoji {
-            font-size: 1.75rem;
-            animation: pulse 2s infinite;
-        }
-
-        .nav-brand-text {
-            font-size: 1.25rem;
-            font-weight: 700;
-            background: var(--accent-gradient);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
-
-        @keyframes pulse {
-
-            0%,
-            100% {
-                transform: scale(1);
-            }
-
-            50% {
-                transform: scale(1.1);
-            }
-        }
-
-        .nav-links {
-            display: flex;
-            gap: 0.5rem;
-            align-items: center;
-        }
-
-        .nav-link {
-            color: var(--text-secondary);
-            text-decoration: none;
-            padding: 0.5rem 1rem;
-            border-radius: 8px;
-            font-size: 0.875rem;
-            font-weight: 500;
-            transition: all 0.3s ease;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-        }
-
-        .nav-link:hover {
-            background: var(--bg-card);
-            color: var(--text-primary);
-        }
-
-        .nav-link.active {
-            background: var(--accent-gradient);
-            color: white;
-        }
-
-        .container {
-            max-width: 1400px;
-            margin: 0 auto;
-            padding: 2rem;
-        }
-
-        /* Header */
-        .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 2rem;
-            flex-wrap: wrap;
-            gap: 1rem;
-        }
-
-        .header-left {
-            display: flex;
-            align-items: center;
-            gap: 1rem;
-        }
-
-        .header-right {
-            display: flex;
-            align-items: center;
-            gap: 0.75rem;
-        }
-
-        .auth-pill,
-        .auth-button {
-            border-radius: 999px;
-            padding: 0.6rem 1rem;
-            font-size: 0.85rem;
-            font-weight: 600;
-            border: 1px solid var(--border-color);
-            text-decoration: none;
-        }
-
-        .auth-pill {
-            background: rgba(16, 185, 129, 0.14);
-            color: #6ee7b7;
-        }
-
-        .auth-user-link {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.75rem;
-            padding: 0.4rem 0.7rem 0.4rem 0.4rem;
-            border-radius: 14px;
-            border: 1px solid var(--border-color);
-            background: var(--bg-card);
-            text-decoration: none;
-        }
-
-        .auth-avatar {
-            width: 40px;
-            height: 40px;
-            object-fit: cover;
-            display: block;
-            border-radius: 999px;
-        }
-
-        .auth-user-meta {
-            display: flex;
-            flex-direction: column;
-            line-height: 1.1;
-        }
-
-        .auth-user-name {
-            color: var(--text-primary);
-            font-size: 0.8rem;
-            font-weight: 600;
-        }
-
-        .auth-user-logout {
-            color: var(--text-secondary);
-            font-size: 0.75rem;
-        }
-
-        .auth-button {
-            background: var(--accent-gradient);
-            color: white;
-        }
-
-        .logo {
-            font-size: 2rem;
-            font-weight: 700;
-            background: var(--accent-gradient);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
-
-        .logo-emoji {
-            font-size: 2.5rem;
-        }
-
-        /* Time Range Selector */
-        .time-selector {
-            display: flex;
-            gap: 0.5rem;
-            background: var(--bg-card);
-            padding: 0.25rem;
-            border-radius: 12px;
-            border: 1px solid var(--border-color);
-        }
-
-        .time-btn {
-            padding: 0.5rem 1rem;
-            border: none;
-            background: transparent;
-            color: var(--text-secondary);
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 0.875rem;
-            font-weight: 500;
-            transition: all 0.3s ease;
-        }
-
-        .time-btn:hover {
-            color: var(--text-primary);
-        }
-
-        .time-btn.active {
-            background: var(--accent-gradient);
-            color: white;
-            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
-        }
-
-        /* Stats Cards Grid */
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-            gap: 1.5rem;
-            margin-bottom: 2rem;
-        }
-
-        .stat-card {
-            background: var(--bg-card);
-            backdrop-filter: blur(10px);
-            border: 1px solid var(--border-color);
-            border-radius: 16px;
-            padding: 1.5rem;
-            transition: all 0.3s ease;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .stat-card::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 3px;
-            background: var(--accent-gradient);
-            opacity: 0;
-            transition: opacity 0.3s ease;
-        }
-
-        .stat-card:hover {
-            transform: translateY(-4px);
-            box-shadow: var(--shadow-glow);
-        }
-
-        .stat-card:hover::before {
-            opacity: 1;
-        }
-
-        .stat-icon {
-            font-size: 2rem;
-            margin-bottom: 0.75rem;
-        }
-
-        .stat-value {
-            font-size: 2.5rem;
-            font-weight: 700;
-            background: var(--accent-gradient);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-            margin-bottom: 0.25rem;
-        }
-
-        .stat-label {
-            color: var(--text-secondary);
-            font-size: 0.875rem;
-            font-weight: 500;
-        }
-
-        /* Main Grid Layout */
-        .main-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 1.5rem;
-            margin-bottom: 2rem;
-        }
-
-        @media (max-width: 1024px) {
-            .main-grid {
-                grid-template-columns: 1fr;
-            }
-        }
-
-        /* Card Component */
-        .card {
-            background: var(--bg-card);
-            backdrop-filter: blur(10px);
-            border: 1px solid var(--border-color);
-            border-radius: 16px;
-            padding: 1.5rem;
-        }
-
-        .card-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 1.5rem;
-        }
-
-        .card-title {
-            font-size: 1.125rem;
-            font-weight: 600;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-        }
-
-        /* Leaderboard */
-        .leaderboard-list {
-            display: flex;
-            flex-direction: column;
-            gap: 0.75rem;
-        }
-
-        .leaderboard-item {
-            display: flex;
-            align-items: center;
-            gap: 1rem;
-            padding: 0.75rem;
-            background: var(--bg-secondary);
-            border-radius: 10px;
-            transition: all 0.3s ease;
-        }
-
-        .leaderboard-item:hover {
-            background: var(--bg-card-hover);
-            transform: translateX(4px);
-        }
-
-        .rank {
-            width: 28px;
-            height: 28px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: 700;
-            font-size: 0.875rem;
-            border-radius: 50%;
-            background: var(--bg-card);
-        }
-
-        .rank.gold {
-            background: linear-gradient(135deg, #fbbf24, #f59e0b);
-            color: #000;
-        }
-
-        .rank.silver {
-            background: linear-gradient(135deg, #94a3b8, #64748b);
-            color: #000;
-        }
-
-        .rank.bronze {
-            background: linear-gradient(135deg, #cd7f32, #b87333);
-            color: #000;
-        }
-
-        .item-info {
-            flex: 1;
-            min-width: 0;
-        }
-
-        .item-name {
-            font-weight: 500;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-
-        .item-bar {
-            height: 4px;
-            background: var(--bg-card);
-            border-radius: 2px;
-            margin-top: 0.5rem;
-            overflow: hidden;
-        }
-
-        .item-bar-fill {
-            height: 100%;
-            background: var(--accent-gradient);
-            border-radius: 2px;
-            transition: width 0.5s ease;
-        }
-
-        .item-count {
-            font-weight: 600;
-            color: var(--accent-primary);
-        }
-
-        .play-btn {
-            width: 32px;
-            height: 32px;
-            border-radius: 50%;
-            border: none;
-            background: var(--accent-gradient);
-            color: white;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: all 0.3s ease;
-        }
-
-        .play-btn:hover {
-            transform: scale(1.1);
-            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
-        }
-
-        .play-btn.login-required {
-            background: rgba(245, 158, 11, 0.2);
-            color: #fbbf24;
-            border: 1px solid rgba(245, 158, 11, 0.35);
-        }
-
-        /* Heatmap - Fixed to fit container */
-        .heatmap-container {
-            overflow: visible;
-            padding-top: 1.5rem;
-            /* Space for top row tooltips */
-        }
-
-        .heatmap {
-            display: grid;
-            grid-template-columns: 50px repeat(24, 1fr);
-            gap: 3px;
-            width: 100%;
-        }
-
-        .heatmap-header {
-            font-size: 0.6rem;
-            color: var(--text-muted);
-            text-align: center;
-            padding: 0.15rem;
-        }
-
-        .heatmap-row-label {
-            font-size: 0.7rem;
-            color: var(--text-secondary);
-            display: flex;
-            align-items: center;
-            justify-content: flex-end;
-            padding-right: 0.5rem;
-        }
-
-        .heatmap-cell {
-            aspect-ratio: 1.5;
-            border-radius: 3px;
-            background: var(--bg-secondary);
-            cursor: pointer;
-            transition: all 0.2s ease;
-            position: relative;
-        }
-
-        .heatmap-cell:hover {
-            transform: scale(1.3);
-            z-index: 10;
-        }
-
-        .heatmap-cell[data-count="0"] {
-            background: var(--bg-secondary);
-        }
-
-        .heatmap-cell[data-level="1"] {
-            background: rgba(99, 102, 241, 0.2);
-        }
-
-        .heatmap-cell[data-level="2"] {
-            background: rgba(99, 102, 241, 0.4);
-        }
-
-        .heatmap-cell[data-level="3"] {
-            background: rgba(99, 102, 241, 0.6);
-        }
-
-        .heatmap-cell[data-level="4"] {
-            background: rgba(99, 102, 241, 0.8);
-        }
-
-        .heatmap-cell[data-level="5"] {
-            background: #6366f1;
-        }
-
-        /* Tooltip - show below for top rows, above for bottom rows */
-        .heatmap-tooltip {
-            position: absolute;
-            left: 50%;
-            transform: translateX(-50%);
-            background: var(--bg-primary);
-            padding: 0.4rem 0.6rem;
-            border-radius: 6px;
-            font-size: 0.7rem;
-            white-space: nowrap;
-            opacity: 0;
-            pointer-events: none;
-            transition: opacity 0.2s;
-            border: 1px solid var(--border-color);
-            z-index: 100;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-        }
-
-        /* Default: show below */
-        .heatmap-tooltip {
-            top: calc(100% + 6px);
-            bottom: auto;
-        }
-
-        /* For top rows (0, 1, 2): show below */
-        .heatmap-cell[data-row="0"] .heatmap-tooltip,
-        .heatmap-cell[data-row="1"] .heatmap-tooltip,
-        .heatmap-cell[data-row="2"] .heatmap-tooltip {
-            top: calc(100% + 6px);
-            bottom: auto;
-        }
-
-        .heatmap-cell:hover .heatmap-tooltip {
-            opacity: 1;
-        }
-
-        /* Timeline Chart */
-        .timeline-container {
-            grid-column: 1 / -1;
-        }
-
-        .chart-container {
-            height: 200px;
-            position: relative;
-        }
-
-        #timelineChart {
-            width: 100%;
-            height: 100%;
-        }
-
-        /* Activity Feed */
-        .activity-feed {
-            max-height: 400px;
-            overflow-y: auto;
-            scrollbar-width: thin;
-            scrollbar-color: var(--accent-primary) var(--bg-secondary);
-        }
-
-        .activity-feed::-webkit-scrollbar {
-            width: 6px;
-        }
-
-        .activity-feed::-webkit-scrollbar-track {
-            background: var(--bg-secondary);
-            border-radius: 3px;
-        }
-
-        .activity-feed::-webkit-scrollbar-thumb {
-            background: var(--accent-primary);
-            border-radius: 3px;
-        }
-
-        .activity-item {
-            display: flex;
-            gap: 1rem;
-            padding: 0.75rem 0;
-            border-bottom: 1px solid var(--border-color);
-            animation: fadeIn 0.3s ease;
-        }
-
-        @keyframes fadeIn {
-            from {
-                opacity: 0;
-                transform: translateY(-10px);
-            }
-
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-
-        .activity-item:last-child {
-            border-bottom: none;
-        }
-
-        .activity-icon {
-            width: 36px;
-            height: 36px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 1rem;
-            flex-shrink: 0;
-        }
-
-        .activity-icon.play {
-            background: rgba(16, 185, 129, 0.2);
-        }
-
-        .activity-icon.favorite {
-            background: rgba(245, 158, 11, 0.2);
-        }
-
-        .activity-icon.join {
-            background: rgba(99, 102, 241, 0.2);
-        }
-
-        .activity-icon.leave {
-            background: rgba(239, 68, 68, 0.2);
-        }
-
-        .activity-content {
-            flex: 1;
-            min-width: 0;
-        }
-
-        .activity-text {
-            font-size: 0.875rem;
-        }
-
-        .activity-text strong {
-            color: var(--accent-primary);
-        }
-
-        .activity-time {
-            font-size: 0.75rem;
-            color: var(--text-muted);
-            margin-top: 0.25rem;
-        }
-
-        /* Loading State */
-        .loading {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 2rem;
-        }
-
-        .spinner {
-            width: 40px;
-            height: 40px;
-            border: 3px solid var(--bg-secondary);
-            border-top-color: var(--accent-primary);
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }
-
-        @keyframes spin {
-            to {
-                transform: rotate(360deg);
-            }
-        }
-
-        /* Responsive */
-        @media (max-width: 768px) {
-            .container {
-                padding: 1rem;
-            }
-
-            .header {
-                flex-direction: column;
-                align-items: flex-start;
-            }
-
-            .time-selector {
-                width: 100%;
-                justify-content: center;
-            }
-
-            .stats-grid {
-                grid-template-columns: repeat(2, 1fr);
-            }
-
-            .stat-value {
-                font-size: 1.75rem;
-            }
-
-            .nav {
-                padding: 0.75rem 1rem;
-            }
-
-            .nav-links {
-                gap: 0.25rem;
-            }
-
-            .nav-link {
-                padding: 0.4rem 0.6rem;
-                font-size: 0.8rem;
-            }
-
-            .nav-link span:first-child {
-                display: none;
-            }
-        }
-    </style>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Space+Grotesk:wght@400;500;700&display=optional"
+        rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='web.css') }}">
 </head>
 
-<body>
-    <!-- Navigation -->
+<body class="page page-analytics">
+    {% if discord_user %}
+    {% set display_name = discord_user.global_name or discord_user.username %}
+    {% set avatar_url = 'https://cdn.discordapp.com/avatars/' ~ discord_user.id ~ '/' ~ discord_user.avatar ~ '.png?size=128' if discord_user.avatar else 'https://cdn.discordapp.com/embed/avatars/0.png' %}
+    {% endif %}
+
     <nav class="nav">
         <div class="nav-container">
             <a href="/" class="nav-brand">
-                <span class="nav-brand-emoji">🧠</span>
-                <span class="nav-brand-text">Brain Rot</span>
+                <span class="nav-brand-mark">BR</span>
+                <span class="nav-brand-copy">
+                    <span class="nav-brand-label">Discord Brain Rot</span>
+                    <span class="nav-brand-subtitle">Signal Report</span>
+                </span>
             </a>
             <div class="nav-links">
                 <a href="/" class="nav-link">
-                    <span>🎵</span> Soundboard
+                    <span class="nav-link-index">01</span>
+                    <span>Soundboard</span>
                 </a>
                 <a href="/analytics" class="nav-link active">
-                    <span>📊</span> Analytics
+                    <span class="nav-link-index">02</span>
+                    <span>Analytics</span>
                 </a>
                 {% if discord_user %}
-                <a href="/logout?next=/analytics" class="auth-user-link" title="Logout {{ discord_user.global_name }}">
-                    <img
-                        class="auth-avatar"
-                        src="https://cdn.discordapp.com/avatars/{{ discord_user.id }}/{{ discord_user.avatar }}.png?size=128"
-                        alt="{{ discord_user.global_name }}"
-                    >
+                <a href="/logout?next=/analytics" class="auth-user-link" title="Logout {{ display_name }}">
+                    <img class="auth-avatar" src="{{ avatar_url }}" alt="{{ display_name }}">
                     <span class="auth-user-meta">
-                        <span class="auth-user-name">{{ discord_user.global_name }}</span>
+                        <span class="auth-user-name">{{ display_name }}</span>
                         <span class="auth-user-logout">Logout</span>
                     </span>
                 </a>
                 {% elif discord_oauth_configured %}
-                <a href="{{ discord_login_url }}" class="auth-button">Login with Discord</a>
+                <a href="{{ discord_login_url }}" class="auth-button">
+                    <span class="auth-button-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" role="presentation" focusable="false">
+                            <path fill="currentColor"
+                                d="M20.317 4.369A19.791 19.791 0 0 0 15.885 3a13.92 13.92 0 0 0-.602 1.245a18.27 18.27 0 0 0-5.566 0A13.92 13.92 0 0 0 9.115 3a19.736 19.736 0 0 0-4.433 1.369C1.88 8.58 1.12 12.686 1.5 16.734A19.92 19.92 0 0 0 6.818 19a14.99 14.99 0 0 0 1.143-1.873a12.93 12.93 0 0 1-1.798-.868c.151-.113.3-.231.441-.353c3.467 1.628 7.235 1.628 10.661 0c.143.122.29.24.441.353c-.576.336-1.178.627-1.798.868A14.7 14.7 0 0 0 17.051 19a19.856 19.856 0 0 0 5.449-2.266c.456-4.694-.778-8.762-2.183-12.365ZM8.261 14.228c-1.037 0-1.887-.949-1.887-2.114c0-1.165.831-2.114 1.887-2.114c1.055 0 1.905.949 1.887 2.114c0 1.165-.832 2.114-1.887 2.114Zm7.478 0c-1.037 0-1.887-.949-1.887-2.114c0-1.165.831-2.114 1.887-2.114s1.905.949 1.887 2.114c0 1.165-.831 2.114-1.887 2.114Z" />
+                        </svg>
+                    </span>
+                    <span class="auth-button-label">Login <span class="auth-button-label-extended">with Discord</span></span>
+                </a>
                 {% endif %}
             </div>
         </div>
     </nav>
 
-    <div class="container">
-        <!-- Header -->
-        <header class="header">
-            <div class="header-left">
-                <span class="logo-emoji">📊</span>
-                <h1 class="logo">Analytics Dashboard</h1>
-            </div>
-            <div class="header-right">
-                {% if not discord_user and discord_oauth_configured %}
-                <a href="{{ discord_login_url }}" class="auth-button">Login to Play Sounds</a>
-                {% endif %}
-            </div>
-        </header>
-
-        <!-- Time Range Selector -->
-        <div style="display: flex; justify-content: flex-end; margin-bottom: 1.5rem;">
+    <main class="page-shell">
+        <div class="analytics-toolbar analytics-toolbar-standalone">
             <div class="time-selector">
                 <button class="time-btn" data-days="1">24h</button>
                 <button class="time-btn active" data-days="7">7 days</button>
@@ -795,112 +72,129 @@
             </div>
         </div>
 
-        <!-- Stats Cards -->
         <div class="stats-grid">
-            <div class="stat-card">
+            <section class="stat-card">
                 <div class="stat-icon">🎵</div>
                 <div class="stat-value" id="totalSounds">-</div>
                 <div class="stat-label">Total Sounds</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-icon">▶️</div>
+            </section>
+            <section class="stat-card">
+                <div class="stat-icon">▶</div>
                 <div class="stat-value" id="totalPlays">-</div>
                 <div class="stat-label">Total Plays</div>
-            </div>
-            <div class="stat-card">
+            </section>
+            <section class="stat-card">
                 <div class="stat-icon">👥</div>
                 <div class="stat-value" id="activeUsers">-</div>
                 <div class="stat-label">Active Users</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-icon">📥</div>
+            </section>
+            <section class="stat-card">
+                <div class="stat-icon">✚</div>
                 <div class="stat-value" id="soundsThisWeek">-</div>
                 <div class="stat-label">New This Week</div>
-            </div>
+            </section>
         </div>
 
-        <!-- Main Grid -->
         <div class="main-grid">
-            <!-- Top Users -->
-            <div class="card">
-                <div class="card-header">
-                    <h2 class="card-title">🏆 Top Users</h2>
-                </div>
-                <div class="leaderboard-list" id="topUsers">
-                    <div class="loading">
-                        <div class="spinner"></div>
+            <div class="main-grid-column">
+                <section class="card card--top-users">
+                    <div class="card-header">
+                        <div class="card-title-stack">
+                            <p class="card-kicker">Leaderboard</p>
+                            <h2 class="card-title">Top Users</h2>
+                            <p class="card-copy">The people pressing the queue hardest in the selected window.</p>
+                        </div>
                     </div>
-                </div>
-            </div>
-
-            <!-- Top Sounds -->
-            <div class="card">
-                <div class="card-header">
-                    <h2 class="card-title">🔥 Top Sounds</h2>
-                </div>
-                <div class="leaderboard-list" id="topSounds">
-                    <div class="loading">
-                        <div class="spinner"></div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Activity Heatmap -->
-            <div class="card" style="grid-column: 1 / -1;">
-                <div class="card-header">
-                    <h2 class="card-title">📊 Activity Heatmap</h2>
-                </div>
-                <div class="heatmap-container">
-                    <div class="heatmap" id="heatmap">
+                    <div class="leaderboard-list" id="topUsers">
                         <div class="loading">
                             <div class="spinner"></div>
                         </div>
                     </div>
-                </div>
-            </div>
+                </section>
 
-            <!-- Activity Timeline -->
-            <div class="card timeline-container">
-                <div class="card-header">
-                    <h2 class="card-title">📈 Activity Timeline</h2>
-                </div>
-                <div class="chart-container">
-                    <canvas id="timelineChart"></canvas>
-                </div>
-            </div>
-
-            <!-- Recent Activity Feed -->
-            <div class="card">
-                <div class="card-header">
-                    <h2 class="card-title">⚡ Live Activity</h2>
-                </div>
-                <div class="activity-feed" id="activityFeed">
-                    <div class="loading">
-                        <div class="spinner"></div>
+                <section class="card card--timeline timeline-container">
+                    <div class="card-header">
+                        <div class="card-title-stack">
+                            <p class="card-kicker">Trend Line</p>
+                            <h2 class="card-title">Activity Timeline</h2>
+                            <p class="card-copy">Daily volume across the selected range, with longer buckets for archive view.</p>
+                        </div>
                     </div>
-                </div>
+                    <div class="chart-container">
+                        <canvas id="timelineChart"></canvas>
+                    </div>
+                </section>
+
+                <section class="card card--heatmap">
+                    <div class="card-header">
+                        <div class="card-title-stack">
+                            <p class="card-kicker">Rhythm</p>
+                            <h2 class="card-title">Activity Heatmap</h2>
+                            <p class="card-copy">A compact grid showing when the bot gets hit the hardest.</p>
+                        </div>
+                    </div>
+                    <div class="heatmap-container">
+                        <div class="heatmap" id="heatmap">
+                            <div class="loading">
+                                <div class="spinner"></div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
             </div>
+
+            <div class="main-grid-column">
+                <section class="card card--top-sounds">
+                    <div class="card-header">
+                        <div class="card-title-stack">
+                            <p class="card-kicker">Hot List</p>
+                            <h2 class="card-title">Top Sounds</h2>
+                            <p class="card-copy">The clips dominating repeats, requests, and random plays.</p>
+                        </div>
+                    </div>
+                    <div class="leaderboard-list" id="topSounds">
+                        <div class="loading">
+                            <div class="spinner"></div>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="card card--activity">
+                    <div class="card-header">
+                        <div class="card-title-stack">
+                            <p class="card-kicker">Live Feed</p>
+                            <h2 class="card-title">Recent Activity</h2>
+                            <p class="card-copy">The latest joins, leaves, favorites, and playback actions.</p>
+                        </div>
+                    </div>
+                    <div class="activity-feed" id="activityFeed">
+                        <div class="loading">
+                            <div class="spinner"></div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+
         </div>
-    </div>
+    </main>
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script>
         const discordUser = {{ discord_user|tojson }};
         const discordLoginUrl = {{ discord_login_url|tojson }};
-        // State
         let currentDays = 7;
         let timelineChart = null;
 
-        // Initialize
+        function getCssVar(name) {
+            return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+        }
+
         document.addEventListener('DOMContentLoaded', () => {
             loadAllData();
             setupTimeSelector();
-
-            // Auto-refresh activity feed every 30 seconds
             setInterval(loadRecentActivity, 30000);
         });
 
-        // Time selector
         function setupTimeSelector() {
             document.querySelectorAll('.time-btn').forEach(btn => {
                 btn.addEventListener('click', () => {
@@ -912,7 +206,6 @@
             });
         }
 
-        // Load all data
         function loadAllData() {
             loadSummary();
             loadTopUsers();
@@ -926,16 +219,19 @@
             if (discordUser) {
                 button.disabled = false;
                 button.classList.remove('login-required');
-                button.title = 'Play';
+                button.textContent = '▶';
+                button.title = 'Queue sound';
+                button.setAttribute('aria-label', 'Queue sound');
                 return;
             }
 
             button.disabled = false;
             button.classList.add('login-required');
+            button.textContent = '↗';
             button.title = 'Login with Discord to play';
+            button.setAttribute('aria-label', 'Login with Discord to play');
         }
 
-        // API calls
         async function loadSummary() {
             try {
                 const res = await fetch(`/api/analytics/summary?days=${currentDays}`);
@@ -957,7 +253,7 @@
 
                 const container = document.getElementById('topUsers');
                 if (!data.users || data.users.length === 0) {
-                    container.innerHTML = '<p style="color: var(--text-muted); text-align: center;">No data available</p>';
+                    container.innerHTML = '<p class="empty-state">No data available</p>';
                     return;
                 }
 
@@ -986,7 +282,7 @@
 
                 const container = document.getElementById('topSounds');
                 if (!data.sounds || data.sounds.length === 0) {
-                    container.innerHTML = '<p style="color: var(--text-muted); text-align: center;">No data available</p>';
+                    container.innerHTML = '<p class="empty-state">No data available</p>';
                     return;
                 }
 
@@ -1001,7 +297,7 @@
                             </div>
                         </div>
                         <div class="item-count">${sound.count}</div>
-                        <button class="play-btn ${discordUser ? '' : 'login-required'}" data-sound-id="${sound.sound_id}" title="${discordUser ? 'Play' : 'Login with Discord to play'}">${discordUser ? '▶' : '↗'}</button>
+                        <button class="play-btn ${discordUser ? '' : 'login-required'}" data-sound-id="${sound.sound_id}" title="${discordUser ? 'Queue sound' : 'Login with Discord to play'}">${discordUser ? '▶' : '↗'}</button>
                     </div>
                 `).join('');
 
@@ -1024,7 +320,6 @@
                 const container = document.getElementById('heatmap');
                 const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-                // Create lookup for counts
                 const countMap = {};
                 let maxCount = 1;
                 data.heatmap.forEach(item => {
@@ -1033,15 +328,14 @@
                     maxCount = Math.max(maxCount, item.count);
                 });
 
-                // Build heatmap HTML
                 let html = '<div class="heatmap-header"></div>';
-                for (let h = 0; h < 24; h++) {
-                    html += `<div class="heatmap-header">${h}</div>`;
+                for (let d = 0; d < 7; d++) {
+                    html += `<div class="heatmap-header">${days[d]}</div>`;
                 }
 
-                for (let d = 0; d < 7; d++) {
-                    html += `<div class="heatmap-row-label">${days[d]}</div>`;
-                    for (let h = 0; h < 24; h++) {
+                for (let h = 0; h < 24; h++) {
+                    html += `<div class="heatmap-row-label">${String(h).padStart(2, '0')}</div>`;
+                    for (let d = 0; d < 7; d++) {
                         const count = countMap[`${d}-${h}`] || 0;
                         const level = count === 0 ? 0 : Math.min(5, Math.ceil((count / maxCount) * 5));
                         html += `
@@ -1060,11 +354,14 @@
 
         async function loadTimeline() {
             try {
-                // Pass currentDays directly - API will group by week for all-time (0)
                 const res = await fetch(`/api/analytics/activity_timeline?days=${currentDays}`);
                 const data = await res.json();
-
                 const ctx = document.getElementById('timelineChart').getContext('2d');
+                const chartAccent = getCssVar('--accent');
+                const chartFill = getCssVar('--accent-soft');
+                const chartPaper = getCssVar('--paper');
+                const chartTicks = getCssVar('--ink-muted');
+                const chartGrid = getCssVar('--chart-grid');
 
                 if (timelineChart) {
                     timelineChart.destroy();
@@ -1072,7 +369,6 @@
 
                 const labels = data.timeline.map(t => {
                     const date = new Date(t.date);
-                    // Include year for all-time view, just month/day for shorter ranges
                     if (currentDays === 0) {
                         return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
                     }
@@ -1087,14 +383,14 @@
                         datasets: [{
                             label: 'Plays',
                             data: values,
-                            borderColor: '#6366f1',
-                            backgroundColor: 'rgba(99, 102, 241, 0.1)',
+                            borderColor: chartAccent,
+                            backgroundColor: chartFill,
                             fill: true,
-                            tension: 0.4,
+                            tension: 0.35,
                             pointRadius: 2,
                             pointHoverRadius: 6,
-                            pointBackgroundColor: '#6366f1',
-                            pointBorderColor: '#fff',
+                            pointBackgroundColor: chartAccent,
+                            pointBorderColor: chartPaper,
                             pointBorderWidth: 2
                         }]
                     },
@@ -1106,12 +402,12 @@
                         },
                         scales: {
                             x: {
-                                grid: { color: 'rgba(255,255,255,0.05)' },
-                                ticks: { color: '#6b7280', maxTicksLimit: 10 }
+                                grid: { color: chartGrid },
+                                ticks: { color: chartTicks, maxTicksLimit: 10 }
                             },
                             y: {
-                                grid: { color: 'rgba(255,255,255,0.05)' },
-                                ticks: { color: '#6b7280' },
+                                grid: { color: chartGrid },
+                                ticks: { color: chartTicks },
                                 beginAtZero: true
                             }
                         }
@@ -1129,7 +425,7 @@
 
                 const container = document.getElementById('activityFeed');
                 if (!data.activities || data.activities.length === 0) {
-                    container.innerHTML = '<p style="color: var(--text-muted); text-align: center;">No recent activity</p>';
+                    container.innerHTML = '<p class="empty-state">No recent activity</p>';
                     return;
                 }
 
@@ -1153,7 +449,6 @@
             }
         }
 
-        // Helper functions
         function animateNumber(elementId, target) {
             const el = document.getElementById(elementId);
             const start = parseInt(el.textContent) || 0;
@@ -1184,18 +479,18 @@
         function getActivityIcon(action) {
             const icons = {
                 'play_random_sound': { emoji: '🎲', class: 'play' },
-                'play_request': { emoji: '▶️', class: 'play' },
-                'replay_sound': { emoji: '🔁', class: 'play' },
-                'play_from_list': { emoji: '📋', class: 'play' },
-                'play_similar_sound': { emoji: '🔀', class: 'play' },
+                'play_request': { emoji: '▶', class: 'play' },
+                'replay_sound': { emoji: '↻', class: 'play' },
+                'play_from_list': { emoji: '≡', class: 'play' },
+                'play_similar_sound': { emoji: '⇄', class: 'play' },
                 'play_sound_periodically': { emoji: '⏰', class: 'play' },
-                'play_random_favorite_sound': { emoji: '⭐', class: 'play' },
-                'favorite_sound': { emoji: '💜', class: 'favorite' },
-                'unfavorite_sound': { emoji: '💔', class: 'favorite' },
-                'join': { emoji: '📥', class: 'join' },
-                'leave': { emoji: '📤', class: 'leave' }
+                'play_random_favorite_sound': { emoji: '★', class: 'play' },
+                'favorite_sound': { emoji: '♥', class: 'favorite' },
+                'unfavorite_sound': { emoji: '♡', class: 'favorite' },
+                'join': { emoji: '↘', class: 'join' },
+                'leave': { emoji: '↗', class: 'leave' }
             };
-            return icons[action] || { emoji: '🎵', class: 'play' };
+            return icons[action] || { emoji: '♪', class: 'play' };
         }
 
         function formatActivityText(activity) {
@@ -1254,8 +549,7 @@
             }
 
             button.disabled = true;
-            const originalText = button.textContent;
-            const originalBackground = button.style.background;
+            button.classList.remove('queued', 'error');
             button.textContent = '⏳';
 
             try {
@@ -1271,17 +565,21 @@
                         window.location.href = payload.login_url;
                         return;
                     }
+                    button.textContent = '✗';
+                    button.classList.add('error');
+                } else {
+                    button.textContent = '✓';
+                    button.classList.add('queued');
                 }
-
-                button.style.background = res.ok ? 'var(--success)' : 'var(--error)';
             } catch (err) {
                 console.error('Error playing sound:', err);
-                button.style.background = 'var(--error)';
+                button.textContent = '✗';
+                button.classList.add('error');
             } finally {
                 setTimeout(() => {
-                    button.textContent = originalText;
-                    button.style.background = originalBackground;
-                    button.disabled = false;
+                    button.classList.remove('queued', 'error');
+                    button.style.background = '';
+                    applyPlayButtonState(button);
                 }, 1000);
             }
         }

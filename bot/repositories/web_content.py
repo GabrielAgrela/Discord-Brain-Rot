@@ -85,31 +85,44 @@ class WebContentRepository(BaseRepository[dict[str, Any]]):
         )
         return int(row["count"]) if row else 0
 
-    def get_action_filters(self) -> dict[str, list[str]]:
+    def get_action_filters(
+        self,
+        filter_keys: Sequence[str] | None = None,
+    ) -> dict[str, list[str]]:
         """
         Fetch filter options for the actions table.
+
+        Args:
+            filter_keys: Optional subset of action filter groups to fetch.
 
         Returns:
             Filter values grouped by column.
         """
-        return {
-            "action": self._fetch_distinct_values(
+        selected_keys = set(filter_keys or ("action", "user", "sound"))
+        filters: dict[str, list[str]] = {}
+
+        if "action" in selected_keys:
+            filters["action"] = self._fetch_distinct_values(
                 """
                 SELECT DISTINCT action AS value
                 FROM actions
                 WHERE action IS NOT NULL AND TRIM(action) != ''
                 ORDER BY value COLLATE NOCASE ASC
                 """
-            ),
-            "user": self._fetch_distinct_values(
+            )
+
+        if "user" in selected_keys:
+            filters["user"] = self._fetch_distinct_values(
                 """
                 SELECT DISTINCT username AS value
                 FROM actions
                 WHERE username IS NOT NULL AND TRIM(username) != ''
                 ORDER BY value COLLATE NOCASE ASC
                 """
-            ),
-            "sound": self._fetch_distinct_values(
+            )
+
+        if "sound" in selected_keys:
+            filters["sound"] = self._fetch_distinct_values(
                 """
                 SELECT DISTINCT COALESCE(s.Filename, a.target) AS value
                 FROM actions a
@@ -118,8 +131,9 @@ class WebContentRepository(BaseRepository[dict[str, Any]]):
                   AND TRIM(COALESCE(s.Filename, a.target)) != ''
                 ORDER BY value COLLATE NOCASE ASC
                 """
-            ),
-        }
+            )
+
+        return filters
 
     def get_favorites_page(self, query: PaginatedQuery) -> list[dict[str, Any]]:
         """

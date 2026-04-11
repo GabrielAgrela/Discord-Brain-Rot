@@ -284,6 +284,86 @@ def test_web_app_configures_persistent_session_defaults():
     assert app.config["PERMANENT_SESSION_LIFETIME"] == timedelta(days=30)
 
 
+def test_soundboard_page_renders_shared_redesign(web_client):
+    client, db_path = web_client
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executemany(
+            """
+            INSERT INTO sounds (id, originalfilename, Filename, favorite, slap, is_elevenlabs, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (1, "alpha.mp3", "alpha.mp3", 1, 0, 0, "2026-04-01 12:00:00"),
+                (2, "gamma.mp3", "gamma.mp3", 0, 0, 0, "2026-04-03 12:00:00"),
+            ],
+        )
+        conn.execute(
+            """
+            INSERT INTO actions (username, action, target, timestamp, guild_id)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            ("alice", "play_request", "1", "2026-04-04 12:00:00", "111"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "/static/web.css" in html
+    assert "Recent Actions" in html
+    assert "Favorites" in html
+    assert "All Sounds" in html
+    assert 'class="placeholder-row"' not in html
+    assert 'class="filter-group placeholder-filter"' not in html
+    assert "initialSoundboardData" in html
+    assert "alpha" in html
+    assert "gamma" in html
+    assert "alice" in html
+    assert "Played" in html
+    assert 'id="actions-action-filter"' in html
+    assert "touchend" in html
+    assert "requestInFlight" in html
+    assert "isButtonCooldown" not in html
+    assert "fetchFunction();" not in html
+    assert "pendingInitialRenderEndpoints" in html
+    assert "Queue the right clip fast, without the generic dashboard look." not in html
+    assert "What just happened, who triggered it, and how fresh it is." not in html
+    assert "The shortlist for when you already know the bit you want." not in html
+    assert "The full catalog, including older uploads and new arrivals." not in html
+
+
+def test_analytics_page_renders_shared_redesign(web_client):
+    client, _ = web_client
+
+    response = client.get("/analytics")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "/static/web.css" in html
+    assert 'class="time-selector"' in html
+    assert "Activity Heatmap" in html
+    assert "Watch the server’s taste evolve in real time." not in html
+
+
+def test_web_static_stylesheet_is_served(web_client):
+    client, _ = web_client
+
+    response = client.get("/static/web.css")
+
+    assert response.status_code == 200
+    stylesheet = response.get_data(as_text=True)
+    assert ".page-title" in stylesheet
+    assert "--accent:" in stylesheet
+    assert "--soundboard-table-height" in stylesheet
+    assert "body.page-soundboard .tables-grid > .card" in stylesheet
+    assert "animation: none" in stylesheet
+
+
 def test_web_content_endpoints_censor_hateful_strings(web_client):
     client, db_path = web_client
 
@@ -417,6 +497,77 @@ def test_web_table_endpoints_return_filter_options_and_apply_column_filters(web_
             "date": ["2026-04-03", "2026-04-02", "2026-04-01"],
         },
     }
+
+
+def test_actions_endpoint_can_skip_filter_metadata(web_client):
+    client, db_path = web_client
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            INSERT INTO actions (username, action, target, timestamp, guild_id)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            ("alice", "play_request", "alpha.mp3", "2026-04-04 12:00:00", "111"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    response = client.get("/api/actions?include_filters=0")
+
+    assert response.status_code == 200
+    assert response.get_json() == {
+        "items": [
+            {
+                "display_filename": "alpha.mp3",
+                "display_username": "alice",
+                "action": "play_request",
+                "timestamp": "2026-04-04 12:00:00",
+            }
+        ],
+        "total_pages": 1,
+        "filters": {},
+    }
+
+
+def test_soundboard_initial_render_skips_unused_filter_payloads(web_client):
+    client, db_path = web_client
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executemany(
+            """
+            INSERT INTO sounds (id, originalfilename, Filename, favorite, slap, is_elevenlabs, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (1, "alpha.mp3", "alpha.mp3", 1, 0, 0, "2026-04-01 12:00:00"),
+                (2, "beta.mp3", "beta.mp3", 0, 0, 0, "2026-04-02 12:00:00"),
+            ],
+        )
+        conn.executemany(
+            """
+            INSERT INTO actions (username, action, target, timestamp, guild_id)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            [
+                ("alice", "play_request", "1", "2026-04-03 12:00:00", "111"),
+                ("bob", "favorite_sound", "2", "2026-04-03 12:05:00", "111"),
+            ],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "const initialSoundboardData =" in html
+    assert '"filters": {}' in html
+    assert '"sound":["alpha.mp3","beta.mp3"]' not in html
 
 
 def test_analytics_endpoints_censor_hateful_strings(web_client):
