@@ -4,8 +4,7 @@ Helpers for web-triggered playback queueing and processing.
 
 from __future__ import annotations
 
-import asyncio
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Callable, Mapping
 from datetime import datetime
 import os
 from pathlib import Path
@@ -211,7 +210,6 @@ async def process_playback_queue_request(
     db: Any,
     sound_folder: str | Path,
     action_logger_factory: Callable[[], Any] | None = None,
-    sleep_fn: Callable[[float], Awaitable[Any]] = asyncio.sleep,
     now_fn: Callable[[], datetime] = datetime.now,
     logger: Callable[[str], None] = print,
 ) -> bool:
@@ -227,7 +225,6 @@ async def process_playback_queue_request(
         sound_folder: Folder containing sound files.
         action_logger_factory: Optional callable returning an object with
             ``insert()`` or ``insert_action()``.
-        sleep_fn: Awaitable sleep function for tests.
         now_fn: Timestamp provider for tests.
         logger: Logging function.
 
@@ -268,14 +265,31 @@ async def process_playback_queue_request(
         mark_played()
         return False
 
-    sound_path = Path(sound_folder) / sound_filename
+    playback_filename = sound_filename
+    sound_path = Path(sound_folder) / playback_filename
     if not sound_path.exists():
-        logger(
-            f"[Playback Queue] Error: Sound file not found at '{sound_path}'. "
-            f"Skipping request {request_id}."
+        original_filename = _get_original_sound_filename(sound_data)
+        original_sound_path = (
+            Path(sound_folder) / original_filename if original_filename else None
         )
-        mark_played()
-        return False
+        if (
+            original_filename
+            and original_filename != sound_filename
+            and original_sound_path is not None
+            and original_sound_path.exists()
+        ):
+            logger(
+                f"[Playback Queue] Sound file not found at '{sound_path}'. "
+                f"Falling back to original file '{original_sound_path}'."
+            )
+            playback_filename = original_filename
+        else:
+            logger(
+                f"[Playback Queue] Error: Sound file not found at '{sound_path}'. "
+                f"Skipping request {request_id}."
+            )
+            mark_played()
+            return False
 
     try:
         channel = behavior.get_largest_voice_channel(guild)
@@ -286,7 +300,7 @@ async def process_playback_queue_request(
                 playback_user = f"discord-user-{request_user_id}"
             else:
                 playback_user = "webpage"
-            await behavior.play_audio(channel, sound_filename, playback_user)
+            await behavior.play_audio(channel, playback_filename, playback_user)
             if action_logger_factory is not None:
                 action_logger = action_logger_factory()
                 if hasattr(action_logger, "insert"):
@@ -305,7 +319,6 @@ async def process_playback_queue_request(
                     )
 
         mark_played()
-        await sleep_fn(1)
         return channel is not None
     except Exception as exc:
         logger(
@@ -372,6 +385,19 @@ def _add_guild_id(guild_ids: set[int], raw_guild_id: Any) -> None:
         guild_ids.add(int(raw_value))
     except ValueError:
         return
+
+
+def _get_original_sound_filename(sound_data: Any) -> str | None:
+    """Extract ``originalfilename`` from a DB sound row tuple when available."""
+    try:
+        original_filename = sound_data[1]
+    except (IndexError, KeyError, TypeError):
+        return None
+
+    if original_filename is None:
+        return None
+    original_filename_text = str(original_filename).strip()
+    return original_filename_text or None
 
 
 def _ensure_playback_queue_identity_columns(cursor: sqlite3.Cursor) -> None:

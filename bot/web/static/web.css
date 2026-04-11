@@ -1002,9 +1002,30 @@ tr:last-child td {
 }
 
 .pagination-info {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
     color: var(--ink-muted);
     font-size: 0.72rem;
     font-weight: 700;
+}
+
+.pagination-page-input {
+    width: 3.8rem;
+    min-height: 2.35rem;
+    padding: 0.35rem 0.5rem;
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.72);
+    color: var(--ink);
+    font: inherit;
+    text-align: center;
+}
+
+.pagination-page-input:focus {
+    outline: 2px solid rgba(197, 72, 52, 0.28);
+    outline-offset: 2px;
 }
 
 .action-badge {

@@ -63,9 +63,32 @@ def _create_web_tables(db_path: Path) -> None:
             )
             """
         )
+        cursor.execute(
+            """
+            CREATE TABLE voice_activity (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL,
+                channel_id TEXT NOT NULL,
+                join_time TEXT NOT NULL,
+                leave_time TEXT,
+                guild_id TEXT
+            )
+            """
+        )
         conn.commit()
     finally:
         conn.close()
+
+
+def _login_web_user(client, username: str = "trusted-user", global_name: str = "Trusted User") -> None:
+    """Store a Discord user in the Flask test session."""
+    with client.session_transaction() as flask_session:
+        flask_session["discord_user"] = {
+            "id": "123",
+            "username": username,
+            "global_name": global_name,
+            "avatar": "",
+        }
 
 
 @pytest.fixture
@@ -325,7 +348,12 @@ def test_soundboard_page_renders_shared_redesign(web_client):
     assert "gamma" in html
     assert "alice" in html
     assert "Played" in html
+    assert 'id="pageInputActions"' in html
+    assert 'id="pageInputFavorites"' in html
+    assert 'id="pageInputAllSounds"' in html
+    assert "setupPageInput" in html
     assert 'id="actions-action-filter"' in html
+    assert "hasRenderableFilterPayload(endpoint, data.filters)" in html
     assert "touchend" in html
     assert "requestInFlight" in html
     assert "isButtonCooldown" not in html
@@ -360,6 +388,7 @@ def test_web_static_stylesheet_is_served(web_client):
     assert ".page-title" in stylesheet
     assert "--accent:" in stylesheet
     assert "--soundboard-table-height" in stylesheet
+    assert ".pagination-page-input" in stylesheet
     assert "body.page-soundboard .tables-grid > .card" in stylesheet
     assert "animation: none" in stylesheet
 
@@ -409,6 +438,64 @@ def test_web_content_endpoints_censor_hateful_strings(web_client):
     assert all_sounds_response.get_json()["items"][0] == {
         "sound_id": 1,
         "display_filename": "[censored]",
+        "timestamp": "2026-04-01 12:00:00",
+    }
+
+
+def test_web_content_endpoints_do_not_censor_logged_in_voice_user(web_client):
+    client, db_path = web_client
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            INSERT INTO sounds (id, originalfilename, Filename, favorite, slap, is_elevenlabs, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (1, "jews did 911.mp3", "jews did 911.mp3", 1, 0, 0, "2026-04-01 12:00:00"),
+        )
+        conn.execute(
+            """
+            INSERT INTO actions (username, action, target, timestamp, guild_id)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            ("niggas young fly on the tra", "play_request", "1", "2026-04-01 12:01:00", "111"),
+        )
+        conn.execute(
+            """
+            INSERT INTO voice_activity (username, channel_id, join_time, leave_time, guild_id)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            ("trusted-user", "222", "2026-04-01 11:00:00", None, "111"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    _login_web_user(client, username="trusted-user", global_name="Trusted User")
+
+    actions_response = client.get("/api/actions")
+    favorites_response = client.get("/api/favorites")
+    all_sounds_response = client.get("/api/all_sounds")
+
+    assert actions_response.status_code == 200
+    assert actions_response.get_json()["items"][0] == {
+        "display_filename": "jews did 911.mp3",
+        "display_username": "niggas young fly on the tra",
+        "action": "play_request",
+        "timestamp": "2026-04-01 12:01:00",
+    }
+
+    assert favorites_response.status_code == 200
+    assert favorites_response.get_json()["items"][0] == {
+        "sound_id": 1,
+        "display_filename": "jews did 911.mp3",
+    }
+
+    assert all_sounds_response.status_code == 200
+    assert all_sounds_response.get_json()["items"][0] == {
+        "sound_id": 1,
+        "display_filename": "jews did 911.mp3",
         "timestamp": "2026-04-01 12:00:00",
     }
 
@@ -616,4 +703,62 @@ def test_analytics_endpoints_censor_hateful_strings(web_client):
         "action": "play_request",
         "timestamp": "2026-04-01 12:01:00",
         "display_sound": "[censored]",
+    }
+
+
+def test_analytics_endpoints_do_not_censor_logged_in_voice_user(web_client):
+    client, db_path = web_client
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            INSERT INTO sounds (id, originalfilename, Filename, favorite, slap, is_elevenlabs, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (1, "nig-ventura-27-07-2.mp3", "nig-ventura-27-07-2.mp3", 0, 0, 0, "2026-04-01 12:00:00"),
+        )
+        conn.execute(
+            """
+            INSERT INTO actions (username, action, target, timestamp, guild_id)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            ("jews did 911", "play_request", "1", "2026-04-01 12:01:00", "111"),
+        )
+        conn.execute(
+            """
+            INSERT INTO voice_activity (username, channel_id, join_time, leave_time, guild_id)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            ("Trusted User", "222", "2026-04-01 11:00:00", None, "111"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    _login_web_user(client, username="trusted-user", global_name="Trusted User")
+
+    top_users_response = client.get("/api/analytics/top_users?days=0&limit=8")
+    top_sounds_response = client.get("/api/analytics/top_sounds?days=0&limit=8")
+    recent_activity_response = client.get("/api/analytics/recent_activity?limit=15")
+
+    assert top_users_response.status_code == 200
+    assert top_users_response.get_json()["users"][0] == {
+        "display_username": "jews did 911",
+        "count": 1,
+    }
+
+    assert top_sounds_response.status_code == 200
+    assert top_sounds_response.get_json()["sounds"][0] == {
+        "sound_id": 1,
+        "display_filename": "nig-ventura-27-07-2.mp3",
+        "count": 1,
+    }
+
+    assert recent_activity_response.status_code == 200
+    assert recent_activity_response.get_json()["activities"][0] == {
+        "display_username": "jews did 911",
+        "action": "play_request",
+        "timestamp": "2026-04-01 12:01:00",
+        "display_sound": "nig-ventura-27-07-2.mp3",
     }

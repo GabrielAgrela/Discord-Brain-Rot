@@ -1187,7 +1187,8 @@ class AudioService:
                         sts_char: str = None,
                         requester_avatar_url: str = None,
                         sts_thumbnail_url: str = None,
-                        loading_message: 'discord.Message' = None):
+                        loading_message: 'discord.Message' = None,
+                        allow_tts_interrupt: bool = False):
         """Play an audio file in the specified voice channel."""
         play_start_time = time.time()
         guild_id = channel.guild.id
@@ -1265,7 +1266,7 @@ class AudioService:
             is_currently_playing = voice_client.is_playing() or (hasattr(voice_client, "is_paused") and voice_client.is_paused())
 
             if is_currently_playing:
-                if is_tts:
+                if is_tts and not allow_tts_interrupt:
                     await self._notify_tts_busy(
                         channel=channel,
                         user=user,

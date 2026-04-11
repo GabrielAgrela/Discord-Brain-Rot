@@ -7,8 +7,9 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from bot.models.web import PaginatedQuery
+from bot.models.web import DiscordWebUser, PaginatedQuery
 from bot.repositories.web_content import WebContentRepository
+from bot.repositories.web_user_access import WebUserAccessRepository
 from bot.services.text_censor import TextCensorService
 
 
@@ -21,6 +22,7 @@ class WebContentService:
         self,
         repository: WebContentRepository,
         text_censor_service: TextCensorService,
+        user_access_repository: WebUserAccessRepository,
     ) -> None:
         """
         Initialize the service.
@@ -28,15 +30,18 @@ class WebContentService:
         Args:
             repository: Repository for web content queries.
             text_censor_service: Service used to censor text for web output.
+            user_access_repository: Repository for web-session access checks.
         """
         self.repository = repository
         self.text_censor_service = text_censor_service
+        self.user_access_repository = user_access_repository
 
     def get_actions(
         self,
         query: PaginatedQuery,
         include_filters: bool = True,
         filter_keys: tuple[str, ...] | None = None,
+        current_user: DiscordWebUser | None = None,
     ) -> dict[str, Any]:
         """
         Build the JSON payload for the web actions table.
@@ -45,17 +50,25 @@ class WebContentService:
             query: Pagination, search, and filter parameters.
             include_filters: Whether to include filter metadata in the response.
             filter_keys: Optional subset of action filter groups to fetch.
+            current_user: Optional authenticated Discord web user.
 
         Returns:
             API response payload.
         """
         rows = self.repository.get_actions_page(query)
         total_count = self.repository.count_actions(query)
+        should_censor = self._should_censor(current_user)
         return {
             "items": [
                 {
-                    "display_filename": self._censor_text(row["filename"] or row["target"]),
-                    "display_username": self._censor_text(row["username"]),
+                    "display_filename": self._censor_text(
+                        row["filename"] or row["target"],
+                        should_censor=should_censor,
+                    ),
+                    "display_username": self._censor_text(
+                        row["username"],
+                        should_censor=should_censor,
+                    ),
                     "action": row["action"],
                     "timestamp": row["timestamp"],
                 }
@@ -73,6 +86,7 @@ class WebContentService:
         self,
         query: PaginatedQuery,
         include_filters: bool = True,
+        current_user: DiscordWebUser | None = None,
     ) -> dict[str, Any]:
         """
         Build the JSON payload for the favorites table.
@@ -80,17 +94,22 @@ class WebContentService:
         Args:
             query: Pagination, search, and filter parameters.
             include_filters: Whether to include filter metadata in the response.
+            current_user: Optional authenticated Discord web user.
 
         Returns:
             API response payload.
         """
         rows = self.repository.get_favorites_page(query)
         total_count = self.repository.count_favorites(query)
+        should_censor = self._should_censor(current_user)
         return {
             "items": [
                 {
                     "sound_id": row["sound_id"],
-                    "display_filename": self._censor_text(row["filename"]),
+                    "display_filename": self._censor_text(
+                        row["filename"],
+                        should_censor=should_censor,
+                    ),
                 }
                 for row in rows
             ],
@@ -102,6 +121,7 @@ class WebContentService:
         self,
         query: PaginatedQuery,
         include_filters: bool = True,
+        current_user: DiscordWebUser | None = None,
     ) -> dict[str, Any]:
         """
         Build the JSON payload for the all-sounds table.
@@ -109,17 +129,22 @@ class WebContentService:
         Args:
             query: Pagination, search, and filter parameters.
             include_filters: Whether to include filter metadata in the response.
+            current_user: Optional authenticated Discord web user.
 
         Returns:
             API response payload.
         """
         rows = self.repository.get_all_sounds_page(query)
         total_count = self.repository.count_all_sounds(query)
+        should_censor = self._should_censor(current_user)
         return {
             "items": [
                 {
                     "sound_id": row["sound_id"],
-                    "display_filename": self._censor_text(row["filename"]),
+                    "display_filename": self._censor_text(
+                        row["filename"],
+                        should_censor=should_censor,
+                    ),
                     "timestamp": row["timestamp"],
                 }
                 for row in rows
@@ -128,9 +153,19 @@ class WebContentService:
             "filters": self.repository.get_all_sound_filters() if include_filters else {},
         }
 
-    def _censor_text(self, value: str | None) -> str | None:
-        """Censor hateful text for web responses."""
+    def _censor_text(self, value: str | None, should_censor: bool) -> str | None:
+        """Censor hateful text for web responses when needed."""
+        if not should_censor:
+            return value
         return self.text_censor_service.censor_text(value)
+
+    def _should_censor(self, current_user: DiscordWebUser | None) -> bool:
+        """Return whether web labels should be censored for this request."""
+        if current_user is None:
+            return True
+        return not self.user_access_repository.has_voice_activity_for_usernames(
+            (current_user.username, current_user.global_name)
+        )
 
     @staticmethod
     def _calculate_total_pages(total_count: int, per_page: int) -> int:

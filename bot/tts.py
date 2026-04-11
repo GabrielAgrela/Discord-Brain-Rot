@@ -272,7 +272,8 @@ class TTS:
 
     async def speech_to_speech(self, input_audio_name, char="en", region="",
                                loading_message=None, requester_avatar_url=None, sts_thumbnail_url=None,
-                               requester_name="admin", guild_id: Optional[int] = None):
+                               requester_name="admin", guild_id: Optional[int] = None,
+                               allow_tts_interrupt: bool = False):
         boost_volume = 0
         
         filenames = Database().get_sounds_by_similarity(input_audio_name, guild_id=guild_id)
@@ -381,7 +382,8 @@ class TTS:
                                 original_message=original_sound_name, sts_char=char,
                                 loading_message=loading_message,
                                 requester_avatar_url=requester_avatar_url,
-                                sts_thumbnail_url=sts_thumbnail_url
+                                sts_thumbnail_url=sts_thumbnail_url,
+                                allow_tts_interrupt=allow_tts_interrupt,
                             )
 
                             self.update_last_request_time(guild_id=guild_id)

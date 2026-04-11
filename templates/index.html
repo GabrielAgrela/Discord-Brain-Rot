@@ -158,7 +158,17 @@
                 <div class="pagination">
                     <button id="prevPageActions" disabled>Prev</button>
                     <span class="pagination-info">
-                        <span id="currentPageActions">1</span> / <span id="totalPagesActions">{{ actions_data.get('total_pages', 1) }}</span>
+                        Page
+                        <input
+                            id="pageInputActions"
+                            class="pagination-page-input"
+                            type="number"
+                            min="1"
+                            max="{{ actions_data.get('total_pages', 1) or 1 }}"
+                            value="1"
+                            aria-label="Recent Actions page"
+                        >
+                        / <span id="totalPagesActions">{{ actions_data.get('total_pages', 1) }}</span>
                     </span>
                     <button id="nextPageActions" {% if actions_data.get('total_pages', 1) <= 1 %}disabled{% endif %}>Next</button>
                 </div>
@@ -204,7 +214,17 @@
                 <div class="pagination">
                     <button id="prevPageFavorites" disabled>Prev</button>
                     <span class="pagination-info">
-                        <span id="currentPageFavorites">1</span> / <span id="totalPagesFavorites">{{ favorites_data.get('total_pages', 1) }}</span>
+                        Page
+                        <input
+                            id="pageInputFavorites"
+                            class="pagination-page-input"
+                            type="number"
+                            min="1"
+                            max="{{ favorites_data.get('total_pages', 1) or 1 }}"
+                            value="1"
+                            aria-label="Favorites page"
+                        >
+                        / <span id="totalPagesFavorites">{{ favorites_data.get('total_pages', 1) }}</span>
                     </span>
                     <button id="nextPageFavorites" {% if favorites_data.get('total_pages', 1) <= 1 %}disabled{% endif %}>Next</button>
                 </div>
@@ -252,7 +272,17 @@
                 <div class="pagination">
                     <button id="prevPageAllSounds" disabled>Prev</button>
                     <span class="pagination-info">
-                        <span id="currentPageAllSounds">1</span> / <span id="totalPagesAllSounds">{{ all_sounds_data.get('total_pages', 1) }}</span>
+                        Page
+                        <input
+                            id="pageInputAllSounds"
+                            class="pagination-page-input"
+                            type="number"
+                            min="1"
+                            max="{{ all_sounds_data.get('total_pages', 1) or 1 }}"
+                            value="1"
+                            aria-label="All Sounds page"
+                        >
+                        / <span id="totalPagesAllSounds">{{ all_sounds_data.get('total_pages', 1) }}</span>
                     </span>
                     <button id="nextPageAllSounds" {% if all_sounds_data.get('total_pages', 1) <= 1 %}disabled{% endif %}>Next</button>
                 </div>
@@ -660,11 +690,30 @@
             lastRenderedFilters[endpoint] = serializedFilters;
         }
 
-        function fetchData(endpoint, page, tableBodyId, currentPageId, totalPagesId, prevButtonId, nextButtonId, searchInputId) {
-            const tableBody = document.getElementById(tableBodyId);
-            const container = tableBody ? tableBody.closest('.table-container') : null;
+        function hasRenderableFilterPayload(endpoint, filters) {
+            const keys = filterColumnKeysByEndpoint[endpoint] || [];
+            return keys.length > 0 && keys.every(key => Array.isArray(filters?.[key]));
+        }
+
+        function updatePaginationControls(page, totalPages, totalPagesId, prevButtonId, nextButtonId, pageInputId) {
+            const totalPageCount = Number.isFinite(totalPages) ? totalPages : 0;
+            const pageInput = document.getElementById(pageInputId);
             const prevButton = document.getElementById(prevButtonId);
             const nextButton = document.getElementById(nextButtonId);
+
+            document.getElementById(totalPagesId).textContent = totalPageCount;
+            if (pageInput) {
+                pageInput.value = page;
+                pageInput.max = Math.max(1, totalPageCount);
+            }
+
+            prevButton.disabled = (page <= 1);
+            nextButton.disabled = (page >= totalPageCount);
+        }
+
+        function fetchData(endpoint, page, tableBodyId, totalPagesId, prevButtonId, nextButtonId, pageInputId, searchInputId) {
+            const tableBody = document.getElementById(tableBodyId);
+            const container = tableBody ? tableBody.closest('.table-container') : null;
             const searchInput = document.getElementById(searchInputId);
             const searchQuery = searchInput ? searchInput.value.trim() : '';
 
@@ -675,17 +724,18 @@
             return fetch(apiUrl)
                 .then(response => response.json())
                 .then(data => {
-                    if (endpoint === 'actions' && !pendingInitialRenderEndpoints.has(endpoint)) {
+                    if (endpoint === 'actions' && hasRenderableFilterPayload(endpoint, data.filters) && !pendingInitialRenderEndpoints.has(endpoint)) {
                         renderFilterControls(endpoint, data.filters || {}, fetchActions);
                     }
 
                     const hasNewEntries = JSON.stringify(data.items) !== JSON.stringify(lastFetchedData[endpoint]);
+                    updatePaginationControls(page, data.total_pages, totalPagesId, prevButtonId, nextButtonId, pageInputId);
 
                     if (hasNewEntries) {
                         lastFetchedData[endpoint] = data.items;
 
                         const renderFetchedData = () => {
-                            if (endpoint === 'actions') {
+                            if (endpoint === 'actions' && hasRenderableFilterPayload(endpoint, data.filters)) {
                                 renderFilterControls(endpoint, data.filters || {}, fetchActions);
                             }
 
@@ -754,12 +804,6 @@
                                 tableBody.appendChild(row);
                             });
 
-                            document.getElementById(currentPageId).textContent = page;
-                            document.getElementById(totalPagesId).textContent = data.total_pages;
-
-                            prevButton.disabled = (page <= 1);
-                            nextButton.disabled = (page >= data.total_pages);
-
                             applyTableGeometry(endpoint);
 
                             const pageSizeChanged = updateItemsPerPage(endpoint);
@@ -816,34 +860,67 @@
             nextButton.addEventListener('touchend', event => handleButtonClick(nextButton, true, event), { passive: false });
         }
 
-        function fetchActions(increment = null, forcePageOne = false) {
-            if (forcePageOne) {
-                currentPageActions = 1;
-            } else {
-                if (increment === true) currentPageActions++;
-                else if (increment === false && currentPageActions > 1) currentPageActions--;
+        function setupPageInput(pageInputId, fetchFunction) {
+            const pageInput = document.getElementById(pageInputId);
+            if (!pageInput) {
+                return;
             }
-            return fetchData('actions', currentPageActions, 'actionsTableBody', 'currentPageActions', 'totalPagesActions', 'prevPageActions', 'nextPageActions', 'searchActions');
+
+            let requestInFlight = false;
+
+            pageInput.addEventListener('change', async () => {
+                if (requestInFlight) {
+                    return;
+                }
+
+                const requestedPage = Number.parseInt(pageInput.value, 10);
+                const maxPage = Number.parseInt(pageInput.max, 10) || 1;
+                const page = Math.min(Math.max(1, requestedPage || 1), maxPage);
+
+                requestInFlight = true;
+                pageInput.disabled = true;
+                try {
+                    await fetchFunction(page);
+                } finally {
+                    pageInput.disabled = false;
+                    requestInFlight = false;
+                }
+            });
+        }
+
+        function resolveRequestedPage(currentPage, increment, forcePageOne) {
+            if (forcePageOne) {
+                return 1;
+            }
+
+            if (Number.isInteger(increment)) {
+                return Math.max(1, increment);
+            }
+
+            if (increment === true) {
+                return currentPage + 1;
+            }
+
+            if (increment === false && currentPage > 1) {
+                return currentPage - 1;
+            }
+
+            return currentPage;
+        }
+
+        function fetchActions(increment = null, forcePageOne = false) {
+            currentPageActions = resolveRequestedPage(currentPageActions, increment, forcePageOne);
+            return fetchData('actions', currentPageActions, 'actionsTableBody', 'totalPagesActions', 'prevPageActions', 'nextPageActions', 'pageInputActions', 'searchActions');
         }
 
         function fetchFavorites(increment = null, forcePageOne = false) {
-            if (forcePageOne) {
-                currentPageFavorites = 1;
-            } else {
-                if (increment === true) currentPageFavorites++;
-                else if (increment === false && currentPageFavorites > 1) currentPageFavorites--;
-            }
-            return fetchData('favorites', currentPageFavorites, 'favoritesTableBody', 'currentPageFavorites', 'totalPagesFavorites', 'prevPageFavorites', 'nextPageFavorites', 'searchFavorites');
+            currentPageFavorites = resolveRequestedPage(currentPageFavorites, increment, forcePageOne);
+            return fetchData('favorites', currentPageFavorites, 'favoritesTableBody', 'totalPagesFavorites', 'prevPageFavorites', 'nextPageFavorites', 'pageInputFavorites', 'searchFavorites');
         }
 
         function fetchAllSounds(increment = null, forcePageOne = false) {
-            if (forcePageOne) {
-                currentPageAllSounds = 1;
-            } else {
-                if (increment === true) currentPageAllSounds++;
-                else if (increment === false && currentPageAllSounds > 1) currentPageAllSounds--;
-            }
-            return fetchData('all_sounds', currentPageAllSounds, 'allSoundsTableBody', 'currentPageAllSounds', 'totalPagesAllSounds', 'prevPageAllSounds', 'nextPageAllSounds', 'searchAllSounds');
+            currentPageAllSounds = resolveRequestedPage(currentPageAllSounds, increment, forcePageOne);
+            return fetchData('all_sounds', currentPageAllSounds, 'allSoundsTableBody', 'totalPagesAllSounds', 'prevPageAllSounds', 'nextPageAllSounds', 'pageInputAllSounds', 'searchAllSounds');
         }
 
         const fetchersByEndpoint = {
@@ -881,6 +958,9 @@
         setupPagination('prevPageActions', 'nextPageActions', fetchActions);
         setupPagination('prevPageFavorites', 'nextPageFavorites', fetchFavorites);
         setupPagination('prevPageAllSounds', 'nextPageAllSounds', fetchAllSounds);
+        setupPageInput('pageInputActions', fetchActions);
+        setupPageInput('pageInputFavorites', fetchFavorites);
+        setupPageInput('pageInputAllSounds', fetchAllSounds);
 
         const loginModal = document.getElementById('loginModal');
         const loginModalClose = document.getElementById('loginModalClose');
@@ -989,7 +1069,8 @@
 
         setInterval(() => {
             const isInteractingWithFilters = document.activeElement && document.activeElement.classList.contains('filter-select');
-            if (isInteractingWithFilters) {
+            const isEditingPageInput = document.activeElement && document.activeElement.classList.contains('pagination-page-input');
+            if (isInteractingWithFilters || isEditingPageInput) {
                 return;
             }
             Promise.all([fetchActions(), fetchFavorites(), fetchAllSounds()]);

@@ -257,7 +257,6 @@ async def test_process_playback_queue_request_marks_played_and_starts_audio(tmp_
         play_audio=AsyncMock(),
     )
     action_logger = Mock()
-    sleep_fn = AsyncMock()
 
     sound_file = tmp_path / "test.mp3"
     sound_file.write_bytes(b"fake mp3 data")
@@ -269,7 +268,6 @@ async def test_process_playback_queue_request_marks_played_and_starts_audio(tmp_
         db=FakeDatabase(conn),
         sound_folder=tmp_path,
         action_logger_factory=lambda: action_logger,
-        sleep_fn=sleep_fn,
         logger=lambda _: None,
     )
 
@@ -281,7 +279,70 @@ async def test_process_playback_queue_request_marks_played_and_starts_audio(tmp_
         123,
         guild_id=42,
     )
-    sleep_fn.assert_awaited_once_with(1)
+    assert conn.execute(
+        "SELECT played_at FROM playback_queue WHERE id = 1"
+    ).fetchone()[0] is not None
+
+
+@pytest.mark.asyncio
+async def test_process_playback_queue_request_falls_back_to_original_filename(tmp_path):
+    conn = sqlite3.connect(":memory:")
+    conn.execute(
+        """
+        CREATE TABLE playback_queue (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            sound_filename TEXT NOT NULL,
+            request_username TEXT,
+            request_user_id TEXT,
+            requested_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            played_at DATETIME
+        )
+        """
+    )
+    conn.execute(
+        "INSERT INTO playback_queue (id, guild_id, sound_filename, request_username, request_user_id) VALUES (?, ?, ?, ?, ?)",
+        (1, 42, "renamed.mp3", "Discord User", "123"),
+    )
+    conn.commit()
+
+    class FakeDatabase:
+        def __init__(self, connection):
+            self.conn = connection
+            self.cursor = connection.cursor()
+
+        def get_sound(self, sound_filename, guild_id=None):
+            return (777, "original.mp3", sound_filename)
+
+    guild = SimpleNamespace(id=42)
+    channel = object()
+    behavior = SimpleNamespace(
+        get_largest_voice_channel=Mock(return_value=channel),
+        play_audio=AsyncMock(),
+    )
+    action_logger = Mock()
+
+    original_file = tmp_path / "original.mp3"
+    original_file.write_bytes(b"fake mp3 data")
+
+    result = await process_playback_queue_request(
+        (1, 42, "renamed.mp3", "Discord User", "123"),
+        bot=SimpleNamespace(get_guild=lambda guild_id: guild if guild_id == 42 else None),
+        behavior=behavior,
+        db=FakeDatabase(conn),
+        sound_folder=tmp_path,
+        action_logger_factory=lambda: action_logger,
+        logger=lambda _: None,
+    )
+
+    assert result is True
+    behavior.play_audio.assert_awaited_once_with(channel, "original.mp3", "Discord User")
+    action_logger.insert.assert_called_once_with(
+        "Discord User",
+        "play_request",
+        777,
+        guild_id=42,
+    )
     assert conn.execute(
         "SELECT played_at FROM playback_queue WHERE id = 1"
     ).fetchone()[0] is not None
@@ -329,7 +390,6 @@ async def test_process_playback_queue_request_marks_played_when_sound_is_missing
         db=FakeDatabase(conn),
         sound_folder=".",
         action_logger_factory=None,
-        sleep_fn=AsyncMock(),
         logger=lambda _: None,
     )
 

@@ -112,6 +112,7 @@ class VoiceTransformationService:
             sts_thumbnail_url=sts_thumbnail_url,
             requester_name=requester_name,
             guild_id=guild_id,
+            allow_tts_interrupt=True,
         ))
         
     async def isolate_voice(self, sound_name: str, guild_id: Optional[int] = None, requested_by=None):

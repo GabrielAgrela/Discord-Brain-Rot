@@ -35,6 +35,7 @@ from bot.services.web_playback import (
     ensure_playback_queue_identity_columns,
     process_playback_queue_request,
 )
+from config import PLAYBACK_QUEUE_INTERVAL
 import random
 import time
 from collections import defaultdict
@@ -77,7 +78,7 @@ voice_activity_repo = VoiceActivityRepository()
 
 
 # --- Background Task to Handle Web Playback Requests ---
-@tasks.loop(seconds=5.0)
+@tasks.loop(seconds=PLAYBACK_QUEUE_INTERVAL)
 async def check_playback_queue():
     """Process queued playback requests from the web interface."""
     try:

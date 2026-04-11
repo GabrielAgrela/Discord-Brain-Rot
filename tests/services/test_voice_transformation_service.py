@@ -43,6 +43,17 @@ class TestVoiceTransformationService:
             await service.sts_EL(user, "clip", "ventura")
 
             action_repo.insert.assert_called_once_with("gabi", "sts_EL", "17", guild_id=123)
+            tts_engine.speech_to_speech.assert_awaited_once_with(
+                "clip",
+                "ventura",
+                "",
+                loading_message=None,
+                requester_avatar_url=None,
+                sts_thumbnail_url=None,
+                requester_name="Gabi",
+                guild_id=123,
+                allow_tts_interrupt=True,
+            )
 
     @pytest.mark.asyncio
     async def test_isolate_voice_logs_actor_and_falls_back_to_sound_name(self):

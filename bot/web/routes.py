@@ -26,6 +26,7 @@ from bot.models.web import AnalyticsQuery, DiscordWebUser, PaginatedQuery
 from bot.repositories.sound import SoundRepository
 from bot.repositories.web_analytics import WebAnalyticsRepository
 from bot.repositories.web_content import WebContentRepository
+from bot.repositories.web_user_access import WebUserAccessRepository
 from bot.services.web_analytics import WebAnalyticsService
 from bot.services.web_auth import DiscordOAuthError, WebAuthService
 from bot.services.web_content import WebContentService
@@ -141,19 +142,35 @@ def register_web_routes(app: Flask) -> None:
             "false",
             "no",
         }
-        return jsonify(_get_web_content_service().get_actions(query, include_filters=include_filters))
+        return jsonify(
+            _get_web_content_service().get_actions(
+                query,
+                include_filters=include_filters,
+                current_user=_get_current_discord_user(),
+            )
+        )
 
     @app.route("/api/favorites")
     def get_favorites() -> Any:
         """Return paginated favorite sounds for the web soundboard."""
         query = _build_paginated_query(filter_names=("sound",))
-        return jsonify(_get_web_content_service().get_favorites(query))
+        return jsonify(
+            _get_web_content_service().get_favorites(
+                query,
+                current_user=_get_current_discord_user(),
+            )
+        )
 
     @app.route("/api/all_sounds")
     def get_all_sounds() -> Any:
         """Return paginated sound inventory for the web soundboard."""
         query = _build_paginated_query(filter_names=("sound", "date"))
-        return jsonify(_get_web_content_service().get_all_sounds(query))
+        return jsonify(
+            _get_web_content_service().get_all_sounds(
+                query,
+                current_user=_get_current_discord_user(),
+            )
+        )
 
     @app.route("/api/play_sound", methods=["POST"])
     @_require_discord_login_api
@@ -193,7 +210,12 @@ def register_web_routes(app: Flask) -> None:
             days=_parse_int_arg("days", 7),
             limit=_parse_int_arg("limit", 10),
         )
-        return jsonify(_get_web_analytics_service().get_top_users(query))
+        return jsonify(
+            _get_web_analytics_service().get_top_users(
+                query,
+                current_user=_get_current_discord_user(),
+            )
+        )
 
     @app.route("/api/analytics/top_sounds")
     def get_analytics_top_sounds() -> Any:
@@ -202,7 +224,12 @@ def register_web_routes(app: Flask) -> None:
             days=_parse_int_arg("days", 7),
             limit=_parse_int_arg("limit", 10),
         )
-        return jsonify(_get_web_analytics_service().get_top_sounds(query))
+        return jsonify(
+            _get_web_analytics_service().get_top_sounds(
+                query,
+                current_user=_get_current_discord_user(),
+            )
+        )
 
     @app.route("/api/analytics/activity_heatmap")
     def get_analytics_heatmap() -> Any:
@@ -227,7 +254,8 @@ def register_web_routes(app: Flask) -> None:
         """Return recent activity rows for the analytics dashboard."""
         return jsonify(
             _get_web_analytics_service().get_recent_activity(
-                _parse_int_arg("limit", 20)
+                _parse_int_arg("limit", 20),
+                current_user=_get_current_discord_user(),
             )
         )
 
@@ -239,23 +267,33 @@ def _get_auth_service() -> WebAuthService:
 
 def _get_web_content_service() -> WebContentService:
     """Build a content service for the current request config."""
+    db_path = current_app.config["DATABASE_PATH"]
     return WebContentService(
         repository=WebContentRepository(
-            db_path=current_app.config["DATABASE_PATH"],
+            db_path=db_path,
             use_shared=False,
         ),
         text_censor_service=current_app.extensions["web_text_censor_service"],
+        user_access_repository=WebUserAccessRepository(
+            db_path=db_path,
+            use_shared=False,
+        ),
     )
 
 
 def _get_web_analytics_service() -> WebAnalyticsService:
     """Build an analytics service for the current request config."""
+    db_path = current_app.config["DATABASE_PATH"]
     return WebAnalyticsService(
         repository=WebAnalyticsRepository(
-            db_path=current_app.config["DATABASE_PATH"],
+            db_path=db_path,
             use_shared=False,
         ),
         text_censor_service=current_app.extensions["web_text_censor_service"],
+        user_access_repository=WebUserAccessRepository(
+            db_path=db_path,
+            use_shared=False,
+        ),
     )
 
 
@@ -336,15 +374,27 @@ def _build_initial_soundboard_data() -> dict[str, dict[str, Any]]:
 
     return {
         "actions": _prepare_initial_payload(
-            service.get_actions(base_query, filter_keys=("action", "user")),
+            service.get_actions(
+                base_query,
+                filter_keys=("action", "user"),
+                current_user=_get_current_discord_user(),
+            ),
             filter_keys=("action", "user"),
         ),
         "favorites": _prepare_initial_payload(
-            service.get_favorites(base_query, include_filters=False),
+            service.get_favorites(
+                base_query,
+                include_filters=False,
+                current_user=_get_current_discord_user(),
+            ),
             filter_keys=(),
         ),
         "all_sounds": _prepare_initial_payload(
-            service.get_all_sounds(base_query, include_filters=False),
+            service.get_all_sounds(
+                base_query,
+                include_filters=False,
+                current_user=_get_current_discord_user(),
+            ),
             filter_keys=(),
         ),
     }

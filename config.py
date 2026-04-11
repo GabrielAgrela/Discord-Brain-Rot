@@ -8,6 +8,18 @@ that were previously scattered across the codebase.
 import os
 from pathlib import Path
 
+
+def _env_float(name: str, default: float) -> float:
+    """Parse a float environment variable with a fallback."""
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    try:
+        return float(raw_value.strip())
+    except ValueError:
+        return default
+
+
 # ============================================================================
 # Paths
 # ============================================================================
@@ -180,7 +192,7 @@ PROGRESS_UPDATE_INTERVAL = 2
 # ============================================================================
 
 # Playback queue check interval (seconds)
-PLAYBACK_QUEUE_INTERVAL = 5.0
+PLAYBACK_QUEUE_INTERVAL = _env_float("PLAYBACK_QUEUE_INTERVAL", 0.25)
 
 # Mute duration default (seconds)
 DEFAULT_MUTE_DURATION = 1800  # 30 minutes

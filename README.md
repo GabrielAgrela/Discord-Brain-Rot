@@ -104,10 +104,12 @@ This README is based on the current codebase behavior (not historical README ass
 ### Web Soundboard
 - `GET /` shows recent actions, favorites, and all sounds.
 - Each web table now includes prepopulated per-column filters so you can narrow by action/user/sound/date without losing server-side pagination.
-- The web soundboard and analytics dashboard now replace matched racist/hateful usernames and sound titles with `[censored]`.
+- Each web table lets you enter a target page directly from its pagination controls.
+- The web soundboard and analytics dashboard replace matched racist/hateful usernames and sound titles with `[censored]` unless the logged-in Discord user has prior tracked voice activity.
 - Queue playback from web via `POST /api/play_sound` into `playback_queue`.
 - Web sound playback now requires Discord login; queued requests carry the authenticated Discord user so playback is logged as that user instead of a bot/system account.
 - Web play buttons use `sound_id` under the hood so censored labels still queue the real sound correctly.
+- Bot-side web playback polling defaults to `PLAYBACK_QUEUE_INTERVAL=0.25` seconds for low-latency play-button response.
 - If `DEFAULT_GUILD_ID` is unset, web playback now auto-resolves the guild only when exactly one known guild ID exists in stable bot data (`guild_settings`, `sounds`, or `actions`); `playback_queue` is used only as a last-resort fallback when those tables are empty, and multi-guild callers must send `guild_id` explicitly.
 - Bot background task consumes queued playback requests.
 
@@ -253,6 +255,7 @@ This README is based on the current codebase behavior (not historical README ass
 - `DISCORD_OAUTH_CLIENT_ID` (required to enable Discord login on the web UI)
 - `DISCORD_OAUTH_CLIENT_SECRET` (required to enable Discord login on the web UI)
 - `DISCORD_OAUTH_REDIRECT_URI` (recommended public callback URL for Discord OAuth; falls back to Flask external URL generation if unset)
+- `PLAYBACK_QUEUE_INTERVAL` (web play-button queue polling interval in seconds, default `0.25`)
 - `ENABLE_VENTURA` (`true`/`false`, default `true`)
 - `OWNER_USER_IDS` (comma-separated Discord user IDs allowed to run admin-only commands)
 - `AUDIO_LATENCY_MODE` (`low_latency` default, or `balanced` / `high_quality`)
