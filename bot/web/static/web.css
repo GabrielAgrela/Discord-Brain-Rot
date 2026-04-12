@@ -152,7 +152,7 @@ a {
 .nav-brand-mark {
     width: 48px;
     height: 48px;
-    border-radius: 15px;
+    border-radius: 8px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -163,6 +163,12 @@ a {
     font-weight: 700;
     letter-spacing: 0.12em;
     text-transform: uppercase;
+}
+
+.nav-brand-mark img {
+    width: 34px;
+    height: 34px;
+    display: block;
 }
 
 .nav-brand-copy {
@@ -287,6 +293,7 @@ a {
 }
 
 .auth-user-link {
+    position: relative;
     display: inline-flex;
     align-items: center;
     gap: 0.75rem;
@@ -598,6 +605,65 @@ a {
 
 .tables-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.web-controls {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 0.65rem;
+    margin: 0;
+}
+
+.web-control-button {
+    width: 2.65rem;
+    height: 2.65rem;
+    padding: 0;
+    border: 1px solid var(--ink);
+    border-radius: 8px;
+    background: var(--ink);
+    color: var(--paper);
+    box-shadow: 3px 3px 0 rgba(23, 18, 13, 0.14);
+    font-size: 1rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition:
+        transform 0.16s ease,
+        box-shadow 0.16s ease,
+        background 0.16s ease,
+        border-color 0.16s ease,
+        color 0.16s ease,
+        opacity 0.16s ease;
+}
+
+.web-control-button:hover:not(:disabled) {
+    transform: translate(-1px, -1px);
+    box-shadow: 5px 5px 0 rgba(23, 18, 13, 0.14);
+}
+
+.web-control-button:disabled {
+    cursor: not-allowed;
+    opacity: 0.56;
+}
+
+.web-control-button.login-required {
+    background: transparent;
+    border-color: rgba(197, 72, 52, 0.5);
+    color: var(--accent);
+    box-shadow: none;
+}
+
+.web-control-button.queued {
+    background: var(--success);
+    border-color: var(--success);
+    box-shadow: 3px 3px 0 rgba(38, 112, 77, 0.16);
+}
+
+.web-control-button.error {
+    background: var(--error);
+    border-color: var(--error);
+    color: var(--paper);
+    box-shadow: 3px 3px 0 rgba(164, 43, 35, 0.16);
 }
 
 .stats-grid {
@@ -1848,19 +1914,22 @@ body.page-soundboard .tables-grid > .card {
     }
 
     .nav-links {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 0.45rem;
-        overflow: visible;
+        display: flex;
+        flex-wrap: nowrap;
+        align-items: center;
+        gap: 0.35rem;
+        overflow-x: auto;
+        overflow-y: hidden;
         padding: 0;
     }
 
     .nav-link {
         gap: 0.3rem;
         justify-content: center;
-        min-width: 0;
-        padding: 0.64rem 0.55rem;
-        font-size: 0.72rem;
+        flex: 1 1 0;
+        min-width: 5.65rem;
+        padding: 0.64rem 0.42rem;
+        font-size: 0.68rem;
     }
 
     .nav-link-index {
@@ -1889,26 +1958,51 @@ body.page-soundboard .tables-grid > .card {
     }
 
     .auth-user-link {
-        gap: 0.55rem;
-        min-width: 0;
-        padding: 0.28rem 0.72rem 0.28rem 0.28rem;
+        flex: 0 0 2.45rem;
+        width: 2.45rem;
+        height: 2.45rem;
+        justify-content: center;
+        gap: 0;
+        min-width: 2.45rem;
+        padding: 0.18rem;
         box-shadow: 3px 3px 0 rgba(68, 42, 18, 0.1);
     }
 
     .auth-avatar {
-        width: 38px;
-        height: 38px;
+        width: 34px;
+        height: 34px;
     }
 
-    .auth-user-name {
-        font-size: 0.76rem;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+    .auth-user-link::after {
+        content: "🚪";
+        position: absolute;
+        right: 0.18rem;
+        bottom: 0.12rem;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 0.95rem;
+        height: 0.95rem;
+        border-radius: 999px;
+        background: rgba(255, 252, 247, 0.92);
+        border: 1px solid rgba(23, 18, 13, 0.1);
+        font-size: 0.58rem;
+        line-height: 1;
+        box-shadow: 0 1px 3px rgba(23, 18, 13, 0.18);
     }
 
-    .auth-user-logout {
-        font-size: 0.62rem;
+    .auth-user-meta {
+        display: none;
+    }
+
+    .web-controls {
+        flex: 0 0 auto;
+        gap: 0.3rem;
+    }
+
+    .web-control-button {
+        width: 2.45rem;
+        height: 2.45rem;
     }
 
     .hero-panel-title,

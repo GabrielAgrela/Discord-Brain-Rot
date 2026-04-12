@@ -160,6 +160,8 @@ class Database:
             self._ensure_column("sound_lists", "guild_id TEXT", "guild_id")
             self._ensure_column("playback_queue", "request_username TEXT", "request_username")
             self._ensure_column("playback_queue", "request_user_id TEXT", "request_user_id")
+            self._ensure_column("playback_queue", "request_type TEXT DEFAULT 'play_sound'", "request_type")
+            self._ensure_column("playback_queue", "control_action TEXT", "control_action")
 
             # Helpful indexes for scoped queries.
             self.conn.execute("CREATE INDEX IF NOT EXISTS idx_actions_guild_id ON actions(guild_id)")

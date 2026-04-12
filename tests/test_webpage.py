@@ -1,5 +1,5 @@
 import sqlite3
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -230,6 +230,82 @@ def test_play_sound_endpoint_requires_discord_login(web_client):
         "error": "Discord login required",
         "login_url": "/login?next=/api/play_sound",
     }
+
+
+def test_web_control_endpoint_queues_toggle_mute_request(web_client):
+    client, db_path = web_client
+    _login_web_user(client, username="discord-user", global_name="Discord User")
+
+    response = client.post("/api/web_control", json={"action": "toggle_mute", "guild_id": "359077662742020107"})
+
+    assert response.status_code == 200
+    assert response.get_json() == {"message": "Control request queued"}
+
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute(
+            """
+            SELECT guild_id, sound_filename, request_username, request_user_id, request_type, control_action
+            FROM playback_queue
+            """
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert row == (
+        359077662742020107,
+        "__web_control__",
+        "Discord User",
+        "123",
+        "toggle_mute",
+        "toggle_mute",
+    )
+
+
+def test_web_control_endpoint_requires_discord_login(web_client):
+    client, _ = web_client
+
+    response = client.post("/api/web_control", json={"action": "mute_30_minutes"})
+
+    assert response.status_code == 401
+    assert response.get_json() == {
+        "error": "Discord login required",
+        "login_url": "/login?next=/api/web_control",
+    }
+
+
+def test_web_control_state_endpoint_reports_current_mute_state(web_client):
+    client, db_path = web_client
+    _login_web_user(client, username="discord-user", global_name="Discord User")
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO guild_settings (guild_id) VALUES (?)",
+            ("359077662742020107",),
+        )
+        conn.execute(
+            "INSERT INTO actions (username, action, target, timestamp, guild_id) VALUES (?, ?, ?, ?, ?)",
+            (
+                "Discord User",
+                "mute_30_minutes",
+                "",
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "359077662742020107",
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    response = client.get("/api/web_control_state?guild_id=359077662742020107")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["guild_id"] == 359077662742020107
+    assert payload["mute"]["is_muted"] is True
+    assert 0 < payload["mute"]["remaining_seconds"] <= 1800
+    assert payload["mute"]["toggle_action"] == "toggle_mute"
 
 
 def test_login_route_marks_session_permanent(web_client, monkeypatch):

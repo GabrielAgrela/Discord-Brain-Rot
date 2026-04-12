@@ -86,7 +86,14 @@ async def check_playback_queue():
         cursor = db.cursor
         cursor.execute(
             """
-            SELECT id, guild_id, sound_filename, request_username, request_user_id
+            SELECT
+                id,
+                guild_id,
+                sound_filename,
+                request_username,
+                request_user_id,
+                request_type,
+                control_action
             FROM playback_queue
             WHERE played_at IS NULL
             ORDER BY requested_at ASC

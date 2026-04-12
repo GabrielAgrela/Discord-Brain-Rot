@@ -1,4 +1,5 @@
 import sqlite3
+from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -8,7 +9,9 @@ import pytest
 from bot.models.web import DiscordWebUser
 from bot.services.web_playback import (
     WebPlaybackService,
+    get_web_control_state,
     process_playback_queue_request,
+    queue_control_request,
     queue_playback_request,
 )
 
@@ -220,6 +223,140 @@ def test_web_playback_service_queues_authenticated_user_request(tmp_path):
     assert row == (359077662742020107, "test.mp3", "Discord User", "123")
 
 
+def test_queue_control_request_adds_control_columns_and_queues_action(tmp_path):
+    db_path = tmp_path / "web.db"
+    _create_web_tables(db_path)
+
+    row_id = queue_control_request(
+        control_action="slap",
+        requested_guild_id="359077662742020107",
+        db_path=str(db_path),
+        request_username="Discord User",
+        request_user_id="123",
+        env={},
+    )
+
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute(
+            """
+            SELECT
+                guild_id,
+                sound_filename,
+                request_username,
+                request_user_id,
+                request_type,
+                control_action
+            FROM playback_queue
+            WHERE id = ?
+            """,
+            (row_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert row == (
+        359077662742020107,
+        "__web_control__",
+        "Discord User",
+        "123",
+        "slap",
+        "slap",
+    )
+
+
+def test_queue_control_request_rejects_unknown_action(tmp_path):
+    db_path = tmp_path / "web.db"
+    _create_web_tables(db_path)
+
+    with pytest.raises(ValueError, match="Invalid web control action"):
+        queue_control_request(
+            control_action="restart_server",
+            requested_guild_id="359077662742020107",
+            db_path=str(db_path),
+            request_username="Discord User",
+            request_user_id="123",
+            env={},
+        )
+
+
+def test_get_web_control_state_reports_active_mute_from_latest_action(tmp_path):
+    db_path = tmp_path / "web.db"
+    _create_web_tables(db_path)
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO guild_settings (guild_id) VALUES (?)",
+            ("359077662742020107",),
+        )
+        conn.execute(
+            "INSERT INTO actions (username, action, target, timestamp, guild_id) VALUES (?, ?, ?, ?, ?)",
+            (
+                "Discord User",
+                "mute_30_minutes",
+                "",
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "359077662742020107",
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    state = get_web_control_state(
+        requested_guild_id=None,
+        db_path=str(db_path),
+        env={},
+    )
+
+    assert state["mute"]["is_muted"] is True
+    assert 0 < state["mute"]["remaining_seconds"] <= 1800
+
+
+def test_get_web_control_state_reports_unmuted_after_unmute_action(tmp_path):
+    db_path = tmp_path / "web.db"
+    _create_web_tables(db_path)
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO guild_settings (guild_id) VALUES (?)",
+            ("359077662742020107",),
+        )
+        conn.executemany(
+            "INSERT INTO actions (username, action, target, timestamp, guild_id) VALUES (?, ?, ?, ?, ?)",
+            [
+                (
+                    "Discord User",
+                    "mute_30_minutes",
+                    "",
+                    (datetime.now() - timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S"),
+                    "359077662742020107",
+                ),
+                (
+                    "Discord User",
+                    "unmute",
+                    "",
+                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "359077662742020107",
+                ),
+            ],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    state = get_web_control_state(
+        requested_guild_id=None,
+        db_path=str(db_path),
+        env={},
+    )
+
+    assert state["mute"]["is_muted"] is False
+    assert state["mute"]["remaining_seconds"] == 0
+
+
 @pytest.mark.asyncio
 async def test_process_playback_queue_request_marks_played_and_starts_audio(tmp_path):
     conn = sqlite3.connect(":memory:")
@@ -398,3 +535,276 @@ async def test_process_playback_queue_request_marks_played_when_sound_is_missing
     assert conn.execute(
         "SELECT played_at FROM playback_queue WHERE id = 1"
     ).fetchone()[0] is not None
+
+
+@pytest.mark.asyncio
+async def test_process_playback_queue_request_executes_slap_control(tmp_path, monkeypatch):
+    conn = sqlite3.connect(":memory:")
+    conn.execute(
+        """
+        CREATE TABLE playback_queue (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            sound_filename TEXT NOT NULL,
+            request_username TEXT,
+            request_user_id TEXT,
+            request_type TEXT,
+            control_action TEXT,
+            requested_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            played_at DATETIME
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO playback_queue (
+            id,
+            guild_id,
+            sound_filename,
+            request_username,
+            request_user_id,
+            request_type,
+            control_action
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (1, 42, "__web_control__", "Discord User", "123", "slap", "slap"),
+    )
+    conn.commit()
+
+    class FakeDatabase:
+        def __init__(self, connection):
+            self.conn = connection
+            self.cursor = connection.cursor()
+
+        def get_sounds(self, slap=None, num_sounds=25, guild_id=None):
+            return [(456, "slap-original.mp3", "slap.mp3")]
+
+    guild = SimpleNamespace(id=42)
+    channel = object()
+    audio_service = SimpleNamespace(
+        get_largest_voice_channel=Mock(return_value=channel),
+        play_slap=AsyncMock(),
+    )
+    behavior = SimpleNamespace(_audio_service=audio_service)
+    action_logger = Mock()
+    monkeypatch.setattr("bot.services.web_playback.random.choice", lambda items: items[0])
+
+    result = await process_playback_queue_request(
+        (1, 42, "__web_control__", "Discord User", "123", "slap", "slap"),
+        bot=SimpleNamespace(get_guild=lambda guild_id: guild if guild_id == 42 else None),
+        behavior=behavior,
+        db=FakeDatabase(conn),
+        sound_folder=tmp_path,
+        action_logger_factory=lambda: action_logger,
+        logger=lambda _: None,
+    )
+
+    assert result is True
+    audio_service.play_slap.assert_awaited_once_with(channel, "slap.mp3", "Discord User")
+    action_logger.insert.assert_called_once_with(
+        "Discord User",
+        "play_slap",
+        456,
+        guild_id=42,
+    )
+    assert conn.execute(
+        "SELECT played_at FROM playback_queue WHERE id = 1"
+    ).fetchone()[0] is not None
+
+
+@pytest.mark.asyncio
+async def test_process_playback_queue_request_executes_mute_control():
+    conn = sqlite3.connect(":memory:")
+    conn.execute(
+        """
+        CREATE TABLE playback_queue (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            sound_filename TEXT NOT NULL,
+            request_username TEXT,
+            request_user_id TEXT,
+            request_type TEXT,
+            control_action TEXT,
+            requested_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            played_at DATETIME
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO playback_queue (
+            id,
+            guild_id,
+            sound_filename,
+            request_username,
+            request_user_id,
+            request_type,
+            control_action
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (1, 42, "__web_control__", "Discord User", "123", "mute_30_minutes", "mute_30_minutes"),
+    )
+    conn.commit()
+
+    class FakeDatabase:
+        def __init__(self, connection):
+            self.conn = connection
+            self.cursor = connection.cursor()
+
+    guild = SimpleNamespace(id=42)
+    behavior = SimpleNamespace(activate_mute=AsyncMock())
+    action_logger = Mock()
+
+    result = await process_playback_queue_request(
+        (
+            1,
+            42,
+            "__web_control__",
+            "Discord User",
+            "123",
+            "mute_30_minutes",
+            "mute_30_minutes",
+        ),
+        bot=SimpleNamespace(get_guild=lambda guild_id: guild if guild_id == 42 else None),
+        behavior=behavior,
+        db=FakeDatabase(conn),
+        sound_folder=".",
+        action_logger_factory=lambda: action_logger,
+        logger=lambda _: None,
+    )
+
+    assert result is True
+    behavior.activate_mute.assert_awaited_once_with(
+        duration_seconds=1800,
+        requested_by="Discord User",
+    )
+    action_logger.insert.assert_called_once_with(
+        "Discord User",
+        "mute_30_minutes",
+        "",
+        guild_id=42,
+    )
+    assert conn.execute(
+        "SELECT played_at FROM playback_queue WHERE id = 1"
+    ).fetchone()[0] is not None
+
+
+@pytest.mark.asyncio
+async def test_process_playback_queue_request_toggles_mute_on_when_unmuted():
+    conn = sqlite3.connect(":memory:")
+    conn.execute(
+        """
+        CREATE TABLE playback_queue (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            sound_filename TEXT NOT NULL,
+            request_username TEXT,
+            request_user_id TEXT,
+            request_type TEXT,
+            control_action TEXT,
+            requested_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            played_at DATETIME
+        )
+        """
+    )
+    conn.execute(
+        "INSERT INTO playback_queue (id, guild_id, sound_filename, request_username, request_user_id, request_type, control_action) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (1, 42, "__web_control__", "Discord User", "123", "toggle_mute", "toggle_mute"),
+    )
+    conn.commit()
+
+    class FakeDatabase:
+        def __init__(self, connection):
+            self.conn = connection
+            self.cursor = connection.cursor()
+
+    guild = SimpleNamespace(id=42)
+    behavior = SimpleNamespace(
+        get_mute_remaining=Mock(return_value=0),
+        activate_mute=AsyncMock(),
+        deactivate_mute=AsyncMock(),
+    )
+    action_logger = Mock()
+
+    result = await process_playback_queue_request(
+        (1, 42, "__web_control__", "Discord User", "123", "toggle_mute", "toggle_mute"),
+        bot=SimpleNamespace(get_guild=lambda guild_id: guild if guild_id == 42 else None),
+        behavior=behavior,
+        db=FakeDatabase(conn),
+        sound_folder=".",
+        action_logger_factory=lambda: action_logger,
+        logger=lambda _: None,
+    )
+
+    assert result is True
+    behavior.activate_mute.assert_awaited_once_with(
+        duration_seconds=1800,
+        requested_by="Discord User",
+    )
+    behavior.deactivate_mute.assert_not_awaited()
+    action_logger.insert.assert_called_once_with(
+        "Discord User",
+        "mute_30_minutes",
+        "",
+        guild_id=42,
+    )
+
+
+@pytest.mark.asyncio
+async def test_process_playback_queue_request_toggles_mute_off_when_muted():
+    conn = sqlite3.connect(":memory:")
+    conn.execute(
+        """
+        CREATE TABLE playback_queue (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            sound_filename TEXT NOT NULL,
+            request_username TEXT,
+            request_user_id TEXT,
+            request_type TEXT,
+            control_action TEXT,
+            requested_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            played_at DATETIME
+        )
+        """
+    )
+    conn.execute(
+        "INSERT INTO playback_queue (id, guild_id, sound_filename, request_username, request_user_id, request_type, control_action) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (1, 42, "__web_control__", "Discord User", "123", "toggle_mute", "toggle_mute"),
+    )
+    conn.commit()
+
+    class FakeDatabase:
+        def __init__(self, connection):
+            self.conn = connection
+            self.cursor = connection.cursor()
+
+    guild = SimpleNamespace(id=42)
+    behavior = SimpleNamespace(
+        get_mute_remaining=Mock(return_value=120),
+        activate_mute=AsyncMock(),
+        deactivate_mute=AsyncMock(),
+    )
+    action_logger = Mock()
+
+    result = await process_playback_queue_request(
+        (1, 42, "__web_control__", "Discord User", "123", "toggle_mute", "toggle_mute"),
+        bot=SimpleNamespace(get_guild=lambda guild_id: guild if guild_id == 42 else None),
+        behavior=behavior,
+        db=FakeDatabase(conn),
+        sound_folder=".",
+        action_logger_factory=lambda: action_logger,
+        logger=lambda _: None,
+    )
+
+    assert result is True
+    behavior.deactivate_mute.assert_awaited_once_with(requested_by="Discord User")
+    behavior.activate_mute.assert_not_awaited()
+    action_logger.insert.assert_called_once_with(
+        "Discord User",
+        "unmute",
+        "",
+        guild_id=42,
+    )

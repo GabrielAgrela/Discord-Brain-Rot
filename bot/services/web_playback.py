@@ -5,14 +5,28 @@ Helpers for web-triggered playback queueing and processing.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 from pathlib import Path
+import random
 import sqlite3
 from typing import Any
 
 from bot.models.web import DiscordWebUser
 from bot.repositories.sound import SoundRepository
+
+
+WEB_QUEUE_PLAY_SOUND = "play_sound"
+WEB_QUEUE_SLAP = "slap"
+WEB_QUEUE_MUTE_30_MINUTES = "mute_30_minutes"
+WEB_QUEUE_TOGGLE_MUTE = "toggle_mute"
+WEB_QUEUE_CONTROL_PLACEHOLDER = "__web_control__"
+WEB_MUTE_DURATION_SECONDS = 1800
+WEB_QUEUE_CONTROL_ACTIONS = {
+    WEB_QUEUE_SLAP,
+    WEB_QUEUE_MUTE_30_MINUTES,
+    WEB_QUEUE_TOGGLE_MUTE,
+}
 
 
 class WebPlaybackService:
@@ -91,6 +105,46 @@ class WebPlaybackService:
             db_path=self.db_path,
             request_username=current_user.global_name,
             request_user_id=current_user.id,
+            env=self.env,
+        )
+
+    def queue_control_request(
+        self,
+        payload: Mapping[str, Any],
+        current_user: DiscordWebUser,
+    ) -> int:
+        """
+        Queue a web control request for the bot to execute.
+
+        Args:
+            payload: JSON request payload.
+            current_user: Authenticated Discord user.
+
+        Returns:
+            Inserted playback queue row ID.
+        """
+        return queue_control_request(
+            control_action=payload.get("action"),
+            requested_guild_id=payload.get("guild_id"),
+            db_path=self.db_path,
+            request_username=current_user.global_name,
+            request_user_id=current_user.id,
+            env=self.env,
+        )
+
+    def get_control_state(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        """
+        Return current web control state inferred from persisted bot actions.
+
+        Args:
+            payload: Request payload or query mapping.
+
+        Returns:
+            Control state used by the web UI.
+        """
+        return get_web_control_state(
+            requested_guild_id=payload.get("guild_id"),
+            db_path=self.db_path,
             env=self.env,
         )
 
@@ -175,15 +229,144 @@ def queue_playback_request(
         _ensure_playback_queue_identity_columns(cursor)
         cursor.execute(
             """
-            INSERT INTO playback_queue (guild_id, sound_filename, request_username, request_user_id)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO playback_queue (
+                guild_id,
+                sound_filename,
+                request_username,
+                request_user_id,
+                request_type
+            )
+            VALUES (?, ?, ?, ?, ?)
             """,
-            (guild_id, sound_filename, str(request_username).strip(), str(request_user_id).strip()),
+            (
+                guild_id,
+                sound_filename,
+                str(request_username).strip(),
+                str(request_user_id).strip(),
+                WEB_QUEUE_PLAY_SOUND,
+            ),
         )
         conn.commit()
         return int(cursor.lastrowid)
     finally:
         conn.close()
+
+
+def queue_control_request(
+    control_action: Any,
+    requested_guild_id: Any,
+    db_path: str,
+    request_username: str,
+    request_user_id: str,
+    env: Mapping[str, str] | None = None,
+) -> int:
+    """
+    Queue a web control action for bot-side execution.
+
+    Args:
+        control_action: Control action name to execute.
+        requested_guild_id: Explicit guild ID from the request payload.
+        db_path: Path to the SQLite database.
+        request_username: Discord display name to attribute the request to.
+        request_user_id: Discord user ID associated with the request.
+        env: Optional environment mapping for tests.
+
+    Returns:
+        Inserted playback queue row ID.
+
+    Raises:
+        ValueError: If the request is missing required data or guild resolution fails.
+        sqlite3.Error: If the insert fails.
+    """
+    action = str(control_action or "").strip()
+    if action not in WEB_QUEUE_CONTROL_ACTIONS:
+        raise ValueError("Invalid web control action")
+    if not str(request_username).strip():
+        raise ValueError("Missing request_username")
+    if not str(request_user_id).strip():
+        raise ValueError("Missing request_user_id")
+
+    guild_id = resolve_requested_guild_id(
+        requested_guild_id=requested_guild_id,
+        db_path=db_path,
+        env=env,
+    )
+
+    conn = sqlite3.connect(db_path)
+    try:
+        cursor = conn.cursor()
+        _ensure_playback_queue_identity_columns(cursor)
+        cursor.execute(
+            """
+            INSERT INTO playback_queue (
+                guild_id,
+                sound_filename,
+                request_username,
+                request_user_id,
+                request_type,
+                control_action
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                guild_id,
+                WEB_QUEUE_CONTROL_PLACEHOLDER,
+                str(request_username).strip(),
+                str(request_user_id).strip(),
+                action,
+                action,
+            ),
+        )
+        conn.commit()
+        return int(cursor.lastrowid)
+    finally:
+        conn.close()
+
+
+def get_web_control_state(
+    requested_guild_id: Any,
+    db_path: str,
+    env: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """
+    Return web control state inferred from the latest mute/unmute action.
+
+    Args:
+        requested_guild_id: Explicit guild ID from the request.
+        db_path: Path to the SQLite database.
+        env: Optional environment mapping for tests.
+
+    Returns:
+        Dict containing mute state details.
+    """
+    guild_id = resolve_requested_guild_id(
+        requested_guild_id=requested_guild_id,
+        db_path=db_path,
+        env=env,
+    )
+    latest_mute_action = _get_latest_mute_action(db_path, guild_id)
+    is_muted = False
+    remaining_seconds = 0
+
+    if latest_mute_action:
+        action, timestamp = latest_mute_action
+        if action == WEB_QUEUE_MUTE_30_MINUTES:
+            parsed_timestamp = _parse_action_timestamp(timestamp)
+            if parsed_timestamp is None:
+                is_muted = True
+            else:
+                mute_until = parsed_timestamp + timedelta(seconds=WEB_MUTE_DURATION_SECONDS)
+                remaining_seconds = max(0, int((mute_until - datetime.now()).total_seconds()))
+                is_muted = remaining_seconds > 0
+
+    return {
+        "guild_id": guild_id,
+        "mute": {
+            "is_muted": is_muted,
+            "remaining_seconds": remaining_seconds,
+            "toggle_action": WEB_QUEUE_TOGGLE_MUTE,
+        },
+    }
 
 
 def ensure_playback_queue_identity_columns(db_path: str) -> None:
@@ -231,13 +414,21 @@ async def process_playback_queue_request(
     Returns:
         True when playback was started, otherwise False.
     """
-    request_id, guild_id, sound_filename, request_username, request_user_id = (
+    (
+        request_id,
+        guild_id,
+        sound_filename,
+        request_username,
+        request_user_id,
+        request_type,
+        control_action,
+    ) = (
         _normalize_playback_queue_row(request_row)
     )
 
     logger(
         f"[Playback Queue] Processing request ID {request_id}: "
-        f"Play '{sound_filename}' in guild {guild_id}"
+        f"{request_type} '{sound_filename}' in guild {guild_id}"
     )
 
     def mark_played() -> None:
@@ -255,6 +446,22 @@ async def process_playback_queue_request(
         )
         mark_played()
         return False
+
+    if request_type != WEB_QUEUE_PLAY_SOUND:
+        result = await _process_web_control_request(
+            request_id=request_id,
+            guild_id=guild_id,
+            guild=guild,
+            control_action=control_action or request_type,
+            request_username=request_username,
+            request_user_id=request_user_id,
+            behavior=behavior,
+            db=db,
+            action_logger_factory=action_logger_factory,
+            logger=logger,
+        )
+        mark_played()
+        return result
 
     sound_data = db.get_sound(sound_filename, guild_id=guild_id)
     if not sound_data:
@@ -374,6 +581,50 @@ def _discover_known_guild_ids(db_path: str) -> list[int]:
         conn.close()
 
 
+def _get_latest_mute_action(db_path: str, guild_id: int) -> tuple[str, str | None] | None:
+    """Return the latest persisted mute/unmute action for a guild."""
+    conn = sqlite3.connect(db_path)
+    try:
+        cursor = conn.cursor()
+        row = cursor.execute(
+            """
+            SELECT action, timestamp
+            FROM actions
+            WHERE action IN (?, ?)
+              AND guild_id = ?
+            ORDER BY timestamp DESC, id DESC
+            LIMIT 1
+            """,
+            (WEB_QUEUE_MUTE_30_MINUTES, "unmute", str(guild_id)),
+        ).fetchone()
+        if row is None:
+            return None
+        return str(row[0]), str(row[1]) if row[1] is not None else None
+    finally:
+        conn.close()
+
+
+def _parse_action_timestamp(timestamp: str | None) -> datetime | None:
+    """Parse the action timestamp format used by ActionRepository."""
+    if not timestamp:
+        return None
+    normalized_timestamp = str(timestamp).strip().replace("Z", "+00:00")
+    try:
+        parsed_timestamp = datetime.fromisoformat(normalized_timestamp)
+    except ValueError:
+        try:
+            parsed_timestamp = datetime.strptime(
+                normalized_timestamp,
+                "%Y-%m-%d %H:%M:%S",
+            )
+        except ValueError:
+            return None
+
+    if parsed_timestamp.tzinfo is not None:
+        parsed_timestamp = parsed_timestamp.astimezone().replace(tzinfo=None)
+    return parsed_timestamp
+
+
 def _add_guild_id(guild_ids: set[int], raw_guild_id: Any) -> None:
     """Normalize and add a guild ID to a discovery set."""
     if raw_guild_id is None:
@@ -412,12 +663,39 @@ def _ensure_playback_queue_identity_columns(cursor: sqlite3.Cursor) -> None:
         cursor.execute("ALTER TABLE playback_queue ADD COLUMN request_username TEXT")
     if "request_user_id" not in existing_columns:
         cursor.execute("ALTER TABLE playback_queue ADD COLUMN request_user_id TEXT")
+    if "request_type" not in existing_columns:
+        cursor.execute(
+            "ALTER TABLE playback_queue ADD COLUMN request_type TEXT DEFAULT 'play_sound'"
+        )
+    if "control_action" not in existing_columns:
+        cursor.execute("ALTER TABLE playback_queue ADD COLUMN control_action TEXT")
 
 
 def _normalize_playback_queue_row(
     request_row: tuple[Any, ...],
-) -> tuple[int, int, str, str | None, str | None]:
+) -> tuple[int, int, str, str | None, str | None, str, str | None]:
     """Normalize old and new playback queue rows into a common tuple shape."""
+    if len(request_row) >= 7:
+        (
+            request_id,
+            guild_id,
+            sound_filename,
+            request_username,
+            request_user_id,
+            request_type,
+            control_action,
+        ) = request_row[:7]
+        normalized_request_type = str(request_type or WEB_QUEUE_PLAY_SOUND).strip()
+        return (
+            int(request_id),
+            int(guild_id),
+            str(sound_filename),
+            str(request_username).strip() if request_username is not None else None,
+            str(request_user_id).strip() if request_user_id is not None else None,
+            normalized_request_type or WEB_QUEUE_PLAY_SOUND,
+            str(control_action).strip() if control_action is not None else None,
+        )
+
     if len(request_row) >= 5:
         request_id, guild_id, sound_filename, request_username, request_user_id = request_row[:5]
         return (
@@ -426,7 +704,126 @@ def _normalize_playback_queue_row(
             str(sound_filename),
             str(request_username).strip() if request_username is not None else None,
             str(request_user_id).strip() if request_user_id is not None else None,
+            WEB_QUEUE_PLAY_SOUND,
+            None,
         )
 
     request_id, guild_id, sound_filename = request_row[:3]
-    return int(request_id), int(guild_id), str(sound_filename), None, None
+    return int(request_id), int(guild_id), str(sound_filename), None, None, WEB_QUEUE_PLAY_SOUND, None
+
+
+async def _process_web_control_request(
+    *,
+    request_id: int,
+    guild_id: int,
+    guild: Any,
+    control_action: str,
+    request_username: str | None,
+    request_user_id: str | None,
+    behavior: Any,
+    db: Any,
+    action_logger_factory: Callable[[], Any] | None,
+    logger: Callable[[str], None],
+) -> bool:
+    """Execute a queued web control request."""
+    playback_user = _get_web_playback_user(request_username, request_user_id)
+
+    try:
+        if control_action == WEB_QUEUE_SLAP:
+            slap_sounds = db.get_sounds(slap=True, num_sounds=100, guild_id=guild_id)
+            if not slap_sounds:
+                logger(
+                    f"[Playback Queue] Error: No slap sounds found for request {request_id}."
+                )
+                return False
+
+            channel = behavior._audio_service.get_largest_voice_channel(guild)
+            if channel is None:
+                logger(
+                    f"[Playback Queue] Error: No voice channel available for slap request {request_id}."
+                )
+                return False
+
+            random_slap = random.choice(slap_sounds)
+            await behavior._audio_service.play_slap(channel, random_slap[2], playback_user)
+            _log_web_control_action(
+                action_logger_factory,
+                playback_user,
+                "play_slap",
+                random_slap[0],
+                guild_id,
+            )
+            return True
+
+        if control_action == WEB_QUEUE_MUTE_30_MINUTES:
+            await behavior.activate_mute(duration_seconds=1800, requested_by=playback_user)
+            _log_web_control_action(
+                action_logger_factory,
+                playback_user,
+                "mute_30_minutes",
+                "",
+                guild_id,
+            )
+            return True
+
+        if control_action == WEB_QUEUE_TOGGLE_MUTE:
+            if behavior.get_mute_remaining() > 0:
+                await behavior.deactivate_mute(requested_by=playback_user)
+                _log_web_control_action(
+                    action_logger_factory,
+                    playback_user,
+                    "unmute",
+                    "",
+                    guild_id,
+                )
+            else:
+                await behavior.activate_mute(duration_seconds=1800, requested_by=playback_user)
+                _log_web_control_action(
+                    action_logger_factory,
+                    playback_user,
+                    "mute_30_minutes",
+                    "",
+                    guild_id,
+                )
+            return True
+
+        logger(
+            f"[Playback Queue] Error: Unknown web control action '{control_action}' "
+            f"for request {request_id}."
+        )
+        return False
+    except Exception as exc:
+        logger(
+            f"[Playback Queue] Error executing web control request {request_id}: {exc}"
+        )
+        return False
+
+
+def _get_web_playback_user(
+    request_username: str | None,
+    request_user_id: str | None,
+) -> str:
+    """Return a stable display name for a web-originated queue request."""
+    if request_username:
+        return request_username
+    if request_user_id:
+        return f"discord-user-{request_user_id}"
+    return "webpage"
+
+
+def _log_web_control_action(
+    action_logger_factory: Callable[[], Any] | None,
+    username: str,
+    action: str,
+    target: Any,
+    guild_id: int,
+) -> None:
+    """Log a processed web control action when an action repository is available."""
+    if action_logger_factory is None:
+        return
+
+    action_logger = action_logger_factory()
+    if hasattr(action_logger, "insert"):
+        action_logger.insert(username, action, target, guild_id=guild_id)
+    else:
+        action_logger.insert_action(username, action, target, guild_id=guild_id)

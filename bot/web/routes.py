@@ -193,6 +193,42 @@ def register_web_routes(app: Flask) -> None:
             logger.exception("Unexpected error queuing playback request")
             return jsonify({"error": "Internal server error"}), 500
 
+    @app.route("/api/web_control", methods=["POST"])
+    @_require_discord_login_api
+    def request_web_control() -> Any:
+        """Queue a bot control request from the authenticated web user."""
+        data = request.get_json(silent=True) or {}
+        current_user = _get_current_discord_user()
+        if current_user is None:
+            return jsonify({"error": "Discord login required"}), 401
+
+        try:
+            _get_web_playback_service().queue_control_request(data, current_user)
+            return jsonify({"message": "Control request queued"}), 200
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except sqlite3.Error:
+            logger.exception("Database error queuing web control request")
+            return jsonify({"error": "Database error"}), 500
+        except Exception:
+            logger.exception("Unexpected error queuing web control request")
+            return jsonify({"error": "Internal server error"}), 500
+
+    @app.route("/api/web_control_state")
+    @_require_discord_login_api
+    def get_web_control_state() -> Any:
+        """Return current bot control state for the authenticated web user."""
+        try:
+            return jsonify(_get_web_playback_service().get_control_state(request.args)), 200
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except sqlite3.Error:
+            logger.exception("Database error loading web control state")
+            return jsonify({"error": "Database error"}), 500
+        except Exception:
+            logger.exception("Unexpected error loading web control state")
+            return jsonify({"error": "Internal server error"}), 500
+
     @app.route("/analytics")
     def analytics() -> str:
         """Render the analytics dashboard page."""
