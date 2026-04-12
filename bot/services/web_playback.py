@@ -730,32 +730,30 @@ async def _process_web_control_request(
 
     try:
         if control_action == WEB_QUEUE_SLAP:
-            slap_sounds = db.get_sounds(slap=True, num_sounds=100, guild_id=guild_id)
-            if not slap_sounds:
-                logger(
-                    f"[Playback Queue] Error: No slap sounds found for request {request_id}."
-                )
-                return False
-
-            channel = behavior._audio_service.get_largest_voice_channel(guild)
-            if channel is None:
-                logger(
-                    f"[Playback Queue] Error: No voice channel available for slap request {request_id}."
-                )
-                return False
-
-            random_slap = random.choice(slap_sounds)
-            await behavior._audio_service.play_slap(channel, random_slap[2], playback_user)
-            _log_web_control_action(
-                action_logger_factory,
-                playback_user,
-                "play_slap",
-                random_slap[0],
-                guild_id,
+            return await _play_random_web_slap(
+                request_id=request_id,
+                guild_id=guild_id,
+                guild=guild,
+                playback_user=playback_user,
+                behavior=behavior,
+                db=db,
+                action_logger_factory=action_logger_factory,
+                logger=logger,
+                require_slap=True,
             )
-            return True
 
         if control_action == WEB_QUEUE_MUTE_30_MINUTES:
+            await _play_random_web_slap(
+                request_id=request_id,
+                guild_id=guild_id,
+                guild=guild,
+                playback_user=playback_user,
+                behavior=behavior,
+                db=db,
+                action_logger_factory=action_logger_factory,
+                logger=logger,
+                require_slap=False,
+            )
             await behavior.activate_mute(duration_seconds=1800, requested_by=playback_user)
             _log_web_control_action(
                 action_logger_factory,
@@ -777,6 +775,17 @@ async def _process_web_control_request(
                     guild_id,
                 )
             else:
+                await _play_random_web_slap(
+                    request_id=request_id,
+                    guild_id=guild_id,
+                    guild=guild,
+                    playback_user=playback_user,
+                    behavior=behavior,
+                    db=db,
+                    action_logger_factory=action_logger_factory,
+                    logger=logger,
+                    require_slap=False,
+                )
                 await behavior.activate_mute(duration_seconds=1800, requested_by=playback_user)
                 _log_web_control_action(
                     action_logger_factory,
@@ -797,6 +806,56 @@ async def _process_web_control_request(
             f"[Playback Queue] Error executing web control request {request_id}: {exc}"
         )
         return False
+
+
+async def _play_random_web_slap(
+    *,
+    request_id: int,
+    guild_id: int,
+    guild: Any,
+    playback_user: str,
+    behavior: Any,
+    db: Any,
+    action_logger_factory: Callable[[], Any] | None,
+    logger: Callable[[str], None],
+    require_slap: bool,
+) -> bool:
+    """Play a random slap for a web control request."""
+    slap_sounds = db.get_sounds(slap=True, num_sounds=100, guild_id=guild_id)
+    if not slap_sounds:
+        logger(
+            f"[Playback Queue] Error: No slap sounds found for request {request_id}."
+        )
+        return False
+
+    channel = behavior._audio_service.get_user_voice_channel(guild, playback_user)
+    if not channel:
+        channel = behavior._audio_service.get_largest_voice_channel(guild)
+    if channel is None:
+        logger(
+            f"[Playback Queue] Error: No voice channel available for slap request {request_id}."
+        )
+        return False
+
+    random_slap = random.choice(slap_sounds)
+    try:
+        await behavior._audio_service.play_slap(channel, random_slap[2], playback_user)
+    except Exception as exc:
+        logger(
+            f"[Playback Queue] Error playing web slap for request {request_id}: {exc}"
+        )
+        if require_slap:
+            raise
+        return False
+
+    _log_web_control_action(
+        action_logger_factory,
+        playback_user,
+        "play_slap",
+        random_slap[0],
+        guild_id,
+    )
+    return True
 
 
 def _get_web_playback_user(

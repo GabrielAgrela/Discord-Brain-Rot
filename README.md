@@ -105,9 +105,10 @@ This README is based on the current codebase behavior (not historical README ass
 - `GET /` shows recent actions, favorites, and all sounds.
 - Each web table now includes prepopulated per-column filters so you can narrow by action/user/sound/date without losing server-side pagination.
 - Each web table lets you enter a target page directly from its pagination controls.
-- The web soundboard and analytics dashboard replace matched racist/hateful usernames and sound titles with `[censored]` unless the logged-in Discord user has prior tracked voice activity.
+- The web soundboard and analytics dashboard replace matched racist/hateful usernames and sound titles with `******` unless the logged-in Discord user has prior tracked voice activity.
 - Queue playback from web via `POST /api/play_sound` into `playback_queue`.
-- The web soundboard also exposes authenticated Slap and mute-toggle controls via `POST /api/web_control`; the bot consumes these through the same `playback_queue` polling path, and the mute toggle icon refreshes from `/api/web_control_state`.
+- The web soundboard also exposes authenticated Slap and mute-toggle controls via `POST /api/web_control`; the mute-on path plays a slap before muting, the bot consumes controls through the same `playback_queue` polling path, and the mute toggle icon refreshes from `/api/web_control_state`.
+- Unauthenticated web play/control buttons use a red locked state to prompt Discord login before queueing bot actions.
 - Web sound playback now requires Discord login; queued requests carry the authenticated Discord user so playback is logged as that user instead of a bot/system account.
 - Web play buttons use `sound_id` under the hood so censored labels still queue the real sound correctly.
 - Bot-side web playback polling defaults to `PLAYBACK_QUEUE_INTERVAL=0.25` seconds for low-latency play-button response.

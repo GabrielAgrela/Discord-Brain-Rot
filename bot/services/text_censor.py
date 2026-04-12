@@ -10,7 +10,7 @@ import re
 class TextCensorService:
     """Replace matched hateful strings with a safe placeholder."""
 
-    CENSORED_TEXT = "[censored]"
+    CENSORED_TEXT = "******"
 
     _LEETSPEAK_TRANSLATION = str.maketrans(
         {
@@ -59,7 +59,7 @@ class TextCensorService:
             text: Candidate text to inspect.
 
         Returns:
-            The original text when it is allowed, otherwise `[censored]`.
+            The original text when it is allowed, otherwise `******`.
         """
         if text is None:
             return None

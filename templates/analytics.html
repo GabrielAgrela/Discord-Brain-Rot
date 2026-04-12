@@ -34,11 +34,9 @@
             </a>
             <div class="nav-links">
                 <a href="/" class="nav-link">
-                    <span class="nav-link-index">01</span>
                     <span>Soundboard</span>
                 </a>
                 <a href="/analytics" class="nav-link active">
-                    <span class="nav-link-index">02</span>
                     <span>Analytics</span>
                 </a>
                 {% if discord_user %}
@@ -229,7 +227,7 @@
 
             button.disabled = false;
             button.classList.add('login-required');
-            button.textContent = '↗';
+            button.textContent = '🔒';
             button.title = 'Login with Discord to play';
             button.setAttribute('aria-label', 'Login with Discord to play');
         }
@@ -299,7 +297,7 @@
                             </div>
                         </div>
                         <div class="item-count">${sound.count}</div>
-                        <button class="play-btn ${discordUser ? '' : 'login-required'}" data-sound-id="${sound.sound_id}" title="${discordUser ? 'Queue sound' : 'Login with Discord to play'}">${discordUser ? '▶' : '↗'}</button>
+                        <button class="play-btn ${discordUser ? '' : 'login-required'}" data-sound-id="${sound.sound_id}" title="${discordUser ? 'Queue sound' : 'Login with Discord to play'}">${discordUser ? '▶' : '🔒'}</button>
                     </div>
                 `).join('');
 

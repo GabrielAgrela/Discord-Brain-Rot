@@ -435,6 +435,8 @@ def test_soundboard_page_renders_shared_redesign(web_client):
     assert "isButtonCooldown" not in html
     assert "fetchFunction();" not in html
     assert "pendingInitialRenderEndpoints" in html
+    assert "🔒" in html
+    assert "Login with Discord to use bot controls" in html
     assert "Queue the right clip fast, without the generic dashboard look." not in html
     assert "What just happened, who triggered it, and how fresh it is." not in html
     assert "The shortlist for when you already know the bit you want." not in html
@@ -451,6 +453,7 @@ def test_analytics_page_renders_shared_redesign(web_client):
     assert "/static/web.css" in html
     assert 'class="time-selector"' in html
     assert "Activity Heatmap" in html
+    assert "🔒" in html
     assert "Watch the server’s taste evolve in real time." not in html
 
 
@@ -466,6 +469,9 @@ def test_web_static_stylesheet_is_served(web_client):
     assert "--soundboard-table-height" in stylesheet
     assert ".pagination-page-input" in stylesheet
     assert "body.page-soundboard .tables-grid > .card" in stylesheet
+    assert "border: 1px solid var(--ink)" in stylesheet
+    assert ".play-button.login-required" in stylesheet
+    assert "background: var(--error)" in stylesheet
     assert "animation: none" in stylesheet
 
 
@@ -498,8 +504,8 @@ def test_web_content_endpoints_censor_hateful_strings(web_client):
 
     assert actions_response.status_code == 200
     assert actions_response.get_json()["items"][0] == {
-        "display_filename": "[censored]",
-        "display_username": "[censored]",
+        "display_filename": "******",
+        "display_username": "******",
         "action": "play_request",
         "timestamp": "2026-04-01 12:01:00",
     }
@@ -507,13 +513,13 @@ def test_web_content_endpoints_censor_hateful_strings(web_client):
     assert favorites_response.status_code == 200
     assert favorites_response.get_json()["items"][0] == {
         "sound_id": 1,
-        "display_filename": "[censored]",
+        "display_filename": "******",
     }
 
     assert all_sounds_response.status_code == 200
     assert all_sounds_response.get_json()["items"][0] == {
         "sound_id": 1,
-        "display_filename": "[censored]",
+        "display_filename": "******",
         "timestamp": "2026-04-01 12:00:00",
     }
 
@@ -762,23 +768,23 @@ def test_analytics_endpoints_censor_hateful_strings(web_client):
 
     assert top_users_response.status_code == 200
     assert top_users_response.get_json()["users"][0] == {
-        "display_username": "[censored]",
+        "display_username": "******",
         "count": 1,
     }
 
     assert top_sounds_response.status_code == 200
     assert top_sounds_response.get_json()["sounds"][0] == {
         "sound_id": 1,
-        "display_filename": "[censored]",
+        "display_filename": "******",
         "count": 1,
     }
 
     assert recent_activity_response.status_code == 200
     assert recent_activity_response.get_json()["activities"][0] == {
-        "display_username": "[censored]",
+        "display_username": "******",
         "action": "play_request",
         "timestamp": "2026-04-01 12:01:00",
-        "display_sound": "[censored]",
+        "display_sound": "******",
     }
 
 

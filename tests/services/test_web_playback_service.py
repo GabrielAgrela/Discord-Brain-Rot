@@ -2,7 +2,7 @@ import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, call
 
 import pytest
 
@@ -583,6 +583,7 @@ async def test_process_playback_queue_request_executes_slap_control(tmp_path, mo
     guild = SimpleNamespace(id=42)
     channel = object()
     audio_service = SimpleNamespace(
+        get_user_voice_channel=Mock(return_value=None),
         get_largest_voice_channel=Mock(return_value=channel),
         play_slap=AsyncMock(),
     )
@@ -614,7 +615,7 @@ async def test_process_playback_queue_request_executes_slap_control(tmp_path, mo
 
 
 @pytest.mark.asyncio
-async def test_process_playback_queue_request_executes_mute_control():
+async def test_process_playback_queue_request_executes_mute_control(monkeypatch):
     conn = sqlite3.connect(":memory:")
     conn.execute(
         """
@@ -653,9 +654,19 @@ async def test_process_playback_queue_request_executes_mute_control():
             self.conn = connection
             self.cursor = connection.cursor()
 
+        def get_sounds(self, slap=None, num_sounds=25, guild_id=None):
+            return [(456, "slap-original.mp3", "slap.mp3")]
+
     guild = SimpleNamespace(id=42)
-    behavior = SimpleNamespace(activate_mute=AsyncMock())
+    channel = object()
+    audio_service = SimpleNamespace(
+        get_user_voice_channel=Mock(return_value=channel),
+        get_largest_voice_channel=Mock(),
+        play_slap=AsyncMock(),
+    )
+    behavior = SimpleNamespace(_audio_service=audio_service, activate_mute=AsyncMock())
     action_logger = Mock()
+    monkeypatch.setattr("bot.services.web_playback.random.choice", lambda items: items[0])
 
     result = await process_playback_queue_request(
         (
@@ -676,15 +687,16 @@ async def test_process_playback_queue_request_executes_mute_control():
     )
 
     assert result is True
+    audio_service.play_slap.assert_awaited_once_with(channel, "slap.mp3", "Discord User")
     behavior.activate_mute.assert_awaited_once_with(
         duration_seconds=1800,
         requested_by="Discord User",
     )
-    action_logger.insert.assert_called_once_with(
-        "Discord User",
-        "mute_30_minutes",
-        "",
-        guild_id=42,
+    action_logger.insert.assert_has_calls(
+        [
+            call("Discord User", "play_slap", 456, guild_id=42),
+            call("Discord User", "mute_30_minutes", "", guild_id=42),
+        ]
     )
     assert conn.execute(
         "SELECT played_at FROM playback_queue WHERE id = 1"
@@ -692,7 +704,7 @@ async def test_process_playback_queue_request_executes_mute_control():
 
 
 @pytest.mark.asyncio
-async def test_process_playback_queue_request_toggles_mute_on_when_unmuted():
+async def test_process_playback_queue_request_toggles_mute_on_when_unmuted(monkeypatch):
     conn = sqlite3.connect(":memory:")
     conn.execute(
         """
@@ -720,13 +732,24 @@ async def test_process_playback_queue_request_toggles_mute_on_when_unmuted():
             self.conn = connection
             self.cursor = connection.cursor()
 
+        def get_sounds(self, slap=None, num_sounds=25, guild_id=None):
+            return [(456, "slap-original.mp3", "slap.mp3")]
+
     guild = SimpleNamespace(id=42)
+    channel = object()
+    audio_service = SimpleNamespace(
+        get_user_voice_channel=Mock(return_value=channel),
+        get_largest_voice_channel=Mock(),
+        play_slap=AsyncMock(),
+    )
     behavior = SimpleNamespace(
+        _audio_service=audio_service,
         get_mute_remaining=Mock(return_value=0),
         activate_mute=AsyncMock(),
         deactivate_mute=AsyncMock(),
     )
     action_logger = Mock()
+    monkeypatch.setattr("bot.services.web_playback.random.choice", lambda items: items[0])
 
     result = await process_playback_queue_request(
         (1, 42, "__web_control__", "Discord User", "123", "toggle_mute", "toggle_mute"),
@@ -739,16 +762,17 @@ async def test_process_playback_queue_request_toggles_mute_on_when_unmuted():
     )
 
     assert result is True
+    audio_service.play_slap.assert_awaited_once_with(channel, "slap.mp3", "Discord User")
     behavior.activate_mute.assert_awaited_once_with(
         duration_seconds=1800,
         requested_by="Discord User",
     )
     behavior.deactivate_mute.assert_not_awaited()
-    action_logger.insert.assert_called_once_with(
-        "Discord User",
-        "mute_30_minutes",
-        "",
-        guild_id=42,
+    action_logger.insert.assert_has_calls(
+        [
+            call("Discord User", "play_slap", 456, guild_id=42),
+            call("Discord User", "mute_30_minutes", "", guild_id=42),
+        ]
     )
 
 

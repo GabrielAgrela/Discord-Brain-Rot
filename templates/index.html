@@ -64,11 +64,9 @@
             </a>
             <div class="nav-links">
                 <a href="/" class="nav-link active">
-                    <span class="nav-link-index">01</span>
                     <span>Soundboard</span>
                 </a>
                 <a href="/analytics" class="nav-link">
-                    <span class="nav-link-index">02</span>
                     <span>Analytics</span>
                 </a>
                 <div class="web-controls" aria-label="Bot controls">
@@ -76,19 +74,19 @@
                         type="button"
                         class="web-control-button{% if not discord_user %} login-required{% endif %}"
                         data-control-action="slap"
-                        title="Slap"
-                        aria-label="Slap"
+                        title="{% if discord_user %}Slap{% else %}Login with Discord to use bot controls{% endif %}"
+                        aria-label="{% if discord_user %}Slap{% else %}Login with Discord to use bot controls{% endif %}"
                     >
-                        👋
+                        {% if discord_user %}👋{% else %}🔒{% endif %}
                     </button>
                     <button
                         type="button"
                         class="web-control-button{% if not discord_user %} login-required{% endif %}"
                         data-control-action="toggle_mute"
-                        title="Toggle mute"
-                        aria-label="Toggle mute"
+                        title="{% if discord_user %}Toggle mute{% else %}Login with Discord to use bot controls{% endif %}"
+                        aria-label="{% if discord_user %}Toggle mute{% else %}Login with Discord to use bot controls{% endif %}"
                     >
-                        🔇
+                        {% if discord_user %}🔇{% else %}🔒{% endif %}
                     </button>
                 </div>
                 {% if discord_user %}
@@ -227,7 +225,7 @@
                                         data-sound-id="{{ item.get('sound_id') }}"
                                         title="{% if discord_user %}Queue sound{% else %}Login with Discord to queue{% endif %}"
                                         aria-label="{% if discord_user %}Queue sound{% else %}Login with Discord to queue{% endif %}">
-                                        {% if discord_user %}▶{% else %}↗{% endif %}
+                                        {% if discord_user %}▶{% else %}🔒{% endif %}
                                     </button>
                                 </td>
                             </tr>
@@ -285,7 +283,7 @@
                                         data-sound-id="{{ item.get('sound_id') }}"
                                         title="{% if discord_user %}Queue sound{% else %}Login with Discord to queue{% endif %}"
                                         aria-label="{% if discord_user %}Queue sound{% else %}Login with Discord to queue{% endif %}">
-                                        {% if discord_user %}▶{% else %}↗{% endif %}
+                                        {% if discord_user %}▶{% else %}🔒{% endif %}
                                     </button>
                                 </td>
                             </tr>
@@ -440,7 +438,7 @@
         function applyPlayButtonState(button) {
             button.disabled = false;
             button.classList.toggle('login-required', !discordUser);
-            button.textContent = discordUser ? '▶' : '↗';
+            button.textContent = discordUser ? '▶' : '🔒';
             button.title = discordUser ? 'Queue sound' : 'Login with Discord to queue';
             button.setAttribute('aria-label', button.title);
         }
@@ -448,6 +446,12 @@
         function applyWebControlButtonState(button) {
             button.disabled = false;
             button.classList.toggle('login-required', !discordUser);
+            if (!discordUser) {
+                button.textContent = '🔒';
+                button.title = 'Login with Discord to use bot controls';
+                button.setAttribute('aria-label', button.title);
+                return;
+            }
             const action = button.dataset.controlAction;
             if (action === 'slap') {
                 button.textContent = '👋';

@@ -240,12 +240,6 @@ a {
     box-shadow: 4px 4px 0 rgba(23, 18, 13, 0.14);
 }
 
-.nav-link-index {
-    font-family: "Instrument Serif", Georgia, serif;
-    font-size: 1rem;
-    line-height: 1;
-}
-
 .auth-button {
     display: inline-flex;
     align-items: center;
@@ -647,10 +641,10 @@ a {
 }
 
 .web-control-button.login-required {
-    background: transparent;
-    border-color: rgba(197, 72, 52, 0.5);
-    color: var(--accent);
-    box-shadow: none;
+    background: var(--error);
+    border-color: var(--error);
+    color: var(--paper);
+    box-shadow: 3px 3px 0 rgba(164, 43, 35, 0.16);
 }
 
 .web-control-button.queued {
@@ -1024,10 +1018,10 @@ tr:last-child td {
 
 .play-button.login-required,
 .play-btn.login-required {
-    background: transparent;
-    border-color: rgba(197, 72, 52, 0.5);
-    color: var(--accent);
-    box-shadow: none;
+    background: var(--error);
+    border-color: var(--error);
+    color: var(--paper);
+    box-shadow: 3px 3px 0 rgba(164, 43, 35, 0.16);
 }
 
 .play-button.queued,
@@ -1930,10 +1924,6 @@ body.page-soundboard .tables-grid > .card {
         min-width: 5.65rem;
         padding: 0.64rem 0.42rem;
         font-size: 0.68rem;
-    }
-
-    .nav-link-index {
-        display: none;
     }
 
     .auth-button {
