@@ -451,6 +451,8 @@ def test_soundboard_page_renders_shared_redesign(web_client):
     assert 'id="pageInputAllSounds"' in html
     assert "setupPageInput" in html
     assert 'id="actions-action-filter"' in html
+    assert 'aria-label="Filter recent actions by action"' in html
+    assert 'aria-label="Filter recent actions by user"' in html
     assert 'id="favorites-user-filter"' in html
     assert 'id="all_sounds-list-filter"' in html
     assert 'class="library-controls"' in html
@@ -459,6 +461,8 @@ def test_soundboard_page_renders_shared_redesign(web_client):
     assert 'aria-label="Filter favorites by user"' in html
     assert 'aria-label="Search all sounds"' in html
     assert 'aria-label="Filter all sounds by list"' in html
+    assert 'for="actions-action-filter">Action</label>' not in html
+    assert 'for="actions-user-filter">User</label>' not in html
     assert 'for="favorites-user-filter">User</label>' not in html
     assert 'for="searchAllSounds">Search</label>' not in html
     assert 'for="all_sounds-list-filter">List</label>' not in html

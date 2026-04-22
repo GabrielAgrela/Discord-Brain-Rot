@@ -141,10 +141,9 @@
 
                 <div id="filtersActions" class="filters-grid cols-2">
                     <div class="filter-group">
-                        <label class="filter-label" for="actions-action-filter">Action</label>
                         <div class="select-shell">
                             <select id="actions-action-filter" class="filter-select" data-endpoint="actions"
-                                data-filter-key="action">
+                                data-filter-key="action" aria-label="Filter recent actions by action">
                                 <option value="" selected>All Action</option>
                                 {% for value in actions_data.get('filters', {}).get('action', []) %}
                                 <option value="{{ value }}">{{ action_labels.get(value, value) }}</option>
@@ -153,10 +152,9 @@
                         </div>
                     </div>
                     <div class="filter-group">
-                        <label class="filter-label" for="actions-user-filter">User</label>
                         <div class="select-shell">
                             <select id="actions-user-filter" class="filter-select" data-endpoint="actions"
-                                data-filter-key="user">
+                                data-filter-key="user" aria-label="Filter recent actions by user">
                                 <option value="" selected>All User</option>
                                 {% for value in actions_data.get('filters', {}).get('user', []) %}
                                 <option value="{{ value }}">{{ value }}</option>
@@ -481,8 +479,8 @@
             actions: {
                 containerId: 'filtersActions',
                 columns: [
-                    { key: 'action', label: 'Action', formatOption: formatAction },
-                    { key: 'user', label: 'User' }
+                    { key: 'action', label: 'Action', formatOption: formatAction, hideLabel: true, ariaLabel: 'Filter recent actions by action' },
+                    { key: 'user', label: 'User', hideLabel: true, ariaLabel: 'Filter recent actions by user' }
                 ]
             },
             favorites: {
