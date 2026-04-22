@@ -153,7 +153,7 @@ def register_web_routes(app: Flask) -> None:
     @app.route("/api/favorites")
     def get_favorites() -> Any:
         """Return paginated favorite sounds for the web soundboard."""
-        query = _build_paginated_query(filter_names=("sound",))
+        query = _build_paginated_query(filter_names=("sound", "user"))
         return jsonify(
             _get_web_content_service().get_favorites(
                 query,
@@ -164,7 +164,7 @@ def register_web_routes(app: Flask) -> None:
     @app.route("/api/all_sounds")
     def get_all_sounds() -> Any:
         """Return paginated sound inventory for the web soundboard."""
-        query = _build_paginated_query(filter_names=("sound", "date"))
+        query = _build_paginated_query(filter_names=("sound", "date", "list"))
         return jsonify(
             _get_web_content_service().get_all_sounds(
                 query,
@@ -420,18 +420,17 @@ def _build_initial_soundboard_data() -> dict[str, dict[str, Any]]:
         "favorites": _prepare_initial_payload(
             service.get_favorites(
                 base_query,
-                include_filters=False,
                 current_user=_get_current_discord_user(),
             ),
-            filter_keys=(),
+            filter_keys=("user",),
         ),
         "all_sounds": _prepare_initial_payload(
             service.get_all_sounds(
                 base_query,
-                include_filters=False,
+                filter_keys=("list",),
                 current_user=_get_current_discord_user(),
             ),
-            filter_keys=(),
+            filter_keys=("list",),
         ),
     }
 

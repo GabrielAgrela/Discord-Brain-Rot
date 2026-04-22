@@ -86,6 +86,7 @@ class WebContentService:
         self,
         query: PaginatedQuery,
         include_filters: bool = True,
+        filter_keys: tuple[str, ...] | None = None,
         current_user: DiscordWebUser | None = None,
     ) -> dict[str, Any]:
         """
@@ -94,6 +95,7 @@ class WebContentService:
         Args:
             query: Pagination, search, and filter parameters.
             include_filters: Whether to include filter metadata in the response.
+            filter_keys: Optional subset of favorite filter groups to fetch.
             current_user: Optional authenticated Discord web user.
 
         Returns:
@@ -114,13 +116,18 @@ class WebContentService:
                 for row in rows
             ],
             "total_pages": self._calculate_total_pages(total_count, query.per_page),
-            "filters": self.repository.get_favorite_filters() if include_filters else {},
+            "filters": (
+                self.repository.get_favorite_filters(filter_keys)
+                if include_filters
+                else {}
+            ),
         }
 
     def get_all_sounds(
         self,
         query: PaginatedQuery,
         include_filters: bool = True,
+        filter_keys: tuple[str, ...] | None = None,
         current_user: DiscordWebUser | None = None,
     ) -> dict[str, Any]:
         """
@@ -129,6 +136,7 @@ class WebContentService:
         Args:
             query: Pagination, search, and filter parameters.
             include_filters: Whether to include filter metadata in the response.
+            filter_keys: Optional subset of all-sounds filter groups to fetch.
             current_user: Optional authenticated Discord web user.
 
         Returns:
@@ -150,7 +158,11 @@ class WebContentService:
                 for row in rows
             ],
             "total_pages": self._calculate_total_pages(total_count, query.per_page),
-            "filters": self.repository.get_all_sound_filters() if include_filters else {},
+            "filters": (
+                self.repository.get_all_sound_filters(filter_keys)
+                if include_filters
+                else {}
+            ),
         }
 
     def _censor_text(self, value: str | None, should_censor: bool) -> str | None:

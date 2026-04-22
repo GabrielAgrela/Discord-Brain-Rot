@@ -2,12 +2,12 @@
 Admin slash commands cog.
 
 This cog handles administrative commands including:
+- /reboot - Reboot the host machine
 - /lastlogs - Show service logs
 - /commands - Show recent bot commands from logs
 """
 
 import os
-import sys
 import asyncio
 import subprocess
 from datetime import datetime
@@ -46,18 +46,42 @@ class AdminCog(commands.Cog):
     def _is_admin(self, member: discord.Member) -> bool:
         """Check if member has admin/mod permissions."""
         return self.behavior.is_admin_or_mod(member)
+
+    def _can_reboot(self, member: discord.Member) -> bool:
+        """Check if member can reboot the host machine."""
+        owner_ids = getattr(self.behavior, "_owner_user_ids", set())
+        if member.id in owner_ids:
+            return True
+        guild_permissions = getattr(member, "guild_permissions", None)
+        return bool(guild_permissions and guild_permissions.administrator)
     
-    @commands.slash_command(name="reboot", description="Disabled in public deployments")
+    @commands.slash_command(name="reboot", description="Reboot the host machine (Admin only)")
     async def reboot(self, ctx: discord.ApplicationContext):
-        """Disabled host control command for public safety."""
-        if not self._is_admin(ctx.author):
+        """Reboot the host machine."""
+        if not self._can_reboot(ctx.author):
             await ctx.respond("You don't have permission to use this command.", ephemeral=True)
             return
-        self._log_action(ctx, "reboot_disabled", "requested")
-        await ctx.respond(
-            "Host reboot is disabled in public deployments. Use infrastructure tooling for restarts.",
-            ephemeral=True,
+
+        self._log_action(ctx, "reboot_host", "requested")
+        await self.behavior._message_service.send_message(
+            title="🚨 System Reboot Initiated 🚨",
+            description=f"Rebooting the host machine as requested by {ctx.author.mention}...",
         )
+        await ctx.respond("Rebooting host machine...", ephemeral=True, delete_after=5)
+        print(f"Restart initiated by {ctx.author.name} ({ctx.author.id})")
+
+        await asyncio.sleep(2)
+
+        try:
+            print("Attempting host reboot via nsenter...")
+            await asyncio.to_thread(
+                subprocess.run,
+                ["nsenter", "-t", "1", "-m", "-u", "-n", "-i", "reboot"],
+                check=True,
+            )
+        except Exception as e:
+            print(f"Error during reboot: {e}")
+            await ctx.followup.send(f"Failed to reboot host: {e}", ephemeral=True)
     
     
     @commands.slash_command(name="lastlogs", description="Show the last service logs")

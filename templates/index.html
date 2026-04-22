@@ -12,10 +12,27 @@
     <link
         href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Space+Grotesk:wght@400;500;700&display=optional"
         rel="stylesheet">
+    <script>
+        try {
+            if (localStorage.getItem('brainrot-theme') === 'dark') {
+                document.documentElement.classList.add('theme-dark');
+            }
+        } catch (error) {
+            document.documentElement.classList.remove('theme-dark');
+        }
+    </script>
     <link rel="stylesheet" href="{{ url_for('static', filename='web.css') }}">
 </head>
 
 <body class="page page-soundboard">
+    <button
+        type="button"
+        class="theme-toggle"
+        aria-label="Enable dark mode"
+        aria-pressed="false"
+    >
+        🌙
+    </button>
     {% if discord_user %}
     {% set display_name = discord_user.global_name or discord_user.username %}
     {% set avatar_url = 'https://cdn.discordapp.com/avatars/' ~ discord_user.id ~ '/' ~ discord_user.avatar ~ '.png?size=128' if discord_user.avatar else 'https://cdn.discordapp.com/embed/avatars/0.png' %}
@@ -125,23 +142,27 @@
                 <div id="filtersActions" class="filters-grid cols-2">
                     <div class="filter-group">
                         <label class="filter-label" for="actions-action-filter">Action</label>
-                        <select id="actions-action-filter" class="filter-select" data-endpoint="actions"
-                            data-filter-key="action">
-                            <option value="" selected>All Action</option>
-                            {% for value in actions_data.get('filters', {}).get('action', []) %}
-                            <option value="{{ value }}">{{ action_labels.get(value, value) }}</option>
-                            {% endfor %}
-                        </select>
+                        <div class="select-shell">
+                            <select id="actions-action-filter" class="filter-select" data-endpoint="actions"
+                                data-filter-key="action">
+                                <option value="" selected>All Action</option>
+                                {% for value in actions_data.get('filters', {}).get('action', []) %}
+                                <option value="{{ value }}">{{ action_labels.get(value, value) }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
                     </div>
                     <div class="filter-group">
                         <label class="filter-label" for="actions-user-filter">User</label>
-                        <select id="actions-user-filter" class="filter-select" data-endpoint="actions"
-                            data-filter-key="user">
-                            <option value="" selected>All User</option>
-                            {% for value in actions_data.get('filters', {}).get('user', []) %}
-                            <option value="{{ value }}">{{ value }}</option>
-                            {% endfor %}
-                        </select>
+                        <div class="select-shell">
+                            <select id="actions-user-filter" class="filter-select" data-endpoint="actions"
+                                data-filter-key="user">
+                                <option value="" selected>All User</option>
+                                {% for value in actions_data.get('filters', {}).get('user', []) %}
+                                <option value="{{ value }}">{{ value }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
                     </div>
                 </div>
 
@@ -205,7 +226,35 @@
                     </div>
                 </div>
 
-                <input type="text" id="searchFavorites" class="search-input" placeholder="Search favorites...">
+                <div class="library-controls">
+                    <div class="filter-group">
+                        <input
+                            type="text"
+                            id="searchFavorites"
+                            class="search-input"
+                            placeholder="Search favorites..."
+                            aria-label="Search favorites"
+                        >
+                    </div>
+                    <div id="filtersFavorites" class="library-filter-slot">
+                        <div class="filter-group">
+                            <div class="select-shell">
+                                <select
+                                    id="favorites-user-filter"
+                                    class="filter-select"
+                                    data-endpoint="favorites"
+                                    data-filter-key="user"
+                                    aria-label="Filter favorites by user"
+                                >
+                                    <option value="" selected>All Users</option>
+                                    {% for option in favorites_data.get('filters', {}).get('user', []) %}
+                                    <option value="{{ option }}">{{ option }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
 
                 <div class="table-container">
                     <table id="favoritesTable">
@@ -261,7 +310,35 @@
                     </div>
                 </div>
 
-                <input type="text" id="searchAllSounds" class="search-input" placeholder="Search the full library...">
+                <div class="library-controls">
+                    <div class="filter-group">
+                        <input
+                            type="text"
+                            id="searchAllSounds"
+                            class="search-input"
+                            placeholder="Search the full library..."
+                            aria-label="Search all sounds"
+                        >
+                    </div>
+                    <div id="filtersAllSounds" class="library-filter-slot">
+                        <div class="filter-group">
+                            <div class="select-shell">
+                                <select
+                                    id="all_sounds-list-filter"
+                                    class="filter-select"
+                                    data-endpoint="all_sounds"
+                                    data-filter-key="list"
+                                    aria-label="Filter all sounds by list"
+                                >
+                                    <option value="" selected>All Lists</option>
+                                    {% for option in all_sounds_data.get('filters', {}).get('list', []) %}
+                                    <option value="{{ option.get('value') }}">{{ option.get('label') }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
 
                 <div class="table-container">
                     <table id="allSoundsTable">
@@ -338,6 +415,7 @@
         const discordUser = {{ discord_user|tojson }};
         const discordLoginUrl = {{ discord_login_url|tojson }};
         const initialSoundboardData = {{ initial_soundboard_data|tojson }};
+        const themeToggle = document.querySelector('.theme-toggle');
         let webControlMuteIsMuted = false;
         let webControlStateRequestInFlight = false;
         let currentPageActions = 1;
@@ -360,7 +438,9 @@
             ...endpointMaxItemsPerPage
         };
         const filterColumnKeysByEndpoint = {
-            actions: ['action', 'user']
+            actions: ['action', 'user'],
+            favorites: ['user'],
+            all_sounds: ['list']
         };
 
         function getInitialFetchedItems(endpoint) {
@@ -404,8 +484,50 @@
                     { key: 'action', label: 'Action', formatOption: formatAction },
                     { key: 'user', label: 'User' }
                 ]
+            },
+            favorites: {
+                containerId: 'filtersFavorites',
+                columns: [
+                    { key: 'user', label: 'User', allLabel: 'All Users', hideLabel: true, ariaLabel: 'Filter favorites by user' }
+                ]
+            },
+            all_sounds: {
+                containerId: 'filtersAllSounds',
+                columns: [
+                    { key: 'list', label: 'List', allLabel: 'All Lists', hideLabel: true, ariaLabel: 'Filter all sounds by list' }
+                ]
             }
         };
+
+        function applyThemePreference(theme) {
+            const isDark = theme === 'dark';
+            document.documentElement.classList.toggle('theme-dark', isDark);
+            if (!themeToggle) {
+                return;
+            }
+            themeToggle.textContent = isDark ? '☀️' : '🌙';
+            themeToggle.setAttribute('aria-pressed', String(isDark));
+            themeToggle.setAttribute('aria-label', isDark ? 'Disable dark mode' : 'Enable dark mode');
+        }
+
+        if (themeToggle) {
+            let storedTheme = null;
+            try {
+                storedTheme = localStorage.getItem('brainrot-theme');
+            } catch (error) {
+                storedTheme = null;
+            }
+            applyThemePreference(storedTheme);
+            themeToggle.addEventListener('click', () => {
+                const nextTheme = document.documentElement.classList.contains('theme-dark') ? 'light' : 'dark';
+                try {
+                    localStorage.setItem('brainrot-theme', nextTheme);
+                } catch (error) {
+                    // Keep the in-page toggle usable even if storage is blocked.
+                }
+                applyThemePreference(nextTheme);
+            });
+        }
 
         function parseServerTimestamp(timestamp) {
             if (!timestamp) return new Date(NaN);
@@ -731,17 +853,22 @@
                 const wrapper = document.createElement('div');
                 wrapper.className = 'filter-group';
 
-                const label = document.createElement('label');
-                label.className = 'filter-label';
-                label.textContent = column.label;
-                label.setAttribute('for', `${endpoint}-${column.key}-filter`);
-                wrapper.appendChild(label);
+                if (!column.hideLabel) {
+                    const label = document.createElement('label');
+                    label.className = 'filter-label';
+                    label.textContent = column.label;
+                    label.setAttribute('for', `${endpoint}-${column.key}-filter`);
+                    wrapper.appendChild(label);
+                }
 
                 const select = document.createElement('select');
                 select.id = `${endpoint}-${column.key}-filter`;
                 select.className = 'filter-select';
                 select.dataset.endpoint = endpoint;
                 select.dataset.filterKey = column.key;
+                if (column.ariaLabel) {
+                    select.setAttribute('aria-label', column.ariaLabel);
+                }
 
                 const options = filters[column.key] || [];
                 const selectedValue = (currentSelections[column.key] || [])[0] || '';
@@ -749,24 +876,44 @@
 
                 const allOption = document.createElement('option');
                 allOption.value = '';
-                allOption.textContent = `All ${column.label}`;
+                allOption.textContent = column.allLabel || `All ${column.label}`;
                 allOption.selected = selectedValue === '';
                 select.appendChild(allOption);
 
-                options.forEach(value => {
+                options.forEach(rawOption => {
+                    const value = getFilterOptionValue(rawOption);
                     const option = document.createElement('option');
                     option.value = value;
-                    option.textContent = formatter(value);
+                    option.textContent = getFilterOptionLabel(rawOption, formatter);
                     option.selected = selectedValue === value;
                     select.appendChild(option);
                 });
 
-                wrapper.appendChild(select);
+                const shell = document.createElement('div');
+                shell.className = 'select-shell';
+                shell.appendChild(select);
+                wrapper.appendChild(shell);
                 fragment.appendChild(wrapper);
             });
 
             container.replaceChildren(fragment);
             lastRenderedFilters[endpoint] = serializedFilters;
+        }
+
+        function getFilterOptionValue(option) {
+            if (option && typeof option === 'object') {
+                return String(option.value ?? '');
+            }
+
+            return String(option ?? '');
+        }
+
+        function getFilterOptionLabel(option, formatter) {
+            if (option && typeof option === 'object') {
+                return String(option.label ?? formatter(getFilterOptionValue(option)));
+            }
+
+            return String(formatter(getFilterOptionValue(option)));
         }
 
         function hasRenderableFilterPayload(endpoint, filters) {
@@ -790,7 +937,25 @@
             nextButton.disabled = (page >= totalPageCount);
         }
 
-        function fetchData(endpoint, page, tableBodyId, totalPagesId, prevButtonId, nextButtonId, pageInputId, searchInputId) {
+        function setEndpointLoading(endpoint, isLoading) {
+            const config = filterConfigs[endpoint];
+            const container = config ? document.getElementById(config.containerId) : null;
+            const tableBody = document.getElementById(endpointTableBodyIds[endpoint]);
+            const tableContainer = tableBody ? tableBody.closest('.table-container') : null;
+
+            if (container) {
+                container.querySelectorAll('.filter-select').forEach(select => {
+                    select.disabled = isLoading;
+                });
+            }
+
+            if (tableContainer) {
+                tableContainer.classList.toggle('is-loading', isLoading);
+                tableContainer.setAttribute('aria-busy', isLoading ? 'true' : 'false');
+            }
+        }
+
+        function fetchData(endpoint, page, tableBodyId, totalPagesId, prevButtonId, nextButtonId, pageInputId, searchInputId, showLoading = false) {
             const tableBody = document.getElementById(tableBodyId);
             const container = tableBody ? tableBody.closest('.table-container') : null;
             const searchInput = document.getElementById(searchInputId);
@@ -800,11 +965,14 @@
             const includeFiltersQuery = endpoint === 'actions' ? '&include_filters=0' : '';
             const apiUrl = `/api/${endpoint}?page=${page}&per_page=${endpointItemsPerPage[endpoint]}&search=${encodeURIComponent(searchQuery)}${includeFiltersQuery}${filterQuery ? `&${filterQuery}` : ''}`;
 
+            if (showLoading) {
+                setEndpointLoading(endpoint, true);
+            }
             return fetch(apiUrl)
                 .then(response => response.json())
                 .then(data => {
-                    if (endpoint === 'actions' && hasRenderableFilterPayload(endpoint, data.filters) && !pendingInitialRenderEndpoints.has(endpoint)) {
-                        renderFilterControls(endpoint, data.filters || {}, fetchActions);
+                    if (hasRenderableFilterPayload(endpoint, data.filters) && !pendingInitialRenderEndpoints.has(endpoint)) {
+                        renderFilterControls(endpoint, data.filters || {}, fetchersByEndpoint[endpoint]);
                     }
 
                     const hasNewEntries = JSON.stringify(data.items) !== JSON.stringify(lastFetchedData[endpoint]);
@@ -814,8 +982,8 @@
                         lastFetchedData[endpoint] = data.items;
 
                         const renderFetchedData = () => {
-                            if (endpoint === 'actions' && hasRenderableFilterPayload(endpoint, data.filters)) {
-                                renderFilterControls(endpoint, data.filters || {}, fetchActions);
+                            if (hasRenderableFilterPayload(endpoint, data.filters)) {
+                                renderFilterControls(endpoint, data.filters || {}, fetchersByEndpoint[endpoint]);
                             }
 
                             tableBody.innerHTML = '';
@@ -900,6 +1068,11 @@
                     console.error('Error:', error);
                     markInitialEndpointDone(endpoint);
                     return false;
+                })
+                .finally(() => {
+                    if (showLoading) {
+                        setEndpointLoading(endpoint, false);
+                    }
                 });
         }
 
@@ -987,19 +1160,19 @@
             return currentPage;
         }
 
-        function fetchActions(increment = null, forcePageOne = false) {
+        function fetchActions(increment = null, forcePageOne = false, showLoading = false) {
             currentPageActions = resolveRequestedPage(currentPageActions, increment, forcePageOne);
-            return fetchData('actions', currentPageActions, 'actionsTableBody', 'totalPagesActions', 'prevPageActions', 'nextPageActions', 'pageInputActions', 'searchActions');
+            return fetchData('actions', currentPageActions, 'actionsTableBody', 'totalPagesActions', 'prevPageActions', 'nextPageActions', 'pageInputActions', 'searchActions', showLoading);
         }
 
-        function fetchFavorites(increment = null, forcePageOne = false) {
+        function fetchFavorites(increment = null, forcePageOne = false, showLoading = false) {
             currentPageFavorites = resolveRequestedPage(currentPageFavorites, increment, forcePageOne);
-            return fetchData('favorites', currentPageFavorites, 'favoritesTableBody', 'totalPagesFavorites', 'prevPageFavorites', 'nextPageFavorites', 'pageInputFavorites', 'searchFavorites');
+            return fetchData('favorites', currentPageFavorites, 'favoritesTableBody', 'totalPagesFavorites', 'prevPageFavorites', 'nextPageFavorites', 'pageInputFavorites', 'searchFavorites', showLoading);
         }
 
-        function fetchAllSounds(increment = null, forcePageOne = false) {
+        function fetchAllSounds(increment = null, forcePageOne = false, showLoading = false) {
             currentPageAllSounds = resolveRequestedPage(currentPageAllSounds, increment, forcePageOne);
-            return fetchData('all_sounds', currentPageAllSounds, 'allSoundsTableBody', 'totalPagesAllSounds', 'prevPageAllSounds', 'nextPageAllSounds', 'pageInputAllSounds', 'searchAllSounds');
+            return fetchData('all_sounds', currentPageAllSounds, 'allSoundsTableBody', 'totalPagesAllSounds', 'prevPageAllSounds', 'nextPageAllSounds', 'pageInputAllSounds', 'searchAllSounds', showLoading);
         }
 
         const fetchersByEndpoint = {
@@ -1028,7 +1201,11 @@
                     }
 
                     filterState[endpoint][filterKey] = select.value ? [select.value] : [];
-                    fetchersByEndpoint[endpoint](null, true);
+                    const shouldShowLoading = (
+                        (endpoint === 'all_sounds' && filterKey === 'list')
+                        || (endpoint === 'favorites' && filterKey === 'user')
+                    );
+                    fetchersByEndpoint[endpoint](null, true, shouldShowLoading);
                 });
             });
         }

@@ -103,7 +103,8 @@ This README is based on the current codebase behavior (not historical README ass
 
 ### Web Soundboard
 - `GET /` shows recent actions, favorites, and all sounds.
-- Each web table now includes prepopulated per-column filters so you can narrow by action/user/sound/date without losing server-side pagination.
+- Recent actions can be filtered by action/user, Favorites can be searched and filtered by favoriting user, and All Sounds can be filtered by sound list without losing server-side pagination.
+- The soundboard and analytics pages include a top-right dark mode toggle that persists in browser local storage.
 - Each web table lets you enter a target page directly from its pagination controls.
 - The web soundboard and analytics dashboard replace matched racist/hateful usernames and sound titles with `******` unless the logged-in Discord user has prior tracked voice activity.
 - Queue playback from web via `POST /api/play_sound` into `playback_queue`.
@@ -122,7 +123,7 @@ This README is based on the current codebase behavior (not historical README ass
   - `/commands`
   - `/ventura`
   - `/backup`
-- `/reboot` command is intentionally disabled for public deployments.
+  - `/reboot` (owner allowlist or Discord Administrator permission only)
 - Backup service creates compressed project backups with exclusions and now updates the ephemeral `/backup` response with live stage/progress status while archiving.
 
 ### Background Automations

@@ -12,10 +12,27 @@
     <link
         href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Space+Grotesk:wght@400;500;700&display=optional"
         rel="stylesheet">
+    <script>
+        try {
+            if (localStorage.getItem('brainrot-theme') === 'dark') {
+                document.documentElement.classList.add('theme-dark');
+            }
+        } catch (error) {
+            document.documentElement.classList.remove('theme-dark');
+        }
+    </script>
     <link rel="stylesheet" href="{{ url_for('static', filename='web.css') }}">
 </head>
 
 <body class="page page-analytics">
+    <button
+        type="button"
+        class="theme-toggle"
+        aria-label="Enable dark mode"
+        aria-pressed="false"
+    >
+        🌙
+    </button>
     {% if discord_user %}
     {% set display_name = discord_user.global_name or discord_user.username %}
     {% set avatar_url = 'https://cdn.discordapp.com/avatars/' ~ discord_user.id ~ '/' ~ discord_user.avatar ~ '.png?size=128' if discord_user.avatar else 'https://cdn.discordapp.com/embed/avatars/0.png' %}
@@ -182,11 +199,45 @@
     <script>
         const discordUser = {{ discord_user|tojson }};
         const discordLoginUrl = {{ discord_login_url|tojson }};
+        const themeToggle = document.querySelector('.theme-toggle');
         let currentDays = 7;
         let timelineChart = null;
 
         function getCssVar(name) {
             return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+        }
+
+        function applyThemePreference(theme) {
+            const isDark = theme === 'dark';
+            document.documentElement.classList.toggle('theme-dark', isDark);
+            if (!themeToggle) {
+                return;
+            }
+            themeToggle.textContent = isDark ? '☀️' : '🌙';
+            themeToggle.setAttribute('aria-pressed', String(isDark));
+            themeToggle.setAttribute('aria-label', isDark ? 'Disable dark mode' : 'Enable dark mode');
+        }
+
+        if (themeToggle) {
+            let storedTheme = null;
+            try {
+                storedTheme = localStorage.getItem('brainrot-theme');
+            } catch (error) {
+                storedTheme = null;
+            }
+            applyThemePreference(storedTheme);
+            themeToggle.addEventListener('click', () => {
+                const nextTheme = document.documentElement.classList.contains('theme-dark') ? 'light' : 'dark';
+                try {
+                    localStorage.setItem('brainrot-theme', nextTheme);
+                } catch (error) {
+                    // Keep the in-page toggle usable even if storage is blocked.
+                }
+                applyThemePreference(nextTheme);
+                if (timelineChart) {
+                    loadTimeline();
+                }
+            });
         }
 
         document.addEventListener('DOMContentLoaded', () => {

@@ -65,6 +65,28 @@ def _create_web_tables(db_path: Path) -> None:
         )
         cursor.execute(
             """
+            CREATE TABLE sound_lists (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                list_name TEXT NOT NULL,
+                creator TEXT NOT NULL,
+                guild_id TEXT,
+                created_at TEXT
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE TABLE sound_list_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                list_id INTEGER NOT NULL,
+                sound_filename TEXT NOT NULL,
+                added_at TEXT,
+                FOREIGN KEY (list_id) REFERENCES sound_lists(id)
+            )
+            """
+        )
+        cursor.execute(
+            """
             CREATE TABLE voice_activity (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT NOT NULL,
@@ -429,7 +451,28 @@ def test_soundboard_page_renders_shared_redesign(web_client):
     assert 'id="pageInputAllSounds"' in html
     assert "setupPageInput" in html
     assert 'id="actions-action-filter"' in html
+    assert 'id="favorites-user-filter"' in html
+    assert 'id="all_sounds-list-filter"' in html
+    assert 'class="library-controls"' in html
+    assert 'class="select-shell"' in html
+    assert 'aria-label="Search favorites"' in html
+    assert 'aria-label="Filter favorites by user"' in html
+    assert 'aria-label="Search all sounds"' in html
+    assert 'aria-label="Filter all sounds by list"' in html
+    assert 'for="favorites-user-filter">User</label>' not in html
+    assert 'for="searchAllSounds">Search</label>' not in html
+    assert 'for="all_sounds-list-filter">List</label>' not in html
+    assert "hideLabel: true" in html
+    assert "allLabel: 'All Users'" in html
+    assert "allLabel: 'All Lists'" in html
+    assert 'class="theme-toggle"' in html
+    assert "brainrot-theme" in html
+    assert "applyThemePreference" in html
+    assert "🌙" in html
+    assert "☀️" in html
     assert "hasRenderableFilterPayload(endpoint, data.filters)" in html
+    assert "setEndpointLoading" in html
+    assert "aria-busy" in html
     assert "touchend" in html
     assert "requestInFlight" in html
     assert "isButtonCooldown" not in html
@@ -451,6 +494,10 @@ def test_analytics_page_renders_shared_redesign(web_client):
     assert response.status_code == 200
     html = response.get_data(as_text=True)
     assert "/static/web.css" in html
+    assert 'class="theme-toggle"' in html
+    assert "brainrot-theme" in html
+    assert "🌙" in html
+    assert "☀️" in html
     assert 'class="time-selector"' in html
     assert "Activity Heatmap" in html
     assert "🔒" in html
@@ -471,8 +518,19 @@ def test_web_static_stylesheet_is_served(web_client):
     assert "body.page-soundboard .tables-grid > .card" in stylesheet
     assert "border: 1px solid var(--ink)" in stylesheet
     assert ".play-button.login-required" in stylesheet
+    assert "tableLoadingSweep" in stylesheet
+    assert ".table-container.is-loading" in stylesheet
+    assert ".theme-toggle" in stylesheet
+    assert "html.theme-dark" in stylesheet
+    assert 'border-radius: 999px' in stylesheet
+    assert 'html.theme-dark .heatmap-cell[data-level="5"]' in stylesheet
+    assert "html.theme-dark .play-button" in stylesheet
+    assert "html.theme-dark .nav-brand-mark" in stylesheet
     assert "background: var(--error)" in stylesheet
     assert "animation: none" in stylesheet
+    assert "body.page-soundboard .library-controls" in stylesheet
+    assert "margin-bottom: 2.4rem" in stylesheet
+    assert "min-height: 4.4rem" in stylesheet
 
 
 def test_web_content_endpoints_censor_hateful_strings(web_client):
@@ -616,7 +674,7 @@ def test_web_table_endpoints_return_filter_options_and_apply_column_filters(web_
     actions_response = client.get(
         "/api/actions?action=play_request&user=alice&sound=alpha.mp3"
     )
-    favorites_response = client.get("/api/favorites?sound=beta.mp3")
+    favorites_response = client.get("/api/favorites?sound=beta.mp3&user=bob")
     all_sounds_response = client.get("/api/all_sounds?sound=gamma.mp3&date=2026-04-03")
 
     assert actions_response.status_code == 200
@@ -648,6 +706,7 @@ def test_web_table_endpoints_return_filter_options_and_apply_column_filters(web_
         "total_pages": 1,
         "filters": {
             "sound": ["alpha.mp3", "beta.mp3"],
+            "user": ["bob"],
         },
     }
 
@@ -664,6 +723,116 @@ def test_web_table_endpoints_return_filter_options_and_apply_column_filters(web_
         "filters": {
             "sound": ["alpha.mp3", "beta.mp3", "gamma.mp3"],
             "date": ["2026-04-03", "2026-04-02", "2026-04-01"],
+            "list": [],
+        },
+    }
+
+
+def test_all_sounds_endpoint_returns_and_applies_sound_list_filter(web_client):
+    client, db_path = web_client
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executemany(
+            """
+            INSERT INTO sounds (id, originalfilename, Filename, favorite, slap, is_elevenlabs, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (1, "alpha.mp3", "alpha.mp3", 0, 0, 0, "2026-04-01 12:00:00"),
+                (2, "beta.mp3", "beta.mp3", 0, 0, 0, "2026-04-02 12:00:00"),
+            ],
+        )
+        conn.executemany(
+            """
+            INSERT INTO sound_lists (id, list_name, creator, guild_id, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            [
+                (10, "Airhorns", "alice", "111", "2026-04-01 12:05:00"),
+                (11, "Drops", "bob", "111", "2026-04-01 12:06:00"),
+            ],
+        )
+        conn.execute(
+            """
+            INSERT INTO sound_list_items (list_id, sound_filename, added_at)
+            VALUES (?, ?, ?)
+            """,
+            (10, "beta.mp3", "2026-04-01 12:10:00"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    response = client.get("/api/all_sounds?list=10")
+
+    assert response.status_code == 200
+    assert response.get_json() == {
+        "items": [
+            {
+                "sound_id": 2,
+                "display_filename": "beta.mp3",
+                "timestamp": "2026-04-02 12:00:00",
+            }
+        ],
+        "total_pages": 1,
+        "filters": {
+            "sound": ["alpha.mp3", "beta.mp3"],
+            "date": ["2026-04-02", "2026-04-01"],
+            "list": [
+                {"value": "10", "label": "Airhorns (alice)"},
+                {"value": "11", "label": "Drops (bob)"},
+            ],
+        },
+    }
+
+
+def test_favorites_endpoint_returns_and_applies_user_filter(web_client):
+    client, db_path = web_client
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executemany(
+            """
+            INSERT INTO sounds (id, originalfilename, Filename, favorite, slap, is_elevenlabs, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (1, "alpha.mp3", "alpha.mp3", 1, 0, 0, "2026-04-01 12:00:00"),
+                (2, "beta.mp3", "beta.mp3", 1, 0, 0, "2026-04-02 12:00:00"),
+                (3, "gamma.mp3", "gamma.mp3", 1, 0, 0, "2026-04-03 12:00:00"),
+            ],
+        )
+        conn.executemany(
+            """
+            INSERT INTO actions (username, action, target, timestamp, guild_id)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            [
+                ("alice", "favorite_sound", "1", "2026-04-04 12:00:00", "111"),
+                ("alice", "favorite_sound", "2", "2026-04-04 12:05:00", "111"),
+                ("alice", "unfavorite_sound", "2", "2026-04-04 12:10:00", "111"),
+                ("bob", "favorite_sound", "3", "2026-04-04 12:15:00", "111"),
+            ],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    response = client.get("/api/favorites?user=alice")
+
+    assert response.status_code == 200
+    assert response.get_json() == {
+        "items": [
+            {
+                "sound_id": 1,
+                "display_filename": "alpha.mp3",
+            }
+        ],
+        "total_pages": 1,
+        "filters": {
+            "sound": ["alpha.mp3", "beta.mp3", "gamma.mp3"],
+            "user": ["alice", "bob"],
         },
     }
 
@@ -735,8 +904,9 @@ def test_soundboard_initial_render_skips_unused_filter_payloads(web_client):
     assert response.status_code == 200
     html = response.get_data(as_text=True)
     assert "const initialSoundboardData =" in html
-    assert '"filters": {}' in html
+    assert 'id="favorites-user-filter"' in html
     assert '"sound":["alpha.mp3","beta.mp3"]' not in html
+    assert '"date":' not in html
 
 
 def test_analytics_endpoints_censor_hateful_strings(web_client):
