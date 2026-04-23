@@ -31,7 +31,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Create necessary directories
-RUN mkdir -p Sounds Downloads Data/models/vosk-model-small-pt-0.3 Logs Debug/llm_audio
+RUN mkdir -p Sounds Downloads Data/models/vosk-model-small-pt-0.3 Logs
 
 # Set entry point (can be overridden in docker-compose)
 CMD ["python", "PersonalGreeter.py"]

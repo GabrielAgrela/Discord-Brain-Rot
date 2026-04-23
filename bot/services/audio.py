@@ -87,9 +87,6 @@ class AudioService:
         self._connection_timestamps: Dict[int, float] = {}  # Track when a connection was fully established
         self.RECONNECTION_GRACE_PERIOD = 15.0  # Seconds to wait before health checks intervene
         
-        # Buffer for /llmdebug (handled via ring buffer in sink)
-        self.last_audio_buffer: Dict[int, bytes] = {} 
-        
         # Initialize Vosk model for local STT
         try:
             # Silence internal Vosk logs to avoid spamming the console
@@ -1228,7 +1225,7 @@ class AudioService:
                 bot_channel = self.message_service.get_bot_channel(channel.guild)
                 if bot_channel:
                     cooldown_message = await bot_channel.send(
-                        embed=discord.Embed(title="Don't be rude, let Ventura speak 😤")
+                        embed=discord.Embed(title="Cooldown active")
                     )
                     self._guild_cooldown_message[guild_id] = cooldown_message
                     self.cooldown_message = cooldown_message
@@ -2027,20 +2024,12 @@ class KeywordDetectionSink(sinks.Sink):
         self.max_segment_duration = 10.0 # Force flush after 10 seconds of continuous speech
         self.audio_buffers = {} # user_id -> bytearray for batching
         self.min_batch_size = 28800 # ~300ms at 48kHz stereo (48000 * 2 * 2 * 0.3)
-        # Audio buffering for AI Commentary - PER-USER timestamped chunks
+        # Per-user timestamped chunks used for recent audio inspection/debugging.
         self.buffer_seconds = 30
         self.user_audio_buffers: Dict[int, list] = {}  # user_id -> list of (timestamp, audio_bytes)
         self.buffer_last_update: Dict[int, float] = {}  # user_id -> timestamp
         self.buffer_lock = threading.Lock()
         
-        # Auto-AI Commentary state
-        self.speech_start_time: Dict[int, float] = {}  # user_id -> when they started talking
-        self.pending_ai_trigger: Optional[float] = None  # Time when 2s speech detected (wait for silence)
-        self.ventura_trigger_times: Dict[int, float] = {}  # user_id -> when "ventura" heard
-        self.ventura_keywords = ["ventura", "andre ventura"]
-        self.last_ventura_trigger_time = 0
-        self.ventura_trigger_enabled = False
-
         # Log directory for per-user transcripts
         self.log_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Data", "vosk_logs"))
         os.makedirs(self.log_dir, exist_ok=True)
@@ -2068,21 +2057,6 @@ class KeywordDetectionSink(sinks.Sink):
         except Exception as e:
             print(f"[VoskLogger] Error writing log for {username}: {e}")
 
-    def _is_ventura_match(self, text: str) -> bool:
-        """Check if text contains 'ventura' as a whole word (not substring).
-        
-        Uses word boundary matching to prevent false triggers on similar words
-        like 'aventura', 'boaventura', 'venturar', etc.
-        """
-        import re
-        text_lower = text.lower()
-        for keyword in self.ventura_keywords:
-            # Use word boundaries to match whole words only
-            pattern = r'\b' + re.escape(keyword) + r'\b'
-            if re.search(pattern, text_lower):
-                return True
-        return False
-
     def stop(self):
         self.running = False
         self.queue.put((None, None))
@@ -2108,15 +2082,6 @@ class KeywordDetectionSink(sinks.Sink):
         receive_time = time.time()
         self.last_audio_time[user_id] = receive_time
         self.buffer_last_update[user_id] = receive_time
-        
-        # Track speech duration for Auto-AI (mark for trigger, wait for silence)
-        if user_id not in self.speech_start_time:
-            self.speech_start_time[user_id] = receive_time
-        else:
-            duration = receive_time - self.speech_start_time[user_id]
-            if duration >= 2.0 and self.pending_ai_trigger is None:
-                # Mark pending - actual trigger fires when silence is detected
-                self.pending_ai_trigger = receive_time
         
         # Store audio in per-user timestamped buffer
         with self.buffer_lock:
@@ -2218,57 +2183,10 @@ class KeywordDetectionSink(sinks.Sink):
         """Force Vosk to finalize results for users who stopped talking and cleanup idle users."""
         now = time.time()
         
-        # Check if ALL users are silent (for pending AI trigger)
-        all_silent = True
-        for user_id, last_time in self.buffer_last_update.items():
-            if now - last_time < 1.5:
-                all_silent = False
-                break
-        
-        # Handle pending Auto-AI trigger on silence
-        if self.pending_ai_trigger is not None and all_silent:
-            trigger_start = self.pending_ai_trigger
-            self.pending_ai_trigger = None
-            
-            # SAFETY: If trigger is older than 60s, something went wrong - skip it
-            if now - trigger_start > 60:
-                print(f"[AutoAI] WARNING: Stale trigger detected ({now - trigger_start:.1f}s old). Skipping.")
-            else:
-                duration = min(now - trigger_start + 5.0, 30.0)  # Add context, cap at 30s
-                
-                # Check if already processing before queueing
-                if hasattr(self.audio_service.bot, 'behavior'):
-                    behavior = self.audio_service.bot.behavior
-                    if hasattr(behavior, '_ai_commentary_service'):
-                        if behavior._ai_commentary_service.is_processing:
-                            print(f"[AutoAI] Already processing. Skipping trigger.")
-                        else:
-                            print(f"[AutoAI] Silence detected. Triggering (duration={duration:.1f}s)")
-                            if not self.loop.is_closed():
-                                future = asyncio.run_coroutine_threadsafe(
-                                    behavior._ai_commentary_service.trigger_commentary(self.guild.id, duration=duration),
-                                    self.loop
-                                )
-                                future.add_done_callback(lambda f: print(f"[AutoAI] ERROR in trigger_commentary: {f.exception()}") if f.exception() else None)
-        
-        # Send "listening" notification when cooldown ends
-        if hasattr(self.audio_service.bot, 'behavior'):
-            behavior = self.audio_service.bot.behavior
-            if hasattr(behavior, '_ai_commentary_service'):
-                if not self.loop.is_closed():
-                    future = asyncio.run_coroutine_threadsafe(
-                        behavior._ai_commentary_service.notify_listening_if_ready(self.guild.id),
-                        self.loop
-                    )
-                    future.add_done_callback(lambda f: print(f"[AutoAI] ERROR in notify_listening: {f.exception()}") if f.exception() else None)
-        
         # Handle Vosk flushing for speech-to-text (1s threshold)
         for user_id, last_time in list(self.last_audio_time.items()):
             idle_time = now - last_time
             if idle_time > 1:
-                if user_id in self.speech_start_time:
-                    del self.speech_start_time[user_id]
-                
                 self._flush_user(user_id)
                 if user_id in self.last_audio_time:
                     del self.last_audio_time[user_id]
@@ -2278,37 +2196,7 @@ class KeywordDetectionSink(sinks.Sink):
                 if segment_time > self.max_segment_duration:
                     self._flush_user(user_id)
 
-        # 2. Handle Ventura trigger silence detection (2.0s threshold)
-        # We use buffer_last_update as it is more persistent than last_audio_time
-        if not self.ventura_trigger_enabled:
-            self.ventura_trigger_times.clear()  # Clear any pending triggers
-        else:
-            for user_id in list(self.ventura_trigger_times.keys()):
-                last_activity = self.buffer_last_update.get(user_id, 0)
-                idle_time = now - last_activity
-                
-                if idle_time > 2.0:
-                    trigger_time = self.ventura_trigger_times.pop(user_id)
-                    # Duration is trigger until now + 5s prefix for context
-                    duration = (now - trigger_time) + 5.0
-                    duration = min(duration, 30.0) # Cap at 30s
-                    
-                    # Check if already processing before queueing
-                    if hasattr(self.audio_service.bot, 'behavior'):
-                        behavior = self.audio_service.bot.behavior
-                        if hasattr(behavior, '_ai_commentary_service'):
-                            if behavior._ai_commentary_service.is_processing:
-                                print(f"[VenturaTrigger] Already processing. Skipping trigger for user {user_id}.")
-                            else:
-                                print(f"[VenturaTrigger] Silence detected (2s) for user {user_id}. Triggering AI commentary (duration={duration:.1f}s)")
-                                if not self.loop.is_closed():
-                                    future = asyncio.run_coroutine_threadsafe(
-                                        behavior._ai_commentary_service.trigger_commentary(self.guild.id, force=True, duration=duration),
-                                        self.loop
-                                    )
-                                    future.add_done_callback(lambda f: print(f"[VenturaTrigger] ERROR in trigger_commentary: {f.exception()}") if f.exception() else None)
-            
-        # 3. Cleanup users idle for more than 30 seconds to free memory
+        # Cleanup users idle for more than 30 seconds to free memory
         for user_id, last_time in list(self.buffer_last_update.items()):
             idle_time = now - last_time
             if idle_time > 30:
@@ -2320,8 +2208,7 @@ class KeywordDetectionSink(sinks.Sink):
                     del self.last_partial[user_id]
                 # Keep buffer_last_update a bit longer or let it be cleaned up
                 # del self.buffer_last_update[user_id]
-                if user_id in self.last_partial:
-                    del self.last_partial[user_id]
+
     def get_buffer_content(self, seconds: int = 10) -> bytes:
         """Get the last N seconds of mixed audio from all users' buffers."""
         # SAFETY: Hard cap at 30 seconds no matter what is requested
@@ -2510,16 +2397,6 @@ class KeywordDetectionSink(sinks.Sink):
                     print(f"[{timestamp}] [Vosk Final] {username}: \"{text}\"")
                     self._log_to_file(username, text)
                     
-                    # Detect Ventura in final results as well (strict word match)
-                    if self.ventura_trigger_enabled and self._is_ventura_match(text):
-                        now = time.time()
-                        if now - self.last_ventura_trigger_time < 30:
-                            print(f"[VenturaTrigger] Cooldown active (final). Skipping trigger for {username}.")
-                        elif user_id not in self.ventura_trigger_times:
-                            print(f"[VenturaTrigger] 'Ventura' detected in final result from {username}")
-                            self.ventura_trigger_times[user_id] = now
-                            self.last_ventura_trigger_time = now
-                    
                     # Check keywords in final result (most accurate)
                     keyword, action = self._check_keywords(text, result)
                     if keyword:
@@ -2538,16 +2415,6 @@ class KeywordDetectionSink(sinks.Sink):
                 if text and text != self.last_partial.get(user_id):
                     self.last_partial[user_id] = text
                     
-                    # Detect Ventura in partial results for faster response (strict word match)
-                    if self.ventura_trigger_enabled and self._is_ventura_match(text):
-                        now = time.time()
-                        if now - self.last_ventura_trigger_time < 30:
-                            # Too much spam in partials, only log once if we haven't already
-                            pass
-                        elif user_id not in self.ventura_trigger_times:
-                            print(f"[VenturaTrigger] 'Ventura' detected in partial result from {username}")
-                            self.ventura_trigger_times[user_id] = now
-                            self.last_ventura_trigger_time = now
         except Exception as e:
             if not is_silence:
                 print(f"[KeywordDetection] Error in detect_keyword for {username}: {e}")

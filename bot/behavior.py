@@ -44,7 +44,6 @@ from bot.services.voice_transformation import VoiceTransformationService
 from bot.services.stats import StatsService
 from bot.services.background import BackgroundService
 from bot.services.backup import BackupService
-from bot.services.llm import LLMService
 from bot.services.guild_settings import GuildSettingsService
 from bot.services.rl_store import RocketLeagueStoreService
 from bot.services.weekly_wrapped import WeeklyWrappedService
@@ -70,13 +69,9 @@ class BotBehavior:
         self._stats_service = StatsService(bot, self._message_service, self._sound_service)
         self._background_service = BackgroundService(bot, self._audio_service, self._sound_service, self)
         self._backup_service = BackupService(bot, self._message_service)
-        self._llm_service = LLMService()
         self._guild_settings_service = GuildSettingsService()
         self._rocket_league_store_service = RocketLeagueStoreService()
         self._weekly_wrapped_service = WeeklyWrappedService(bot, self._message_service)
-        
-        from bot.services.ai_commentary import AICommentaryService
-        self._ai_commentary_service = AICommentaryService(self)
         
         # Start background tasks
         self._background_service.start_tasks()

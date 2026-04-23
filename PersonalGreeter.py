@@ -154,7 +154,7 @@ async def on_ready():
                 if bot_channel:
                     await behavior.send_message(
                         channel=bot_channel,
-                        title="🤖 Bot Started: Ventura is online and ready.",
+                        title="🤖 Bot Started: soundboard is online and ready.",
                         description="",
                         message_format="image",
                         image_requester="System",
@@ -170,80 +170,6 @@ async def on_ready():
     # Background tasks are handled by BackgroundService (started automatically in BotBehavior)
     bot.loop.create_task(SoundDownloader(behavior, behavior.db, os.getenv("CHROMEDRIVER_PATH")).move_sounds())
     check_playback_queue.start()
-
-
-    # --- Auto-join most populated voice channel --- 
-    print("Attempting per-guild auto-join where enabled...")
-    for guild in bot.guilds:
-        guild_settings = settings_service.get(guild.id)
-        if not guild_settings.autojoin_enabled:
-            print(f"Auto-join disabled for {guild.name}; skipping.")
-            continue
-
-        print(f"Checking guild: {guild.name} ({guild.id})")
-        channel_to_join = None
-        if guild_settings.default_voice_channel_id:
-            try:
-                configured_channel = guild.get_channel(int(guild_settings.default_voice_channel_id))
-                if isinstance(configured_channel, discord.VoiceChannel):
-                    channel_to_join = configured_channel
-            except (TypeError, ValueError):
-                channel_to_join = None
-        if channel_to_join is None:
-            channel_to_join = behavior.get_largest_voice_channel(guild)
-        
-        if channel_to_join:
-            print(f"Found most populated channel in {guild.name}: {channel_to_join.name} ({len(channel_to_join.members)} members)")
-            try:
-                # Disconnect if already connected in this guild
-                if guild.voice_client and guild.voice_client.is_connected():
-                    print(f"Disconnecting from current channel in {guild.name}...")
-                    await behavior.send_message(title=f"Disconnecting from current channel in {guild.name}...", send_controls=False)
-                    await guild.voice_client.disconnect(force=True)
-                    await asyncio.sleep(1) # Short delay after disconnecting
-
-                # Attempt to connect
-                print(f"Attempting to connect to {channel_to_join.name} in {guild.name}...")
-                await channel_to_join.connect()
-                print(f"Successfully connected to {channel_to_join.name} in {guild.name}.")
-                try:
-                    vc = guild.voice_client
-                    if vc is not None:
-                        print(f"Voice encryption mode: {getattr(vc, 'mode', 'unknown')}")
-                except Exception as e:
-                    print(f"Could not read voice mode: {e}")
-                
-                # Play startup sound FIRST before starting keyword detection
-                if not bot.startup_sound_played:
-                    try:
-                        from bot.repositories import SoundRepository
-                        startup_sounds = SoundRepository().get_random_sounds(num_sounds=1, guild_id=guild.id)
-                        if startup_sounds:
-                            startup_sound = startup_sounds[0]
-                            await behavior.play_audio(channel_to_join, startup_sound[2], "startup")
-                            db.insert_action("startup", "play_startup_sound", startup_sound[0], guild_id=guild.id)
-                        # Wait for sound to start playing
-                        await asyncio.sleep(3)
-                    except Exception as e:
-                        print(f"Error playing startup sound: {e}")
-                    bot.startup_sound_played = True
-                
-                # Start keyword detection only when enabled for this guild.
-                if guild_settings.stt_enabled:
-                    try:
-                        await behavior._audio_service.start_keyword_detection(guild)
-                    except Exception as e:
-                        print(f"Could not start keyword detection: {e}")
-            except discord.ClientException as e:
-                print(f"Error connecting to {channel_to_join.name} in {guild.name}: {e}. Already connected elsewhere or connection issue.")
-            except asyncio.TimeoutError:
-                print(f"Timeout trying to connect to {channel_to_join.name} in {guild.name}.")
-            except Exception as e:
-                print(f"An unexpected error occurred while trying to connect to {channel_to_join.name} in {guild.name}: {e}")
-        else:
-            print(f"No suitable voice channel found in {guild.name} (or all are empty).")
-    print("Finished auto-join process.")
-    # --- End Auto-join ---
 
 
 @bot.event
@@ -385,7 +311,6 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
             if len(non_bot_members) == 0:
                 print(f"[AutoDisconnect] No non-bot members left in {before.channel.name}, disconnecting...")
                 try:
-                    # Stop keyword detection before disconnecting
                     await behavior._audio_service.stop_keyword_detection(before.channel.guild)
                     await voice_client.disconnect()
                     print(f"[AutoDisconnect] Disconnected from {before.channel.name}")
@@ -406,11 +331,9 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
             if len(non_bot_members) > 0:
                 print(f"[AutoFollow] Following {member_str} to {after.channel.name}")
                 try:
-                    # Stop keyword detection in old channel
                     await behavior._audio_service.stop_keyword_detection(voice_client.guild)
                     # Move to new channel
                     await voice_client.move_to(after.channel)
-                    # Restart keyword detection in new channel
                     await behavior._audio_service.start_keyword_detection(after.channel.guild)
                     print(f"[AutoFollow] Successfully moved to {after.channel.name}")
                 except Exception as e:

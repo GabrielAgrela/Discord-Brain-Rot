@@ -152,10 +152,11 @@ class MessageService:
         channel: Optional[discord.TextChannel] = None,
         guild: Optional[discord.Guild] = None,
         message_format: Literal["embed", "image"] = "embed",
-        image_requester: str = "Ventura",
+        image_requester: str = "Bot",
         image_show_footer: bool = True,
         image_show_sound_icon: bool = True,
         image_border_color: Optional[str] = None,
+        send_controls: bool = True,
     ) -> Optional[discord.Message]:
         """
         Send a message to the bot channel as an embed or image card.
@@ -174,6 +175,7 @@ class MessageService:
             image_show_footer: Whether image card should include footer row
             image_show_sound_icon: Whether image card should include the leading sound icon
             image_border_color: Optional hex color (e.g. "#ED4245") for image card border
+            send_controls: Whether to attach the default inline controls view when no view is supplied
             
         Returns:
             The sent message or None on failure
@@ -188,7 +190,7 @@ class MessageService:
         try:
             kwargs = {}
             effective_view = view
-            if effective_view is None:
+            if effective_view is None and send_controls:
                 style = self._resolve_default_inline_controls_style(
                     message_format=message_format,
                     color=color,

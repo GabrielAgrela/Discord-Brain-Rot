@@ -63,23 +63,12 @@ class TTSCog(commands.Cog):
         ctx: discord.ApplicationContext, 
         message: Option(str, "What you want to say", required=True),
         language: Option(str, "Select a voice or language", choices=list(TTS_PROFILES.keys()), required=True),
-        expressive: Option(bool, "Use AI to add emotional tags (ElevenLabs)", required=False, default=True)
     ):
         """Generate text-to-speech audio."""
         await ctx.respond("Processing your request...", delete_after=0)
         
         # Send loading card instead of character embed
         loading_message = await self._send_loading_card(ctx.guild)
-
-        if expressive:
-            # Pass loading_message to process_text_for_tts if needed, or just let it process
-            # Note: process_text_for_tts might take a few seconds
-            processed = await self.behavior._llm_service.process_text_for_tts(message)
-            if processed and processed.strip():
-                message = processed
-            else:
-                print(f"[TTSCog] Warning: LLM returned empty text for TTS. Falling back to original.")
-
         
         profile = TTS_PROFILES.get(language, TTS_PROFILES["en"])
         

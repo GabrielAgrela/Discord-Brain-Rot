@@ -3,6 +3,7 @@ Tests for bot/services/audio.py - AudioService helper behavior.
 """
 
 import asyncio
+import inspect
 import os
 import sys
 from types import SimpleNamespace
@@ -287,6 +288,17 @@ class TestAudioService:
 
         assert result is False
         voice_client.start_recording.assert_not_called()
+
+    def test_keyword_sink_has_no_ambient_llm_commentary_trigger(self):
+        """Ensure the Vosk sink only handles keyword actions, not ambient LLM commentary."""
+        from bot.services.audio import KeywordDetectionSink
+
+        source = inspect.getsource(KeywordDetectionSink)
+
+        assert "_ai_commentary_service" not in source
+        assert "trigger_commentary" not in source
+        assert "VenturaTrigger" not in source
+        assert "pending_ai_trigger" not in source
 
     @pytest.mark.asyncio
     async def test_update_progress_bar_exits_when_message_is_no_longer_current(self, audio_service):

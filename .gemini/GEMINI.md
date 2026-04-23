@@ -245,12 +245,6 @@ Canonical completion command:
 - AFK transitions are intentionally handled as session boundaries for active channels only (joining AFK is not counted as active voice time)
 - Voice session rows currently store `member.name` (not `name#discriminator`) to align with existing stats queries
 
-### STT Feature Flag Enforcement
-- `AudioService.start_keyword_detection` must enforce guild-level `stt_enabled` from `GuildSettingsService` before starting a sink.
-- `ensure_voice_connected` can be invoked more than once in quick succession during join/event playback flows; without the guard, keyword detection may start even when STT is disabled and then immediately be stopped by background health checks.
-- If Vosk appears to start and stop within seconds, verify `guild_settings.stt_enabled` for that guild first.
-- **VoskWorker event-loop crash cycle**: The `KeywordDetectionSink` runs in a background thread. All `asyncio.run_coroutine_threadsafe()` calls in this thread MUST be guarded with `if not loop.is_closed():` before calling. Without this guard, the VoskWorker crashes with `RuntimeError: Event loop is closed` every time the bot shuts down while STT is active, which triggers a crash-restart loop every 2-3 minutes and leaves the voice client in a broken state. This was the root cause of intermittent silent audio including slap sounds.
-
 ### Inline Controls Button Normalization
 - The minute background normalizer in `bot/services/background.py` is a safety dedupe pass; keep real-time cleanup in `on_message` (`handle_new_bot_message_for_controls_cleanup`) intact.
 - When detecting/removing inline `⚙️` controls, prefer checking both reconstructed views (`discord.ui.View.from_message`) and raw `message.components`; relying on one source can miss existing buttons and cause duplicate `custom_id` edit failures.
@@ -263,9 +257,18 @@ Canonical completion command:
 - `AudioService.update_progress_bar` should not rely only on global `self.current_view`/`self.stop_progress_update` for task coordination; stale tasks can overwrite older messages after a new playback starts.
 - Cancel the previous progress task before starting a new one and guard updates by message identity (`current_sound_message.id`) to keep historical progress labels stable.
 
+### Vosk Keyword Detection
+- Vosk keyword detection is still supported for configured trigger words (for example `diogo`, `hugo`, and other DB keywords). Do not remove `Data/models/vosk-model-small-pt-0.3`, `KeywordCog`, `KeywordRepository`, the `AudioService` recording sink, or DAVE inbound decrypt unless explicitly asked.
+- The removed feature is only the ambient Ventura LLM/commentary routine: no LLM provider/profile stack, no `_ai_commentary_service`, and no `/ventura` admin toggle. Manual Ventura `/tts` and `/sts` voice support stays intact.
+- `AudioService.start_keyword_detection` must enforce guild-level `stt_enabled` from `GuildSettingsService` before starting a sink.
+- `ensure_voice_connected` can be invoked more than once in quick succession during join/event playback flows; without the guard, keyword detection may start even when STT is disabled and then immediately be stopped by background health checks.
+- If Vosk appears to start and stop within seconds, verify `guild_settings.stt_enabled` for that guild first.
+- `KeywordDetectionSink` runs in a background thread. All `asyncio.run_coroutine_threadsafe()` calls in this thread must be guarded with `if not loop.is_closed():` before calling.
+- Startup auto-join is owned by `BackgroundService._auto_join_channels()`. Do not add a second `on_ready` auto-join path in `PersonalGreeter.py`; duplicate joins can disconnect the first voice client and make startup playback fail with `Not connected to voice`.
+
 ### PCM Audio Mixing
-- When combining concurrent raw PCM chunks from multiple users (e.g. from Discord Voice sinks), DO NOT simply concatenate them. Interleaved concatenations stretch out playback duration and cause severe lag/distortion.
-- Use `audioop.add(mix_buffer, user_buffer, 2)` to properly sum overlapping 16-bit PCM bytes together while preserving real-time duration.
+- When combining concurrent raw PCM chunks from multiple users (for example from Discord Voice sinks), do not concatenate them. Interleaved concatenations stretch playback duration and cause severe lag/distortion.
+- Use `audioop.add(mix_buffer, user_buffer, 2)` to properly sum overlapping 16-bit PCM bytes while preserving real-time duration.
 
 ### FFmpegOpusAudio and Silent Failures
 - `discord.FFmpegOpusAudio` wraps an `ffmpeg` process but its `AudioPlayer` thread silently ignores immediate `ffmpeg` exit-code crashes, interpreting empty pipe reads simply as normal EOF.
@@ -293,7 +296,7 @@ Canonical completion command:
 - `VOICE_MAX_DAVE_PROTOCOL_VERSION` defaults to auto-detected `davey.DAVE_PROTOCOL_VERSION` (currently `1`). Do not force it to `0` in production unless intentionally disabling voice while debugging.
 - In py-cord `VoiceClient.connect_websocket()`, `VoiceClient.ws` is still `utils.MISSING` while `ws.poll_event()` is processing handshake frames. Any DAVE MLS send path during `SESSION_DESCRIPTION` must use the live `DiscordVoiceWebSocket` reference (for example `_voicecompat_active_ws`) instead of `self.ws` to avoid `'_MissingSentinel' object has no attribute 'send_binary'`.
 - Reconnect loops can additionally produce `_MissingSentinel` (`poll_event`/`close`) and `Unclosed connection` noise; these are secondary effects after the initial `4017` rejection.
-- **STT/recording with DAVE requires inbound media decrypt**: patching only outbound voice packets (`encrypt_opus`) is not enough. `voice_client.start_recording()`/sinks receive RTP-decrypted bytes that still contain DAVE-encrypted opus payloads; without `dave_session.decrypt(user_id, davey.MediaType.audio, packet)` in `VoiceClient.unpack_audio`, logs spam `Error occurred while decoding opus frame.` / `error has happened in opus_decode` and keyword detection appears dead even though `audio_keyword_sink_count` is non-zero.
+- STT/recording with DAVE requires inbound media decrypt: patching only outbound voice packets (`encrypt_opus`) is not enough. `voice_client.start_recording()`/sinks receive RTP-decrypted bytes that still contain DAVE-encrypted opus payloads; without `dave_session.decrypt(user_id, davey.MediaType.audio, packet)` in `VoiceClient.unpack_audio`, logs spam `Error occurred while decoding opus frame.` / `error has happened in opus_decode` and keyword detection appears dead even when `audio_keyword_sink_count` is non-zero.
 - DAVE inbound decrypt depends on `ssrc -> user_id` mapping (`ws.ssrc_map`). When mapping is not available yet, drop those packets until mapping arrives; attempting opus decode on still-encrypted payloads causes continuous decoder errors and high CPU.
 
 ### Speech-to-Speech Playback

@@ -1142,7 +1142,7 @@ class BackgroundService:
 
     @tasks.loop(seconds=60)
     async def update_bot_status_loop(self):
-        """Continuously update the bot's status based on next explosion time and AI cooldown."""
+        """Continuously update the bot's status based on scheduled background work."""
         try:
             status_parts = []
             
@@ -1159,24 +1159,7 @@ class BackgroundService:
                     else:
                         status_parts.append(f'🤯 in ~{minutes}m')
             
-            # 2. AI Commentary (Ventura) status
-            if self.behavior and hasattr(self.behavior, '_ai_commentary_service'):
-                ai_service = self.behavior._ai_commentary_service
-                if not ai_service.enabled:
-                    status_parts.append('👂🏻 ❌')
-                else:
-                    ai_cooldown_seconds = ai_service.get_cooldown_remaining()
-                    ai_minutes = round(ai_cooldown_seconds / 60)
-                    if ai_cooldown_seconds > 0:
-                        if ai_minutes >= 60:
-                            ai_hours = round(ai_minutes / 60)
-                            status_parts.append(f'👂🏻 in ~{ai_hours}h')
-                        else:
-                            status_parts.append(f'👂🏻 in ~{ai_minutes}m')
-                    else:
-                        status_parts.append('👂🏻')
-
-            # 3. Scraper status
+            # 2. Scraper status
             if hasattr(self.bot, 'next_scrape_time'):
                 scrape_time_left = self.bot.next_scrape_time - time.time()
                 if scrape_time_left > 0:

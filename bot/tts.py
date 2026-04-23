@@ -510,7 +510,7 @@ class TTS:
 
         if self.is_on_cooldown(guild_id=guild_id):
             print("Cooldown active. Please wait before making another request.")
-            cooldown_message = await self.behavior.send_message(view=None, title="Não dês spam nesta merda (1/m)", description="Custa 11 euros por 2h de andre ventura fdp")
+            cooldown_message = await self.behavior.send_message(view=None, title="Cooldown Active", description="Please wait before making another request.")
             await asyncio.sleep(5)
             await cooldown_message.delete()
             return

@@ -87,3 +87,22 @@ class TestMessageService:
         kwargs = channel.send.await_args.kwargs
         assert kwargs["view"] is default_view
         message_service._build_default_inline_controls_view.assert_called_once_with(style=discord.ButtonStyle.success)
+
+    @pytest.mark.asyncio
+    async def test_send_message_can_skip_default_inline_controls_view(self, message_service):
+        """Callers can suppress default inline controls for transient messages."""
+        channel = Mock()
+        channel.send = AsyncMock(return_value=Mock())
+
+        message_service._build_default_inline_controls_view = Mock(return_value=Mock())
+
+        await message_service.send_message(
+            title="disconnecting",
+            channel=channel,
+            message_format="embed",
+            send_controls=False,
+        )
+
+        kwargs = channel.send.await_args.kwargs
+        assert "view" not in kwargs
+        message_service._build_default_inline_controls_view.assert_not_called()

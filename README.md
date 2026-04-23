@@ -1,6 +1,6 @@
 # Discord Brain Rot
 
-Discord bot for soundboard playback, live voice keyword triggers, TTS/STS, AI commentary, and analytics. Web dashboard is optional and disabled by default in production.
+Discord bot for soundboard playback, live voice keyword triggers, TTS/STS, sound ingestion, analytics, and an optional web dashboard. Web dashboard is optional and disabled by default in production.
 
 This README is based on the current codebase behavior (not historical README assumptions).
 
@@ -45,23 +45,25 @@ This README is based on the current codebase behavior (not historical README ass
 - Ingest-time loudness normalization for direct MP3 uploads and URL-ingested MP3s (compression + peak-safe gain; target `-18 dBFS` by default).
 - Periodic MyInstants scraping (background task).
 
-### Voice Connection and STT Resilience
+### Voice Connection Resilience
 - `ensure_voice_connected` with per-guild locks and retry logic.
 - Zombie voice client detection/recovery (websocket/socket/latency checks).
 - Reconnection grace period to avoid competing reconnects.
 - Voice DAVE compatibility patch for py-cord (identify payload, DAVE transitions, and MLS binary frame handling).
+- Voice DAVE receive decrypt support so recording sinks can feed Vosk instead of encrypted opus.
 - Auto-follow users when they switch channels.
 - Auto-disconnect when bot is alone (event-based + safety loop).
 - Auto-join is feature-flagged per guild (disabled by default for public hosting).
 
 ### Real-Time Keyword Detection (Vosk)
-- Live transcription via Vosk + Discord voice sinks.
-- Keywords stored in DB and reloadable at runtime.
+- Live keyword detection via Vosk + Discord voice sinks.
+- Keywords are stored in the `keywords` table and managed with `/keyword`.
 - Supported keyword actions:
   - `slap`
   - `list:<list_name>`
-- Grammar + confidence filtering for better trigger precision.
-- Worker/health checks to restart stalled keyword detection.
+- Guild-level STT is controlled by `/settings feature stt_enabled`.
+- Grammar + confidence filtering improves trigger precision for configured words like `diogo` or `hugo`.
+- Worker and health checks restart stalled keyword detection.
 
 ### TTS, STS, and Voice Isolation
 - `/tts` supports Google and ElevenLabs profiles.
@@ -70,13 +72,6 @@ This README is based on the current codebase behavior (not historical README ass
 - High-resolution timestamped filenames for generated outputs.
 - Loudness normalization in TTS pipeline.
 - ElevenLabs outputs are tagged (`is_elevenlabs=1`) and excluded from normal random/listing flows.
-
-### AI Commentary (Ventura Routine)
-- Auto commentary with cooldown scheduling and runtime enable/disable.
-- Captures recent voice audio context and active speakers.
-- LLM provider abstraction with profile config in `bot/data/llm_profiles.json`.
-- Current default profile: OpenRouter (primary + fallback model).
-- Persists short memory in `ai_commentary_memory` for contextual follow-up.
 
 ### Lists, Events, and Historical Features
 - Sound list CRUD via slash commands.
@@ -121,7 +116,6 @@ This README is based on the current codebase behavior (not historical README ass
 - Admin slash commands:
   - `/lastlogs`
   - `/commands`
-  - `/ventura`
   - `/backup`
   - `/reboot` (owner allowlist or Discord Administrator permission only)
 - Backup service creates compressed project backups with exclusions and now updates the ephemeral `/backup` response with live stage/progress status while archiving.
@@ -148,10 +142,9 @@ This README is based on the current codebase behavior (not historical README ass
 ### Dec 2025 to Jan 2026
 - Major architecture refactor into `commands/`, `services/`, `repositories/`, and `ui/` layers.
 - Repository pattern rollout + larger pytest coverage.
-- Real-time Vosk keyword detection and admin keyword management.
+- Real-time Vosk keyword detection and keyword management.
 - On This Day feature and yearly review flow added.
 - Dockerized runtime and deployment workflow consolidation.
-- AI commentary routine introduced and then expanded with buffering, memory, and cooldown controls.
 - Multi-guild and voice-connection resilience improvements.
 - Analytics dashboard and backup command added.
 
@@ -161,7 +154,6 @@ This README is based on the current codebase behavior (not historical README ass
 - Faster audio startup by deferring heavy card/UI operations.
 - Clickable progress button behavior (slap while playing, replay when stopped).
 - Auto-hide/expand playback controls and lazy similar-sounds loading.
-- Pluggable LLM provider architecture with profile-based configuration.
 - Voice session analytics (`voice_activity`) integrated into `/top` and `/yearreview`.
 - Accent border color support for generated image cards.
 
@@ -176,7 +168,7 @@ This README is based on the current codebase behavior (not historical README ass
 - `/slice`
 
 ### TTS / Voice
-- `/tts message:<text> language:<profile> expressive:<bool>`
+- `/tts message:<text> language:<profile>`
 - `/sts sound:<sound> char:<ventura|tyson|costa>`
 - `/isolate sound:<sound>`
 
@@ -205,7 +197,6 @@ This README is based on the current codebase behavior (not historical README ass
 ### Admin
 - `/lastlogs lines:<int> service:<optional>`
 - `/commands`
-- `/ventura state:<Enable|Disable>`
 - `/backup`
 
 ### Setup / Settings
@@ -261,7 +252,6 @@ This README is based on the current codebase behavior (not historical README ass
 - `DISCORD_OAUTH_CLIENT_SECRET` (required to enable Discord login on the web UI)
 - `DISCORD_OAUTH_REDIRECT_URI` (recommended public callback URL for Discord OAuth; falls back to Flask external URL generation if unset)
 - `PLAYBACK_QUEUE_INTERVAL` (web play-button queue polling interval in seconds, default `0.25`)
-- `ENABLE_VENTURA` (`true`/`false`, default `true`)
 - `OWNER_USER_IDS` (comma-separated Discord user IDs allowed to run admin-only commands)
 - `AUDIO_LATENCY_MODE` (`low_latency` default, or `balanced` / `high_quality`)
 - `RLSTORE_NOTIFY_ENABLED` (`true` default; enables the daily Rocket League store notification scheduler)
@@ -306,11 +296,6 @@ This README is based on the current codebase behavior (not historical README ass
 - `EL_voice_id_pt`
 - `EL_voice_id_en`
 - `EL_voice_id_costa`
-
-### LLM Providers
-- `OPENROUTER_API_KEY` (default profile path)
-- `OPENAI_API_KEY` (if using OpenAI profile)
-- `ANTHROPIC_API_KEY` (if using Anthropic profile)
 
 ### Optional TTS Loudness Tuning
 - `TTS_LUFS_TARGET`
