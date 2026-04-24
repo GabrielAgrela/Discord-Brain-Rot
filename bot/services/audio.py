@@ -68,6 +68,10 @@ class AudioService:
         self._guild_playback_done: Dict[int, asyncio.Event] = {}
         self._guild_progress_update_task: Dict[int, Optional[asyncio.Task]] = {}
         self._guild_current_view: Dict[int, Optional[discord.ui.View]] = {}
+        self._guild_current_audio_file: Dict[int, Optional[str]] = {}
+        self._guild_current_requester: Dict[int, Optional[str]] = {}
+        self._guild_current_play_id: Dict[int, Optional[str]] = {}
+        self._guild_current_play_started_at: Dict[int, Optional[datetime]] = {}
         self._active_guild_id: Optional[int] = None
         
         # Track current view to update progress button
@@ -185,6 +189,10 @@ class AudioService:
             self._guild_playback_done = {}
             self._guild_progress_update_task = {}
             self._guild_current_view = {}
+            self._guild_current_audio_file = {}
+            self._guild_current_requester = {}
+            self._guild_current_play_id = {}
+            self._guild_current_play_started_at = {}
             self._play_request_timestamps = {}
             self._play_pending_count = {}
         if guild_id not in self._guild_last_played_time:
@@ -198,6 +206,10 @@ class AudioService:
             self._guild_playback_done[guild_id] = event
             self._guild_progress_update_task[guild_id] = None
             self._guild_current_view[guild_id] = None
+            self._guild_current_audio_file[guild_id] = None
+            self._guild_current_requester[guild_id] = None
+            self._guild_current_play_id[guild_id] = None
+            self._guild_current_play_started_at[guild_id] = None
 
     def _set_active_guild(self, guild_id: int) -> None:
         """Mark the active guild for backward-compatible fields."""
@@ -210,6 +222,71 @@ class AudioService:
         self.playback_done = self._guild_playback_done.get(guild_id, self.playback_done)
         self._progress_update_task = self._guild_progress_update_task.get(guild_id)
         self.current_view = self._guild_current_view.get(guild_id)
+
+    def _mark_playback_started(
+        self,
+        guild_id: int,
+        audio_file: str,
+        user: Any,
+        play_id: str,
+    ) -> None:
+        """Track the currently audible file for web/runtime status."""
+        self._ensure_guild_playback_state(guild_id)
+        self._guild_current_audio_file[guild_id] = audio_file
+        self._guild_current_requester[guild_id] = getattr(user, "name", str(user))
+        self._guild_current_play_id[guild_id] = play_id
+        self._guild_current_play_started_at[guild_id] = datetime.now()
+
+    def _mark_playback_finished(self, guild_id: int, play_id: str) -> None:
+        """Clear current playback tracking when the active player ends."""
+        if self._guild_current_play_id.get(guild_id) != play_id:
+            return
+        self._guild_current_audio_file[guild_id] = None
+        self._guild_current_requester[guild_id] = None
+        self._guild_current_play_id[guild_id] = None
+        self._guild_current_play_started_at[guild_id] = None
+
+    def get_guild_playback_snapshot(self, guild: discord.Guild) -> Dict[str, Any]:
+        """
+        Return lightweight playback/voice state for one guild.
+
+        Args:
+            guild: Discord guild to inspect.
+
+        Returns:
+            Dictionary used by the web control-room status writer.
+        """
+        guild_id = guild.id
+        self._ensure_guild_playback_state(guild_id)
+        voice_client = guild.voice_client
+        voice_connected = bool(voice_client and voice_client.is_connected())
+        is_playing = bool(voice_client and voice_client.is_playing())
+        is_paused = bool(
+            voice_client
+            and hasattr(voice_client, "is_paused")
+            and voice_client.is_paused()
+        )
+        channel = getattr(voice_client, "channel", None) if voice_connected else None
+        non_bot_members = (
+            [
+                member
+                for member in getattr(channel, "members", [])
+                if not getattr(member, "bot", False)
+            ]
+            if channel
+            else []
+        )
+
+        return {
+            "voice_connected": voice_connected,
+            "voice_channel_id": getattr(channel, "id", None),
+            "voice_channel_name": getattr(channel, "name", None),
+            "voice_member_count": len(non_bot_members),
+            "is_playing": is_playing,
+            "is_paused": is_paused,
+            "current_sound": self._guild_current_audio_file.get(guild_id) if is_playing or is_paused else None,
+            "current_requester": self._guild_current_requester.get(guild_id) if is_playing or is_paused else None,
+        }
 
     def _track_guild_play_request(self, guild_id: int) -> bool:
         """Return False when per-guild rate or backpressure limits are exceeded."""
@@ -1166,8 +1243,18 @@ class AudioService:
                     print(f"[AudioService] [SLAP-DEBUG] Playback error: {error}")
                 else:
                     print(f"[AudioService] [SLAP-DEBUG] Slap playback completed OK")
+                try:
+                    self.bot.loop.call_soon_threadsafe(
+                        self._mark_playback_finished,
+                        guild_id,
+                        slap_play_id,
+                    )
+                except Exception:
+                    pass
 
+            slap_play_id = f"slap-{guild_id}-{int(slap_start_time * 1000)}"
             voice_client.play(audio_source, after=slap_after)
+            self._mark_playback_started(guild_id, audio_file, user, slap_play_id)
             print(f"[AudioService] [SLAP-DEBUG] voice_client.play() returned. is_playing={voice_client.is_playing()}")
             self._log_perf(f"play_slap ({audio_file})", slap_start_time)
             return True
@@ -1217,27 +1304,6 @@ class AudioService:
                 )
             return False
 
-        # Check cooldown first (per guild)
-        guild_last_played = self._guild_last_played_time.get(guild_id)
-        guild_cooldown_message = self._guild_cooldown_message.get(guild_id)
-        if not is_tts and guild_last_played and (datetime.now() - guild_last_played).total_seconds() < 2:
-            if guild_cooldown_message is None and not is_entrance:
-                bot_channel = self.message_service.get_bot_channel(channel.guild)
-                if bot_channel:
-                    cooldown_message = await bot_channel.send(
-                        embed=discord.Embed(title="Cooldown active")
-                    )
-                    self._guild_cooldown_message[guild_id] = cooldown_message
-                    self.cooldown_message = cooldown_message
-                    await asyncio.sleep(3)
-                    try:
-                        await cooldown_message.delete()
-                    except:
-                        pass
-                    self._guild_cooldown_message[guild_id] = None
-                    self.cooldown_message = None
-                    self._release_guild_play_request(guild_id)
-                    return
         self._guild_last_played_time[guild_id] = datetime.now()
         self.last_played_time = self._guild_last_played_time[guild_id]
 
@@ -1489,8 +1555,14 @@ class AudioService:
                         if guild_event is not None:
                             self.bot.loop.call_soon_threadsafe(guild_event.set)
                         self.bot.loop.call_soon_threadsafe(self.playback_done.set)
+                        self.bot.loop.call_soon_threadsafe(
+                            self._mark_playback_finished,
+                            guild_id,
+                            play_id,
+                        )
 
                 voice_client.play(audio_source, after=after_playing)
+                self._mark_playback_started(guild_id, audio_file, user, play_id)
                 active_player = getattr(voice_client, "_player", None)
                 active_player_id = hex(id(active_player)) if active_player is not None else "None"
                 try:

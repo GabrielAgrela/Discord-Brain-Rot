@@ -98,18 +98,19 @@ This README is based on the current codebase behavior (not historical README ass
 
 ### Web Soundboard
 - `GET /` shows recent actions, favorites, and all sounds.
+- A web control-room panel shows live bot status: current sound/requester, voice channel, mute state, and quick Slap/mute controls.
 - Recent actions can be filtered by action/user, Favorites can be searched and filtered by favoriting user, and All Sounds can be filtered by sound list without losing server-side pagination.
 - The soundboard and analytics pages include a top-right dark mode toggle that persists in browser local storage.
 - Each web table lets you enter a target page directly from its pagination controls.
 - The web soundboard and analytics dashboard replace matched racist/hateful usernames and sound titles with `******` unless the logged-in Discord user has prior tracked voice activity.
-- Queue playback from web via `POST /api/play_sound` into `playback_queue`.
-- The web soundboard also exposes authenticated Slap and mute-toggle controls via `POST /api/web_control`; the mute-on path plays a slap before muting, the bot consumes controls through the same `playback_queue` polling path, and the mute toggle icon refreshes from `/api/web_control_state`.
-- Unauthenticated web play/control buttons use a red locked state to prompt Discord login before queueing bot actions.
-- Web sound playback now requires Discord login; queued requests carry the authenticated Discord user so playback is logged as that user instead of a bot/system account.
-- Web play buttons use `sound_id` under the hood so censored labels still queue the real sound correctly.
+- Send playback requests from web via `POST /api/play_sound`; `playback_queue` remains the internal Flask-to-bot transport table.
+- The web soundboard also exposes authenticated Slap and mute-toggle controls via `POST /api/web_control`; the mute-on path plays a slap before muting, the bot consumes controls through the same internal polling path, and the mute toggle icon refreshes from `/api/web_control_state`.
+- Unauthenticated web play/control buttons use a red locked state to prompt Discord login before sending bot actions.
+- Web sound playback now requires Discord login; web requests carry the authenticated Discord user so playback is logged as that user instead of a bot/system account.
+- Web play buttons use `sound_id` under the hood so censored labels still play the real sound correctly.
 - Bot-side web playback polling defaults to `PLAYBACK_QUEUE_INTERVAL=0.25` seconds for low-latency play-button response.
-- If `DEFAULT_GUILD_ID` is unset, web playback now auto-resolves the guild only when exactly one known guild ID exists in stable bot data (`guild_settings`, `sounds`, or `actions`); `playback_queue` is used only as a last-resort fallback when those tables are empty, and multi-guild callers must send `guild_id` explicitly.
-- Bot background task consumes queued playback requests.
+- If `DEFAULT_GUILD_ID` is unset, web playback now auto-resolves the guild only when exactly one known guild ID exists in stable bot data (`guild_settings`, `sounds`, `actions`, or `web_bot_status`); `playback_queue` is used only as a last-resort fallback when those tables are empty, and multi-guild callers must send `guild_id` explicitly.
+- Bot background task consumes web playback/control requests from the internal transport table.
 
 ### Operations and Admin
 - Daily rotating logs in `Logs/YYYY-MM-DD.log` (+ `Logs/errors.log`).
@@ -130,7 +131,7 @@ This README is based on the current codebase behavior (not historical README ass
 - Keyword detection health check loop.
 - Voice-activity auto-disconnect safety loop.
 - High-frequency performance telemetry loop (JSON logs with CPU, memory, process/runtime, network, disk, loop lag, and bot health metrics).
-- Web playback queue consumer loop.
+- Web playback/control request bridge loop.
 
 ## Recent Updates (Last Months)
 
@@ -224,6 +225,7 @@ This README is based on the current codebase behavior (not historical README ass
 - `POST /api/play_sound`
 - `POST /api/web_control`
 - `GET /api/web_control_state`
+- `GET /api/control_room/status`
 - `GET /api/analytics/summary`
 - `GET /api/analytics/top_users`
 - `GET /api/analytics/top_sounds`
@@ -251,7 +253,7 @@ This README is based on the current codebase behavior (not historical README ass
 - `DISCORD_OAUTH_CLIENT_ID` (required to enable Discord login on the web UI)
 - `DISCORD_OAUTH_CLIENT_SECRET` (required to enable Discord login on the web UI)
 - `DISCORD_OAUTH_REDIRECT_URI` (recommended public callback URL for Discord OAuth; falls back to Flask external URL generation if unset)
-- `PLAYBACK_QUEUE_INTERVAL` (web play-button queue polling interval in seconds, default `0.25`)
+- `PLAYBACK_QUEUE_INTERVAL` (internal web request bridge polling interval in seconds, default `0.25`)
 - `OWNER_USER_IDS` (comma-separated Discord user IDs allowed to run admin-only commands)
 - `AUDIO_LATENCY_MODE` (`low_latency` default, or `balanced` / `high_quality`)
 - `RLSTORE_NOTIFY_ENABLED` (`true` default; enables the daily Rocket League store notification scheduler)

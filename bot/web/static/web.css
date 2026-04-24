@@ -462,9 +462,9 @@ html.theme-dark .web-control-button.error {
     box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.28);
 }
 
-html.theme-dark .play-button.queued,
-html.theme-dark .play-btn.queued,
-html.theme-dark .web-control-button.queued {
+html.theme-dark .play-button.sent,
+html.theme-dark .play-btn.sent,
+html.theme-dark .web-control-button.sent {
     background: var(--success);
     border-color: var(--success);
     color: #06100a;
@@ -775,12 +775,161 @@ html.theme-dark .web-control-button.queued {
     grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-.web-controls {
+.control-room {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 1.15rem;
+    margin-bottom: 0.75rem;
+    padding: 0.72rem 0.95rem;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-lg);
+    background:
+        linear-gradient(135deg, rgba(255, 249, 241, 0.92), rgba(242, 248, 232, 0.72)),
+        var(--paper-soft);
+    box-shadow: var(--shadow-sm);
+}
+
+html.theme-dark .control-room {
+    background:
+        linear-gradient(135deg, rgba(32, 38, 35, 0.92), rgba(52, 47, 38, 0.72)),
+        var(--paper-soft);
+}
+
+.control-room-status {
     display: flex;
-    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.85rem;
+    min-width: 0;
+}
+
+.control-room-status-main {
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+    min-width: 0;
+}
+
+.control-room-copy {
+    min-width: 0;
+}
+
+.control-room-dot {
+    width: 0.88rem;
+    height: 0.88rem;
+    flex: 0 0 auto;
+    border-radius: 999px;
+    background: var(--ink-muted);
+    box-shadow: 0 0 0 5px rgba(101, 88, 75, 0.12);
+}
+
+.control-room-dot.playing {
+    background: var(--success);
+    box-shadow: 0 0 0 5px rgba(38, 112, 77, 0.16);
+}
+
+.control-room-dot.offline {
+    background: var(--error);
+    box-shadow: 0 0 0 5px rgba(164, 43, 35, 0.15);
+}
+
+.control-room-title {
+    max-width: 100%;
+    margin: 0.1rem 0 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: clamp(1rem, 1.6vw, 1.22rem);
+    line-height: 1.05;
+}
+
+.control-room-subtitle {
+    margin: 0.2rem 0 0;
+    color: var(--ink-muted);
+    font-size: 0.78rem;
+    font-weight: 600;
+}
+
+.control-room-metrics {
+    display: flex;
+    align-items: center;
     justify-content: flex-end;
-    gap: 0.65rem;
-    margin: 0;
+    gap: 0.85rem;
+    min-width: 0;
+}
+
+.control-room-metric {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.42rem;
+    min-width: 0;
+    min-height: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+}
+
+html.theme-dark .control-room-metric {
+    background: transparent;
+}
+
+.control-room-metric + .control-room-metric {
+    padding-left: 0.85rem;
+}
+
+.control-room-metric + .control-room-metric::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 50%;
+    width: 1px;
+    height: 1.9rem;
+    transform: translateY(-50%);
+    background: rgba(23, 18, 13, 0.14);
+}
+
+html.theme-dark .control-room-metric + .control-room-metric::before {
+    background: rgba(244, 240, 232, 0.14);
+}
+
+.control-room-metric-label {
+    display: inline-flex;
+    color: var(--ink-muted);
+    font-size: 0.66rem;
+    font-weight: 800;
+    line-height: 1;
+    text-transform: uppercase;
+}
+
+.control-room-metric strong {
+    display: inline-block;
+    margin-top: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.92rem;
+    line-height: 1.1;
+}
+
+.control-room-metric--action {
+    gap: 0;
+}
+
+.control-room-metric--action .control-room-metric-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+}
+
+.control-room-metric-button {
+    width: 2.3rem;
+    height: 2.3rem;
+    box-shadow: 2px 2px 0 rgba(23, 18, 13, 0.12);
 }
 
 .web-control-button {
@@ -821,7 +970,7 @@ html.theme-dark .web-control-button.queued {
     box-shadow: 3px 3px 0 rgba(164, 43, 35, 0.16);
 }
 
-.web-control-button.queued {
+.web-control-button.sent {
     background: var(--success);
     border-color: var(--success);
     box-shadow: 3px 3px 0 rgba(38, 112, 77, 0.16);
@@ -1275,8 +1424,8 @@ tr:last-child td {
     box-shadow: 3px 3px 0 rgba(164, 43, 35, 0.16);
 }
 
-.play-button.queued,
-.play-btn.queued {
+.play-button.sent,
+.play-btn.sent {
     background: var(--success);
     border-color: var(--success);
     box-shadow: 3px 3px 0 rgba(38, 112, 77, 0.16);
@@ -2059,6 +2208,17 @@ body.page-soundboard .tables-grid > .card {
         grid-template-columns: 1fr;
     }
 
+    .control-room {
+        grid-template-columns: 1fr;
+        gap: 0.65rem;
+    }
+
+    .control-room-metrics {
+        justify-content: flex-start;
+        flex-wrap: wrap;
+        gap: 0.55rem 0.7rem;
+    }
+
     .card-full {
         grid-column: auto;
     }
@@ -2069,6 +2229,11 @@ body.page-soundboard .tables-grid > .card {
 }
 
 @media (min-width: 1201px) {
+    :root {
+        --table-header-height: 48px;
+        --table-row-height: 56px;
+    }
+
     body.page-soundboard {
         min-height: 100dvh;
         height: 100dvh;
@@ -2084,15 +2249,20 @@ body.page-soundboard .tables-grid > .card {
         display: flex;
         flex-direction: column;
         overflow: hidden;
-        padding-top: 1.25rem;
-        padding-bottom: 1.25rem;
+        padding-top: 1rem;
+        padding-bottom: 1rem;
     }
 
     body.page-soundboard .tables-grid {
-        flex: 0 1 auto;
+        flex: 1 1 auto;
         min-height: 0;
         align-items: start;
         grid-auto-rows: auto;
+        overflow: hidden;
+    }
+
+    body.page-soundboard .control-room {
+        flex: 0 0 auto;
     }
 
     body.page-soundboard .card {
@@ -2105,7 +2275,6 @@ body.page-soundboard .tables-grid > .card {
         flex: 0 1 auto;
         min-height: 0;
         height: var(--soundboard-table-height);
-        max-height: calc(100dvh - 22rem);
     }
 
     body.page-soundboard #filtersActions {
@@ -2221,6 +2390,8 @@ body.page-soundboard .tables-grid > .card {
     }
 
     .nav {
+        position: relative;
+        top: auto;
         padding: 0.85rem 0;
     }
 
@@ -2307,14 +2478,115 @@ body.page-soundboard .tables-grid > .card {
         display: none;
     }
 
-    .web-controls {
-        flex: 0 0 auto;
-        gap: 0.3rem;
+    .control-room {
+        position: sticky;
+        top: calc(0.5rem + env(safe-area-inset-top, 0px));
+        z-index: 35;
+        grid-template-columns: minmax(0, 1fr) auto auto;
+        grid-template-areas:
+            "status mute slap"
+            "voice voice voice";
+        align-items: center;
+        column-gap: 0.42rem;
+        row-gap: 0.38rem;
+        padding: 0.56rem 0.68rem;
+        border-radius: 20px;
+        background:
+            linear-gradient(135deg, rgba(255, 249, 241, 0.97), rgba(242, 248, 232, 0.9)),
+            var(--paper-soft);
+        backdrop-filter: blur(14px);
+        box-shadow: 0 8px 24px rgba(23, 18, 13, 0.18);
     }
 
-    .web-control-button {
-        width: 2.45rem;
-        height: 2.45rem;
+    html.theme-dark .control-room {
+        background:
+            linear-gradient(135deg, rgba(28, 34, 31, 0.97), rgba(47, 42, 34, 0.92)),
+            var(--paper-soft);
+    }
+
+    .control-room-status {
+        grid-area: status;
+        align-items: center;
+        flex-direction: row;
+        min-width: 0;
+    }
+
+    .control-room-status-main {
+        gap: 0.56rem;
+    }
+
+    .control-room-metrics {
+        display: contents;
+    }
+
+    .control-room-metric {
+        gap: 0.26rem;
+        min-height: 0;
+        padding: 0;
+    }
+
+    .control-room-metric:nth-child(1) {
+        grid-area: voice;
+    }
+
+    .control-room-metric:nth-child(2) {
+        grid-area: mute;
+        justify-self: end;
+    }
+
+    .control-room-metric:nth-child(3) {
+        grid-area: slap;
+        justify-self: end;
+    }
+
+    .control-room-metric + .control-room-metric {
+        padding-left: 0;
+    }
+
+    .control-room-metric + .control-room-metric::before {
+        display: none;
+    }
+
+    .control-room-metric:not(.control-room-metric--action) .control-room-metric-label {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+    }
+
+    .control-room-metric strong {
+        max-width: 100%;
+        font-size: 0.82rem;
+        line-height: 1;
+    }
+
+    .control-room-title {
+        margin-top: 0.04rem;
+        font-size: 0.9rem;
+    }
+
+    .control-room-subtitle {
+        display: none;
+    }
+
+    .control-room .card-kicker {
+        display: none;
+    }
+
+    .control-room-dot {
+        width: 0.7rem;
+        height: 0.7rem;
+        align-self: center;
+        box-shadow: 0 0 0 4px rgba(101, 88, 75, 0.12);
+    }
+
+    .web-control-button,
+    .control-room-metric-button {
+        width: 2rem;
+        height: 2rem;
+        font-size: 0.9rem;
     }
 
     .hero-panel-title,

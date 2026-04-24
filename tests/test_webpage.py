@@ -97,6 +97,25 @@ def _create_web_tables(db_path: Path) -> None:
             )
             """
         )
+        cursor.execute(
+            """
+            CREATE TABLE web_bot_status (
+                guild_id TEXT PRIMARY KEY,
+                guild_name TEXT,
+                voice_connected INTEGER NOT NULL DEFAULT 0,
+                voice_channel_id TEXT,
+                voice_channel_name TEXT,
+                voice_member_count INTEGER NOT NULL DEFAULT 0,
+                is_playing INTEGER NOT NULL DEFAULT 0,
+                is_paused INTEGER NOT NULL DEFAULT 0,
+                current_sound TEXT,
+                current_requester TEXT,
+                muted INTEGER NOT NULL DEFAULT 0,
+                mute_remaining_seconds INTEGER NOT NULL DEFAULT 0,
+                updated_at DATETIME NOT NULL
+            )
+            """
+        )
         conn.commit()
     finally:
         conn.close()
@@ -129,7 +148,7 @@ def web_client(tmp_path, monkeypatch):
         app.config["DATABASE_PATH"] = original_db_path
 
 
-def test_play_sound_endpoint_queues_request_with_inferred_single_guild(web_client):
+def test_play_sound_endpoint_sends_request_with_inferred_single_guild(web_client):
     client, db_path = web_client
 
     conn = sqlite3.connect(db_path)
@@ -153,7 +172,7 @@ def test_play_sound_endpoint_queues_request_with_inferred_single_guild(web_clien
     response = client.post("/api/play_sound", json={"sound_filename": "test.mp3"})
 
     assert response.status_code == 200
-    assert response.get_json() == {"message": "Playback request queued"}
+    assert response.get_json() == {"message": "Playback request sent"}
 
     conn = sqlite3.connect(db_path)
     try:
@@ -229,7 +248,7 @@ def test_play_sound_endpoint_accepts_sound_id_payload(web_client):
     response = client.post("/api/play_sound", json={"sound_id": 1})
 
     assert response.status_code == 200
-    assert response.get_json() == {"message": "Playback request queued"}
+    assert response.get_json() == {"message": "Playback request sent"}
 
     conn = sqlite3.connect(db_path)
     try:
@@ -254,14 +273,14 @@ def test_play_sound_endpoint_requires_discord_login(web_client):
     }
 
 
-def test_web_control_endpoint_queues_toggle_mute_request(web_client):
+def test_web_control_endpoint_sends_toggle_mute_request(web_client):
     client, db_path = web_client
     _login_web_user(client, username="discord-user", global_name="Discord User")
 
     response = client.post("/api/web_control", json={"action": "toggle_mute", "guild_id": "359077662742020107"})
 
     assert response.status_code == 200
-    assert response.get_json() == {"message": "Control request queued"}
+    assert response.get_json() == {"message": "Control request sent"}
 
     conn = sqlite3.connect(db_path)
     try:
@@ -328,6 +347,67 @@ def test_web_control_state_endpoint_reports_current_mute_state(web_client):
     assert payload["mute"]["is_muted"] is True
     assert 0 < payload["mute"]["remaining_seconds"] <= 1800
     assert payload["mute"]["toggle_action"] == "toggle_mute"
+
+
+def test_control_room_status_endpoint_reports_runtime(web_client):
+    client, db_path = web_client
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO guild_settings (guild_id) VALUES (?)",
+            ("359077662742020107",),
+        )
+        conn.execute(
+            """
+            INSERT INTO web_bot_status (
+                guild_id,
+                guild_name,
+                voice_connected,
+                voice_channel_id,
+                voice_channel_name,
+                voice_member_count,
+                is_playing,
+                is_paused,
+                current_sound,
+                current_requester,
+                muted,
+                mute_remaining_seconds,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "359077662742020107",
+                "Test Guild",
+                1,
+                "99",
+                "General",
+                3,
+                1,
+                0,
+                "clip.mp3",
+                "Trusted User",
+                1,
+                120,
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    response = client.get("/api/control_room/status")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["guild_id"] == 359077662742020107
+    assert payload["status"]["online"] is True
+    assert payload["status"]["voice_channel_name"] == "General"
+    assert payload["status"]["current_sound"] == "clip.mp3"
+    assert "queue" not in payload
+    assert payload["mute"]["is_muted"] is True
+    assert payload["mute"]["remaining_seconds"] == 120
 
 
 def test_login_route_marks_session_permanent(web_client, monkeypatch):
@@ -450,6 +530,10 @@ def test_soundboard_page_renders_shared_redesign(web_client):
     assert 'id="pageInputFavorites"' in html
     assert 'id="pageInputAllSounds"' in html
     assert "setupPageInput" in html
+    assert 'class="web-controls"' not in html
+    assert 'id="controlRoomMuteButton"' in html
+    assert 'id="controlRoomSlapButton"' in html
+    assert 'id="controlRoomUpdated"' not in html
     assert 'id="actions-action-filter"' in html
     assert 'aria-label="Filter recent actions by action"' in html
     assert 'aria-label="Filter recent actions by user"' in html
@@ -478,12 +562,19 @@ def test_soundboard_page_renders_shared_redesign(web_client):
     assert "setEndpointLoading" in html
     assert "aria-busy" in html
     assert "touchend" in html
+    assert "handlePlayButtonActivation" in html
+    assert "handleWebControlActivation" in html
     assert "requestInFlight" in html
     assert "isButtonCooldown" not in html
     assert "fetchFunction();" not in html
     assert "pendingInitialRenderEndpoints" in html
     assert "🔒" in html
     assert "Login with Discord to use bot controls" in html
+    assert "Play sound" in html
+    assert "Queue sound" not in html
+    assert "controlRoomQueue" not in html
+    assert ">Queue<" not in html
+    assert "Queued" not in html
     assert "Queue the right clip fast, without the generic dashboard look." not in html
     assert "What just happened, who triggered it, and how fresh it is." not in html
     assert "The shortlist for when you already know the bit you want." not in html
@@ -535,6 +626,10 @@ def test_web_static_stylesheet_is_served(web_client):
     assert "body.page-soundboard .library-controls" in stylesheet
     assert "margin-bottom: 2.4rem" in stylesheet
     assert "min-height: 4.4rem" in stylesheet
+    assert "top: calc(0.5rem + env(safe-area-inset-top, 0px))" in stylesheet
+    assert ".control-room .card-kicker" in stylesheet
+    assert ".play-button.sent" in stylesheet
+    assert ".play-button.queued" not in stylesheet
 
 
 def test_web_content_endpoints_censor_hateful_strings(web_client):

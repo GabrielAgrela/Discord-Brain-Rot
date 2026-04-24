@@ -119,7 +119,7 @@
                         <div class="card-title-stack">
                             <p class="card-kicker">Leaderboard</p>
                             <h2 class="card-title">Top Users</h2>
-                            <p class="card-copy">The people pressing the queue hardest in the selected window.</p>
+                            <p class="card-copy">The people playing the most sounds in the selected window.</p>
                         </div>
                     </div>
                     <div class="leaderboard-list" id="topUsers">
@@ -271,8 +271,8 @@
                 button.disabled = false;
                 button.classList.remove('login-required');
                 button.textContent = '▶';
-                button.title = 'Queue sound';
-                button.setAttribute('aria-label', 'Queue sound');
+                button.title = 'Play sound';
+                button.setAttribute('aria-label', 'Play sound');
                 return;
             }
 
@@ -348,7 +348,7 @@
                             </div>
                         </div>
                         <div class="item-count">${sound.count}</div>
-                        <button class="play-btn ${discordUser ? '' : 'login-required'}" data-sound-id="${sound.sound_id}" title="${discordUser ? 'Queue sound' : 'Login with Discord to play'}">${discordUser ? '▶' : '🔒'}</button>
+                        <button class="play-btn ${discordUser ? '' : 'login-required'}" data-sound-id="${sound.sound_id}" title="${discordUser ? 'Play sound' : 'Login with Discord to play'}">${discordUser ? '▶' : '🔒'}</button>
                     </div>
                 `).join('');
 
@@ -600,7 +600,7 @@
             }
 
             button.disabled = true;
-            button.classList.remove('queued', 'error');
+            button.classList.remove('sent', 'error');
             button.textContent = '⏳';
 
             try {
@@ -620,7 +620,7 @@
                     button.classList.add('error');
                 } else {
                     button.textContent = '✓';
-                    button.classList.add('queued');
+                    button.classList.add('sent');
                 }
             } catch (err) {
                 console.error('Error playing sound:', err);
@@ -628,7 +628,7 @@
                 button.classList.add('error');
             } finally {
                 setTimeout(() => {
-                    button.classList.remove('queued', 'error');
+                    button.classList.remove('sent', 'error');
                     button.style.background = '';
                     applyPlayButtonState(button);
                 }, 1000);

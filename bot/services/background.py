@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Tuple
 import discord
 from discord.ext import tasks
-from bot.repositories import SoundRepository, ActionRepository
+from bot.repositories import SoundRepository, ActionRepository, WebControlRoomRepository
 from bot.downloaders.sound import SoundDownloader
 from bot.services.guild_settings import GuildSettingsService
 
@@ -36,6 +36,7 @@ class BackgroundService:
         # Repositories
         self.sound_repo = SoundRepository()
         self.action_repo = ActionRepository()
+        self.web_control_room_repo = WebControlRoomRepository()
         self.guild_settings_service = GuildSettingsService()
         
         self._started = False
@@ -87,6 +88,8 @@ class BackgroundService:
                     seconds=self._perf_tick_rate_seconds
                 )
                 self.performance_telemetry_loop.start()
+            if not self.web_control_room_status_loop.is_running():
+                self.web_control_room_status_loop.start()
             if self._weekly_wrapped_enabled and not self.weekly_wrapped_scheduler_loop.is_running():
                 self.weekly_wrapped_scheduler_loop.start()
             if self._rlstore_notify_enabled and not self.rlstore_notification_loop.is_running():
@@ -1055,6 +1058,36 @@ class BackgroundService:
                 e,
                 exc_info=True,
             )
+
+    @tasks.loop(seconds=2)
+    async def web_control_room_status_loop(self):
+        """Persist live bot status for the optional web soundboard panel."""
+        try:
+            for guild in self.bot.guilds:
+                snapshot = self.audio_service.get_guild_playback_snapshot(guild)
+                mute_service = getattr(self.audio_service, "mute_service", None)
+                muted = bool(getattr(mute_service, "is_muted", False))
+                mute_remaining = (
+                    mute_service.get_remaining_seconds()
+                    if muted and hasattr(mute_service, "get_remaining_seconds")
+                    else 0
+                )
+                self.web_control_room_repo.upsert_status(
+                    guild_id=guild.id,
+                    guild_name=guild.name,
+                    voice_connected=snapshot["voice_connected"],
+                    voice_channel_id=snapshot["voice_channel_id"],
+                    voice_channel_name=snapshot["voice_channel_name"],
+                    voice_member_count=snapshot["voice_member_count"],
+                    is_playing=snapshot["is_playing"],
+                    is_paused=snapshot["is_paused"],
+                    current_sound=snapshot["current_sound"],
+                    current_requester=snapshot["current_requester"],
+                    muted=muted,
+                    mute_remaining_seconds=mute_remaining,
+                )
+        except Exception as e:
+            print(f"[BackgroundService] Error updating web control room status: {e}")
 
     @tasks.loop(minutes=5)
     async def weekly_wrapped_scheduler_loop(self):

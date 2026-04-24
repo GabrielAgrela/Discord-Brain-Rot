@@ -555,6 +555,7 @@ def _discover_known_guild_ids(db_path: str) -> list[int]:
             "SELECT guild_id FROM guild_settings WHERE guild_id IS NOT NULL AND TRIM(guild_id) != ''",
             "SELECT guild_id FROM sounds WHERE guild_id IS NOT NULL AND TRIM(guild_id) != ''",
             "SELECT guild_id FROM actions WHERE guild_id IS NOT NULL AND TRIM(guild_id) != ''",
+            "SELECT guild_id FROM web_bot_status WHERE guild_id IS NOT NULL AND TRIM(guild_id) != ''",
         ):
             try:
                 cursor.execute(query)

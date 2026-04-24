@@ -26,10 +26,12 @@ from bot.models.web import AnalyticsQuery, DiscordWebUser, PaginatedQuery
 from bot.repositories.sound import SoundRepository
 from bot.repositories.web_analytics import WebAnalyticsRepository
 from bot.repositories.web_content import WebContentRepository
+from bot.repositories.web_control_room import WebControlRoomRepository
 from bot.repositories.web_user_access import WebUserAccessRepository
 from bot.services.web_analytics import WebAnalyticsService
 from bot.services.web_auth import DiscordOAuthError, WebAuthService
 from bot.services.web_content import WebContentService
+from bot.services.web_control_room import WebControlRoomService
 from bot.services.web_playback import WebPlaybackService
 
 logger = logging.getLogger(__name__)
@@ -175,7 +177,7 @@ def register_web_routes(app: Flask) -> None:
     @app.route("/api/play_sound", methods=["POST"])
     @_require_discord_login_api
     def request_play_sound() -> Any:
-        """Queue a sound playback request from the authenticated web user."""
+        """Send a sound playback request from the authenticated web user."""
         data = request.get_json(silent=True) or {}
         current_user = _get_current_discord_user()
         if current_user is None:
@@ -183,7 +185,7 @@ def register_web_routes(app: Flask) -> None:
 
         try:
             _get_web_playback_service().queue_request(data, current_user)
-            return jsonify({"message": "Playback request queued"}), 200
+            return jsonify({"message": "Playback request sent"}), 200
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
         except sqlite3.Error:
@@ -196,7 +198,7 @@ def register_web_routes(app: Flask) -> None:
     @app.route("/api/web_control", methods=["POST"])
     @_require_discord_login_api
     def request_web_control() -> Any:
-        """Queue a bot control request from the authenticated web user."""
+        """Send a bot control request from the authenticated web user."""
         data = request.get_json(silent=True) or {}
         current_user = _get_current_discord_user()
         if current_user is None:
@@ -204,7 +206,7 @@ def register_web_routes(app: Flask) -> None:
 
         try:
             _get_web_playback_service().queue_control_request(data, current_user)
-            return jsonify({"message": "Control request queued"}), 200
+            return jsonify({"message": "Control request sent"}), 200
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
         except sqlite3.Error:
@@ -227,6 +229,20 @@ def register_web_routes(app: Flask) -> None:
             return jsonify({"error": "Database error"}), 500
         except Exception:
             logger.exception("Unexpected error loading web control state")
+            return jsonify({"error": "Internal server error"}), 500
+
+    @app.route("/api/control_room/status")
+    def get_control_room_status() -> Any:
+        """Return live bot status for the web control room."""
+        try:
+            return jsonify(_get_web_control_room_service().get_status(request.args)), 200
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except sqlite3.Error:
+            logger.exception("Database error loading control room status")
+            return jsonify({"error": "Database error"}), 500
+        except Exception:
+            logger.exception("Unexpected error loading control room status")
             return jsonify({"error": "Internal server error"}), 500
 
     @app.route("/analytics")
@@ -338,6 +354,15 @@ def _get_web_playback_service() -> WebPlaybackService:
     db_path = current_app.config["DATABASE_PATH"]
     return WebPlaybackService(
         sound_repository=SoundRepository(db_path=db_path, use_shared=False),
+        db_path=db_path,
+    )
+
+
+def _get_web_control_room_service() -> WebControlRoomService:
+    """Build a control-room service for the current request config."""
+    db_path = current_app.config["DATABASE_PATH"]
+    return WebControlRoomService(
+        repository=WebControlRoomRepository(db_path=db_path, use_shared=False),
         db_path=db_path,
     )
 

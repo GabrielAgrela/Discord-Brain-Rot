@@ -162,6 +162,25 @@ class Database:
                 )
                 """
             )
+            self.conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS web_bot_status (
+                    guild_id TEXT PRIMARY KEY,
+                    guild_name TEXT,
+                    voice_connected INTEGER NOT NULL DEFAULT 0,
+                    voice_channel_id TEXT,
+                    voice_channel_name TEXT,
+                    voice_member_count INTEGER NOT NULL DEFAULT 0,
+                    is_playing INTEGER NOT NULL DEFAULT 0,
+                    is_paused INTEGER NOT NULL DEFAULT 0,
+                    current_sound TEXT,
+                    current_requester TEXT,
+                    muted INTEGER NOT NULL DEFAULT 0,
+                    mute_remaining_seconds INTEGER NOT NULL DEFAULT 0,
+                    updated_at DATETIME NOT NULL
+                )
+                """
+            )
             keyword_count = self.conn.execute("SELECT COUNT(*) FROM keywords").fetchone()[0]
             if keyword_count == 0:
                 self.conn.executemany(

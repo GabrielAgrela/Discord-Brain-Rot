@@ -6,6 +6,7 @@ import asyncio
 import inspect
 import os
 import sys
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -121,6 +122,30 @@ class TestAudioService:
 
         with patch("bot.services.audio.discord.ui.View.from_message", side_effect=RuntimeError("boom")):
             assert audio_service._message_has_send_controls_button(message) is True
+
+    @pytest.mark.asyncio
+    async def test_play_audio_does_not_block_rapid_requests_with_cooldown_message(self, audio_service):
+        """Ensure rapid non-TTS play requests continue into normal playback handling."""
+        from bot.services.audio import AudioService
+
+        guild = Mock(id=123, name="Guild")
+        channel = Mock(guild=guild)
+        audio_service.playback_done = asyncio.Event()
+        audio_service.playback_done.set()
+        AudioService._ensure_guild_playback_state(audio_service, guild.id)
+        audio_service._guild_last_played_time[guild.id] = datetime.now()
+        audio_service.mute_service = SimpleNamespace(is_muted=False)
+        audio_service.message_service = Mock()
+        audio_service.message_service.get_bot_channel = Mock()
+        audio_service._track_guild_play_request = Mock(return_value=True)
+        audio_service._release_guild_play_request = Mock()
+        audio_service.ensure_voice_connected = AsyncMock(return_value=None)
+
+        result = await AudioService.play_audio(audio_service, channel, "clip.mp3", "tester")
+
+        assert result is False
+        audio_service.ensure_voice_connected.assert_awaited_once_with(channel)
+        audio_service.message_service.get_bot_channel.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_remove_send_controls_button_from_message_no_gear_no_edit(self, audio_service):
