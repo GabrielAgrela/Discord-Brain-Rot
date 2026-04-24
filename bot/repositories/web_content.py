@@ -88,6 +88,7 @@ class WebContentRepository(BaseRepository[dict[str, Any]]):
     def get_action_filters(
         self,
         filter_keys: Sequence[str] | None = None,
+        guild_id: int | str | None = None,
     ) -> dict[str, list[str]]:
         """
         Fetch filter options for the actions table.
@@ -103,34 +104,40 @@ class WebContentRepository(BaseRepository[dict[str, Any]]):
 
         if "action" in selected_keys:
             filters["action"] = self._fetch_distinct_values(
-                """
+                f"""
                 SELECT DISTINCT action AS value
                 FROM actions
                 WHERE action IS NOT NULL AND TRIM(action) != ''
+                {self._guild_filter_sql("guild_id", guild_id, prefix="AND")}
                 ORDER BY value COLLATE NOCASE ASC
-                """
+                """,
+                self._guild_filter_params(guild_id),
             )
 
         if "user" in selected_keys:
             filters["user"] = self._fetch_distinct_values(
-                """
+                f"""
                 SELECT DISTINCT username AS value
                 FROM actions
                 WHERE username IS NOT NULL AND TRIM(username) != ''
+                {self._guild_filter_sql("guild_id", guild_id, prefix="AND")}
                 ORDER BY value COLLATE NOCASE ASC
-                """
+                """,
+                self._guild_filter_params(guild_id),
             )
 
         if "sound" in selected_keys:
             filters["sound"] = self._fetch_distinct_values(
-                """
+                f"""
                 SELECT DISTINCT COALESCE(s.Filename, a.target) AS value
                 FROM actions a
                 LEFT JOIN sounds s ON a.target = s.id
                 WHERE COALESCE(s.Filename, a.target) IS NOT NULL
                   AND TRIM(COALESCE(s.Filename, a.target)) != ''
+                  {self._guild_filter_sql("a.guild_id", guild_id, prefix="AND")}
                 ORDER BY value COLLATE NOCASE ASC
-                """
+                """,
+                self._guild_filter_params(guild_id),
             )
 
         return filters
@@ -147,6 +154,7 @@ class WebContentRepository(BaseRepository[dict[str, Any]]):
         """
         conditions = ["s.favorite = 1", "s.is_elevenlabs = 0"]
         params: list[object] = []
+        self._append_sound_guild_condition(conditions, params, query.guild_id, alias="s")
 
         if query.search_query:
             search_term = f"%{query.search_query}%"
@@ -223,6 +231,7 @@ class WebContentRepository(BaseRepository[dict[str, Any]]):
         """
         conditions = ["favorite = 1", "is_elevenlabs = 0"]
         params: list[object] = []
+        self._append_sound_guild_condition(conditions, params, query.guild_id)
 
         if query.search_query:
             search_term = f"%{query.search_query}%"
@@ -276,6 +285,7 @@ class WebContentRepository(BaseRepository[dict[str, Any]]):
     def get_favorite_filters(
         self,
         filter_keys: Sequence[str] | None = None,
+        guild_id: int | str | None = None,
     ) -> dict[str, list[str]]:
         """
         Fetch filter options for the favorites table.
@@ -291,20 +301,22 @@ class WebContentRepository(BaseRepository[dict[str, Any]]):
 
         if "sound" in selected_keys:
             filters["sound"] = self._fetch_distinct_values(
-                """
+                f"""
                 SELECT DISTINCT Filename AS value
                 FROM sounds
                 WHERE favorite = 1
                   AND is_elevenlabs = 0
                   AND Filename IS NOT NULL
                   AND TRIM(Filename) != ''
+                  {self._guild_filter_sql("guild_id", guild_id, prefix="AND")}
                 ORDER BY value COLLATE NOCASE ASC
-                """
+                """,
+                self._guild_filter_params(guild_id),
             )
 
         if "user" in selected_keys:
             filters["user"] = self._fetch_distinct_values(
-                """
+                f"""
                 SELECT DISTINCT username AS value
                 FROM (
                     SELECT
@@ -319,14 +331,17 @@ class WebContentRepository(BaseRepository[dict[str, Any]]):
                     WHERE a.action IN ('favorite_sound', 'unfavorite_sound')
                       AND a.username IS NOT NULL
                       AND TRIM(a.username) != ''
+                      {self._guild_filter_sql("a.guild_id", guild_id, prefix="AND")}
                 ) latest
                 INNER JOIN sounds s ON s.id = latest.sound_id
                 WHERE latest.rn = 1
                   AND latest.action = 'favorite_sound'
                   AND s.favorite = 1
                   AND s.is_elevenlabs = 0
+                  {self._guild_filter_sql("s.guild_id", guild_id, prefix="AND")}
                 ORDER BY value COLLATE NOCASE ASC
-                """
+                """,
+                (*self._guild_filter_params(guild_id), *self._guild_filter_params(guild_id)),
             )
 
         return filters
@@ -343,6 +358,7 @@ class WebContentRepository(BaseRepository[dict[str, Any]]):
         """
         conditions = ["s.is_elevenlabs = 0"]
         params: list[object] = []
+        self._append_sound_guild_condition(conditions, params, query.guild_id, alias="s")
 
         if query.search_query:
             search_term = f"%{query.search_query}%"
@@ -403,6 +419,7 @@ class WebContentRepository(BaseRepository[dict[str, Any]]):
         """
         conditions = ["s.is_elevenlabs = 0"]
         params: list[object] = []
+        self._append_sound_guild_condition(conditions, params, query.guild_id, alias="s")
 
         if query.search_query:
             search_term = f"%{query.search_query}%"
@@ -449,6 +466,7 @@ class WebContentRepository(BaseRepository[dict[str, Any]]):
     def get_all_sound_filters(
         self,
         filter_keys: Sequence[str] | None = None,
+        guild_id: int | str | None = None,
     ) -> dict[str, list[Any]]:
         """
         Fetch filter options for the full sounds table.
@@ -464,37 +482,41 @@ class WebContentRepository(BaseRepository[dict[str, Any]]):
 
         if "sound" in selected_keys:
             filters["sound"] = self._fetch_distinct_values(
-                """
+                f"""
                 SELECT DISTINCT Filename AS value
                 FROM sounds
                 WHERE is_elevenlabs = 0
                   AND Filename IS NOT NULL
                   AND TRIM(Filename) != ''
+                  {self._guild_filter_sql("guild_id", guild_id, prefix="AND")}
                 ORDER BY value COLLATE NOCASE ASC
-                """
+                """,
+                self._guild_filter_params(guild_id),
             )
 
         if "date" in selected_keys:
             filters["date"] = self._fetch_distinct_values(
-                """
+                f"""
                 SELECT DISTINCT date(timestamp) AS value
                 FROM sounds
                 WHERE is_elevenlabs = 0
                   AND timestamp IS NOT NULL
                   AND TRIM(timestamp) != ''
+                  {self._guild_filter_sql("guild_id", guild_id, prefix="AND")}
                 ORDER BY value DESC
-                """
+                """,
+                self._guild_filter_params(guild_id),
             )
 
         if "list" in selected_keys:
-            filters["list"] = self._fetch_sound_list_filter_options()
+            filters["list"] = self._fetch_sound_list_filter_options(guild_id=guild_id)
 
         return filters
 
-    def _fetch_sound_list_filter_options(self) -> list[dict[str, str]]:
+    def _fetch_sound_list_filter_options(self, guild_id: int | str | None = None) -> list[dict[str, str]]:
         """Fetch sound-list options for the full sounds table filter."""
         rows = self._execute(
-            """
+            f"""
             SELECT
                 sl.id AS value,
                 CASE
@@ -505,8 +527,10 @@ class WebContentRepository(BaseRepository[dict[str, Any]]):
             FROM sound_lists sl
             WHERE sl.list_name IS NOT NULL
               AND TRIM(sl.list_name) != ''
+              {self._guild_filter_sql("sl.guild_id", guild_id, prefix="AND")}
             ORDER BY sl.list_name COLLATE NOCASE ASC, sl.id ASC
-            """
+            """,
+            self._guild_filter_params(guild_id),
         )
         return [
             {"value": str(row["value"]), "label": str(row["label"])}
@@ -548,7 +572,25 @@ class WebContentRepository(BaseRepository[dict[str, Any]]):
             conditions.append(clause)
             params.extend(clause_params)
 
+        if query.guild_id is not None:
+            conditions.append("(a.guild_id = ? OR a.guild_id IS NULL)")
+            params.append(str(query.guild_id))
+
         return conditions, params
+
+    @staticmethod
+    def _append_sound_guild_condition(
+        conditions: list[str],
+        params: list[object],
+        guild_id: int | str | None,
+        alias: str | None = None,
+    ) -> None:
+        """Append a guild condition for sounds when a guild is selected."""
+        if guild_id is None:
+            return
+        column = f"{alias}.guild_id" if alias else "guild_id"
+        conditions.append(f"({column} = ? OR {column} IS NULL)")
+        params.append(str(guild_id))
 
     def _fetch_distinct_values(
         self,
@@ -572,3 +614,22 @@ class WebContentRepository(BaseRepository[dict[str, Any]]):
         """Build a parameterized ``IN`` clause."""
         placeholders = ", ".join("?" for _ in values)
         return f"{column} IN ({placeholders})", [str(value) for value in values]
+
+    @staticmethod
+    def _guild_filter_sql(
+        column: str,
+        guild_id: int | str | None,
+        *,
+        prefix: str = "AND",
+    ) -> str:
+        """Return optional guild-filter SQL."""
+        if guild_id is None:
+            return ""
+        return f"{prefix} ({column} = ? OR {column} IS NULL)"
+
+    @staticmethod
+    def _guild_filter_params(guild_id: int | str | None) -> tuple[str, ...]:
+        """Return optional guild-filter params."""
+        if guild_id is None:
+            return tuple()
+        return (str(guild_id),)

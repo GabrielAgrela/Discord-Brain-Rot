@@ -1,4 +1,5 @@
 import sqlite3
+import io
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -45,6 +46,7 @@ def _create_web_tables(db_path: Path) -> None:
                 Filename TEXT NOT NULL,
                 guild_id TEXT,
                 favorite INTEGER DEFAULT 0,
+                blacklist INTEGER DEFAULT 0,
                 slap INTEGER DEFAULT 0,
                 is_elevenlabs INTEGER DEFAULT 0,
                 timestamp TEXT
@@ -121,7 +123,12 @@ def _create_web_tables(db_path: Path) -> None:
         conn.close()
 
 
-def _login_web_user(client, username: str = "trusted-user", global_name: str = "Trusted User") -> None:
+def _login_web_user(
+    client,
+    username: str = "trusted-user",
+    global_name: str = "Trusted User",
+    admin_guild_ids: list[str] | None = None,
+) -> None:
     """Store a Discord user in the Flask test session."""
     with client.session_transaction() as flask_session:
         flask_session["discord_user"] = {
@@ -129,6 +136,7 @@ def _login_web_user(client, username: str = "trusted-user", global_name: str = "
             "username": username,
             "global_name": global_name,
             "avatar": "",
+            "admin_guild_ids": admin_guild_ids or [],
         }
 
 
@@ -139,13 +147,17 @@ def web_client(tmp_path, monkeypatch):
     monkeypatch.delenv("DEFAULT_GUILD_ID", raising=False)
 
     original_db_path = app.config["DATABASE_PATH"]
-    app.config.update(TESTING=True, DATABASE_PATH=str(db_path))
+    original_sounds_dir = app.config["SOUNDS_DIR"]
+    sounds_dir = tmp_path / "Sounds"
+    sounds_dir.mkdir()
+    app.config.update(TESTING=True, DATABASE_PATH=str(db_path), SOUNDS_DIR=str(sounds_dir))
 
     try:
         with app.test_client() as client:
             yield client, db_path
     finally:
         app.config["DATABASE_PATH"] = original_db_path
+        app.config["SOUNDS_DIR"] = original_sounds_dir
 
 
 def test_play_sound_endpoint_sends_request_with_inferred_single_guild(web_client):
@@ -259,6 +271,281 @@ def test_play_sound_endpoint_accepts_sound_id_payload(web_client):
         conn.close()
 
     assert row == (359077662742020107, "jews did 911.mp3", "Discord User", "123")
+
+
+def test_guild_selector_endpoint_returns_known_guilds(web_client):
+    client, db_path = web_client
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executemany(
+            "INSERT INTO guild_settings (guild_id) VALUES (?)",
+            [("111",), ("222",)],
+        )
+        conn.execute(
+            """
+            INSERT INTO web_bot_status (
+                guild_id,
+                guild_name,
+                updated_at
+            )
+            VALUES (?, ?, ?)
+            """,
+            ("222", "Second Guild", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    response = client.get("/api/guilds?guild_id=222")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["selected_guild_id"] == 222
+    assert {"guild_id": 222, "name": "Second Guild", "is_default": True} in payload["guilds"]
+    assert {"guild_id": 111, "name": "Guild 111", "is_default": False} in payload["guilds"]
+
+
+def test_web_table_endpoints_scope_to_selected_guild(web_client):
+    client, db_path = web_client
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executemany(
+            """
+            INSERT INTO sounds (id, originalfilename, Filename, guild_id, favorite, slap, is_elevenlabs, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (1, "alpha.mp3", "alpha.mp3", "111", 1, 0, 0, "2026-04-01 12:00:00"),
+                (2, "beta.mp3", "beta.mp3", "222", 1, 0, 0, "2026-04-02 12:00:00"),
+            ],
+        )
+        conn.executemany(
+            """
+            INSERT INTO actions (username, action, target, timestamp, guild_id)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            [
+                ("alice", "play_request", "1", "2026-04-03 12:00:00", "111"),
+                ("bob", "play_request", "2", "2026-04-03 12:05:00", "222"),
+            ],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    actions_response = client.get("/api/actions?guild_id=222")
+    all_sounds_response = client.get("/api/all_sounds?guild_id=222")
+
+    assert actions_response.status_code == 200
+    assert actions_response.get_json()["items"] == [
+        {
+            "display_filename": "beta.mp3",
+            "display_username": "bob",
+            "action": "play_request",
+            "timestamp": "2026-04-03 12:05:00",
+        }
+    ]
+    assert all_sounds_response.status_code == 200
+    assert all_sounds_response.get_json()["items"] == [
+        {
+            "sound_id": 2,
+            "display_filename": "beta.mp3",
+            "timestamp": "2026-04-02 12:00:00",
+        }
+    ]
+
+
+def test_web_upload_approves_by_default_and_records_inbox(web_client, monkeypatch):
+    client, db_path = web_client
+    _login_web_user(client, username="discord-user", global_name="Discord User")
+    monkeypatch.setattr("bot.services.web_upload.MP3", lambda path: object())
+
+    response = client.post(
+        "/api/upload_sound",
+        data={
+            "guild_id": "359077662742020107",
+            "custom_name": "web drop",
+            "sound_file": (io.BytesIO(b"fake mp3"), "source.mp3"),
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["message"] == "Upload approved"
+    assert payload["filename"] == "web drop.mp3"
+    assert payload["status"] == "approved"
+
+    conn = sqlite3.connect(db_path)
+    try:
+        sound = conn.execute(
+            "SELECT id, Filename, guild_id FROM sounds"
+        ).fetchone()
+        upload = conn.execute(
+            """
+            SELECT sound_id, filename, original_filename, uploaded_by_username, uploaded_by_user_id, status, guild_id
+            FROM web_uploads
+            """
+        ).fetchone()
+        action = conn.execute(
+            "SELECT username, action, target, guild_id FROM actions"
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert sound[1:] == ("web drop.mp3", "359077662742020107")
+    assert upload == (
+        sound[0],
+        "web drop.mp3",
+        "source.mp3",
+        "Discord User",
+        "123",
+        "approved",
+        "359077662742020107",
+    )
+    assert action == ("Discord User", "upload_sound", "web drop.mp3", "359077662742020107")
+
+
+def test_web_upload_accepts_bot_modal_url_fields(web_client, monkeypatch):
+    client, db_path = web_client
+    _login_web_user(client, username="discord-user", global_name="Discord User")
+    monkeypatch.setattr("bot.services.web_upload.MP3", lambda path: object())
+
+    class FakeResponse:
+        status_code = 200
+
+        def iter_content(self, chunk_size):
+            return iter([b"fake ", b"mp3"])
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(
+        "bot.services.web_upload.requests.get",
+        lambda *args, **kwargs: FakeResponse(),
+    )
+
+    response = client.post(
+        "/api/upload_sound",
+        data={
+            "guild_id": "359077662742020107",
+            "source_url": "https://example.com/source.mp3",
+            "custom_name": "url drop",
+            "time_limit": "30",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["filename"] == "url drop.mp3"
+    assert payload["status"] == "approved"
+
+    conn = sqlite3.connect(db_path)
+    try:
+        sound = conn.execute(
+            "SELECT id, Filename, guild_id FROM sounds"
+        ).fetchone()
+        upload = conn.execute(
+            "SELECT filename, original_filename, status, guild_id FROM web_uploads"
+        ).fetchone()
+        action = conn.execute(
+            "SELECT username, action, target, guild_id FROM actions"
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert sound[1:] == ("url drop.mp3", "359077662742020107")
+    assert upload == ("url drop.mp3", "source.mp3", "approved", "359077662742020107")
+    assert action == ("Discord User", "upload_sound", "url drop.mp3", "359077662742020107")
+
+
+def test_web_upload_inbox_is_admin_only(web_client, monkeypatch):
+    client, db_path = web_client
+    _login_web_user(client, username="discord-user", global_name="Discord User")
+
+    response = client.get("/api/uploads?guild_id=359077662742020107")
+    assert response.status_code == 403
+
+    _login_web_user(
+        client,
+        username="discord-user",
+        global_name="Discord User",
+        admin_guild_ids=["359077662742020107"],
+    )
+    response = client.get("/api/uploads?guild_id=359077662742020107")
+
+    assert response.status_code == 200
+    assert response.get_json() == {"uploads": []}
+
+
+def test_web_upload_moderation_rejects_and_blacklists_sound_for_admin(web_client, monkeypatch):
+    client, db_path = web_client
+    _login_web_user(
+        client,
+        username="discord-user",
+        global_name="Discord User",
+        admin_guild_ids=["111"],
+    )
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            INSERT INTO sounds (id, originalfilename, Filename, guild_id, favorite, blacklist, slap, is_elevenlabs, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (9, "bad.mp3", "bad.mp3", "111", 0, 0, 0, 0, "2026-04-01 12:00:00"),
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS web_uploads (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id TEXT,
+                sound_id INTEGER,
+                filename TEXT NOT NULL,
+                original_filename TEXT NOT NULL,
+                uploaded_by_username TEXT NOT NULL,
+                uploaded_by_user_id TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'approved',
+                moderator_username TEXT,
+                moderated_at DATETIME,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO web_uploads (
+                id, guild_id, sound_id, filename, original_filename,
+                uploaded_by_username, uploaded_by_user_id, status
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (4, "111", 9, "bad.mp3", "bad.mp3", "Discord User", "123", "approved"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    response = client.post("/api/uploads/4/moderation", json={"status": "rejected"})
+
+    assert response.status_code == 200
+    assert response.get_json() == {"upload_id": 4, "status": "rejected"}
+
+    conn = sqlite3.connect(db_path)
+    try:
+        upload_status, moderator = conn.execute(
+            "SELECT status, moderator_username FROM web_uploads WHERE id = 4"
+        ).fetchone()
+        blacklist = conn.execute("SELECT blacklist FROM sounds WHERE id = 9").fetchone()[0]
+    finally:
+        conn.close()
+
+    assert upload_status == "rejected"
+    assert moderator == "Discord User"
+    assert blacklist == 1
 
 
 def test_play_sound_endpoint_requires_discord_login(web_client):
@@ -455,7 +742,9 @@ def test_discord_callback_persists_user_in_permanent_session(web_client, monkeyp
             return _FakeResponse({"access_token": "token"})
 
         @staticmethod
-        def get(*args, **kwargs):
+        def get(url, *args, **kwargs):
+            if url.endswith("/users/@me/guilds"):
+                return _FakeResponse([{"id": "359077662742020107", "permissions": "8"}])
             return _FakeResponse(fake_user)
 
     original_auth_service = app.extensions["web_auth_service"]
@@ -473,7 +762,10 @@ def test_discord_callback_persists_user_in_permanent_session(web_client, monkeyp
         assert response.headers["Location"].endswith("/analytics")
         with client.session_transaction() as flask_session:
             assert flask_session.permanent is True
-            assert flask_session["discord_user"] == fake_user
+            assert flask_session["discord_user"] == {
+                **fake_user,
+                "admin_guild_ids": ["359077662742020107"],
+            }
     finally:
         app.extensions["web_auth_service"] = original_auth_service
 
@@ -534,6 +826,15 @@ def test_soundboard_page_renders_shared_redesign(web_client):
     assert 'id="controlRoomMuteButton"' in html
     assert 'id="controlRoomSlapButton"' in html
     assert 'id="controlRoomUpdated"' not in html
+    assert '<span>Guild</span>' not in html
+    assert '<span class="nav-icon" aria-hidden="true">⬆️</span>' in html
+    assert '<span class="nav-text">Upload</span>' in html
+    assert '<span class="nav-icon" aria-hidden="true">🎛️</span>' in html
+    assert '<span class="nav-text">Soundboard</span>' in html
+    assert '<span class="nav-icon" aria-hidden="true">📊</span>' in html
+    assert '<span class="nav-text">Analytics</span>' in html
+    assert 'class="web-upload-submit play-button' not in html
+    assert 'class="web-upload-submit' in html
     assert 'id="actions-action-filter"' in html
     assert 'aria-label="Filter recent actions by action"' in html
     assert 'aria-label="Filter recent actions by user"' in html
@@ -593,6 +894,10 @@ def test_analytics_page_renders_shared_redesign(web_client):
     assert "brainrot-theme" in html
     assert "🌙" in html
     assert "☀️" in html
+    assert '<span class="nav-icon" aria-hidden="true">🎛️</span>' in html
+    assert '<span class="nav-text">Soundboard</span>' in html
+    assert '<span class="nav-icon" aria-hidden="true">📊</span>' in html
+    assert '<span class="nav-text">Analytics</span>' in html
     assert 'class="time-selector"' in html
     assert "Activity Heatmap" in html
     assert "🔒" in html

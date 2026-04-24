@@ -18,14 +18,20 @@ class DiscordWebUser:
     username: str
     global_name: str
     avatar: str = ""
+    admin_guild_ids: tuple[str, ...] = ()
 
     @classmethod
-    def from_discord_payload(cls, payload: Mapping[str, Any]) -> "DiscordWebUser":
+    def from_discord_payload(
+        cls,
+        payload: Mapping[str, Any],
+        admin_guild_ids: tuple[str, ...] = (),
+    ) -> "DiscordWebUser":
         """
         Build a web-session user from Discord API payload data.
 
         Args:
             payload: Raw Discord user payload.
+            admin_guild_ids: Guild IDs where the user has bot admin/mod permissions.
 
         Returns:
             Parsed authenticated user.
@@ -36,6 +42,7 @@ class DiscordWebUser:
             username=username,
             global_name=str(payload.get("global_name") or username),
             avatar=str(payload.get("avatar") or ""),
+            admin_guild_ids=tuple(str(guild_id) for guild_id in admin_guild_ids),
         )
 
     @classmethod
@@ -56,6 +63,14 @@ class DiscordWebUser:
         username = str(payload.get("username") or "").strip()
         global_name = str(payload.get("global_name") or username).strip()
         avatar = str(payload.get("avatar") or "").strip()
+        raw_admin_guild_ids = payload.get("admin_guild_ids") or ()
+        if not isinstance(raw_admin_guild_ids, (list, tuple, set)):
+            raw_admin_guild_ids = ()
+        admin_guild_ids = tuple(
+            str(guild_id).strip()
+            for guild_id in raw_admin_guild_ids
+            if str(guild_id).strip()
+        )
 
         if not user_id or not username:
             return None
@@ -65,9 +80,10 @@ class DiscordWebUser:
             username=username,
             global_name=global_name or username,
             avatar=avatar,
+            admin_guild_ids=admin_guild_ids,
         )
 
-    def to_session_payload(self) -> dict[str, str]:
+    def to_session_payload(self) -> dict[str, Any]:
         """
         Serialize the user for Flask session storage.
 
@@ -79,6 +95,7 @@ class DiscordWebUser:
             "username": self.username,
             "global_name": self.global_name,
             "avatar": self.avatar,
+            "admin_guild_ids": list(self.admin_guild_ids),
         }
 
 
@@ -91,6 +108,7 @@ class PaginatedQuery:
     page: int
     per_page: int
     search_query: str = ""
+    guild_id: int | None = None
     filters: dict[str, list[str]] = field(default_factory=dict)
 
     @property
@@ -107,3 +125,27 @@ class AnalyticsQuery:
 
     days: int
     limit: int = 10
+
+
+@dataclass(frozen=True)
+class WebGuild:
+    """
+    Guild option exposed to the web UI.
+
+    Attributes:
+        guild_id: Discord guild ID.
+        name: Display label for the selector.
+        is_default: Whether this is the selected/default option.
+    """
+
+    guild_id: int
+    name: str
+    is_default: bool = False
+
+    def to_payload(self) -> dict[str, Any]:
+        """Serialize the guild option for JSON/template usage."""
+        return {
+            "guild_id": self.guild_id,
+            "name": self.name,
+            "is_default": self.is_default,
+        }

@@ -28,6 +28,7 @@ def create_app() -> Flask:
         template_folder=str(project_root / "templates"),
     )
     app.config.setdefault("DATABASE_PATH", "Data/database.db")
+    app.config.setdefault("SOUNDS_DIR", str(project_root / "Sounds"))
     app.config["SECRET_KEY"] = app.config.get("SECRET_KEY") or os.getenv(
         "WEB_SESSION_SECRET",
         "discord-brain-rot-web-dev",

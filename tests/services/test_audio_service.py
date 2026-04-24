@@ -325,6 +325,23 @@ class TestAudioService:
         assert "VenturaTrigger" not in source
         assert "pending_ai_trigger" not in source
 
+    def test_keyword_sink_flushes_after_configured_silence(self):
+        """Ensure final keyword detection can flush faster than the old one-second pause."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        sink.last_audio_time = {123: 10.0}
+        sink.recognizer_start_time = {}
+        sink.buffer_last_update = {}
+        sink.silence_flush_seconds = 0.35
+        sink._flush_user = Mock()
+
+        with patch("bot.services.audio.time.time", return_value=10.36):
+            sink._flush_silence()
+
+        sink._flush_user.assert_called_once_with(123)
+        assert 123 not in sink.last_audio_time
+
     @pytest.mark.asyncio
     async def test_update_progress_bar_exits_when_message_is_no_longer_current(self, audio_service):
         """Ensure stale progress tasks stop without editing old playback messages."""

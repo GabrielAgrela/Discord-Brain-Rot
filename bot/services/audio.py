@@ -2096,6 +2096,10 @@ class KeywordDetectionSink(sinks.Sink):
         self.max_segment_duration = 10.0 # Force flush after 10 seconds of continuous speech
         self.audio_buffers = {} # user_id -> bytearray for batching
         self.min_batch_size = 28800 # ~300ms at 48kHz stereo (48000 * 2 * 2 * 0.3)
+        try:
+            self.silence_flush_seconds = float(os.getenv("KEYWORD_SILENCE_FLUSH_SECONDS", "0.35"))
+        except ValueError:
+            self.silence_flush_seconds = 0.35
         # Per-user timestamped chunks used for recent audio inspection/debugging.
         self.buffer_seconds = 30
         self.user_audio_buffers: Dict[int, list] = {}  # user_id -> list of (timestamp, audio_bytes)
@@ -2255,10 +2259,10 @@ class KeywordDetectionSink(sinks.Sink):
         """Force Vosk to finalize results for users who stopped talking and cleanup idle users."""
         now = time.time()
         
-        # Handle Vosk flushing for speech-to-text (1s threshold)
+        # Handle Vosk flushing for speech-to-text after a short pause.
         for user_id, last_time in list(self.last_audio_time.items()):
             idle_time = now - last_time
-            if idle_time > 1:
+            if idle_time > self.silence_flush_seconds:
                 self._flush_user(user_id)
                 if user_id in self.last_audio_time:
                     del self.last_audio_time[user_id]

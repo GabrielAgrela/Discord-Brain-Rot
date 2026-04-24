@@ -98,7 +98,12 @@ This README is based on the current codebase behavior (not historical README ass
 
 ### Web Soundboard
 - `GET /` shows recent actions, favorites, and all sounds.
+- Multi-guild web deployments expose a guild selector; soundboard tables, control-room status, play/control requests, and uploads include the selected `guild_id` instead of relying on implicit backend inference.
 - A web control-room panel shows live bot status: current sound/requester, voice channel, mute state, and quick Slap/mute controls.
+- Authenticated users can open the web upload modal from the upload icon and add a sound with the same fields as the bot upload modal: MP3/TikTok/YouTube/Instagram URL, MP3 file, optional custom name, and optional video time limit.
+- Desktop nav uses text labels for Soundboard, Analytics, and Upload; mobile nav compacts those controls to emoji-only buttons.
+- Web uploads are approved by default, immediately inserted into the selected guild sound library, and recorded in an admin-only upload inbox.
+- Web upload moderation is restricted to users who match the bot admin/mod rule for the selected guild (`OWNER_USER_IDS`, Administrator, Manage Server, or Manage Channels). Existing web sessions may need to log out/in after this change so Discord grants the `guilds` OAuth scope.
 - Recent actions can be filtered by action/user, Favorites can be searched and filtered by favoriting user, and All Sounds can be filtered by sound list without losing server-side pagination.
 - The soundboard and analytics pages include a top-right dark mode toggle that persists in browser local storage.
 - Each web table lets you enter a target page directly from its pagination controls.
@@ -222,7 +227,11 @@ This README is based on the current codebase behavior (not historical README ass
 - `GET /api/actions`
 - `GET /api/favorites`
 - `GET /api/all_sounds`
+- `GET /api/guilds`
 - `POST /api/play_sound`
+- `POST /api/upload_sound`
+- `GET /api/uploads` (owner/admin web users only)
+- `POST /api/uploads/<upload_id>/moderation` (owner/admin web users only)
 - `POST /api/web_control`
 - `GET /api/web_control_state`
 - `GET /api/control_room/status`
@@ -285,6 +294,7 @@ This README is based on the current codebase behavior (not historical README ass
 - `AUTOJOIN_DEFAULT` (`false` default for new guilds)
 - `PERIODIC_DEFAULT` (`false` default for new guilds)
 - `STT_DEFAULT` (`false` default for new guilds)
+- `KEYWORD_SILENCE_FLUSH_SECONDS` (`0.35` default; pause after speech before Vosk final keyword detection is forced)
 - `VOICE_MAX_DAVE_PROTOCOL_VERSION` (default auto-detected from `davey` protocol version, currently `1`; set `0` only to force-disable DAVE negotiation)
 - `PERFORMANCE_MONITOR_TICK_SECONDS` (performance monitor interval in seconds, default `0.5`, minimum `0.1`)
 - `WEEKLY_WRAPPED_ENABLED` (`true` default; enables weekly digest scheduler)
@@ -329,6 +339,8 @@ docker-compose restart
 # Stop everything
 docker-compose down
 ```
+
+The optional web service shares the same `Sounds/` and `Data/` mounts as the bot, so web uploads are written where bot playback can read them.
 
 ## Verify, Test, Deploy
 

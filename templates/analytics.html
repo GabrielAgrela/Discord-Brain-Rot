@@ -51,10 +51,12 @@
             </a>
             <div class="nav-links">
                 <a href="/" class="nav-link">
-                    <span>Soundboard</span>
+                    <span class="nav-icon" aria-hidden="true">🎛️</span>
+                    <span class="nav-text">Soundboard</span>
                 </a>
                 <a href="/analytics" class="nav-link active">
-                    <span>Analytics</span>
+                    <span class="nav-icon" aria-hidden="true">📊</span>
+                    <span class="nav-text">Analytics</span>
                 </a>
                 {% if discord_user %}
                 <a href="/logout?next=/analytics" class="auth-user-link" title="Logout {{ display_name }}">

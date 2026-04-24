@@ -14,6 +14,11 @@ import requests
 from bot.models.web import DiscordWebUser
 
 
+DISCORD_PERMISSION_ADMINISTRATOR = 0x8
+DISCORD_PERMISSION_MANAGE_CHANNELS = 0x10
+DISCORD_PERMISSION_MANAGE_GUILD = 0x20
+
+
 class DiscordOAuthError(Exception):
     """
     Raised when Discord OAuth interactions fail.
@@ -131,7 +136,7 @@ class WebAuthService:
                 "client_id": config["client_id"],
                 "redirect_uri": redirect_uri,
                 "response_type": "code",
-                "scope": "identify",
+                "scope": "identify guilds",
                 "state": state,
             }
         )
@@ -192,4 +197,41 @@ class WebAuthService:
                 502,
             )
 
-        return DiscordWebUser.from_discord_payload(user_response.json())
+        admin_guild_ids = self._load_admin_guild_ids(access_token, api_base_url)
+        return DiscordWebUser.from_discord_payload(
+            user_response.json(),
+            admin_guild_ids=admin_guild_ids,
+        )
+
+    def _load_admin_guild_ids(self, access_token: str, api_base_url: str) -> tuple[str, ...]:
+        """
+        Return guild IDs where the OAuth user matches bot admin/mod permissions.
+
+        This mirrors ``BotBehavior.is_admin_or_mod`` for web sessions by using
+        Discord's OAuth guild permission bitset: administrator, manage guild,
+        or manage channels.
+        """
+        guilds_response = self._requests_session.get(
+            f"{api_base_url}/users/@me/guilds",
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=15,
+        )
+        if not guilds_response.ok:
+            return ()
+
+        admin_guild_ids: list[str] = []
+        for guild in guilds_response.json():
+            guild_id = str(guild.get("id") or "").strip()
+            if not guild_id:
+                continue
+            try:
+                permissions = int(str(guild.get("permissions") or "0"))
+            except ValueError:
+                permissions = 0
+            if permissions & (
+                DISCORD_PERMISSION_ADMINISTRATOR
+                | DISCORD_PERMISSION_MANAGE_GUILD
+                | DISCORD_PERMISSION_MANAGE_CHANNELS
+            ):
+                admin_guild_ids.append(guild_id)
+        return tuple(admin_guild_ids)

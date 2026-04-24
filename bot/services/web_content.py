@@ -75,11 +75,7 @@ class WebContentService:
                 for row in rows
             ],
             "total_pages": self._calculate_total_pages(total_count, query.per_page),
-            "filters": (
-                self.repository.get_action_filters(filter_keys)
-                if include_filters
-                else {}
-            ),
+            "filters": self._get_action_filters(query, include_filters, filter_keys),
         }
 
     def get_favorites(
@@ -116,11 +112,7 @@ class WebContentService:
                 for row in rows
             ],
             "total_pages": self._calculate_total_pages(total_count, query.per_page),
-            "filters": (
-                self.repository.get_favorite_filters(filter_keys)
-                if include_filters
-                else {}
-            ),
+            "filters": self._get_favorite_filters(query, include_filters, filter_keys),
         }
 
     def get_all_sounds(
@@ -158,12 +150,41 @@ class WebContentService:
                 for row in rows
             ],
             "total_pages": self._calculate_total_pages(total_count, query.per_page),
-            "filters": (
-                self.repository.get_all_sound_filters(filter_keys)
-                if include_filters
-                else {}
-            ),
+            "filters": self._get_all_sound_filters(query, include_filters, filter_keys),
         }
+
+    def _get_action_filters(
+        self,
+        query: PaginatedQuery,
+        include_filters: bool,
+        filter_keys: tuple[str, ...] | None,
+    ) -> dict[str, Any]:
+        """Return scoped action filters when requested."""
+        if not include_filters:
+            return {}
+        return self.repository.get_action_filters(filter_keys, guild_id=query.guild_id)
+
+    def _get_favorite_filters(
+        self,
+        query: PaginatedQuery,
+        include_filters: bool,
+        filter_keys: tuple[str, ...] | None,
+    ) -> dict[str, Any]:
+        """Return scoped favorite filters when requested."""
+        if not include_filters:
+            return {}
+        return self.repository.get_favorite_filters(filter_keys, guild_id=query.guild_id)
+
+    def _get_all_sound_filters(
+        self,
+        query: PaginatedQuery,
+        include_filters: bool,
+        filter_keys: tuple[str, ...] | None,
+    ) -> dict[str, Any]:
+        """Return scoped all-sound filters when requested."""
+        if not include_filters:
+            return {}
+        return self.repository.get_all_sound_filters(filter_keys, guild_id=query.guild_id)
 
     def _censor_text(self, value: str | None, should_censor: bool) -> str | None:
         """Censor hateful text for web responses when needed."""

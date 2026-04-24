@@ -8,7 +8,7 @@ import logging
 import os
 from datetime import datetime, timezone
 from functools import wraps
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 import sqlite3
 from flask import (
@@ -23,16 +23,21 @@ from flask import (
 )
 
 from bot.models.web import AnalyticsQuery, DiscordWebUser, PaginatedQuery
+from bot.repositories.action import ActionRepository
 from bot.repositories.sound import SoundRepository
 from bot.repositories.web_analytics import WebAnalyticsRepository
 from bot.repositories.web_content import WebContentRepository
 from bot.repositories.web_control_room import WebControlRoomRepository
+from bot.repositories.web_guild import WebGuildRepository
+from bot.repositories.web_upload import WebUploadRepository
 from bot.repositories.web_user_access import WebUserAccessRepository
 from bot.services.web_analytics import WebAnalyticsService
 from bot.services.web_auth import DiscordOAuthError, WebAuthService
 from bot.services.web_content import WebContentService
 from bot.services.web_control_room import WebControlRoomService
+from bot.services.web_guild import WebGuildService
 from bot.services.web_playback import WebPlaybackService
+from bot.services.web_upload import WebUploadService
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +55,7 @@ def register_web_routes(app: Flask) -> None:
         """Expose Discord auth state to templates."""
         return {
             "discord_user": _get_current_discord_user(),
+            "web_user_is_admin": _current_web_user_is_admin(),
             "discord_oauth_configured": _get_auth_service().oauth_is_configured(),
             "discord_login_url": url_for("login", next=request.path),
         }
@@ -130,9 +136,23 @@ def register_web_routes(app: Flask) -> None:
     @app.route("/")
     def index() -> str:
         """Render the soundboard page."""
+        selected_guild_id = _get_selected_guild_id(request.args)
         return render_template(
             "index.html",
-            initial_soundboard_data=_build_initial_soundboard_data(),
+            initial_soundboard_data=_build_initial_soundboard_data(selected_guild_id),
+            guild_options=_get_web_guild_service().get_guild_options(selected_guild_id),
+            selected_guild_id=selected_guild_id,
+        )
+
+    @app.route("/api/guilds")
+    def get_guilds() -> Any:
+        """Return web-visible guild options."""
+        selected_guild_id = _get_selected_guild_id(request.args)
+        return jsonify(
+            {
+                "guilds": _get_web_guild_service().get_guild_options(selected_guild_id),
+                "selected_guild_id": selected_guild_id,
+            }
         )
 
     @app.route("/api/actions")
@@ -179,6 +199,7 @@ def register_web_routes(app: Flask) -> None:
     def request_play_sound() -> Any:
         """Send a sound playback request from the authenticated web user."""
         data = request.get_json(silent=True) or {}
+        _remember_selected_guild_id(data.get("guild_id"))
         current_user = _get_current_discord_user()
         if current_user is None:
             return jsonify({"error": "Discord login required"}), 401
@@ -200,6 +221,7 @@ def register_web_routes(app: Flask) -> None:
     def request_web_control() -> Any:
         """Send a bot control request from the authenticated web user."""
         data = request.get_json(silent=True) or {}
+        _remember_selected_guild_id(data.get("guild_id"))
         current_user = _get_current_discord_user()
         if current_user is None:
             return jsonify({"error": "Discord login required"}), 401
@@ -220,6 +242,7 @@ def register_web_routes(app: Flask) -> None:
     @_require_discord_login_api
     def get_web_control_state() -> Any:
         """Return current bot control state for the authenticated web user."""
+        _remember_selected_guild_id(request.args.get("guild_id"))
         try:
             return jsonify(_get_web_playback_service().get_control_state(request.args)), 200
         except ValueError as exc:
@@ -234,6 +257,7 @@ def register_web_routes(app: Flask) -> None:
     @app.route("/api/control_room/status")
     def get_control_room_status() -> Any:
         """Return live bot status for the web control room."""
+        _remember_selected_guild_id(request.args.get("guild_id"))
         try:
             return jsonify(_get_web_control_room_service().get_status(request.args)), 200
         except ValueError as exc:
@@ -243,6 +267,82 @@ def register_web_routes(app: Flask) -> None:
             return jsonify({"error": "Database error"}), 500
         except Exception:
             logger.exception("Unexpected error loading control room status")
+            return jsonify({"error": "Internal server error"}), 500
+
+    @app.route("/api/upload_sound", methods=["POST"])
+    @_require_discord_login_api
+    def upload_sound() -> Any:
+        """Upload an MP3 from the authenticated web user."""
+        current_user = _get_current_discord_user()
+        if current_user is None:
+            return jsonify({"error": "Discord login required"}), 401
+
+        uploaded_file = request.files.get("sound_file")
+        source_url = request.form.get("source_url", "").strip()
+        if (uploaded_file is None or not uploaded_file.filename) and not source_url:
+            return jsonify({"error": "Please provide a URL or upload an MP3 file."}), 400
+
+        selected_guild_id = _get_selected_guild_id(request.form)
+        _remember_selected_guild_id(selected_guild_id)
+        try:
+            payload = _get_web_upload_service().save_upload(
+                uploaded_file=uploaded_file,
+                current_user=current_user,
+                guild_id=selected_guild_id,
+                custom_name=request.form.get("custom_name"),
+                source_url=source_url,
+                time_limit=_parse_optional_positive_int(request.form.get("time_limit")),
+            )
+            return jsonify({"message": "Upload approved", **payload}), 200
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except sqlite3.Error:
+            logger.exception("Database error saving web upload")
+            return jsonify({"error": "Database error"}), 500
+        except Exception:
+            logger.exception("Unexpected error saving web upload")
+            return jsonify({"error": "Internal server error"}), 500
+
+    @app.route("/api/uploads")
+    @_require_discord_login_api
+    @_require_web_admin_api
+    def get_uploads() -> Any:
+        """Return admin-only upload inbox records."""
+        selected_guild_id = _get_selected_guild_id(request.args)
+        _remember_selected_guild_id(selected_guild_id)
+        return jsonify(
+            _get_web_upload_service().get_inbox(
+                limit=_parse_positive_int_arg("limit", 50),
+                guild_id=selected_guild_id,
+            )
+        )
+
+    @app.route("/api/uploads/<int:upload_id>/moderation", methods=["POST"])
+    @_require_discord_login_api
+    @_require_web_admin_api
+    def moderate_upload(upload_id: int) -> Any:
+        """Apply an admin-only upload moderation decision."""
+        current_user = _get_current_discord_user()
+        if current_user is None:
+            return jsonify({"error": "Discord login required"}), 401
+
+        data = request.get_json(silent=True) or {}
+        status = str(data.get("status") or "").strip().lower()
+        try:
+            return jsonify(
+                _get_web_upload_service().moderate_upload(
+                    upload_id,
+                    status=status,
+                    moderator=current_user,
+                )
+            ), 200
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except sqlite3.Error:
+            logger.exception("Database error moderating web upload")
+            return jsonify({"error": "Database error"}), 500
+        except Exception:
+            logger.exception("Unexpected error moderating web upload")
             return jsonify({"error": "Internal server error"}), 500
 
     @app.route("/analytics")
@@ -358,6 +458,25 @@ def _get_web_playback_service() -> WebPlaybackService:
     )
 
 
+def _get_web_guild_service() -> WebGuildService:
+    """Build a guild service for the current request config."""
+    db_path = current_app.config["DATABASE_PATH"]
+    return WebGuildService(
+        repository=WebGuildRepository(db_path=db_path, use_shared=False),
+    )
+
+
+def _get_web_upload_service() -> WebUploadService:
+    """Build an upload service for the current request config."""
+    db_path = current_app.config["DATABASE_PATH"]
+    return WebUploadService(
+        upload_repository=WebUploadRepository(db_path=db_path, use_shared=False),
+        sound_repository=SoundRepository(db_path=db_path, use_shared=False),
+        action_repository=ActionRepository(db_path=db_path, use_shared=False),
+        sounds_dir=current_app.config["SOUNDS_DIR"],
+    )
+
+
 def _get_web_control_room_service() -> WebControlRoomService:
     """Build a control-room service for the current request config."""
     db_path = current_app.config["DATABASE_PATH"]
@@ -397,22 +516,44 @@ def _require_discord_login_api(view_func: Callable[..., Any]) -> Callable[..., A
     return wrapped
 
 
+def _require_web_admin_api(view_func: Callable[..., Any]) -> Callable[..., Any]:
+    """Require owner allowlist admin rights for web moderation APIs."""
+
+    @wraps(view_func)
+    def wrapped(*args: Any, **kwargs: Any) -> Any:
+        if not _current_web_user_is_admin():
+            return jsonify({"error": "Admin access required"}), 403
+        return view_func(*args, **kwargs)
+
+    return wrapped
+
+
 def _build_paginated_query(filter_names: tuple[str, ...]) -> PaginatedQuery:
     """Build a paginated query model from request args."""
+    selected_guild_id = _get_selected_guild_id(request.args)
+    _remember_selected_guild_id(selected_guild_id)
     return PaginatedQuery(
         page=_parse_positive_int_arg("page", 1),
         per_page=_parse_positive_int_arg("per_page", 10),
         search_query=request.args.get("search", "").strip(),
+        guild_id=selected_guild_id,
         filters={name: _get_filter_values(name) for name in filter_names},
     )
 
 
 def _parse_positive_int_arg(name: str, default: int) -> int:
     """Return a positive integer query arg or the provided default."""
+    parsed = _parse_optional_positive_int(request.args.get(name, default))
+    return parsed if parsed is not None else default
+
+
+def _parse_optional_positive_int(value: Any) -> int | None:
+    """Return a positive integer value, or None when absent/invalid."""
     try:
-        return max(1, int(request.args.get(name, default)))
+        parsed = int(value)
     except (TypeError, ValueError):
-        return default
+        return None
+    return parsed if parsed > 0 else None
 
 
 def _parse_int_arg(name: str, default: int) -> int:
@@ -428,10 +569,10 @@ def _get_filter_values(param_name: str) -> list[str]:
     return [value.strip() for value in request.args.getlist(param_name) if value.strip()]
 
 
-def _build_initial_soundboard_data() -> dict[str, dict[str, Any]]:
+def _build_initial_soundboard_data(selected_guild_id: int | None = None) -> dict[str, dict[str, Any]]:
     """Return first-page soundboard data for the initial HTML paint."""
     service = _get_web_content_service()
-    base_query = PaginatedQuery(page=1, per_page=7)
+    base_query = PaginatedQuery(page=1, per_page=7, guild_id=selected_guild_id)
 
     return {
         "actions": _prepare_initial_payload(
@@ -523,3 +664,41 @@ def _parse_web_timestamp(timestamp: str) -> datetime | None:
     if parsed_timestamp.tzinfo is None:
         return parsed_timestamp.replace(tzinfo=timezone.utc)
     return parsed_timestamp.astimezone(timezone.utc)
+
+
+def _get_selected_guild_id(values: Mapping[str, Any]) -> int | None:
+    """Resolve selected guild ID from request values and session."""
+    return _get_web_guild_service().resolve_selected_guild_id(
+        values,
+        session.get("selected_guild_id"),
+    )
+
+
+def _remember_selected_guild_id(guild_id: Any) -> None:
+    """Persist a selected guild ID in the web session."""
+    try:
+        parsed = int(str(guild_id).strip())
+    except (TypeError, ValueError):
+        return
+    if parsed > 0:
+        session["selected_guild_id"] = str(parsed)
+
+
+def _current_web_user_is_admin() -> bool:
+    """Return whether the current web user matches bot admin/mod rules."""
+    current_user = _get_current_discord_user()
+    if current_user is None:
+        return False
+    owner_ids = {
+        value.strip()
+        for value in os.getenv("OWNER_USER_IDS", "").split(",")
+        if value.strip()
+    }
+    if current_user.id in owner_ids:
+        return True
+
+    selected_guild_id = _get_selected_guild_id(request.values)
+    admin_guild_ids = {str(guild_id) for guild_id in current_user.admin_guild_ids}
+    if selected_guild_id is not None:
+        return str(selected_guild_id) in admin_guild_ids
+    return bool(admin_guild_ids)
