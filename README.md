@@ -99,13 +99,13 @@ This README is based on the current codebase behavior (not historical README ass
 ### Web Soundboard
 - `GET /` shows recent actions, favorites, and all sounds.
 - Multi-guild web deployments expose a guild selector; soundboard tables, control-room status, play/control requests, and uploads include the selected `guild_id` instead of relying on implicit backend inference.
-- A web control-room panel shows live bot status: current sound/requester, voice channel, mute state, and quick Slap/mute controls.
-- Authenticated users can open the web upload modal from the upload icon and add a sound with the same fields as the bot upload modal: MP3/TikTok/YouTube/Instagram URL, MP3 file, optional custom name, and optional video time limit.
-- Desktop nav uses text labels for Soundboard, Analytics, and Upload; mobile nav compacts those controls to emoji-only buttons.
-- Web uploads are approved by default, immediately inserted into the selected guild sound library, and recorded in an admin-only upload inbox.
+- A web control-room panel shows live bot status: current sound/requester, voice channel, mute state, and quick upload/Slap/mute controls.
+- Authenticated users can open the web upload modal from the control-room upload icon and queue a sound with the same fields as the bot upload modal: MP3/TikTok/YouTube/Instagram URL, MP3 file, optional custom name, and optional video time limit.
+- Desktop nav uses text labels for Soundboard and Analytics; mobile nav compacts those controls to emoji-only buttons.
+- Web uploads clear the form after submit, show active items in the modal processing queue, run in the background, insert into the selected guild sound library when processing finishes, and are recorded in a paginated admin-only upload inbox.
 - Web upload moderation is restricted to users who match the bot admin/mod rule for the selected guild (`OWNER_USER_IDS`, Administrator, Manage Server, or Manage Channels). Existing web sessions may need to log out/in after this change so Discord grants the `guilds` OAuth scope.
 - Recent actions can be filtered by action/user, Favorites can be searched and filtered by favoriting user, and All Sounds can be filtered by sound list without losing server-side pagination.
-- The soundboard and analytics pages include a top-right dark mode toggle that persists in browser local storage.
+- The soundboard and analytics pages include a dark mode toggle beside the Discord login/profile control that persists in browser local storage.
 - Each web table lets you enter a target page directly from its pagination controls.
 - The web soundboard and analytics dashboard replace matched racist/hateful usernames and sound titles with `******` unless the logged-in Discord user has prior tracked voice activity.
 - Send playback requests from web via `POST /api/play_sound`; `playback_queue` remains the internal Flask-to-bot transport table.
@@ -230,6 +230,7 @@ This README is based on the current codebase behavior (not historical README ass
 - `GET /api/guilds`
 - `POST /api/play_sound`
 - `POST /api/upload_sound`
+- `GET /api/upload_sound/<job_id>`
 - `GET /api/uploads` (owner/admin web users only)
 - `POST /api/uploads/<upload_id>/moderation` (owner/admin web users only)
 - `POST /api/web_control`

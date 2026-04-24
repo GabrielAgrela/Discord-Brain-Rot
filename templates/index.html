@@ -25,14 +25,6 @@
 </head>
 
 <body class="page page-soundboard">
-    <button
-        type="button"
-        class="theme-toggle"
-        aria-label="Enable dark mode"
-        aria-pressed="false"
-    >
-        🌙
-    </button>
     {% if discord_user %}
     {% set display_name = discord_user.global_name or discord_user.username %}
     {% set avatar_url = 'https://cdn.discordapp.com/avatars/' ~ discord_user.id ~ '/' ~ discord_user.avatar ~ '.png?size=128' if discord_user.avatar else 'https://cdn.discordapp.com/embed/avatars/0.png' %}
@@ -95,16 +87,6 @@
                     </select>
                 </label>
                 {% endif %}
-                <button
-                    type="button"
-                    id="webUploadOpenButton"
-                    class="nav-link nav-upload-button{% if not discord_user %} login-required{% endif %}"
-                    title="{% if discord_user %}Upload sound{% else %}Login with Discord to upload sounds{% endif %}"
-                    aria-label="{% if discord_user %}Upload sound{% else %}Login with Discord to upload sounds{% endif %}"
-                >
-                    <span class="nav-icon" aria-hidden="true">⬆️</span>
-                    <span class="nav-text">Upload</span>
-                </button>
                 <a href="/" class="nav-link active">
                     <span class="nav-icon" aria-hidden="true">🎛️</span>
                     <span class="nav-text">Soundboard</span>
@@ -113,6 +95,8 @@
                     <span class="nav-icon" aria-hidden="true">📊</span>
                     <span class="nav-text">Analytics</span>
                 </a>
+            </div>
+            <div class="nav-actions">
                 {% if discord_user %}
                 <a href="/logout?next=/" class="auth-user-link" title="Logout {{ display_name }}">
                     <img class="auth-avatar" src="{{ avatar_url }}" alt="{{ display_name }}">
@@ -132,6 +116,14 @@
                     <span class="auth-button-label">Login <span class="auth-button-label-extended">with Discord</span></span>
                 </a>
                 {% endif %}
+                <button
+                    type="button"
+                    class="theme-toggle"
+                    aria-label="Enable dark mode"
+                    aria-pressed="false"
+                >
+                    🌙
+                </button>
             </div>
         </div>
     </nav>
@@ -152,6 +144,18 @@
                 <div class="control-room-metric">
                     <span class="control-room-metric-label">Voice</span>
                     <strong id="controlRoomVoice">Disconnected</strong>
+                </div>
+                <div class="control-room-metric control-room-metric--action">
+                    <span class="control-room-metric-label">Upload</span>
+                    <button
+                        type="button"
+                        id="webUploadOpenButton"
+                        class="control-room-metric-button web-upload-control-button{% if not discord_user %} login-required{% endif %}"
+                        title="{% if discord_user %}Upload sound{% else %}Login with Discord to upload sounds{% endif %}"
+                        aria-label="{% if discord_user %}Upload sound{% else %}Login with Discord to upload sounds{% endif %}"
+                    >
+                        {% if discord_user %}⬆️{% else %}🔒{% endif %}
+                    </button>
                 </div>
                 <div class="control-room-metric control-room-metric--action">
                     <span class="control-room-metric-label">Mute</span>
@@ -471,14 +475,18 @@
 
             <label class="web-upload-field">
                 <span>Upload MP3 File (or use URL above)</span>
-                <input
-                    id="webUploadFile"
-                    name="sound_file"
-                    class="web-upload-input"
-                    type="file"
-                    accept="audio/mpeg,.mp3"
-                    {% if not discord_user %}disabled{% endif %}
-                >
+                <span class="web-upload-file-picker">
+                    <input
+                        id="webUploadFile"
+                        name="sound_file"
+                        class="web-upload-file-input"
+                        type="file"
+                        accept="audio/mpeg,.mp3"
+                        {% if not discord_user %}disabled{% endif %}
+                    >
+                    <span class="web-upload-file-button" aria-hidden="true">Choose MP3</span>
+                    <span id="webUploadFileName" class="web-upload-file-name">No file selected</span>
+                </span>
             </label>
 
             <label class="web-upload-field">
@@ -520,11 +528,26 @@
                 </button>
             </div>
 
+            <section class="web-upload-queue" aria-live="polite" aria-label="Processing uploads">
+                <div class="web-upload-queue-header">
+                    <span>Processing Queue</span>
+                    <span id="webUploadQueueCount">0</span>
+                </div>
+                <div id="webUploadQueueList" class="web-upload-queue-list">
+                    <p class="web-upload-empty">No uploads processing.</p>
+                </div>
+            </section>
+
             {% if web_user_is_admin %}
             <details class="web-upload-admin" id="webUploadAdmin">
                 <summary>Admin moderation inbox</summary>
                 <div id="webUploadInbox" class="web-upload-inbox">
                     <p class="web-upload-empty">Loading uploads...</p>
+                </div>
+                <div id="webUploadInboxPagination" class="web-upload-inbox-pagination" hidden>
+                    <button type="button" id="webUploadInboxPrev">Prev</button>
+                    <span id="webUploadInboxPage">1 / 1</span>
+                    <button type="button" id="webUploadInboxNext">Next</button>
                 </div>
             </details>
             {% endif %}
@@ -1626,6 +1649,18 @@
         const webUploadStatus = document.getElementById('webUploadStatus');
         const webUploadSubmit = document.getElementById('webUploadSubmit');
         const webUploadInbox = document.getElementById('webUploadInbox');
+        const webUploadFile = document.getElementById('webUploadFile');
+        const webUploadFileName = document.getElementById('webUploadFileName');
+        const webUploadInboxPagination = document.getElementById('webUploadInboxPagination');
+        const webUploadInboxPrev = document.getElementById('webUploadInboxPrev');
+        const webUploadInboxNext = document.getElementById('webUploadInboxNext');
+        const webUploadInboxPage = document.getElementById('webUploadInboxPage');
+        const webUploadQueueList = document.getElementById('webUploadQueueList');
+        const webUploadQueueCount = document.getElementById('webUploadQueueCount');
+        const uploadQueueItems = new Map();
+        let uploadInboxPage = 1;
+        let uploadInboxTotalPages = 1;
+        let lastUploadOpenTouchHandledAt = 0;
 
         function setUploadStatus(message, kind = '') {
             if (!webUploadStatus) return;
@@ -1646,6 +1681,16 @@
             if (webUserIsAdmin) {
                 loadUploadInbox();
             }
+        }
+
+        function handleUploadOpenActivation(event) {
+            if (event.type === 'touchend') {
+                event.preventDefault();
+                lastUploadOpenTouchHandledAt = Date.now();
+            } else if (event.type === 'click' && Date.now() - lastUploadOpenTouchHandledAt < 700) {
+                return;
+            }
+            openUploadModal();
         }
 
         function closeUploadModal() {
@@ -1671,6 +1716,11 @@
             }
 
             const formData = new FormData(webUploadForm);
+            const queueId = `pending-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+            const queueLabel = getUploadQueueLabel(formData, fileInput, urlInput);
+            addUploadQueueItem(queueId, queueLabel, 'sending', 'Sending');
+            webUploadForm.reset();
+            updateUploadFileLabel();
             const guildId = getSelectedGuildId();
             if (guildId) {
                 formData.set('guild_id', guildId);
@@ -1678,9 +1728,9 @@
 
             if (webUploadSubmit) {
                 webUploadSubmit.disabled = true;
-                webUploadSubmit.textContent = 'Uploading...';
+                webUploadSubmit.textContent = 'Queueing...';
             }
-            setUploadStatus('Uploading and processing audio. Larger clips can take a bit...', 'loading');
+            setUploadStatus('Added to processing queue. You can add another sound now.', 'loading');
 
             try {
                 const response = await fetch('/api/upload_sound', {
@@ -1693,18 +1743,22 @@
                         window.location.href = payload.login_url;
                         return;
                     }
+                    updateUploadQueueItem(queueId, 'error', payload.error || 'Upload failed.');
                     setUploadStatus(payload.error || 'Upload failed.', 'error');
                     return;
                 }
 
-                webUploadForm.reset();
-                setUploadStatus(`Approved: ${payload.filename}`, 'success');
-                fetchAllSounds(null, true, true);
-                if (webUserIsAdmin) {
-                    loadUploadInbox();
+                if (payload.job_id) {
+                    replaceUploadQueueId(queueId, payload.job_id);
+                    updateUploadQueueItem(payload.job_id, 'processing', 'Processing');
+                    setUploadStatus('Processing in the background. You can add another sound.', 'loading');
+                    pollUploadJob(payload.job_id);
+                } else {
+                    handleCompletedUpload(payload, queueId);
                 }
             } catch (error) {
                 console.error('Upload failed:', error);
+                updateUploadQueueItem(queueId, 'error', 'Network error');
                 setUploadStatus('Network error while uploading.', 'error');
             } finally {
                 if (webUploadSubmit) {
@@ -1714,11 +1768,124 @@
             }
         }
 
-        async function loadUploadInbox() {
+        async function pollUploadJob(jobId) {
+            try {
+                const response = await fetch(`/api/upload_sound/${encodeURIComponent(jobId)}`);
+                const payload = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    updateUploadQueueItem(jobId, 'error', payload.error || 'Could not check upload status.');
+                    setUploadStatus(payload.error || 'Could not check upload status.', 'error');
+                    return;
+                }
+                if (payload.status === 'approved') {
+                    handleCompletedUpload(payload, jobId);
+                    return;
+                }
+                if (payload.status === 'error') {
+                    updateUploadQueueItem(jobId, 'error', payload.error || 'Upload failed.');
+                    setUploadStatus(payload.error || 'Upload failed.', 'error');
+                    return;
+                }
+                updateUploadQueueItem(jobId, 'processing', 'Processing');
+                setUploadStatus('Processing audio in the background...', 'loading');
+                window.setTimeout(() => pollUploadJob(jobId), 1200);
+            } catch (error) {
+                console.error('Upload status failed:', error);
+                updateUploadQueueItem(jobId, 'error', 'Status check failed');
+                setUploadStatus('Network error while checking upload status.', 'error');
+            }
+        }
+
+        function handleCompletedUpload(payload, queueId = null) {
+            if (queueId) {
+                updateUploadQueueItem(queueId, 'approved', payload.filename || 'Approved');
+            }
+            setUploadStatus(`Approved: ${payload.filename}`, 'success');
+            fetchAllSounds(null, true, true);
+            if (webUserIsAdmin) {
+                uploadInboxPage = 1;
+                loadUploadInbox();
+            }
+        }
+
+        function getUploadQueueLabel(formData, fileInput, urlInput) {
+            const customName = String(formData.get('custom_name') || '').trim();
+            if (customName) {
+                return customName;
+            }
+            const fileName = fileInput?.files?.[0]?.name;
+            if (fileName) {
+                return fileName;
+            }
+            try {
+                const parsedUrl = new URL(urlInput?.value?.trim() || '');
+                return parsedUrl.pathname.split('/').filter(Boolean).pop() || parsedUrl.hostname;
+            } catch (error) {
+                return 'URL upload';
+            }
+        }
+
+        function addUploadQueueItem(queueId, label, status, statusText) {
+            uploadQueueItems.set(queueId, { label, status, statusText });
+            renderUploadQueue();
+        }
+
+        function replaceUploadQueueId(oldQueueId, newQueueId) {
+            if (!uploadQueueItems.has(oldQueueId)) return;
+            uploadQueueItems.set(newQueueId, uploadQueueItems.get(oldQueueId));
+            uploadQueueItems.delete(oldQueueId);
+            renderUploadQueue();
+        }
+
+        function updateUploadQueueItem(queueId, status, statusText) {
+            const existing = uploadQueueItems.get(queueId);
+            if (!existing) return;
+            uploadQueueItems.set(queueId, { ...existing, status, statusText });
+            renderUploadQueue();
+        }
+
+        function renderUploadQueue() {
+            if (!webUploadQueueList) return;
+            const items = Array.from(uploadQueueItems.values()).reverse();
+            if (webUploadQueueCount) {
+                webUploadQueueCount.textContent = String(items.length);
+            }
+            if (!items.length) {
+                webUploadQueueList.innerHTML = '<p class="web-upload-empty">No uploads processing.</p>';
+                return;
+            }
+
+            const list = document.createElement('div');
+            list.className = 'web-upload-queue-items';
+            items.forEach(item => {
+                const row = document.createElement('article');
+                row.className = `web-upload-queue-item status-${item.status}`;
+
+                const dot = document.createElement('span');
+                dot.className = 'web-upload-queue-dot';
+                dot.setAttribute('aria-hidden', 'true');
+
+                const copy = document.createElement('div');
+                copy.className = 'web-upload-queue-copy';
+                const title = document.createElement('strong');
+                title.textContent = item.label || 'Upload';
+                const sub = document.createElement('span');
+                sub.textContent = item.statusText || item.status;
+                copy.appendChild(title);
+                copy.appendChild(sub);
+
+                row.appendChild(dot);
+                row.appendChild(copy);
+                list.appendChild(row);
+            });
+            webUploadQueueList.replaceChildren(list);
+        }
+
+        async function loadUploadInbox(page = uploadInboxPage) {
             if (!webUserIsAdmin || !webUploadInbox) {
                 return;
             }
-            const params = new URLSearchParams({ limit: '25' });
+            const params = new URLSearchParams({ limit: '8', page: String(page) });
             appendGuildParam(params);
             try {
                 const response = await fetch(`/api/uploads?${params.toString()}`);
@@ -1727,7 +1894,10 @@
                     webUploadInbox.innerHTML = '<p class="web-upload-empty">Could not load uploads.</p>';
                     return;
                 }
+                uploadInboxPage = payload.page || 1;
+                uploadInboxTotalPages = payload.total_pages || 1;
                 renderUploadInbox(payload.uploads || []);
+                renderUploadInboxPagination();
             } catch (error) {
                 console.error('Error loading uploads:', error);
                 webUploadInbox.innerHTML = '<p class="web-upload-empty">Could not load uploads.</p>';
@@ -1776,6 +1946,23 @@
             webUploadInbox.replaceChildren(list);
         }
 
+        function renderUploadInboxPagination() {
+            if (!webUploadInboxPagination || !webUploadInboxPage) return;
+            webUploadInboxPagination.hidden = uploadInboxTotalPages <= 1;
+            webUploadInboxPage.textContent = `${uploadInboxPage} / ${uploadInboxTotalPages}`;
+            if (webUploadInboxPrev) {
+                webUploadInboxPrev.disabled = uploadInboxPage <= 1;
+            }
+            if (webUploadInboxNext) {
+                webUploadInboxNext.disabled = uploadInboxPage >= uploadInboxTotalPages;
+            }
+        }
+
+        function updateUploadFileLabel() {
+            if (!webUploadFileName || !webUploadFile) return;
+            webUploadFileName.textContent = webUploadFile.files?.[0]?.name || 'No file selected';
+        }
+
         async function handleUploadModeration(event) {
             const button = event.target.closest('.web-upload-moderate');
             if (!button) return;
@@ -1791,7 +1978,7 @@
                     body: JSON.stringify({ status })
                 });
                 if (response.ok) {
-                    await loadUploadInbox();
+                    await loadUploadInbox(uploadInboxPage);
                     fetchAllSounds(null, true, true);
                 } else {
                     button.disabled = false;
@@ -1806,7 +1993,8 @@
             webUploadForm.addEventListener('submit', handleWebUploadSubmit);
         }
         if (webUploadOpenButton) {
-            webUploadOpenButton.addEventListener('click', openUploadModal);
+            webUploadOpenButton.addEventListener('click', handleUploadOpenActivation);
+            webUploadOpenButton.addEventListener('touchend', handleUploadOpenActivation, { passive: false });
         }
         if (webUploadCloseButton) {
             webUploadCloseButton.addEventListener('click', closeUploadModal);
@@ -1823,6 +2011,26 @@
         }
         if (webUploadInbox) {
             webUploadInbox.addEventListener('click', handleUploadModeration);
+        }
+        if (webUploadFile) {
+            webUploadFile.addEventListener('change', updateUploadFileLabel);
+        }
+        if (webUploadInboxPrev) {
+            webUploadInboxPrev.addEventListener('click', () => {
+                if (uploadInboxPage > 1) {
+                    loadUploadInbox(uploadInboxPage - 1);
+                }
+            });
+        }
+        if (webUploadInboxNext) {
+            webUploadInboxNext.addEventListener('click', () => {
+                if (uploadInboxPage < uploadInboxTotalPages) {
+                    loadUploadInbox(uploadInboxPage + 1);
+                }
+            });
+        }
+        if (new URLSearchParams(window.location.search).get('upload') === '1') {
+            openUploadModal();
         }
 
         if (guildSelector) {

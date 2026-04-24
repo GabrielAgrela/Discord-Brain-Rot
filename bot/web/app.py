@@ -4,6 +4,7 @@ Flask app factory for the optional web UI.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 import os
 from pathlib import Path
@@ -59,6 +60,10 @@ def create_app() -> Flask:
 
     app.extensions["web_auth_service"] = WebAuthService()
     app.extensions["web_text_censor_service"] = TextCensorService()
+    app.extensions["web_upload_executor"] = ThreadPoolExecutor(
+        max_workers=_get_web_upload_worker_count()
+    )
+    app.extensions["web_upload_jobs"] = {}
 
     register_web_routes(app)
     return app
@@ -77,3 +82,18 @@ def _get_web_session_lifetime_days() -> int:
     except ValueError:
         lifetime_days = 30
     return max(1, lifetime_days)
+
+
+def _get_web_upload_worker_count() -> int:
+    """
+    Return the number of background workers for web upload processing.
+
+    Returns:
+        Positive worker count for async upload jobs.
+    """
+    raw_value = os.getenv("WEB_UPLOAD_WORKERS", "2").strip()
+    try:
+        worker_count = int(raw_value)
+    except ValueError:
+        worker_count = 2
+    return max(1, min(worker_count, 8))

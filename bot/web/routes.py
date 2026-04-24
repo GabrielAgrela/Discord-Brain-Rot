@@ -6,8 +6,11 @@ from __future__ import annotations
 
 import logging
 import os
+import tempfile
+import uuid
 from datetime import datetime, timezone
 from functools import wraps
+from pathlib import Path
 from typing import Any, Callable, Mapping
 
 import sqlite3
@@ -21,6 +24,7 @@ from flask import (
     session,
     url_for,
 )
+from werkzeug.datastructures import FileStorage
 
 from bot.models.web import AnalyticsQuery, DiscordWebUser, PaginatedQuery
 from bot.repositories.action import ActionRepository
@@ -272,7 +276,7 @@ def register_web_routes(app: Flask) -> None:
     @app.route("/api/upload_sound", methods=["POST"])
     @_require_discord_login_api
     def upload_sound() -> Any:
-        """Upload an MP3 from the authenticated web user."""
+        """Queue an MP3 upload from the authenticated web user."""
         current_user = _get_current_discord_user()
         if current_user is None:
             return jsonify({"error": "Discord login required"}), 401
@@ -285,7 +289,7 @@ def register_web_routes(app: Flask) -> None:
         selected_guild_id = _get_selected_guild_id(request.form)
         _remember_selected_guild_id(selected_guild_id)
         try:
-            payload = _get_web_upload_service().save_upload(
+            job_id = _queue_web_upload_job(
                 uploaded_file=uploaded_file,
                 current_user=current_user,
                 guild_id=selected_guild_id,
@@ -293,7 +297,13 @@ def register_web_routes(app: Flask) -> None:
                 source_url=source_url,
                 time_limit=_parse_optional_positive_int(request.form.get("time_limit")),
             )
-            return jsonify({"message": "Upload approved", **payload}), 200
+            return jsonify(
+                {
+                    "message": "Upload queued",
+                    "job_id": job_id,
+                    "status": "processing",
+                }
+            ), 202
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
         except sqlite3.Error:
@@ -302,6 +312,15 @@ def register_web_routes(app: Flask) -> None:
         except Exception:
             logger.exception("Unexpected error saving web upload")
             return jsonify({"error": "Internal server error"}), 500
+
+    @app.route("/api/upload_sound/<job_id>")
+    @_require_discord_login_api
+    def get_upload_sound_job(job_id: str) -> Any:
+        """Return status for a background web upload job."""
+        job = current_app.extensions.get("web_upload_jobs", {}).get(job_id)
+        if not job:
+            return jsonify({"error": "Upload job not found"}), 404
+        return jsonify(dict(job)), 200
 
     @app.route("/api/uploads")
     @_require_discord_login_api
@@ -314,6 +333,7 @@ def register_web_routes(app: Flask) -> None:
             _get_web_upload_service().get_inbox(
                 limit=_parse_positive_int_arg("limit", 50),
                 guild_id=selected_guild_id,
+                page=_parse_positive_int_arg("page", 1),
             )
         )
 
@@ -475,6 +495,115 @@ def _get_web_upload_service() -> WebUploadService:
         action_repository=ActionRepository(db_path=db_path, use_shared=False),
         sounds_dir=current_app.config["SOUNDS_DIR"],
     )
+
+
+def _queue_web_upload_job(
+    *,
+    uploaded_file: FileStorage | None,
+    current_user: DiscordWebUser,
+    guild_id: int | None,
+    custom_name: str | None,
+    source_url: str | None,
+    time_limit: int | None,
+) -> str:
+    """Persist request-local upload data and submit background processing."""
+    sounds_dir = Path(current_app.config["SOUNDS_DIR"])
+    temp_upload_path: str | None = None
+    original_filename: str | None = None
+    if uploaded_file is not None and uploaded_file.filename:
+        original_filename = uploaded_file.filename
+        temp_dir = sounds_dir.parent
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        suffix = ".mp3" if original_filename.lower().endswith(".mp3") else ".upload"
+        with tempfile.NamedTemporaryFile(
+            prefix="web_upload_",
+            suffix=suffix,
+            dir=str(temp_dir),
+            delete=False,
+        ) as temp_file:
+            uploaded_file.save(temp_file)
+            temp_upload_path = temp_file.name
+
+    job_id = uuid.uuid4().hex
+    jobs = current_app.extensions.setdefault("web_upload_jobs", {})
+    jobs[job_id] = {"job_id": job_id, "status": "processing"}
+
+    db_path = current_app.config["DATABASE_PATH"]
+    executor = current_app.extensions["web_upload_executor"]
+    executor.submit(
+        _run_web_upload_job,
+        job_id=job_id,
+        jobs=jobs,
+        db_path=db_path,
+        sounds_dir=str(sounds_dir),
+        temp_upload_path=temp_upload_path,
+        original_filename=original_filename,
+        current_user_payload=current_user.to_session_payload(),
+        guild_id=guild_id,
+        custom_name=custom_name,
+        source_url=source_url,
+        time_limit=time_limit,
+    )
+    return job_id
+
+
+def _run_web_upload_job(
+    *,
+    job_id: str,
+    jobs: dict[str, Any],
+    db_path: str,
+    sounds_dir: str,
+    temp_upload_path: str | None,
+    original_filename: str | None,
+    current_user_payload: Mapping[str, Any],
+    guild_id: int | None,
+    custom_name: str | None,
+    source_url: str | None,
+    time_limit: int | None,
+) -> None:
+    """Process one queued web upload outside the Flask request thread."""
+    file_handle = None
+    try:
+        uploaded_file = None
+        if temp_upload_path:
+            file_handle = open(temp_upload_path, "rb")
+            uploaded_file = FileStorage(
+                stream=file_handle,
+                filename=original_filename or Path(temp_upload_path).name,
+            )
+
+        service = WebUploadService(
+            upload_repository=WebUploadRepository(db_path=db_path, use_shared=False),
+            sound_repository=SoundRepository(db_path=db_path, use_shared=False),
+            action_repository=ActionRepository(db_path=db_path, use_shared=False),
+            sounds_dir=sounds_dir,
+        )
+        current_user = DiscordWebUser.from_session_payload(current_user_payload)
+        if current_user is None:
+            raise ValueError("Discord login required")
+        payload = service.save_upload(
+            uploaded_file=uploaded_file,
+            current_user=current_user,
+            guild_id=guild_id,
+            custom_name=custom_name,
+            source_url=source_url,
+            time_limit=time_limit,
+        )
+        jobs[job_id] = {"job_id": job_id, "status": "approved", **payload}
+    except ValueError as exc:
+        jobs[job_id] = {"job_id": job_id, "status": "error", "error": str(exc)}
+    except Exception:
+        logger.exception("Unexpected error processing web upload job")
+        jobs[job_id] = {
+            "job_id": job_id,
+            "status": "error",
+            "error": "Internal server error",
+        }
+    finally:
+        if file_handle is not None:
+            file_handle.close()
+        if temp_upload_path:
+            Path(temp_upload_path).unlink(missing_ok=True)
 
 
 def _get_web_control_room_service() -> WebControlRoomService:

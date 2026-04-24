@@ -101,6 +101,7 @@ class WebUploadRepository(BaseRepository[dict[str, Any]]):
         *,
         limit: int = 50,
         guild_id: int | str | None = None,
+        offset: int = 0,
     ) -> list[dict[str, Any]]:
         """
         Return recent upload records.
@@ -108,15 +109,16 @@ class WebUploadRepository(BaseRepository[dict[str, Any]]):
         Args:
             limit: Maximum records to return.
             guild_id: Optional guild scope.
+            offset: Number of matching rows to skip.
         """
         if guild_id is None:
             rows = self._execute(
                 """
                 SELECT * FROM web_uploads
                 ORDER BY created_at DESC, id DESC
-                LIMIT ?
+                LIMIT ? OFFSET ?
                 """,
-                (limit,),
+                (limit, offset),
             )
         else:
             rows = self._execute(
@@ -124,11 +126,30 @@ class WebUploadRepository(BaseRepository[dict[str, Any]]):
                 SELECT * FROM web_uploads
                 WHERE guild_id = ? OR guild_id IS NULL
                 ORDER BY created_at DESC, id DESC
-                LIMIT ?
+                LIMIT ? OFFSET ?
                 """,
-                (str(guild_id), limit),
+                (str(guild_id), limit, offset),
             )
         return [self._row_to_entity(row) for row in rows]
+
+    def count_recent(self, *, guild_id: int | str | None = None) -> int:
+        """
+        Count upload records visible to an inbox query.
+
+        Args:
+            guild_id: Optional guild scope.
+        """
+        if guild_id is None:
+            row = self._execute_one("SELECT COUNT(*) AS total FROM web_uploads")
+        else:
+            row = self._execute_one(
+                """
+                SELECT COUNT(*) AS total FROM web_uploads
+                WHERE guild_id = ? OR guild_id IS NULL
+                """,
+                (str(guild_id),),
+            )
+        return int(row["total"]) if row else 0
 
     def moderate(
         self,

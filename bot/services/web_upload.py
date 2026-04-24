@@ -362,19 +362,36 @@ class WebUploadService:
         max_allowed_gain = peak_ceiling_dbfs - peak_dbfs
         return min(desired_gain, max_allowed_gain)
 
-    def get_inbox(self, *, limit: int = 50, guild_id: int | None = None) -> dict[str, Any]:
+    def get_inbox(
+        self,
+        *,
+        limit: int = 50,
+        guild_id: int | None = None,
+        page: int = 1,
+    ) -> dict[str, Any]:
         """
         Return recent web uploads for admin moderation.
 
         Args:
             limit: Maximum records to return.
             guild_id: Optional guild scope.
+            page: One-based inbox page.
         """
+        safe_limit = max(1, min(int(limit), 100))
+        safe_page = max(1, int(page))
+        total = self.upload_repository.count_recent(guild_id=guild_id)
+        total_pages = max(1, math.ceil(total / safe_limit))
+        safe_page = min(safe_page, total_pages)
         return {
             "uploads": self.upload_repository.get_recent(
-                limit=max(1, min(int(limit), 100)),
+                limit=safe_limit,
                 guild_id=guild_id,
-            )
+                offset=(safe_page - 1) * safe_limit,
+            ),
+            "page": safe_page,
+            "per_page": safe_limit,
+            "total": total,
+            "total_pages": total_pages,
         }
 
     def moderate_upload(

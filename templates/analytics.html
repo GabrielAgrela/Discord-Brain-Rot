@@ -25,14 +25,6 @@
 </head>
 
 <body class="page page-analytics">
-    <button
-        type="button"
-        class="theme-toggle"
-        aria-label="Enable dark mode"
-        aria-pressed="false"
-    >
-        🌙
-    </button>
     {% if discord_user %}
     {% set display_name = discord_user.global_name or discord_user.username %}
     {% set avatar_url = 'https://cdn.discordapp.com/avatars/' ~ discord_user.id ~ '/' ~ discord_user.avatar ~ '.png?size=128' if discord_user.avatar else 'https://cdn.discordapp.com/embed/avatars/0.png' %}
@@ -58,6 +50,8 @@
                     <span class="nav-icon" aria-hidden="true">📊</span>
                     <span class="nav-text">Analytics</span>
                 </a>
+            </div>
+            <div class="nav-actions">
                 {% if discord_user %}
                 <a href="/logout?next=/analytics" class="auth-user-link" title="Logout {{ display_name }}">
                     <img class="auth-avatar" src="{{ avatar_url }}" alt="{{ display_name }}">
@@ -77,6 +71,14 @@
                     <span class="auth-button-label">Login <span class="auth-button-label-extended">with Discord</span></span>
                 </a>
                 {% endif %}
+                <button
+                    type="button"
+                    class="theme-toggle"
+                    aria-label="Enable dark mode"
+                    aria-pressed="false"
+                >
+                    🌙
+                </button>
             </div>
         </div>
     </nav>

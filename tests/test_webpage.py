@@ -1,11 +1,26 @@
 import sqlite3
 import io
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
 
 from WebPage import app
+
+
+def _wait_for_upload_job(client, job_id: str) -> dict:
+    """Poll a queued upload job until it reaches a terminal state."""
+    deadline = time.time() + 5
+    payload = {}
+    while time.time() < deadline:
+        response = client.get(f"/api/upload_sound/{job_id}")
+        assert response.status_code == 200
+        payload = response.get_json()
+        if payload.get("status") in {"approved", "error"}:
+            return payload
+        time.sleep(0.05)
+    raise AssertionError(f"Upload job did not finish: {payload}")
 
 
 def _create_web_tables(db_path: Path) -> None:
@@ -372,9 +387,10 @@ def test_web_upload_approves_by_default_and_records_inbox(web_client, monkeypatc
         content_type="multipart/form-data",
     )
 
-    assert response.status_code == 200
-    payload = response.get_json()
-    assert payload["message"] == "Upload approved"
+    assert response.status_code == 202
+    queued_payload = response.get_json()
+    assert queued_payload["message"] == "Upload queued"
+    payload = _wait_for_upload_job(client, queued_payload["job_id"])
     assert payload["filename"] == "web drop.mp3"
     assert payload["status"] == "approved"
 
@@ -437,8 +453,8 @@ def test_web_upload_accepts_bot_modal_url_fields(web_client, monkeypatch):
         },
     )
 
-    assert response.status_code == 200
-    payload = response.get_json()
+    assert response.status_code == 202
+    payload = _wait_for_upload_job(client, response.get_json()["job_id"])
     assert payload["filename"] == "url drop.mp3"
     assert payload["status"] == "approved"
 
@@ -477,7 +493,70 @@ def test_web_upload_inbox_is_admin_only(web_client, monkeypatch):
     response = client.get("/api/uploads?guild_id=359077662742020107")
 
     assert response.status_code == 200
-    assert response.get_json() == {"uploads": []}
+    assert response.get_json() == {
+        "uploads": [],
+        "page": 1,
+        "per_page": 50,
+        "total": 0,
+        "total_pages": 1,
+    }
+
+
+def test_web_upload_inbox_supports_pagination(web_client):
+    client, db_path = web_client
+    _login_web_user(
+        client,
+        username="discord-user",
+        global_name="Discord User",
+        admin_guild_ids=["111"],
+    )
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS web_uploads (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id TEXT,
+                sound_id INTEGER,
+                filename TEXT NOT NULL,
+                original_filename TEXT NOT NULL,
+                uploaded_by_username TEXT NOT NULL,
+                uploaded_by_user_id TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'approved',
+                moderator_username TEXT,
+                moderated_at DATETIME,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        conn.executemany(
+            """
+            INSERT INTO web_uploads (
+                guild_id, sound_id, filename, original_filename,
+                uploaded_by_username, uploaded_by_user_id, status, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                ("111", 1, "first.mp3", "first.mp3", "User", "1", "approved", "2026-04-01 10:00:00"),
+                ("111", 2, "second.mp3", "second.mp3", "User", "1", "approved", "2026-04-01 11:00:00"),
+                ("111", 3, "third.mp3", "third.mp3", "User", "1", "approved", "2026-04-01 12:00:00"),
+            ],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    response = client.get("/api/uploads?guild_id=111&limit=2&page=2")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["page"] == 2
+    assert payload["per_page"] == 2
+    assert payload["total"] == 3
+    assert payload["total_pages"] == 2
+    assert [upload["filename"] for upload in payload["uploads"]] == ["first.mp3"]
 
 
 def test_web_upload_moderation_rejects_and_blacklists_sound_for_admin(web_client, monkeypatch):
@@ -827,14 +906,22 @@ def test_soundboard_page_renders_shared_redesign(web_client):
     assert 'id="controlRoomSlapButton"' in html
     assert 'id="controlRoomUpdated"' not in html
     assert '<span>Guild</span>' not in html
-    assert '<span class="nav-icon" aria-hidden="true">⬆️</span>' in html
-    assert '<span class="nav-text">Upload</span>' in html
+    assert 'id="webUploadOpenButton"' in html
+    assert 'class="control-room-metric-button web-upload-control-button login-required"' in html
+    assert '<span class="control-room-metric-label">Upload</span>' in html
+    assert "Login with Discord to upload sounds" in html
     assert '<span class="nav-icon" aria-hidden="true">🎛️</span>' in html
     assert '<span class="nav-text">Soundboard</span>' in html
     assert '<span class="nav-icon" aria-hidden="true">📊</span>' in html
     assert '<span class="nav-text">Analytics</span>' in html
     assert 'class="web-upload-submit play-button' not in html
     assert 'class="web-upload-submit' in html
+    assert 'class="web-upload-queue"' in html
+    assert 'id="webUploadQueueList"' in html
+    assert 'id="webUploadQueueCount"' in html
+    assert "addUploadQueueItem" in html
+    assert "renderUploadQueue" in html
+    assert "webUploadForm.reset();" in html
     assert 'id="actions-action-filter"' in html
     assert 'aria-label="Filter recent actions by action"' in html
     assert 'aria-label="Filter recent actions by user"' in html
@@ -898,6 +985,8 @@ def test_analytics_page_renders_shared_redesign(web_client):
     assert '<span class="nav-text">Soundboard</span>' in html
     assert '<span class="nav-icon" aria-hidden="true">📊</span>' in html
     assert '<span class="nav-text">Analytics</span>' in html
+    assert 'nav-upload-button' not in html
+    assert '<span class="nav-text">Upload</span>' not in html
     assert 'class="time-selector"' in html
     assert "Activity Heatmap" in html
     assert "🔒" in html
