@@ -6,12 +6,16 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from datetime import datetime, timedelta
+import io
+import json
 import os
 from pathlib import Path
 import random
 import sqlite3
+from types import SimpleNamespace
 from typing import Any
 
+from config import TTS_PROFILES
 from bot.models.web import DiscordWebUser
 from bot.repositories.sound import SoundRepository
 
@@ -20,12 +24,15 @@ WEB_QUEUE_PLAY_SOUND = "play_sound"
 WEB_QUEUE_SLAP = "slap"
 WEB_QUEUE_MUTE_30_MINUTES = "mute_30_minutes"
 WEB_QUEUE_TOGGLE_MUTE = "toggle_mute"
+WEB_QUEUE_TTS = "tts"
 WEB_QUEUE_CONTROL_PLACEHOLDER = "__web_control__"
 WEB_MUTE_DURATION_SECONDS = 1800
+WEB_TTS_MAX_LENGTH = 500
 WEB_QUEUE_CONTROL_ACTIONS = {
     WEB_QUEUE_SLAP,
     WEB_QUEUE_MUTE_30_MINUTES,
     WEB_QUEUE_TOGGLE_MUTE,
+    WEB_QUEUE_TTS,
 }
 
 
@@ -125,6 +132,10 @@ class WebPlaybackService:
         """
         return queue_control_request(
             control_action=payload.get("action"),
+            control_payload={
+                "message": payload.get("message"),
+                "profile": payload.get("profile"),
+            },
             requested_guild_id=payload.get("guild_id"),
             db_path=self.db_path,
             request_username=current_user.global_name,
@@ -259,12 +270,14 @@ def queue_control_request(
     request_username: str,
     request_user_id: str,
     env: Mapping[str, str] | None = None,
+    control_payload: Any = None,
 ) -> int:
     """
     Queue a web control action for bot-side execution.
 
     Args:
         control_action: Control action name to execute.
+        control_payload: Optional control payload, such as TTS text.
         requested_guild_id: Explicit guild ID from the request payload.
         db_path: Path to the SQLite database.
         request_username: Discord display name to attribute the request to.
@@ -285,6 +298,18 @@ def queue_control_request(
         raise ValueError("Missing request_username")
     if not str(request_user_id).strip():
         raise ValueError("Missing request_user_id")
+    queued_payload = WEB_QUEUE_CONTROL_PLACEHOLDER
+    if action == WEB_QUEUE_TTS:
+        speech, profile_key = _normalize_web_tts_payload(control_payload)
+        if not speech:
+            raise ValueError("Missing TTS message")
+        if len(speech) > WEB_TTS_MAX_LENGTH:
+            raise ValueError(f"TTS message must be {WEB_TTS_MAX_LENGTH} characters or fewer")
+        queued_payload = json.dumps(
+            {"message": speech, "profile": profile_key},
+            ensure_ascii=True,
+            separators=(",", ":"),
+        )
 
     guild_id = resolve_requested_guild_id(
         requested_guild_id=requested_guild_id,
@@ -310,7 +335,7 @@ def queue_control_request(
             """,
             (
                 guild_id,
-                WEB_QUEUE_CONTROL_PLACEHOLDER,
+                queued_payload,
                 str(request_username).strip(),
                 str(request_user_id).strip(),
                 action,
@@ -367,6 +392,30 @@ def get_web_control_state(
             "toggle_action": WEB_QUEUE_TOGGLE_MUTE,
         },
     }
+
+
+def _normalize_web_tts_payload(payload: Any) -> tuple[str, str]:
+    """Normalize queued or incoming web TTS payload into message/profile."""
+    if isinstance(payload, Mapping):
+        speech = str(payload.get("message") or "").strip()
+        profile_key = str(payload.get("profile") or "en").strip() or "en"
+        return speech, profile_key if profile_key in TTS_PROFILES else "en"
+
+    payload_text = str(payload or "").strip()
+    if not payload_text:
+        return "", "en"
+
+    try:
+        decoded_payload = json.loads(payload_text)
+    except (TypeError, ValueError):
+        return payload_text, "en"
+
+    if not isinstance(decoded_payload, Mapping):
+        return payload_text, "en"
+
+    speech = str(decoded_payload.get("message") or "").strip()
+    profile_key = str(decoded_payload.get("profile") or "en").strip() or "en"
+    return speech, profile_key if profile_key in TTS_PROFILES else "en"
 
 
 def ensure_playback_queue_identity_columns(db_path: str) -> None:
@@ -453,6 +502,7 @@ async def process_playback_queue_request(
             guild_id=guild_id,
             guild=guild,
             control_action=control_action or request_type,
+            control_payload=sound_filename,
             request_username=request_username,
             request_user_id=request_user_id,
             behavior=behavior,
@@ -719,6 +769,7 @@ async def _process_web_control_request(
     guild_id: int,
     guild: Any,
     control_action: str,
+    control_payload: str,
     request_username: str | None,
     request_user_id: str | None,
     behavior: Any,
@@ -797,6 +848,38 @@ async def _process_web_control_request(
                 )
             return True
 
+        if control_action == WEB_QUEUE_TTS:
+            speech, profile_key = _normalize_web_tts_payload(control_payload)
+            if not speech or speech == WEB_QUEUE_CONTROL_PLACEHOLDER:
+                logger(
+                    f"[Playback Queue] Error: Missing TTS message for request {request_id}."
+                )
+                return False
+            profile = TTS_PROFILES.get(profile_key, TTS_PROFILES["en"])
+            web_user = SimpleNamespace(
+                name=playback_user,
+                display_name=playback_user,
+                guild=guild,
+            )
+            loading_message = await _send_web_tts_loading_card(behavior, guild)
+            if profile.get("provider") == "elevenlabs":
+                await behavior._voice_transformation_service.tts_EL(
+                    web_user,
+                    speech,
+                    profile.get("voice", "en"),
+                    loading_message=loading_message,
+                    sts_thumbnail_url=profile.get("thumbnail"),
+                )
+            else:
+                await behavior._voice_transformation_service.tts(
+                    web_user,
+                    speech,
+                    profile.get("lang", "en"),
+                    profile.get("region", ""),
+                    loading_message=loading_message,
+                )
+            return True
+
         logger(
             f"[Playback Queue] Error: Unknown web control action '{control_action}' "
             f"for request {request_id}."
@@ -807,6 +890,41 @@ async def _process_web_control_request(
             f"[Playback Queue] Error executing web control request {request_id}: {exc}"
         )
         return False
+
+
+async def _send_web_tts_loading_card(behavior: Any, guild: Any) -> Any:
+    """Send the same loading card used by Discord TTS commands."""
+    message_service = getattr(behavior, "_message_service", None)
+    bot_channel = None
+    if message_service is not None:
+        get_bot_channel = getattr(message_service, "get_bot_channel", None)
+        if callable(get_bot_channel):
+            bot_channel = get_bot_channel(guild)
+    if bot_channel is None:
+        return None
+
+    image_bytes = None
+    audio_service = getattr(behavior, "_audio_service", None)
+    image_generator = getattr(audio_service, "image_generator", None)
+    generate_loading_gif = getattr(image_generator, "generate_loading_gif", None)
+    if callable(generate_loading_gif):
+        image_bytes = generate_loading_gif()
+
+    try:
+        import discord
+
+        if image_bytes:
+            file = discord.File(io.BytesIO(image_bytes), filename="loading.gif")
+            return await bot_channel.send(file=file)
+
+        embed = discord.Embed(
+            title="⏳ Processing...",
+            description="Generating audio, please wait",
+            color=discord.Color.dark_blue(),
+        )
+        return await bot_channel.send(embed=embed)
+    except Exception:
+        return await bot_channel.send("⏳ Processing...")
 
 
 async def _play_random_web_slap(

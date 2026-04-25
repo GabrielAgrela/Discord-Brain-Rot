@@ -26,6 +26,7 @@ from flask import (
 )
 from werkzeug.datastructures import FileStorage
 
+from config import TTS_PROFILES
 from bot.models.web import AnalyticsQuery, DiscordWebUser, PaginatedQuery
 from bot.repositories.action import ActionRepository
 from bot.repositories.sound import SoundRepository
@@ -41,6 +42,7 @@ from bot.services.web_content import WebContentService
 from bot.services.web_control_room import WebControlRoomService
 from bot.services.web_guild import WebGuildService
 from bot.services.web_playback import WebPlaybackService
+from bot.services.web_tts_enhancer import WebTtsEnhancerService
 from bot.services.web_upload import WebUploadService
 
 logger = logging.getLogger(__name__)
@@ -146,6 +148,7 @@ def register_web_routes(app: Flask) -> None:
             initial_soundboard_data=_build_initial_soundboard_data(selected_guild_id),
             guild_options=_get_web_guild_service().get_guild_options(selected_guild_id),
             selected_guild_id=selected_guild_id,
+            tts_profile_options=_build_tts_profile_options(),
         )
 
     @app.route("/api/guilds")
@@ -256,6 +259,23 @@ def register_web_routes(app: Flask) -> None:
             return jsonify({"error": "Database error"}), 500
         except Exception:
             logger.exception("Unexpected error loading web control state")
+            return jsonify({"error": "Internal server error"}), 500
+
+    @app.route("/api/tts/enhance", methods=["POST"])
+    @_require_discord_login_api
+    def enhance_tts_message() -> Any:
+        """Enhance a web TTS message with ElevenLabs audio tags."""
+        data = request.get_json(silent=True) or {}
+        try:
+            enhanced_text = _get_web_tts_enhancer_service().enhance(data.get("message", ""))
+            return jsonify({"message": enhanced_text}), 200
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except RuntimeError as exc:
+            logger.warning("TTS enhancement failed: %s", exc)
+            return jsonify({"error": "TTS enhancement failed"}), 502
+        except Exception:
+            logger.exception("Unexpected error enhancing TTS message")
             return jsonify({"error": "Internal server error"}), 500
 
     @app.route("/api/control_room/status")
@@ -613,6 +633,27 @@ def _get_web_control_room_service() -> WebControlRoomService:
         repository=WebControlRoomRepository(db_path=db_path, use_shared=False),
         db_path=db_path,
     )
+
+
+def _get_web_tts_enhancer_service() -> WebTtsEnhancerService:
+    """Return the shared web TTS enhancer service."""
+    service = current_app.extensions.get("web_tts_enhancer_service")
+    if service is None:
+        service = WebTtsEnhancerService()
+        current_app.extensions["web_tts_enhancer_service"] = service
+    return service
+
+
+def _build_tts_profile_options() -> list[dict[str, str]]:
+    """Return TTS profile options for the web control-room modal."""
+    return [
+        {
+            "value": key,
+            "label": str(profile.get("display") or key),
+            "provider": str(profile.get("provider") or "gtts"),
+        }
+        for key, profile in TTS_PROFILES.items()
+    ]
 
 
 def _build_discord_redirect_uri() -> str:

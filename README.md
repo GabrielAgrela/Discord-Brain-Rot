@@ -99,7 +99,7 @@ This README is based on the current codebase behavior (not historical README ass
 ### Web Soundboard
 - `GET /` shows recent actions, favorites, and all sounds.
 - Multi-guild web deployments expose a guild selector; soundboard tables, control-room status, play/control requests, and uploads include the selected `guild_id` instead of relying on implicit backend inference.
-- A web control-room panel shows live bot status: current sound/requester, voice channel, mute state, and quick upload/Slap/mute controls; clicking the voice channel opens the current user/avatar list.
+- A web control-room panel shows live bot status: current sound/requester, voice channel, mute state, and quick upload/TTS/Slap/mute controls; clicking the voice channel opens the current user/avatar list.
 - Authenticated users can open the web upload modal from the control-room upload icon and queue a sound with the same fields as the bot upload modal: MP3/TikTok/YouTube/Instagram URL, MP3 file, optional custom name, and optional video time limit.
 - Desktop nav uses text labels for Soundboard and Analytics; mobile nav compacts those controls to emoji-only buttons.
 - Web uploads clear the form after submit, show active items in the modal processing queue, run in the background, insert into the selected guild sound library when processing finishes, and are recorded in a paginated admin-only upload inbox.
@@ -109,7 +109,7 @@ This README is based on the current codebase behavior (not historical README ass
 - Each web table lets you enter a target page directly from its pagination controls.
 - The web soundboard and analytics dashboard replace matched racist/hateful usernames and sound titles with `******` unless the logged-in Discord user has prior tracked voice activity.
 - Send playback requests from web via `POST /api/play_sound`; `playback_queue` remains the internal Flask-to-bot transport table.
-- The web soundboard also exposes authenticated Slap and mute-toggle controls via `POST /api/web_control`; the mute-on path plays a slap before muting, the bot consumes controls through the same internal polling path, and the mute toggle icon refreshes from `/api/web_control_state`.
+- The web soundboard also exposes authenticated TTS, Slap, and mute-toggle controls via `POST /api/web_control`; TTS opens a modal with the same voice/language profile choices as `/tts`, includes an Enhance button that can add ElevenLabs audio tags through OpenRouter, the mute-on path plays a slap before muting, the bot consumes controls through the same internal polling path, and the mute toggle icon refreshes from `/api/web_control_state`.
 - Unauthenticated web play/control buttons use a red locked state to prompt Discord login before sending bot actions.
 - Web sound playback now requires Discord login; web requests carry the authenticated Discord user so playback is logged as that user instead of a bot/system account.
 - Web play buttons use `sound_id` under the hood so censored labels still play the real sound correctly.
@@ -264,6 +264,9 @@ This README is based on the current codebase behavior (not historical README ass
 - `DISCORD_OAUTH_CLIENT_SECRET` (required to enable Discord login on the web UI)
 - `DISCORD_OAUTH_REDIRECT_URI` (recommended public callback URL for Discord OAuth; falls back to Flask external URL generation if unset)
 - `PLAYBACK_QUEUE_INTERVAL` (internal web request bridge polling interval in seconds, default `0.25`)
+- `OPENROUTER_API_KEY` (optional; enables the web TTS Enhance button)
+- `WEB_TTS_ENHANCER_MODEL` (optional; OpenRouter model for web TTS enhancement, default `x-ai/grok-4.1-fast`)
+- `OPENROUTER_API_URL` (optional; OpenRouter-compatible chat completions endpoint)
 - `OWNER_USER_IDS` (comma-separated Discord user IDs allowed to run admin-only commands)
 - `AUDIO_LATENCY_MODE` (`low_latency` default, or `balanced` / `high_quality`)
 - `RLSTORE_NOTIFY_ENABLED` (`true` default; enables the daily Rocket League store notification scheduler)

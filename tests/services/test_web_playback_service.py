@@ -265,6 +265,52 @@ def test_queue_control_request_adds_control_columns_and_queues_action(tmp_path):
     )
 
 
+def test_queue_control_request_queues_tts_message_payload(tmp_path):
+    db_path = tmp_path / "web.db"
+    _create_web_tables(db_path)
+
+    row_id = queue_control_request(
+        control_action="tts",
+        control_payload={"message": "hello from web", "profile": "pt"},
+        requested_guild_id="359077662742020107",
+        db_path=str(db_path),
+        request_username="Discord User",
+        request_user_id="123",
+        env={},
+    )
+
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute(
+            """
+            SELECT sound_filename, request_type, control_action
+            FROM playback_queue
+            WHERE id = ?
+            """,
+            (row_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert row == ('{"message":"hello from web","profile":"pt"}', "tts", "tts")
+
+
+def test_queue_control_request_rejects_empty_tts_message(tmp_path):
+    db_path = tmp_path / "web.db"
+    _create_web_tables(db_path)
+
+    with pytest.raises(ValueError, match="Missing TTS message"):
+        queue_control_request(
+            control_action="tts",
+            control_payload=" ",
+            requested_guild_id="359077662742020107",
+            db_path=str(db_path),
+            request_username="Discord User",
+            request_user_id="123",
+            env={},
+        )
+
+
 def test_queue_control_request_rejects_unknown_action(tmp_path):
     db_path = tmp_path / "web.db"
     _create_web_tables(db_path)
@@ -609,6 +655,176 @@ async def test_process_playback_queue_request_executes_slap_control(tmp_path, mo
         456,
         guild_id=42,
     )
+    assert conn.execute(
+        "SELECT played_at FROM playback_queue WHERE id = 1"
+    ).fetchone()[0] is not None
+
+
+@pytest.mark.asyncio
+async def test_process_playback_queue_request_executes_tts_control():
+    conn = sqlite3.connect(":memory:")
+    conn.execute(
+        """
+        CREATE TABLE playback_queue (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            sound_filename TEXT NOT NULL,
+            request_username TEXT,
+            request_user_id TEXT,
+            request_type TEXT,
+            control_action TEXT,
+            requested_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            played_at DATETIME
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO playback_queue (
+            id,
+            guild_id,
+            sound_filename,
+            request_username,
+            request_user_id,
+            request_type,
+            control_action
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (1, 42, "hello from web", "Discord User", "123", "tts", "tts"),
+    )
+    conn.commit()
+
+    class FakeDatabase:
+        def __init__(self, connection):
+            self.conn = connection
+            self.cursor = connection.cursor()
+
+    guild = SimpleNamespace(id=42)
+    loading_message = object()
+    bot_channel = SimpleNamespace(send=AsyncMock(return_value=loading_message))
+    voice_transformation_service = SimpleNamespace(tts=AsyncMock(), tts_EL=AsyncMock())
+    behavior = SimpleNamespace(
+        _voice_transformation_service=voice_transformation_service,
+        _message_service=SimpleNamespace(get_bot_channel=Mock(return_value=bot_channel)),
+        _audio_service=SimpleNamespace(
+            image_generator=SimpleNamespace(generate_loading_gif=Mock(return_value=b"gif"))
+        ),
+    )
+
+    result = await process_playback_queue_request(
+        (1, 42, "hello from web", "Discord User", "123", "tts", "tts"),
+        bot=SimpleNamespace(get_guild=lambda guild_id: guild if guild_id == 42 else None),
+        behavior=behavior,
+        db=FakeDatabase(conn),
+        sound_folder=".",
+        logger=lambda _: None,
+    )
+
+    assert result is True
+    voice_transformation_service.tts.assert_awaited_once()
+    user, speech, lang, region = voice_transformation_service.tts.await_args.args
+    assert user.name == "Discord User"
+    assert user.display_name == "Discord User"
+    assert user.guild is guild
+    assert speech == "hello from web"
+    assert lang == "en"
+    assert region == ""
+    voice_transformation_service.tts_EL.assert_not_awaited()
+    assert conn.execute(
+        "SELECT played_at FROM playback_queue WHERE id = 1"
+    ).fetchone()[0] is not None
+
+
+@pytest.mark.asyncio
+async def test_process_playback_queue_request_executes_tts_character_control():
+    conn = sqlite3.connect(":memory:")
+    conn.execute(
+        """
+        CREATE TABLE playback_queue (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            sound_filename TEXT NOT NULL,
+            request_username TEXT,
+            request_user_id TEXT,
+            request_type TEXT,
+            control_action TEXT,
+            requested_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            played_at DATETIME
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO playback_queue (
+            id,
+            guild_id,
+            sound_filename,
+            request_username,
+            request_user_id,
+            request_type,
+            control_action
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            1,
+            42,
+            '{"message":"hello from web","profile":"ventura"}',
+            "Discord User",
+            "123",
+            "tts",
+            "tts",
+        ),
+    )
+    conn.commit()
+
+    class FakeDatabase:
+        def __init__(self, connection):
+            self.conn = connection
+            self.cursor = connection.cursor()
+
+    guild = SimpleNamespace(id=42)
+    loading_message = object()
+    bot_channel = SimpleNamespace(send=AsyncMock(return_value=loading_message))
+    voice_transformation_service = SimpleNamespace(tts=AsyncMock(), tts_EL=AsyncMock())
+    behavior = SimpleNamespace(
+        _voice_transformation_service=voice_transformation_service,
+        _message_service=SimpleNamespace(get_bot_channel=Mock(return_value=bot_channel)),
+        _audio_service=SimpleNamespace(
+            image_generator=SimpleNamespace(generate_loading_gif=Mock(return_value=b"gif"))
+        ),
+    )
+
+    result = await process_playback_queue_request(
+        (
+            1,
+            42,
+            '{"message":"hello from web","profile":"ventura"}',
+            "Discord User",
+            "123",
+            "tts",
+            "tts",
+        ),
+        bot=SimpleNamespace(get_guild=lambda guild_id: guild if guild_id == 42 else None),
+        behavior=behavior,
+        db=FakeDatabase(conn),
+        sound_folder=".",
+        logger=lambda _: None,
+    )
+
+    assert result is True
+    voice_transformation_service.tts.assert_not_awaited()
+    voice_transformation_service.tts_EL.assert_awaited_once()
+    user, speech, voice = voice_transformation_service.tts_EL.await_args.args
+    kwargs = voice_transformation_service.tts_EL.await_args.kwargs
+    assert user.name == "Discord User"
+    assert user.guild is guild
+    assert speech == "hello from web"
+    assert voice == "pt"
+    assert kwargs["loading_message"] is loading_message
+    assert kwargs["sts_thumbnail_url"]
+    bot_channel.send.assert_awaited_once()
     assert conn.execute(
         "SELECT played_at FROM playback_queue WHERE id = 1"
     ).fetchone()[0] is not None

@@ -669,6 +669,78 @@ def test_web_control_endpoint_sends_toggle_mute_request(web_client):
     )
 
 
+def test_web_control_endpoint_sends_tts_request(web_client):
+    client, db_path = web_client
+    _login_web_user(client, username="discord-user", global_name="Discord User")
+
+    response = client.post(
+        "/api/web_control",
+        json={
+            "action": "tts",
+            "message": "hello from the soundboard",
+            "profile": "ventura",
+            "guild_id": "359077662742020107",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.get_json() == {"message": "Control request sent"}
+
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute(
+            """
+            SELECT guild_id, sound_filename, request_username, request_user_id, request_type, control_action
+            FROM playback_queue
+            """
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert row == (
+        359077662742020107,
+        '{"message":"hello from the soundboard","profile":"ventura"}',
+        "Discord User",
+        "123",
+        "tts",
+        "tts",
+    )
+
+
+def test_tts_enhance_endpoint_returns_enhanced_message(web_client):
+    client, _ = web_client
+    _login_web_user(client, username="discord-user", global_name="Discord User")
+
+    class FakeEnhancer:
+        def enhance(self, message: str) -> str:
+            assert message == "hello from the soundboard"
+            return "[excited] hello from the soundboard"
+
+    original_service = app.extensions.get("web_tts_enhancer_service")
+    app.extensions["web_tts_enhancer_service"] = FakeEnhancer()
+    try:
+        response = client.post(
+            "/api/tts/enhance",
+            json={"message": "hello from the soundboard"},
+        )
+    finally:
+        if original_service is None:
+            app.extensions.pop("web_tts_enhancer_service", None)
+        else:
+            app.extensions["web_tts_enhancer_service"] = original_service
+
+    assert response.status_code == 200
+    assert response.get_json() == {"message": "[excited] hello from the soundboard"}
+
+
+def test_tts_enhance_endpoint_requires_discord_login(web_client):
+    client, _ = web_client
+
+    response = client.post("/api/tts/enhance", json={"message": "hello"})
+
+    assert response.status_code == 401
+
+
 def test_web_control_endpoint_requires_discord_login(web_client):
     client, _ = web_client
 
@@ -903,12 +975,22 @@ def test_soundboard_page_renders_shared_redesign(web_client):
     assert "setupPageInput" in html
     assert 'class="web-controls"' not in html
     assert 'id="controlRoomMuteButton"' in html
+    assert 'id="controlRoomTtsButton"' in html
     assert 'id="controlRoomSlapButton"' in html
+    assert 'id="webTtsDialog"' in html
+    assert 'id="webTtsProfile"' in html
+    assert 'id="webTtsMessage"' in html
+    assert 'id="webTtsEnhanceButton"' in html
+    assert "/api/tts/enhance" in html
+    assert "window.prompt" not in html
     assert 'id="controlRoomUpdated"' not in html
     assert '<span>Guild</span>' not in html
     assert 'id="webUploadOpenButton"' in html
     assert 'class="control-room-metric-button web-upload-control-button login-required"' in html
     assert '<span class="control-room-metric-label">Upload</span>' in html
+    assert '<span class="control-room-metric-label">TTS</span>' in html
+    assert '<option value="ventura" selected>' in html
+    assert '<option value="en"' in html
     assert "Login with Discord to upload sounds" in html
     assert '<span class="nav-icon" aria-hidden="true">🎛️</span>' in html
     assert '<span class="nav-text">Soundboard</span>' in html

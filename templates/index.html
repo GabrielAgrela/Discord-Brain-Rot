@@ -180,6 +180,19 @@
                     </button>
                 </div>
                 <div class="control-room-metric control-room-metric--action">
+                    <span class="control-room-metric-label">TTS</span>
+                    <button
+                        type="button"
+                        id="controlRoomTtsButton"
+                        class="control-room-metric-button web-control-button{% if not discord_user %} login-required{% endif %}"
+                        data-control-action="tts"
+                        title="{% if discord_user %}Text to speech{% else %}Login with Discord to use bot controls{% endif %}"
+                        aria-label="{% if discord_user %}Text to speech{% else %}Login with Discord to use bot controls{% endif %}"
+                    >
+                        {% if discord_user %}💬{% else %}🔒{% endif %}
+                    </button>
+                </div>
+                <div class="control-room-metric control-room-metric--action">
                     <span class="control-room-metric-label">Slap</span>
                     <button
                         type="button"
@@ -563,6 +576,78 @@
         </form>
     </dialog>
 
+    <dialog id="webTtsDialog" class="web-upload-dialog web-tts-dialog" aria-labelledby="webTtsTitle">
+        <form id="webTtsForm" class="web-upload-modal-form">
+            <div class="web-upload-modal-header">
+                <div>
+                    <p class="card-kicker">Text to Speech</p>
+                    <h2 id="webTtsTitle" class="web-upload-title">Say it in voice chat</h2>
+                    <p id="webTtsStatus" class="web-upload-status">
+                        {% if discord_user %}
+                        Pick a voice or language, then send the message to the bot.
+                        {% else %}
+                        Login with Discord to use TTS.
+                        {% endif %}
+                    </p>
+                </div>
+                <button type="button" id="webTtsCloseButton" class="web-upload-close" aria-label="Close TTS modal">×</button>
+            </div>
+
+            <label class="web-upload-field">
+                <span>Voice / Language</span>
+                <select
+                    id="webTtsProfile"
+                    name="profile"
+                    class="web-upload-input"
+                    {% if not discord_user %}disabled{% endif %}
+                >
+                    {% for option in tts_profile_options %}
+                    <option value="{{ option.value }}" {% if option.value == 'ventura' %}selected{% endif %}>
+                        {{ option.label }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </label>
+
+            <label class="web-upload-field">
+                <span>Message</span>
+                <div class="web-tts-message-box">
+                    <textarea
+                        id="webTtsMessage"
+                        name="message"
+                        class="web-upload-input web-upload-textarea web-tts-message"
+                        maxlength="500"
+                        placeholder="Type what the bot should say"
+                        required
+                        {% if not discord_user %}disabled{% endif %}
+                    ></textarea>
+                    <button
+                        type="button"
+                        id="webTtsEnhanceButton"
+                        class="web-tts-enhance-button{% if not discord_user %} login-required{% endif %}"
+                        title="{% if discord_user %}Enhance for ElevenLabs tags{% else %}Login with Discord to enhance TTS{% endif %}"
+                        aria-label="{% if discord_user %}Enhance for ElevenLabs tags{% else %}Login with Discord to enhance TTS{% endif %}"
+                        {% if not discord_user %}disabled{% endif %}
+                    >
+                        Enhance
+                    </button>
+                </div>
+            </label>
+
+            <div class="web-upload-modal-actions">
+                <button type="button" class="web-upload-secondary" id="webTtsCancelButton">Cancel</button>
+                <button
+                    id="webTtsSubmit"
+                    class="web-upload-submit{% if not discord_user %} login-required{% endif %}"
+                    type="submit"
+                    {% if not discord_user %}disabled{% endif %}
+                >
+                    {% if discord_user %}Send{% else %}🔒{% endif %}
+                </button>
+            </div>
+        </form>
+    </dialog>
+
     <div id="loginModal" class="login-modal" aria-hidden="true">
         <div class="login-modal-card" role="dialog" aria-modal="true" aria-labelledby="loginModalTitle">
             <h2 id="loginModalTitle" class="login-modal-title">Login Required</h2>
@@ -604,6 +689,7 @@
         const initialSoundboardData = {{ initial_soundboard_data|tojson }};
         const initialGuildOptions = {{ guild_options|tojson }};
         const initialSelectedGuildId = {{ selected_guild_id|tojson }};
+        const ttsProfileOptions = {{ tts_profile_options|tojson }};
         const themeToggle = document.querySelector('.theme-toggle');
         const guildSelector = document.getElementById('guildSelector');
         let webControlMuteIsMuted = false;
@@ -782,6 +868,9 @@
             if (action === 'slap') {
                 button.textContent = '👋';
                 button.title = 'Slap';
+            } else if (action === 'tts') {
+                button.textContent = '💬';
+                button.title = 'Text to speech';
             } else {
                 button.textContent = webControlMuteIsMuted ? '🔊' : '🔇';
                 button.title = webControlMuteIsMuted ? 'Unmute' : 'Mute for 30 minutes';
@@ -1703,6 +1792,10 @@
                 openLoginModal();
                 return;
             }
+            if (action === 'tts') {
+                openTtsModal();
+                return;
+            }
 
             button.disabled = true;
             button.textContent = '⏳';
@@ -1713,7 +1806,10 @@
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({ action, guild_id: getSelectedGuildId() || undefined })
+                    body: JSON.stringify({
+                        action,
+                        guild_id: getSelectedGuildId() || undefined
+                    })
                 });
 
                 if (response.ok) {
@@ -1775,6 +1871,15 @@
         const webUploadInboxPage = document.getElementById('webUploadInboxPage');
         const webUploadQueueList = document.getElementById('webUploadQueueList');
         const webUploadQueueCount = document.getElementById('webUploadQueueCount');
+        const webTtsForm = document.getElementById('webTtsForm');
+        const webTtsDialog = document.getElementById('webTtsDialog');
+        const webTtsCloseButton = document.getElementById('webTtsCloseButton');
+        const webTtsCancelButton = document.getElementById('webTtsCancelButton');
+        const webTtsStatus = document.getElementById('webTtsStatus');
+        const webTtsSubmit = document.getElementById('webTtsSubmit');
+        const webTtsMessage = document.getElementById('webTtsMessage');
+        const webTtsProfile = document.getElementById('webTtsProfile');
+        const webTtsEnhanceButton = document.getElementById('webTtsEnhanceButton');
         const uploadQueueItems = new Map();
         let uploadInboxPage = 1;
         let uploadInboxTotalPages = 1;
@@ -1784,6 +1889,146 @@
             if (!webUploadStatus) return;
             webUploadStatus.textContent = message;
             webUploadStatus.dataset.kind = kind;
+        }
+
+        function setTtsStatus(message, kind = '') {
+            if (!webTtsStatus) return;
+            webTtsStatus.textContent = message;
+            webTtsStatus.dataset.kind = kind;
+        }
+
+        function openTtsModal() {
+            if (!discordUser) {
+                openLoginModal();
+                return;
+            }
+            setTtsStatus('Pick a voice or language, then send the message to the bot.');
+            if (typeof webTtsDialog?.showModal === 'function') {
+                webTtsDialog.showModal();
+            } else if (webTtsDialog) {
+                webTtsDialog.setAttribute('open', '');
+            }
+            webTtsMessage?.focus();
+        }
+
+        function closeTtsModal() {
+            if (typeof webTtsDialog?.close === 'function') {
+                webTtsDialog.close();
+            } else if (webTtsDialog) {
+                webTtsDialog.removeAttribute('open');
+            }
+        }
+
+        async function handleWebTtsSubmit(event) {
+            event.preventDefault();
+            if (!discordUser) {
+                openLoginModal();
+                return;
+            }
+
+            const message = webTtsMessage?.value?.trim() || '';
+            const profile = webTtsProfile?.value || 'ventura';
+            if (!message) {
+                setTtsStatus('Please enter a message.', 'error');
+                webTtsMessage?.focus();
+                return;
+            }
+
+            if (webTtsSubmit) {
+                webTtsSubmit.disabled = true;
+                webTtsSubmit.textContent = 'Sending...';
+            }
+            setTtsStatus('Sending TTS request...', 'loading');
+
+            try {
+                const response = await fetch('/api/web_control', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        action: 'tts',
+                        message: message.slice(0, 500),
+                        profile,
+                        guild_id: getSelectedGuildId() || undefined
+                    })
+                });
+                const payload = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    if (response.status === 401 && payload.login_url) {
+                        window.location.href = payload.login_url;
+                        return;
+                    }
+                    setTtsStatus(payload.error || 'TTS request failed.', 'error');
+                    return;
+                }
+
+                setTtsStatus('TTS request sent.', 'success');
+                webTtsForm?.reset();
+                setTimeout(closeTtsModal, 650);
+            } catch (error) {
+                console.error('TTS request failed:', error);
+                setTtsStatus('Network error while sending TTS.', 'error');
+            } finally {
+                if (webTtsSubmit) {
+                    webTtsSubmit.disabled = false;
+                    webTtsSubmit.textContent = 'Send';
+                }
+            }
+        }
+
+        async function handleWebTtsEnhance() {
+            if (!discordUser) {
+                openLoginModal();
+                return;
+            }
+
+            const message = webTtsMessage?.value?.trim() || '';
+            if (!message) {
+                setTtsStatus('Please enter a message to enhance.', 'error');
+                webTtsMessage?.focus();
+                return;
+            }
+
+            if (webTtsEnhanceButton) {
+                webTtsEnhanceButton.disabled = true;
+                webTtsEnhanceButton.textContent = 'Enhancing...';
+            }
+            setTtsStatus('Adding ElevenLabs style tags...', 'loading');
+
+            try {
+                const response = await fetch('/api/tts/enhance', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        message: message.slice(0, 500)
+                    })
+                });
+                const payload = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    if (response.status === 401 && payload.login_url) {
+                        window.location.href = payload.login_url;
+                        return;
+                    }
+                    setTtsStatus(payload.error || 'TTS enhancement failed.', 'error');
+                    return;
+                }
+                if (webTtsMessage && payload.message) {
+                    webTtsMessage.value = payload.message.slice(0, 500);
+                    webTtsMessage.focus();
+                }
+                setTtsStatus('Message enhanced. Review it, then send.', 'success');
+            } catch (error) {
+                console.error('TTS enhancement failed:', error);
+                setTtsStatus('Network error while enhancing TTS.', 'error');
+            } finally {
+                if (webTtsEnhanceButton) {
+                    webTtsEnhanceButton.disabled = false;
+                    webTtsEnhanceButton.textContent = 'Enhance';
+                }
+            }
         }
 
         function openUploadModal() {
@@ -2119,6 +2364,25 @@
         }
         if (webUploadCancelButton) {
             webUploadCancelButton.addEventListener('click', closeUploadModal);
+        }
+        if (webTtsForm) {
+            webTtsForm.addEventListener('submit', handleWebTtsSubmit);
+        }
+        if (webTtsCloseButton) {
+            webTtsCloseButton.addEventListener('click', closeTtsModal);
+        }
+        if (webTtsCancelButton) {
+            webTtsCancelButton.addEventListener('click', closeTtsModal);
+        }
+        if (webTtsEnhanceButton) {
+            webTtsEnhanceButton.addEventListener('click', handleWebTtsEnhance);
+        }
+        if (webTtsDialog) {
+            webTtsDialog.addEventListener('click', (event) => {
+                if (event.target === webTtsDialog) {
+                    closeTtsModal();
+                }
+            });
         }
         if (webUploadDialog) {
             webUploadDialog.addEventListener('click', (event) => {
