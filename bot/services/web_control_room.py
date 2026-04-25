@@ -88,6 +88,8 @@ class WebControlRoomService:
                 "is_paused": False,
                 "current_sound": None,
                 "current_requester": None,
+                "current_duration_seconds": None,
+                "current_elapsed_seconds": None,
                 "updated_at": None,
             }
 
@@ -102,8 +104,23 @@ class WebControlRoomService:
             "is_paused": bool(status.get("is_paused")),
             "current_sound": status.get("current_sound"),
             "current_requester": status.get("current_requester"),
+            "current_duration_seconds": self._coerce_optional_float(
+                status.get("current_duration_seconds")
+            ),
+            "current_elapsed_seconds": self._coerce_optional_float(
+                status.get("current_elapsed_seconds")
+            ),
             "updated_at": status.get("updated_at"),
         }
+
+    def _coerce_optional_float(self, value: Any) -> float | None:
+        """Convert nullable numeric status fields to floats."""
+        if value is None or value == "":
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
 
     def _decode_voice_members(self, value: Any) -> list[dict[str, Any]]:
         """Decode persisted voice member data for API output."""

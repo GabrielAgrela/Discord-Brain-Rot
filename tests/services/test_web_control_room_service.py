@@ -43,6 +43,8 @@ def test_web_control_room_service_combines_runtime_and_mute(tmp_path):
         is_paused=False,
         current_sound="now.mp3",
         current_requester="web-user",
+        current_duration_seconds=12.5,
+        current_elapsed_seconds=4.0,
         muted=True,
         mute_remaining_seconds=90,
         updated_at=datetime(2026, 4, 23, 12, 1, 0),
@@ -58,6 +60,8 @@ def test_web_control_room_service_combines_runtime_and_mute(tmp_path):
         {"id": "2", "name": "Diogo", "avatar_url": ""},
     ]
     assert payload["status"]["current_sound"] == "now.mp3"
+    assert payload["status"]["current_duration_seconds"] == 12.5
+    assert payload["status"]["current_elapsed_seconds"] == 4.0
     assert "queue" not in payload
     assert payload["mute"]["is_muted"] is True
     assert payload["mute"]["remaining_seconds"] == 90

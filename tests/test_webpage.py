@@ -1215,6 +1215,44 @@ def test_web_content_endpoints_do_not_censor_logged_in_voice_user(web_client):
     }
 
 
+def test_web_sound_tables_include_mp3_duration_when_file_exists(web_client, monkeypatch):
+    client, db_path = web_client
+    sounds_dir = Path(app.config["SOUNDS_DIR"])
+    (sounds_dir / "alpha.mp3").write_bytes(b"fake mp3")
+
+    class FakeAudioInfo:
+        length = 72.2
+
+    class FakeMp3:
+        info = FakeAudioInfo()
+
+        def __init__(self, path: str):
+            assert path.endswith("alpha.mp3")
+
+    monkeypatch.setattr("bot.services.web_content.MP3", FakeMp3)
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            INSERT INTO sounds (id, originalfilename, Filename, favorite, slap, is_elevenlabs, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (1, "alpha.mp3", "alpha.mp3", 1, 0, 0, "2026-04-01 12:00:00"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    favorites_response = client.get("/api/favorites")
+    all_sounds_response = client.get("/api/all_sounds")
+
+    assert favorites_response.status_code == 200
+    assert favorites_response.get_json()["items"][0]["display_duration"] == "1:12"
+    assert all_sounds_response.status_code == 200
+    assert all_sounds_response.get_json()["items"][0]["display_duration"] == "1:12"
+
+
 def test_web_table_endpoints_return_filter_options_and_apply_column_filters(web_client):
     client, db_path = web_client
 

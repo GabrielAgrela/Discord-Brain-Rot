@@ -72,6 +72,7 @@ class AudioService:
         self._guild_current_requester: Dict[int, Optional[str]] = {}
         self._guild_current_play_id: Dict[int, Optional[str]] = {}
         self._guild_current_play_started_at: Dict[int, Optional[datetime]] = {}
+        self._guild_current_duration_seconds: Dict[int, Optional[float]] = {}
         self._active_guild_id: Optional[int] = None
         
         # Track current view to update progress button
@@ -193,6 +194,7 @@ class AudioService:
             self._guild_current_requester = {}
             self._guild_current_play_id = {}
             self._guild_current_play_started_at = {}
+            self._guild_current_duration_seconds = {}
             self._play_request_timestamps = {}
             self._play_pending_count = {}
         if guild_id not in self._guild_last_played_time:
@@ -210,6 +212,7 @@ class AudioService:
             self._guild_current_requester[guild_id] = None
             self._guild_current_play_id[guild_id] = None
             self._guild_current_play_started_at[guild_id] = None
+            self._guild_current_duration_seconds[guild_id] = None
 
     def _set_active_guild(self, guild_id: int) -> None:
         """Mark the active guild for backward-compatible fields."""
@@ -229,6 +232,7 @@ class AudioService:
         audio_file: str,
         user: Any,
         play_id: str,
+        duration_seconds: Optional[float] = None,
     ) -> None:
         """Track the currently audible file for web/runtime status."""
         self._ensure_guild_playback_state(guild_id)
@@ -236,6 +240,7 @@ class AudioService:
         self._guild_current_requester[guild_id] = getattr(user, "name", str(user))
         self._guild_current_play_id[guild_id] = play_id
         self._guild_current_play_started_at[guild_id] = datetime.now()
+        self._guild_current_duration_seconds[guild_id] = duration_seconds
 
     def _mark_playback_finished(self, guild_id: int, play_id: str) -> None:
         """Clear current playback tracking when the active player ends."""
@@ -245,6 +250,7 @@ class AudioService:
         self._guild_current_requester[guild_id] = None
         self._guild_current_play_id[guild_id] = None
         self._guild_current_play_started_at[guild_id] = None
+        self._guild_current_duration_seconds[guild_id] = None
 
     def get_guild_playback_snapshot(self, guild: discord.Guild) -> Dict[str, Any]:
         """
@@ -284,6 +290,13 @@ class AudioService:
             }
             for member in non_bot_members
         ]
+        current_duration = self._guild_current_duration_seconds.get(guild_id)
+        started_at = self._guild_current_play_started_at.get(guild_id)
+        current_elapsed = None
+        if (is_playing or is_paused) and started_at is not None:
+            current_elapsed = max(0.0, (datetime.now() - started_at).total_seconds())
+            if current_duration is not None:
+                current_elapsed = min(current_elapsed, current_duration)
 
         return {
             "voice_connected": voice_connected,
@@ -295,6 +308,8 @@ class AudioService:
             "is_paused": is_paused,
             "current_sound": self._guild_current_audio_file.get(guild_id) if is_playing or is_paused else None,
             "current_requester": self._guild_current_requester.get(guild_id) if is_playing or is_paused else None,
+            "current_duration_seconds": current_duration if is_playing or is_paused else None,
+            "current_elapsed_seconds": current_elapsed if is_playing or is_paused else None,
         }
 
     def _track_guild_play_request(self, guild_id: int) -> bool:
@@ -1246,6 +1261,9 @@ class AudioService:
                 options=self._build_slap_ffmpeg_options(),
             )
             audio_source = discord.PCMVolumeTransformer(pcm_source, volume=self.volume)
+            slap_duration_seconds = None
+            if audio_file_path.lower().endswith(".mp3"):
+                slap_duration_seconds = self._read_mp3_duration_seconds(audio_file_path)
 
             def slap_after(error):
                 if error:
@@ -1263,7 +1281,13 @@ class AudioService:
 
             slap_play_id = f"slap-{guild_id}-{int(slap_start_time * 1000)}"
             voice_client.play(audio_source, after=slap_after)
-            self._mark_playback_started(guild_id, audio_file, user, slap_play_id)
+            self._mark_playback_started(
+                guild_id,
+                audio_file,
+                user,
+                slap_play_id,
+                slap_duration_seconds,
+            )
             print(f"[AudioService] [SLAP-DEBUG] voice_client.play() returned. is_playing={voice_client.is_playing()}")
             self._log_perf(f"play_slap ({audio_file})", slap_start_time)
             return True
@@ -1425,6 +1449,7 @@ class AudioService:
                 return False
 
             short_clip_duration_seconds: Optional[float] = None
+            mp3_duration_seconds: Optional[float] = None
             playback_sample_rate_hz: Optional[int] = None
             playback_bitrate_bps: Optional[int] = None
             if audio_file_path.lower().endswith(".mp3"):
@@ -1571,7 +1596,13 @@ class AudioService:
                         )
 
                 voice_client.play(audio_source, after=after_playing)
-                self._mark_playback_started(guild_id, audio_file, user, play_id)
+                self._mark_playback_started(
+                    guild_id,
+                    audio_file,
+                    user,
+                    play_id,
+                    mp3_duration_seconds,
+                )
                 active_player = getattr(voice_client, "_player", None)
                 active_player_id = hex(id(active_player)) if active_player is not None else "None"
                 try:

@@ -66,6 +66,8 @@ class WebControlRoomRepository(BaseRepository[dict[str, Any]]):
                 is_paused INTEGER NOT NULL DEFAULT 0,
                 current_sound TEXT,
                 current_requester TEXT,
+                current_duration_seconds REAL,
+                current_elapsed_seconds REAL,
                 muted INTEGER NOT NULL DEFAULT 0,
                 mute_remaining_seconds INTEGER NOT NULL DEFAULT 0,
                 updated_at DATETIME NOT NULL
@@ -73,6 +75,8 @@ class WebControlRoomRepository(BaseRepository[dict[str, Any]]):
             """
         )
         self._ensure_column("voice_members TEXT", "voice_members")
+        self._ensure_column("current_duration_seconds REAL", "current_duration_seconds")
+        self._ensure_column("current_elapsed_seconds REAL", "current_elapsed_seconds")
 
     def _ensure_column(self, column_def: str, column_name: str) -> None:
         """Add a missing status-table column for existing deployments."""
@@ -95,6 +99,8 @@ class WebControlRoomRepository(BaseRepository[dict[str, Any]]):
         is_paused: bool,
         current_sound: str | None,
         current_requester: str | None,
+        current_duration_seconds: float | None,
+        current_elapsed_seconds: float | None,
         muted: bool,
         mute_remaining_seconds: int,
         updated_at: datetime | None = None,
@@ -114,6 +120,8 @@ class WebControlRoomRepository(BaseRepository[dict[str, Any]]):
             is_paused: Whether playback is paused.
             current_sound: Current sound filename, when known.
             current_requester: User/requester label for the current sound.
+            current_duration_seconds: Total current sound duration in seconds.
+            current_elapsed_seconds: Current playback progress in seconds.
             muted: Whether runtime mute is active.
             mute_remaining_seconds: Runtime mute remaining seconds.
             updated_at: Optional timestamp for deterministic tests.
@@ -137,11 +145,13 @@ class WebControlRoomRepository(BaseRepository[dict[str, Any]]):
                 is_paused,
                 current_sound,
                 current_requester,
+                current_duration_seconds,
+                current_elapsed_seconds,
                 muted,
                 mute_remaining_seconds,
                 updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(guild_id) DO UPDATE SET
                 guild_name = excluded.guild_name,
                 voice_connected = excluded.voice_connected,
@@ -153,6 +163,8 @@ class WebControlRoomRepository(BaseRepository[dict[str, Any]]):
                 is_paused = excluded.is_paused,
                 current_sound = excluded.current_sound,
                 current_requester = excluded.current_requester,
+                current_duration_seconds = excluded.current_duration_seconds,
+                current_elapsed_seconds = excluded.current_elapsed_seconds,
                 muted = excluded.muted,
                 mute_remaining_seconds = excluded.mute_remaining_seconds,
                 updated_at = excluded.updated_at
@@ -169,6 +181,8 @@ class WebControlRoomRepository(BaseRepository[dict[str, Any]]):
                 1 if is_paused else 0,
                 current_sound,
                 current_requester,
+                current_duration_seconds,
+                current_elapsed_seconds,
                 1 if muted else 0,
                 max(0, int(mute_remaining_seconds)),
                 timestamp,

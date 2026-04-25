@@ -5,7 +5,10 @@ Service layer for web soundboard content endpoints.
 from __future__ import annotations
 
 import math
+from pathlib import Path
 from typing import Any
+
+from mutagen.mp3 import MP3
 
 from bot.models.web import DiscordWebUser, PaginatedQuery
 from bot.repositories.web_content import WebContentRepository
@@ -23,6 +26,7 @@ class WebContentService:
         repository: WebContentRepository,
         text_censor_service: TextCensorService,
         user_access_repository: WebUserAccessRepository,
+        sounds_dir: str | Path | None = None,
     ) -> None:
         """
         Initialize the service.
@@ -31,10 +35,12 @@ class WebContentService:
             repository: Repository for web content queries.
             text_censor_service: Service used to censor text for web output.
             user_access_repository: Repository for web-session access checks.
+            sounds_dir: Directory containing playable MP3 files.
         """
         self.repository = repository
         self.text_censor_service = text_censor_service
         self.user_access_repository = user_access_repository
+        self.sounds_dir = Path(sounds_dir) if sounds_dir is not None else None
 
     def get_actions(
         self,
@@ -102,13 +108,7 @@ class WebContentService:
         should_censor = self._should_censor(current_user)
         return {
             "items": [
-                {
-                    "sound_id": row["sound_id"],
-                    "display_filename": self._censor_text(
-                        row["filename"],
-                        should_censor=should_censor,
-                    ),
-                }
+                self._format_sound_item(row, should_censor=should_censor)
                 for row in rows
             ],
             "total_pages": self._calculate_total_pages(total_count, query.per_page),
@@ -140,11 +140,7 @@ class WebContentService:
         return {
             "items": [
                 {
-                    "sound_id": row["sound_id"],
-                    "display_filename": self._censor_text(
-                        row["filename"],
-                        should_censor=should_censor,
-                    ),
+                    **self._format_sound_item(row, should_censor=should_censor),
                     "timestamp": row["timestamp"],
                 }
                 for row in rows
@@ -191,6 +187,50 @@ class WebContentService:
         if not should_censor:
             return value
         return self.text_censor_service.censor_text(value)
+
+    def _format_sound_item(
+        self,
+        row: dict[str, Any],
+        should_censor: bool,
+    ) -> dict[str, Any]:
+        """Format a sound row for web table output."""
+        item = {
+            "sound_id": row["sound_id"],
+            "display_filename": self._censor_text(
+                row["filename"],
+                should_censor=should_censor,
+            ),
+        }
+        duration_seconds = self._read_sound_duration_seconds(row.get("filename"))
+        if duration_seconds is not None:
+            item["display_duration"] = self._format_duration(duration_seconds)
+        return item
+
+    def _read_sound_duration_seconds(self, filename: str | None) -> float | None:
+        """Read an MP3 duration from disk when the file is available."""
+        if not filename or self.sounds_dir is None:
+            return None
+
+        sound_path = self.sounds_dir / Path(filename).name
+        if not sound_path.exists() or not sound_path.is_file():
+            return None
+
+        try:
+            audio = MP3(str(sound_path))
+            duration = float(audio.info.length)
+        except Exception:
+            return None
+
+        return duration if duration > 0 else None
+
+    def _format_duration(self, seconds: float) -> str:
+        """Format a sound duration as m:ss or h:mm:ss."""
+        total_seconds = max(0, int(round(seconds)))
+        hours, remainder = divmod(total_seconds, 3600)
+        minutes, secs = divmod(remainder, 60)
+        if hours:
+            return f"{hours}:{minutes:02d}:{secs:02d}"
+        return f"{minutes}:{secs:02d}"
 
     def _should_censor(self, current_user: DiscordWebUser | None) -> bool:
         """Return whether web labels should be censored for this request."""

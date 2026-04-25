@@ -467,6 +467,7 @@ def _get_web_content_service() -> WebContentService:
             db_path=db_path,
             use_shared=False,
         ),
+        sounds_dir=current_app.config["SOUNDS_DIR"],
     )
 
 

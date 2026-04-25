@@ -1084,6 +1084,8 @@ class BackgroundService:
                     is_paused=snapshot["is_paused"],
                     current_sound=snapshot["current_sound"],
                     current_requester=snapshot["current_requester"],
+                    current_duration_seconds=snapshot["current_duration_seconds"],
+                    current_elapsed_seconds=snapshot["current_elapsed_seconds"],
                     muted=muted,
                     mute_remaining_seconds=mute_remaining,
                 )

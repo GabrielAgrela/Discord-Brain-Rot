@@ -924,6 +924,57 @@ html.theme-dark .control-room {
     font-weight: 600;
 }
 
+.control-room-subtitle.has-progress {
+    display: flex;
+    align-items: center;
+    gap: 0.48rem;
+    min-width: 0;
+}
+
+.control-room-requester-label {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.control-room-progress {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.36rem;
+    flex: 0 0 auto;
+    min-width: 6.8rem;
+}
+
+.control-room-progress-track {
+    position: relative;
+    width: 4.4rem;
+    height: 0.38rem;
+    overflow: hidden;
+    border-radius: 999px;
+    background: rgba(23, 18, 13, 0.14);
+}
+
+html.theme-dark .control-room-progress-track {
+    background: rgba(244, 240, 232, 0.18);
+}
+
+.control-room-progress-fill {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 0;
+    border-radius: inherit;
+    background: var(--success);
+    transition: width 0.22s ease;
+}
+
+.control-room-progress-time {
+    color: var(--ink-soft);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
 .control-room-metrics {
     display: flex;
     align-items: center;
@@ -1979,6 +2030,33 @@ tr:last-child td {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+.sound-label,
+.filename .sound-title,
+.filename .sound-duration {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.sound-label,
+.filename {
+    line-height: 1.15;
+}
+
+.filename .sound-title {
+    font-weight: 700;
+}
+
+.filename .sound-duration {
+    margin-top: 0.16rem;
+    color: var(--ink-muted);
+    font-size: 0.74rem;
+    font-weight: 700;
+    letter-spacing: 0;
 }
 
 .play-button,

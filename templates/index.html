@@ -344,7 +344,12 @@
                             {% for item in favorites_data.get('items', []) %}
                             {% set filename_value = item.get('display_filename') or '' %}
                             <tr>
-                                <td class="filename" title="{{ filename_value }}">{{ filename_value|replace('.mp3', '') }}</td>
+                                <td class="filename" title="{{ filename_value }}">
+                                    <span class="sound-title">{{ filename_value|replace('.mp3', '') }}</span>
+                                    {% if item.get('display_duration') %}
+                                    <span class="sound-duration">{{ item.get('display_duration') }}</span>
+                                    {% endif %}
+                                </td>
                                 <td>
                                     <button class="play-button{% if not discord_user %} login-required{% endif %}"
                                         data-sound-id="{{ item.get('sound_id') }}"
@@ -429,7 +434,12 @@
                             {% for item in all_sounds_data.get('items', []) %}
                             {% set filename_value = item.get('display_filename') or '' %}
                             <tr>
-                                <td class="filename" title="{{ filename_value }}">{{ filename_value|replace('.mp3', '') }}</td>
+                                <td class="filename" title="{{ filename_value }}">
+                                    <span class="sound-title">{{ filename_value|replace('.mp3', '') }}</span>
+                                    {% if item.get('display_duration') %}
+                                    <span class="sound-duration">{{ item.get('display_duration') }}</span>
+                                    {% endif %}
+                                </td>
                                 <td title="{{ item.get('timestamp') or '' }}">{{ item.get('display_time_ago') or item.get('timestamp') or '' }}</td>
                                 <td>
                                     <button class="play-button{% if not discord_user %} login-required{% endif %}"
@@ -915,11 +925,80 @@
             return String(filename || '').replace(/\.mp3$/i, '') || 'Nothing playing';
         }
 
+        function formatDurationSeconds(seconds) {
+            const numericSeconds = Number(seconds);
+            if (!Number.isFinite(numericSeconds) || numericSeconds < 0) {
+                return '';
+            }
+            const totalSeconds = Math.round(numericSeconds);
+            const hours = Math.floor(totalSeconds / 3600);
+            const minutes = Math.floor((totalSeconds % 3600) / 60);
+            const secs = totalSeconds % 60;
+            if (hours > 0) {
+                return `${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+            }
+            return `${minutes}:${String(secs).padStart(2, '0')}`;
+        }
+
         function setControlRoomText(id, value) {
             const element = document.getElementById(id);
             if (element) {
                 element.textContent = value;
             }
+        }
+
+        function renderControlRoomSubtitleText(value) {
+            const element = document.getElementById('controlRoomRequester');
+            if (!element) {
+                return;
+            }
+            element.classList.remove('has-progress');
+            element.replaceChildren(document.createTextNode(value));
+        }
+
+        function renderControlRoomProgress(status, requester) {
+            const element = document.getElementById('controlRoomRequester');
+            if (!element) {
+                return;
+            }
+
+            const elapsedSeconds = Number(status.current_elapsed_seconds);
+            const durationSeconds = Number(status.current_duration_seconds);
+            const hasElapsed = Number.isFinite(elapsedSeconds) && elapsedSeconds >= 0;
+            const hasDuration = Number.isFinite(durationSeconds) && durationSeconds > 0;
+            const elapsed = hasElapsed ? formatDurationSeconds(elapsedSeconds) : '';
+            const total = hasDuration ? formatDurationSeconds(durationSeconds) : '';
+            const progressPercent = hasElapsed && hasDuration
+                ? Math.max(0, Math.min(100, (elapsedSeconds / durationSeconds) * 100))
+                : 0;
+
+            element.classList.add('has-progress');
+
+            const requesterLabel = document.createElement('span');
+            requesterLabel.className = 'control-room-requester-label';
+            requesterLabel.textContent = requester;
+
+            const progressShell = document.createElement('span');
+            progressShell.className = 'control-room-progress';
+            progressShell.setAttribute(
+                'aria-label',
+                elapsed && total ? `Playback progress ${elapsed} of ${total}` : 'Playback progress'
+            );
+
+            const progressTrack = document.createElement('span');
+            progressTrack.className = 'control-room-progress-track';
+
+            const progressFill = document.createElement('span');
+            progressFill.className = 'control-room-progress-fill';
+            progressFill.style.width = `${progressPercent}%`;
+
+            const progressTime = document.createElement('span');
+            progressTime.className = 'control-room-progress-time';
+            progressTime.textContent = elapsed && total ? `${elapsed} / ${total}` : (total || elapsed);
+
+            progressTrack.appendChild(progressFill);
+            progressShell.append(progressTrack, progressTime);
+            element.replaceChildren(requesterLabel, progressShell);
         }
 
         function getVoiceMembersInitials(name) {
@@ -1004,10 +1083,13 @@
                 'controlRoomNowPlaying',
                 isPlaying ? currentSound : (status.online ? 'Idle' : 'Bot status unavailable')
             );
-            setControlRoomText(
-                'controlRoomRequester',
-                isPlaying ? requester : (status.voice_connected ? 'Ready in voice' : 'Waiting outside voice')
-            );
+            if (isPlaying) {
+                renderControlRoomProgress(status, requester);
+            } else {
+                renderControlRoomSubtitleText(
+                    status.voice_connected ? 'Ready in voice' : 'Waiting outside voice'
+                );
+            }
 
             const voiceLabel = status.voice_connected
                 ? `${status.voice_channel_name || 'Voice'} (${status.voice_member_count || 0})`
@@ -1252,6 +1334,25 @@
             return actionMap[action] || action;
         }
 
+        function buildSoundLabel(item) {
+            const wrapper = document.createElement('span');
+            wrapper.className = 'sound-label';
+
+            const title = document.createElement('span');
+            title.className = 'sound-title';
+            title.textContent = (item.display_filename || '').replace('.mp3', '');
+            wrapper.appendChild(title);
+
+            if (item.display_duration) {
+                const duration = document.createElement('span');
+                duration.className = 'sound-duration';
+                duration.textContent = item.display_duration;
+                wrapper.appendChild(duration);
+            }
+
+            return wrapper;
+        }
+
         function buildFilterQuery(endpoint) {
             const params = new URLSearchParams();
             const filters = filterState[endpoint] || {};
@@ -1452,8 +1553,8 @@
                                 } else if (endpoint === 'favorites') {
                                     const filenameCell = document.createElement('td');
                                     filenameCell.className = 'filename';
-                                    filenameCell.textContent = (item.display_filename || '').replace('.mp3', '');
                                     filenameCell.title = item.display_filename || '';
+                                    filenameCell.appendChild(buildSoundLabel(item));
                                     row.appendChild(filenameCell);
 
                                     const playCell = document.createElement('td');
@@ -1466,8 +1567,8 @@
                                 } else if (endpoint === 'all_sounds') {
                                     const filenameCell = document.createElement('td');
                                     filenameCell.className = 'filename';
-                                    filenameCell.textContent = (item.display_filename || '').replace('.mp3', '');
                                     filenameCell.title = item.display_filename || '';
+                                    filenameCell.appendChild(buildSoundLabel(item));
                                     row.appendChild(filenameCell);
 
                                     const dateCell = document.createElement('td');

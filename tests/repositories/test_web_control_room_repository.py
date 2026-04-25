@@ -22,6 +22,8 @@ def test_upsert_status_and_get_status(tmp_path):
         is_paused=False,
         current_sound="now.mp3",
         current_requester="gabi",
+        current_duration_seconds=12.5,
+        current_elapsed_seconds=4.0,
         muted=False,
         mute_remaining_seconds=0,
         updated_at=datetime(2026, 4, 23, 12, 1, 0),
@@ -32,4 +34,6 @@ def test_upsert_status_and_get_status(tmp_path):
     assert status["guild_name"] == "Guild"
     assert status["voice_connected"] == 1
     assert status["current_sound"] == "now.mp3"
+    assert status["current_duration_seconds"] == 12.5
+    assert status["current_elapsed_seconds"] == 4.0
     assert "Gabi" in status["voice_members"]
