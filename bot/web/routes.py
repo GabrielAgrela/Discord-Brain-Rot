@@ -166,15 +166,10 @@ def register_web_routes(app: Flask) -> None:
     def get_actions() -> Any:
         """Return paginated recent actions for the web soundboard."""
         query = _build_paginated_query(filter_names=("action", "user", "sound"))
-        include_filters = request.args.get("include_filters", "1").strip().lower() not in {
-            "0",
-            "false",
-            "no",
-        }
         return jsonify(
             _get_web_content_service().get_actions(
                 query,
-                include_filters=include_filters,
+                include_filters=_parse_include_filters_arg(),
                 current_user=_get_current_discord_user(),
             )
         )
@@ -186,6 +181,7 @@ def register_web_routes(app: Flask) -> None:
         return jsonify(
             _get_web_content_service().get_favorites(
                 query,
+                include_filters=_parse_include_filters_arg(),
                 current_user=_get_current_discord_user(),
             )
         )
@@ -197,6 +193,7 @@ def register_web_routes(app: Flask) -> None:
         return jsonify(
             _get_web_content_service().get_all_sounds(
                 query,
+                include_filters=_parse_include_filters_arg(),
                 current_user=_get_current_discord_user(),
             )
         )
@@ -709,6 +706,15 @@ def _build_paginated_query(filter_names: tuple[str, ...]) -> PaginatedQuery:
         guild_id=selected_guild_id,
         filters={name: _get_filter_values(name) for name in filter_names},
     )
+
+
+def _parse_include_filters_arg() -> bool:
+    """Return whether a paginated endpoint should include filter metadata."""
+    return request.args.get("include_filters", "1").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+    }
 
 
 def _parse_positive_int_arg(name: str, default: int) -> int:

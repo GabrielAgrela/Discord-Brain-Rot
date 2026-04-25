@@ -1445,6 +1445,76 @@ def test_actions_endpoint_can_skip_filter_metadata(web_client):
     }
 
 
+def test_favorites_endpoint_can_skip_filter_metadata(web_client):
+    client, db_path = web_client
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            INSERT INTO sounds (id, originalfilename, Filename, favorite, slap, is_elevenlabs, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (1, "alpha.mp3", "alpha.mp3", 1, 0, 0, "2026-04-04 12:00:00"),
+        )
+        conn.execute(
+            """
+            INSERT INTO actions (username, action, target, timestamp, guild_id)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            ("alice", "favorite_sound", "1", "2026-04-04 12:05:00", "111"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    response = client.get("/api/favorites?include_filters=0")
+
+    assert response.status_code == 200
+    assert response.get_json() == {
+        "items": [
+            {
+                "sound_id": 1,
+                "display_filename": "alpha.mp3",
+            }
+        ],
+        "total_pages": 1,
+        "filters": {},
+    }
+
+
+def test_all_sounds_endpoint_can_skip_filter_metadata(web_client):
+    client, db_path = web_client
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            INSERT INTO sounds (id, originalfilename, Filename, favorite, slap, is_elevenlabs, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (1, "alpha.mp3", "alpha.mp3", 0, 0, 0, "2026-04-04 12:00:00"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    response = client.get("/api/all_sounds?include_filters=0")
+
+    assert response.status_code == 200
+    assert response.get_json() == {
+        "items": [
+            {
+                "sound_id": 1,
+                "display_filename": "alpha.mp3",
+                "timestamp": "2026-04-04 12:00:00",
+            }
+        ],
+        "total_pages": 1,
+        "filters": {},
+    }
+
+
 def test_soundboard_initial_render_skips_unused_filter_payloads(web_client):
     client, db_path = web_client
 

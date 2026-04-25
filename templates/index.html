@@ -1396,7 +1396,7 @@
             const searchQuery = searchInput ? searchInput.value.trim() : '';
 
             const filterQuery = buildFilterQuery(endpoint);
-            const includeFiltersQuery = endpoint === 'actions' ? '&include_filters=0' : '';
+            const includeFiltersQuery = '&include_filters=0';
             const guildId = getSelectedGuildId();
             const guildQuery = guildId ? `&guild_id=${encodeURIComponent(guildId)}` : '';
             const apiUrl = `/api/${endpoint}?page=${page}&per_page=${endpointItemsPerPage[endpoint]}&search=${encodeURIComponent(searchQuery)}${guildQuery}${includeFiltersQuery}${filterQuery ? `&${filterQuery}` : ''}`;

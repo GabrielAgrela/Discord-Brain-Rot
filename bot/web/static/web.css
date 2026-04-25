@@ -3320,10 +3320,10 @@ body.page-soundboard .tables-grid > .card {
         position: sticky;
         top: calc(0.5rem + env(safe-area-inset-top, 0px));
         z-index: 35;
-        grid-template-columns: minmax(0, 1fr) auto auto auto auto;
+        grid-template-columns: minmax(0, 1fr) repeat(2, 2rem);
         grid-template-areas:
-            "status upload mute tts slap"
-            "voice voice voice voice voice";
+            "status upload mute"
+            "voice tts slap";
         align-items: center;
         column-gap: 0.42rem;
         row-gap: 0.38rem;
