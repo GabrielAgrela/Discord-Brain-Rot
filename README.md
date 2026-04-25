@@ -86,8 +86,8 @@ This README is based on the current codebase behavior (not historical README ass
   - sounds
   - voice users
   - voice channels
-- `/weeklywrapped` admin trigger for a weekly guild digest (top sounds/users/voice + quirky stats).
-- `/yearreview` yearly wrap-up with rank, play habits, streaks, and voice metrics.
+- `/weeklywrapped` admin trigger for a weekly guild digest, sent as a Remotion-rendered GIF when there is activity.
+- `/yearreview` yearly wrap-up as a Remotion-rendered animated GIF that replaces its progress message with the final file.
 - Voice session analytics backed by `voice_activity` rows from `on_voice_state_update`.
 - Web analytics dashboard includes:
   - summary cards
@@ -197,8 +197,8 @@ This README is based on the current codebase behavior (not historical README ass
 
 ### Stats
 - `/top option:<users|sounds|voice users|voice channels> number:<int> numberdays:<int>`
-- `/weeklywrapped days:<optional>` (admin/mod-gated; sends digest to configured bot channel)
-- `/yearreview user:<optional> year:<optional>`
+- `/weeklywrapped days:<optional>` (admin/mod-gated; sends a Remotion GIF digest to the configured bot channel)
+- `/yearreview user:<optional> year:<optional>` (renders a Remotion recap and edits the progress response into a compact animated GIF)
 - `/sendyearreview user:<required> year:<optional>` (admin-gated placeholder DM flow)
 
 ### Admin
@@ -248,6 +248,7 @@ This README is based on the current codebase behavior (not historical README ass
 
 - Docker + Docker Compose (recommended)
 - FFmpeg
+- Node.js/npm (for Remotion year-review and weekly-wrapped rendering)
 - Chromium + chromedriver (image rendering/scraping)
 - Vosk model at `Data/models/vosk-model-small-pt-0.3`
 
@@ -278,6 +279,9 @@ This README is based on the current codebase behavior (not historical README ass
 - `LOW_LATENCY_MP3_START_PREROLL_MS` (default `650`; minimum startup pre-roll floor for MP3 in low-latency mode)
 - `TTS_LOUDNORM_MODE` (`off` default, or `single` / `double`)
 - `FFMPEG_MAX_CONCURRENT_JOBS` (global ffmpeg concurrency cap)
+- `YEAR_REVIEW_GIF_MAX_MB` (optional upload cap override for generated `/yearreview` GIFs; also used by `/weeklywrapped` unless overridden)
+- `WEEKLY_WRAPPED_GIF_MAX_MB` (optional upload cap override for generated `/weeklywrapped` GIFs)
+- `YEAR_REVIEW_RENDER_TIMEOUT_SECONDS` (optional timeout for Remotion MP4 rendering before GIF conversion, default `180`)
 - `TTS_MAX_CONCURRENT_JOBS` (global TTS/STS concurrency cap)
 - `SOUND_PLAYBACK_EAR_PROTECTION_ENABLED` (`true` default; enables playback-time anti-earrape filtering)
 - `SOUND_PLAYBACK_EAR_PROTECTION_GAIN_DB` (default `-3.0`; baseline playback attenuation)

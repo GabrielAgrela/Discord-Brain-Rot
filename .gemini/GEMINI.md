@@ -261,6 +261,15 @@ Canonical completion command:
 - AFK transitions are intentionally handled as session boundaries for active channels only (joining AFK is not counted as active voice time)
 - Voice session rows currently store `member.name` (not `name#discriminator`) to align with existing stats queries
 
+### Year Review GIF Generation
+- `/yearreview` and `/weeklywrapped` send compact animated GIFs generated from a Remotion MP4 render. `YearReviewVideoService` prepares props from stats payloads, invokes the local Remotion CLI from `trailer/node_modules/.bin/remotion`, then converts/compresses with ffmpeg.
+- `/yearreview` should edit the original progress response into a file-only GIF message instead of sending a separate captioned follow-up. Keep the animated top-sounds scene capped to four rows unless the layout is redesigned; five rows clip at 960x540.
+- Keep the year-review/weekly-wrapped Remotion background visually seamless with Discord chat (`#313338`) and avoid decorative confetti/equalizer/glow layers; those made the GIF look detached from the chat UI and worsened compression.
+- The Docker bot image must include Node.js because Remotion's CLI is a Node executable. If `/yearreview` fails with `env: 'node': No such file or directory`, rebuild/recreate the bot image; a plain restart is not enough after Dockerfile dependency changes.
+- The Remotion source lives under `bot/remotion_year_review/` instead of `trailer/` because `bot/` is volume-mounted into the Docker bot container for normal restart deploys. Do not move required runtime composition files into unmounted `trailer/src` unless the deploy flow is changed to rebuild/recreate the image.
+- Keep Remotion/GIF generation in the service layer and keep Discord progress edits in `StatsCog`; the renderer should not import Discord APIs or query repositories directly.
+- GIF output is capped by the guild upload limit with a conservative margin, or by `YEAR_REVIEW_GIF_MAX_MB` / `WEEKLY_WRAPPED_GIF_MAX_MB` when set. If the GIF still exceeds the cap, the command should fall back to the text embed instead of attempting an oversize upload.
+
 ### Inline Controls Button Normalization
 - The minute background normalizer in `bot/services/background.py` is a safety dedupe pass; keep real-time cleanup in `on_message` (`handle_new_bot_message_for_controls_cleanup`) intact.
 - When detecting/removing inline `⚙️` controls, prefer checking both reconstructed views (`discord.ui.View.from_message`) and raw `message.components`; relying on one source can miss existing buttons and cause duplicate `custom_id` edit failures.

@@ -30,6 +30,9 @@ htmlcov/
 # Trailer (Remotion)
 trailer/node_modules/
 trailer/out/
+trailer/.remotion/
+.remotion/
+.cache/
 
 # Static and downloaded assets
 # /static/

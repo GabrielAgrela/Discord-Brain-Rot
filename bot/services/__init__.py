@@ -9,6 +9,7 @@ from bot.services.message import MessageService
 from bot.services.mute import MuteService
 from bot.services.backup import BackupService
 from bot.services.image_generator import ImageGeneratorService
+from bot.services.year_review_video import YearReviewVideoService
 from bot.services.guild_settings import GuildSettingsService
 from bot.services.rl_store import RocketLeagueStoreService
 from bot.services.weekly_wrapped import WeeklyWrappedService
@@ -18,6 +19,7 @@ __all__ = [
     "MuteService",
     "BackupService",
     "ImageGeneratorService",
+    "YearReviewVideoService",
     "GuildSettingsService",
     "RocketLeagueStoreService",
     "WeeklyWrappedService",

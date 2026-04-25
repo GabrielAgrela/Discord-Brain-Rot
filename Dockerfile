@@ -12,6 +12,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libopus0 \
     chromium \
     chromium-driver \
+    nodejs \
+    npm \
     fonts-noto-color-emoji \
     build-essential \
     libffi-dev \

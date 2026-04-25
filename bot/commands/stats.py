@@ -7,13 +7,20 @@ This cog handles stats-related commands:
 - /sendyearreview - Admin command to send year review
 """
 
-import discord
-from discord.ext import commands
-from discord.commands import Option
+import asyncio
 import datetime
+import logging
+import os
 from typing import Optional
 
+import discord
+from discord.commands import Option
+from discord.ext import commands
+
 from bot.repositories import ActionRepository, StatsRepository
+from bot.services.year_review_video import YearReviewVideoService
+
+logger = logging.getLogger(__name__)
 
 
 class StatsCog(commands.Cog):
@@ -24,6 +31,7 @@ class StatsCog(commands.Cog):
         self.behavior = behavior
         self.action_repo = ActionRepository()
         self.stats_repo = StatsRepository()
+        self.year_review_video_service = YearReviewVideoService()
 
     def _log_action(
         self,
@@ -183,9 +191,27 @@ class StatsCog(commands.Cog):
 
         safe_days = max(1, min(int(days), 30))
         await ctx.respond(
-            f"Generating weekly wrapped for the last {safe_days} day(s)...",
+            f"Generating weekly wrapped for the last {safe_days} day(s): 0%",
             ephemeral=True,
         )
+        loop = asyncio.get_running_loop()
+        last_progress = {"percent": -1}
+
+        async def edit_progress(percent: int, label: str) -> None:
+            """Edit the weekly wrapped command response with render progress."""
+            if percent <= last_progress["percent"]:
+                return
+            last_progress["percent"] = percent
+            try:
+                await ctx.interaction.edit_original_response(
+                    content=f"Generating weekly wrapped for the last {safe_days} day(s): {percent}%\n{label}"
+                )
+            except Exception:
+                pass
+
+        def progress_callback(percent: int, label: str) -> None:
+            """Schedule weekly wrapped progress edits from render worker threads."""
+            loop.call_soon_threadsafe(asyncio.create_task, edit_progress(percent, label))
 
         sent = await weekly_service.send_weekly_wrapped(
             guild=ctx.guild,
@@ -193,8 +219,10 @@ class StatsCog(commands.Cog):
             force=True,
             record_delivery=False,
             requested_by=ctx.author.name,
+            progress_callback=progress_callback,
         )
         if sent:
+            await edit_progress(100, "Done")
             await ctx.followup.send(
                 "Weekly wrapped sent to the configured bot channel.",
                 ephemeral=True,
@@ -212,9 +240,9 @@ class StatsCog(commands.Cog):
         user: Option(discord.Member, "User to view", required=False, default=None),
         year: Option(int, "Year to review", required=False, default=None)
     ):
-        """Generate a Spotify-wrapped style year review."""
+        """Generate a Spotify-wrapped style year review GIF."""
         target_user = user if user else ctx.author
-        await ctx.respond(f"Generating year review for {target_user.display_name}... 🎉", delete_after=0)
+        await ctx.respond(f"Generating year review for {target_user.display_name}: 0%")
         
         current_year = datetime.datetime.now().year
         review_year = year if year else current_year
@@ -230,9 +258,91 @@ class StatsCog(commands.Cog):
         
         try:
             stats = self.stats_repo.get_user_year_stats(username, review_year, guild_id=guild_id)
-            await self._send_year_review_embed(ctx, target_user, stats, review_year)
+            await self._send_year_review_gif(ctx, target_user, stats, review_year)
         except AttributeError:
              await self.behavior.send_message(title="Error", description="Year review stats not available directly.")
+        except Exception as exc:
+            logger.exception("Failed to generate /yearreview for %s:%s", username, review_year)
+            await self._edit_year_review_status(
+                ctx,
+                f"Year review failed for {target_user.display_name}: {exc}",
+            )
+
+    async def _edit_year_review_status(self, ctx, content: str) -> None:
+        """Best-effort edit for the original year review slash response."""
+        try:
+            await ctx.interaction.edit_original_response(content=content)
+            return
+        except Exception:
+            pass
+        try:
+            await ctx.edit(content=content)
+        except Exception:
+            pass
+
+    async def _send_year_review_gif(self, ctx, target_user, stats, year):
+        """Generate and send a year review GIF with progress edits."""
+        if not stats or stats.get("total_plays", 0) == 0:
+            await self._send_year_review_embed(ctx, target_user, stats, year)
+            return
+
+        loop = asyncio.get_running_loop()
+        last_progress = {"percent": -1}
+
+        async def edit_progress(percent: int, label: str) -> None:
+            """Edit the original slash response with render progress."""
+            if percent <= last_progress["percent"]:
+                return
+            last_progress["percent"] = percent
+            content = f"Generating year review for {target_user.display_name}: {percent}%\n{label}"
+            await self._edit_year_review_status(ctx, content)
+
+        def progress_callback(percent: int, label: str) -> None:
+            """Schedule progress edits from the render worker thread."""
+            loop.call_soon_threadsafe(asyncio.create_task, edit_progress(percent, label))
+
+        max_bytes = self._resolve_discord_upload_limit(ctx)
+        await edit_progress(3, "Collecting stats")
+        result = await asyncio.to_thread(
+            self.year_review_video_service.render_year_review_gif,
+            username=target_user.name,
+            display_name=target_user.display_name,
+            year=year,
+            stats=stats,
+            avatar_url=target_user.display_avatar.url if target_user.display_avatar else None,
+            max_bytes=max_bytes,
+            progress_callback=progress_callback,
+        )
+
+        file_size_mb = result.size_bytes / (1024 * 1024)
+        if result.size_bytes > max_bytes:
+            await edit_progress(100, f"GIF rendered, but it is too large to upload ({file_size_mb:.1f} MB).")
+            await self._send_year_review_embed(ctx, target_user, stats, year)
+            return
+
+        await edit_progress(98, "Uploading GIF")
+        file = discord.File(result.path, filename=os.path.basename(result.path))
+        try:
+            await ctx.interaction.edit_original_response(
+                content="",
+                attachments=[],
+                file=file,
+            )
+        except Exception:
+            await ctx.followup.send(file=discord.File(result.path, filename=os.path.basename(result.path)))
+
+    def _resolve_discord_upload_limit(self, ctx) -> int:
+        """Resolve a conservative upload limit for the current Discord context."""
+        guild_limit = getattr(getattr(ctx, "guild", None), "filesize_limit", None)
+        configured_limit_mb = os.getenv("YEAR_REVIEW_GIF_MAX_MB")
+        if configured_limit_mb:
+            try:
+                return max(1, int(float(configured_limit_mb) * 1024 * 1024))
+            except ValueError:
+                pass
+        if guild_limit:
+            return max(1, int(guild_limit * 0.92))
+        return 7 * 1024 * 1024
 
     async def _send_year_review_embed(self, ctx, target_user, stats, year):
         """Generate a Spotify-wrapped style embed with year stats matching original format."""

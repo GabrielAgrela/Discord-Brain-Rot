@@ -5,6 +5,7 @@ Tests for bot/services/weekly_wrapped.py - WeeklyWrappedService.
 import os
 import sys
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -32,6 +33,7 @@ class TestWeeklyWrappedService:
             bot = Mock()
             message_service = Mock()
             message_service.send_message = AsyncMock(return_value=Mock())
+            message_service.get_bot_channel = Mock(return_value=None)
 
             service = WeeklyWrappedService(bot=bot, message_service=message_service)
             yield service, action_repo, stats_repo, message_service
@@ -57,7 +59,7 @@ class TestWeeklyWrappedService:
         message_service.send_message.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_send_weekly_wrapped_sends_and_records_delivery(self, service_bundle):
+    async def test_send_weekly_wrapped_sends_and_records_delivery(self, service_bundle, tmp_path):
         """Service should send digest and persist a weekly delivery marker."""
         service, action_repo, stats_repo, message_service = service_bundle
         action_repo.has_action_for_target.return_value = False
@@ -79,7 +81,15 @@ class TestWeeklyWrappedService:
         ]
 
         channel = Mock(name='General')
-        guild = Mock(id=42, name='Chaos', get_channel=Mock(return_value=channel))
+        discord_channel = Mock()
+        discord_channel.send = AsyncMock(return_value=Mock())
+        message_service.get_bot_channel.return_value = discord_channel
+        gif_path = tmp_path / "weekly.gif"
+        gif_path.write_bytes(b"GIF89a")
+        service.video_service.render_weekly_wrapped_gif = Mock(
+            return_value=SimpleNamespace(path=str(gif_path), size_bytes=1024)
+        )
+        guild = Mock(id=42, name='Chaos', get_channel=Mock(return_value=channel), filesize_limit=8 * 1024 * 1024)
 
         sent = await service.send_weekly_wrapped(
             guild=guild,
@@ -90,7 +100,8 @@ class TestWeeklyWrappedService:
         )
 
         assert sent is True
-        message_service.send_message.assert_awaited_once()
+        message_service.send_message.assert_not_awaited()
+        discord_channel.send.assert_awaited_once()
         action_repo.insert.assert_called_once_with(
             'admin',
             service.DELIVERY_ACTION,

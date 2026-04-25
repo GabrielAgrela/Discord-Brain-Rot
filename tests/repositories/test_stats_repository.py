@@ -64,6 +64,41 @@ class TestStatsRepository:
         # Total plays includes actions from sample_actions fixture
         assert stats["total_plays"] >= 0
 
+    def test_get_user_year_stats_with_guild_filter_and_sound_joins(
+        self, stats_repository, db_connection
+    ):
+        """Year stats should qualify guild filters across actions/sounds joins."""
+        cursor = db_connection.cursor()
+        cursor.executemany(
+            """
+            INSERT INTO sounds (id, originalfilename, Filename, slap, timestamp, guild_id)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (101, "alpha.mp3", "alpha.mp3", 0, "2025-01-01 10:00:00", "guild-1"),
+                (102, "beta.mp3", "beta.mp3", 0, "2025-01-02 10:00:00", "guild-2"),
+            ],
+        )
+        cursor.executemany(
+            """
+            INSERT INTO actions (username, action, target, timestamp, guild_id)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            [
+                ("user1", "play_request", "101", "2025-02-01 12:00:00", "guild-1"),
+                ("user1", "play_request", "102", "2025-02-02 12:00:00", "guild-2"),
+            ],
+        )
+        db_connection.commit()
+
+        stats = stats_repository.get_user_year_stats("user1", 2025, guild_id="guild-1")
+
+        assert stats["total_plays"] == 1
+        assert stats["unique_sounds"] == 1
+        assert stats["top_sounds"] == [("alpha.mp3", 1)]
+        assert stats["first_sound"] == "alpha.mp3"
+        assert stats["last_sound"] == "alpha.mp3"
+
 
 class TestStatsRepositoryEdgeCases:
     """Edge case tests for StatsRepository."""

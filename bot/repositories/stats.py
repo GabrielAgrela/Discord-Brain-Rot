@@ -144,10 +144,12 @@ class StatsRepository(BaseRepository):
         year_start = f"{year}-01-01 00:00:00"
         year_end = f"{year}-12-31 23:59:59"
         guild_action_filter = ""
+        guild_join_action_filter = ""
         guild_sound_filter = ""
         guild_params = []
         if guild_id is not None:
             guild_action_filter = "AND (guild_id = ? OR guild_id IS NULL)"
+            guild_join_action_filter = "AND (a.guild_id = ? OR a.guild_id IS NULL)"
             guild_sound_filter = "AND (s.guild_id = ? OR s.guild_id IS NULL)"
             guild_params = [str(guild_id)]
         
@@ -187,7 +189,7 @@ class StatsRepository(BaseRepository):
             AND a.timestamp BETWEEN ? AND ?
             AND a.action IN {play_actions}
             AND s.slap = 0
-            {guild_action_filter}
+            {guild_join_action_filter}
             {guild_sound_filter}
             GROUP BY s.Filename
             ORDER BY play_count DESC
@@ -207,7 +209,7 @@ class StatsRepository(BaseRepository):
             AND a.timestamp BETWEEN ? AND ?
             AND a.action IN {play_actions}
             AND s.slap = 0
-            {guild_action_filter}
+            {guild_join_action_filter}
             {guild_sound_filter}
             """,
             (username, year_start, year_end, *guild_params, *guild_params)
@@ -263,7 +265,7 @@ class StatsRepository(BaseRepository):
             AND a.timestamp BETWEEN ? AND ?
             AND a.action IN {play_actions}
             AND s.slap = 0
-            {guild_action_filter}
+            {guild_join_action_filter}
             {guild_sound_filter}
             ORDER BY a.timestamp ASC
             LIMIT 1
@@ -284,7 +286,7 @@ class StatsRepository(BaseRepository):
             AND a.timestamp BETWEEN ? AND ?
             AND a.action IN {play_actions}
             AND s.slap = 0
-            {guild_action_filter}
+            {guild_join_action_filter}
             {guild_sound_filter}
             ORDER BY a.timestamp DESC
             LIMIT 1
