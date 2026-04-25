@@ -14,6 +14,10 @@ def test_upsert_status_and_get_status(tmp_path):
         voice_channel_id=456,
         voice_channel_name="Voice",
         voice_member_count=2,
+        voice_members=[
+            {"id": "1", "name": "Gabi", "avatar_url": "https://cdn.example/gabi.png"},
+            {"id": "2", "name": "Diogo", "avatar_url": ""},
+        ],
         is_playing=True,
         is_paused=False,
         current_sound="now.mp3",
@@ -28,3 +32,4 @@ def test_upsert_status_and_get_status(tmp_path):
     assert status["guild_name"] == "Guild"
     assert status["voice_connected"] == 1
     assert status["current_sound"] == "now.mp3"
+    assert "Gabi" in status["voice_members"]

@@ -4,6 +4,7 @@ Service layer for the web control-room status panel.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from typing import Any
 
@@ -82,6 +83,7 @@ class WebControlRoomService:
                 "voice_connected": False,
                 "voice_channel_name": None,
                 "voice_member_count": 0,
+                "voice_members": [],
                 "is_playing": False,
                 "is_paused": False,
                 "current_sound": None,
@@ -95,9 +97,34 @@ class WebControlRoomService:
             "voice_connected": bool(status.get("voice_connected")),
             "voice_channel_name": status.get("voice_channel_name"),
             "voice_member_count": int(status.get("voice_member_count") or 0),
+            "voice_members": self._decode_voice_members(status.get("voice_members")),
             "is_playing": bool(status.get("is_playing")),
             "is_paused": bool(status.get("is_paused")),
             "current_sound": status.get("current_sound"),
             "current_requester": status.get("current_requester"),
             "updated_at": status.get("updated_at"),
         }
+
+    def _decode_voice_members(self, value: Any) -> list[dict[str, Any]]:
+        """Decode persisted voice member data for API output."""
+        if not value:
+            return []
+        try:
+            members = json.loads(value)
+        except (TypeError, ValueError):
+            return []
+        if not isinstance(members, list):
+            return []
+
+        formatted: list[dict[str, Any]] = []
+        for member in members:
+            if not isinstance(member, dict):
+                continue
+            formatted.append(
+                {
+                    "id": str(member.get("id") or ""),
+                    "name": str(member.get("name") or "Unknown"),
+                    "avatar_url": str(member.get("avatar_url") or ""),
+                }
+            )
+        return formatted

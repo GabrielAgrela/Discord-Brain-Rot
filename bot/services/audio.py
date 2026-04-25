@@ -276,12 +276,21 @@ class AudioService:
             if channel
             else []
         )
+        voice_members = [
+            {
+                "id": str(getattr(member, "id", "")),
+                "name": getattr(member, "display_name", None) or getattr(member, "name", "Unknown"),
+                "avatar_url": str(getattr(getattr(member, "display_avatar", None), "url", "") or ""),
+            }
+            for member in non_bot_members
+        ]
 
         return {
             "voice_connected": voice_connected,
             "voice_channel_id": getattr(channel, "id", None),
             "voice_channel_name": getattr(channel, "name", None),
             "voice_member_count": len(non_bot_members),
+            "voice_members": voice_members,
             "is_playing": is_playing,
             "is_paused": is_paused,
             "current_sound": self._guild_current_audio_file.get(guild_id) if is_playing or is_paused else None,

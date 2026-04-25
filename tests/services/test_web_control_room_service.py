@@ -35,6 +35,10 @@ def test_web_control_room_service_combines_runtime_and_mute(tmp_path):
         voice_channel_id=456,
         voice_channel_name="Voice",
         voice_member_count=4,
+        voice_members=[
+            {"id": "1", "name": "Gabi", "avatar_url": "https://cdn.example/gabi.png"},
+            {"id": "2", "name": "Diogo", "avatar_url": ""},
+        ],
         is_playing=True,
         is_paused=False,
         current_sound="now.mp3",
@@ -49,6 +53,10 @@ def test_web_control_room_service_combines_runtime_and_mute(tmp_path):
 
     assert payload["guild_id"] == 123
     assert payload["status"]["voice_connected"] is True
+    assert payload["status"]["voice_members"] == [
+        {"id": "1", "name": "Gabi", "avatar_url": "https://cdn.example/gabi.png"},
+        {"id": "2", "name": "Diogo", "avatar_url": ""},
+    ]
     assert payload["status"]["current_sound"] == "now.mp3"
     assert "queue" not in payload
     assert payload["mute"]["is_muted"] is True

@@ -99,7 +99,7 @@ This README is based on the current codebase behavior (not historical README ass
 ### Web Soundboard
 - `GET /` shows recent actions, favorites, and all sounds.
 - Multi-guild web deployments expose a guild selector; soundboard tables, control-room status, play/control requests, and uploads include the selected `guild_id` instead of relying on implicit backend inference.
-- A web control-room panel shows live bot status: current sound/requester, voice channel, mute state, and quick upload/Slap/mute controls.
+- A web control-room panel shows live bot status: current sound/requester, voice channel, mute state, and quick upload/Slap/mute controls; clicking the voice channel opens the current user/avatar list.
 - Authenticated users can open the web upload modal from the control-room upload icon and queue a sound with the same fields as the bot upload modal: MP3/TikTok/YouTube/Instagram URL, MP3 file, optional custom name, and optional video time limit.
 - Desktop nav uses text labels for Soundboard and Analytics; mobile nav compacts those controls to emoji-only buttons.
 - Web uploads clear the form after submit, show active items in the modal processing queue, run in the background, insert into the selected guild sound library when processing finishes, and are recorded in a paginated admin-only upload inbox.

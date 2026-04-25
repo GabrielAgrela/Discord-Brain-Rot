@@ -4,6 +4,7 @@ Repository for web control-room runtime status.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from typing import Any, Optional
 
@@ -60,6 +61,7 @@ class WebControlRoomRepository(BaseRepository[dict[str, Any]]):
                 voice_channel_id TEXT,
                 voice_channel_name TEXT,
                 voice_member_count INTEGER NOT NULL DEFAULT 0,
+                voice_members TEXT,
                 is_playing INTEGER NOT NULL DEFAULT 0,
                 is_paused INTEGER NOT NULL DEFAULT 0,
                 current_sound TEXT,
@@ -70,6 +72,14 @@ class WebControlRoomRepository(BaseRepository[dict[str, Any]]):
             )
             """
         )
+        self._ensure_column("voice_members TEXT", "voice_members")
+
+    def _ensure_column(self, column_def: str, column_name: str) -> None:
+        """Add a missing status-table column for existing deployments."""
+        rows = self._execute("PRAGMA table_info(web_bot_status)")
+        if any(row["name"] == column_name for row in rows):
+            return
+        self._execute_write(f"ALTER TABLE web_bot_status ADD COLUMN {column_def}")
 
     def upsert_status(
         self,
@@ -80,6 +90,7 @@ class WebControlRoomRepository(BaseRepository[dict[str, Any]]):
         voice_channel_id: int | str | None,
         voice_channel_name: str | None,
         voice_member_count: int,
+        voice_members: list[dict[str, Any]] | None,
         is_playing: bool,
         is_paused: bool,
         current_sound: str | None,
@@ -98,6 +109,7 @@ class WebControlRoomRepository(BaseRepository[dict[str, Any]]):
             voice_channel_id: Connected voice channel ID, when present.
             voice_channel_name: Connected voice channel name, when present.
             voice_member_count: Non-bot member count in the connected voice channel.
+            voice_members: Non-bot members in the connected voice channel.
             is_playing: Whether the bot is currently playing audio.
             is_paused: Whether playback is paused.
             current_sound: Current sound filename, when known.
@@ -110,6 +122,7 @@ class WebControlRoomRepository(BaseRepository[dict[str, Any]]):
             SQLite row ID or status code from the write operation.
         """
         timestamp = (updated_at or datetime.now()).strftime("%Y-%m-%d %H:%M:%S")
+        voice_members_json = json.dumps(voice_members or [])
         return self._execute_write(
             """
             INSERT INTO web_bot_status (
@@ -119,6 +132,7 @@ class WebControlRoomRepository(BaseRepository[dict[str, Any]]):
                 voice_channel_id,
                 voice_channel_name,
                 voice_member_count,
+                voice_members,
                 is_playing,
                 is_paused,
                 current_sound,
@@ -127,13 +141,14 @@ class WebControlRoomRepository(BaseRepository[dict[str, Any]]):
                 mute_remaining_seconds,
                 updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(guild_id) DO UPDATE SET
                 guild_name = excluded.guild_name,
                 voice_connected = excluded.voice_connected,
                 voice_channel_id = excluded.voice_channel_id,
                 voice_channel_name = excluded.voice_channel_name,
                 voice_member_count = excluded.voice_member_count,
+                voice_members = excluded.voice_members,
                 is_playing = excluded.is_playing,
                 is_paused = excluded.is_paused,
                 current_sound = excluded.current_sound,
@@ -149,6 +164,7 @@ class WebControlRoomRepository(BaseRepository[dict[str, Any]]):
                 str(voice_channel_id) if voice_channel_id is not None else None,
                 voice_channel_name,
                 max(0, int(voice_member_count)),
+                voice_members_json,
                 1 if is_playing else 0,
                 1 if is_paused else 0,
                 current_sound,

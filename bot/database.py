@@ -171,6 +171,7 @@ class Database:
                     voice_channel_id TEXT,
                     voice_channel_name TEXT,
                     voice_member_count INTEGER NOT NULL DEFAULT 0,
+                    voice_members TEXT,
                     is_playing INTEGER NOT NULL DEFAULT 0,
                     is_paused INTEGER NOT NULL DEFAULT 0,
                     current_sound TEXT,
@@ -199,6 +200,7 @@ class Database:
             self._ensure_column("playback_queue", "request_user_id TEXT", "request_user_id")
             self._ensure_column("playback_queue", "request_type TEXT DEFAULT 'play_sound'", "request_type")
             self._ensure_column("playback_queue", "control_action TEXT", "control_action")
+            self._ensure_column("web_bot_status", "voice_members TEXT", "voice_members")
 
             # Helpful indexes for scoped queries.
             self.conn.execute("CREATE INDEX IF NOT EXISTS idx_actions_guild_id ON actions(guild_id)")

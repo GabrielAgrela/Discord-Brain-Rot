@@ -1079,6 +1079,7 @@ class BackgroundService:
                     voice_channel_id=snapshot["voice_channel_id"],
                     voice_channel_name=snapshot["voice_channel_name"],
                     voice_member_count=snapshot["voice_member_count"],
+                    voice_members=snapshot["voice_members"],
                     is_playing=snapshot["is_playing"],
                     is_paused=snapshot["is_paused"],
                     current_sound=snapshot["current_sound"],

@@ -143,7 +143,16 @@
             <div class="control-room-metrics">
                 <div class="control-room-metric">
                     <span class="control-room-metric-label">Voice</span>
-                    <strong id="controlRoomVoice">Disconnected</strong>
+                    <button
+                        type="button"
+                        id="controlRoomVoiceButton"
+                        class="control-room-voice-button"
+                        aria-haspopup="dialog"
+                        aria-label="Show voice channel members"
+                        disabled
+                    >
+                        <strong id="controlRoomVoice">Disconnected</strong>
+                    </button>
                 </div>
                 <div class="control-room-metric control-room-metric--action">
                     <span class="control-room-metric-label">Upload</span>
@@ -575,6 +584,19 @@
         </div>
     </div>
 
+    <div id="voiceMembersModal" class="voice-members-modal" aria-hidden="true">
+        <div class="voice-members-card" role="dialog" aria-modal="true" aria-labelledby="voiceMembersModalTitle">
+            <div class="voice-members-header">
+                <div>
+                    <p class="card-kicker">Voice Channel</p>
+                    <h2 id="voiceMembersModalTitle" class="voice-members-title">Disconnected</h2>
+                </div>
+                <button id="voiceMembersModalClose" type="button" class="voice-members-close" aria-label="Close voice members modal">×</button>
+            </div>
+            <div id="voiceMembersList" class="voice-members-list"></div>
+        </div>
+    </div>
+
     <script>
         const discordUser = {{ discord_user|tojson }};
         const webUserIsAdmin = {{ web_user_is_admin|tojson }};
@@ -587,6 +609,7 @@
         let webControlMuteIsMuted = false;
         let webControlStateRequestInFlight = false;
         let controlRoomRequestInFlight = false;
+        let latestControlRoomStatus = {};
         let currentPageActions = 1;
         let currentPageFavorites = 1;
         let currentPageAllSounds = 1;
@@ -810,8 +833,72 @@
             }
         }
 
+        function getVoiceMembersInitials(name) {
+            return String(name || '?').trim().slice(0, 1).toUpperCase() || '?';
+        }
+
+        function renderVoiceMembersModal() {
+            const title = document.getElementById('voiceMembersModalTitle');
+            const list = document.getElementById('voiceMembersList');
+            if (!title || !list) return;
+
+            const status = latestControlRoomStatus || {};
+            title.textContent = status.voice_connected
+                ? (status.voice_channel_name || 'Voice')
+                : 'Disconnected';
+
+            const members = Array.isArray(status.voice_members) ? status.voice_members : [];
+            if (!status.voice_connected) {
+                list.innerHTML = '<p class="voice-members-empty">Bot is not connected to a voice channel.</p>';
+                return;
+            }
+            if (!members.length) {
+                list.innerHTML = '<p class="voice-members-empty">No users are in this voice channel.</p>';
+                return;
+            }
+
+            list.replaceChildren(...members.map((member) => {
+                const row = document.createElement('div');
+                row.className = 'voice-member-row';
+
+                const avatar = document.createElement('div');
+                avatar.className = 'voice-member-avatar';
+                if (member.avatar_url) {
+                    const image = document.createElement('img');
+                    image.src = member.avatar_url;
+                    image.alt = '';
+                    avatar.appendChild(image);
+                } else {
+                    avatar.textContent = getVoiceMembersInitials(member.name);
+                }
+
+                const name = document.createElement('strong');
+                name.className = 'voice-member-name';
+                name.textContent = member.name || 'Unknown';
+
+                row.append(avatar, name);
+                return row;
+            }));
+        }
+
+        function openVoiceMembersModal() {
+            const modal = document.getElementById('voiceMembersModal');
+            if (!modal) return;
+            renderVoiceMembersModal();
+            modal.classList.add('open');
+            modal.setAttribute('aria-hidden', 'false');
+        }
+
+        function closeVoiceMembersModal() {
+            const modal = document.getElementById('voiceMembersModal');
+            if (!modal) return;
+            modal.classList.remove('open');
+            modal.setAttribute('aria-hidden', 'true');
+        }
+
         function updateControlRoomStatus(payload) {
             const status = payload?.status || {};
+            latestControlRoomStatus = status;
             const mute = payload?.mute || {};
             const dot = document.getElementById('controlRoomStateDot');
             const isPlaying = Boolean(status.is_playing || status.is_paused);
@@ -837,6 +924,16 @@
                 ? `${status.voice_channel_name || 'Voice'} (${status.voice_member_count || 0})`
                 : 'Disconnected';
             setControlRoomText('controlRoomVoice', voiceLabel);
+            const voiceButton = document.getElementById('controlRoomVoiceButton');
+            if (voiceButton) {
+                voiceButton.disabled = !status.voice_connected;
+                voiceButton.setAttribute(
+                    'aria-label',
+                    status.voice_connected
+                        ? `Show ${status.voice_member_count || 0} voice channel members`
+                        : 'Voice channel disconnected'
+                );
+            }
 
             const muted = Boolean(mute.is_muted);
             updateWebControlMuteState(muted);
@@ -1470,6 +1567,9 @@
 
         const loginModal = document.getElementById('loginModal');
         const loginModalClose = document.getElementById('loginModalClose');
+        const voiceMembersModal = document.getElementById('voiceMembersModal');
+        const voiceMembersModalClose = document.getElementById('voiceMembersModalClose');
+        const controlRoomVoiceButton = document.getElementById('controlRoomVoiceButton');
 
         function openLoginModal() {
             if (!loginModal) return;
@@ -1493,6 +1593,24 @@
             document.addEventListener('keydown', (event) => {
                 if (event.key === 'Escape') {
                     closeLoginModal();
+                }
+            });
+        }
+
+        if (controlRoomVoiceButton) {
+            controlRoomVoiceButton.addEventListener('click', openVoiceMembersModal);
+        }
+
+        if (voiceMembersModal && voiceMembersModalClose) {
+            voiceMembersModalClose.addEventListener('click', closeVoiceMembersModal);
+            voiceMembersModal.addEventListener('click', (event) => {
+                if (event.target === voiceMembersModal) {
+                    closeVoiceMembersModal();
+                }
+            });
+            document.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape') {
+                    closeVoiceMembersModal();
                 }
             });
         }
