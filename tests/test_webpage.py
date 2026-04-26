@@ -981,6 +981,9 @@ def test_soundboard_page_renders_shared_redesign(web_client):
     assert 'id="webTtsProfile"' in html
     assert 'id="webTtsMessage"' in html
     assert 'id="webTtsEnhanceButton"' in html
+    assert "let ttsEnhancedMessageValue = ''" in html
+    assert "This message has already been enhanced. Edit it to enhance again." in html
+    assert "webTtsMessage.addEventListener('input'" in html
     assert 'id="soundRowContextMenu"' in html
     assert 'id="soundRowEditOption"' in html
     assert 'class="sound-options-row" data-sound-id="1"' in html

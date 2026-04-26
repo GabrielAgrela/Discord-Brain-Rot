@@ -1051,7 +1051,7 @@ class BackgroundService:
         try:
             sample_monotonic = time.monotonic()
             payload = self._build_performance_snapshot(sample_monotonic)
-            logger.info("[PerformanceMonitor] %s", json.dumps(payload, sort_keys=True))
+            #logger.info("[PerformanceMonitor] %s", json.dumps(payload, sort_keys=True))
         except Exception as e:
             logger.error(
                 "[BackgroundService] Error in performance telemetry loop: %s",

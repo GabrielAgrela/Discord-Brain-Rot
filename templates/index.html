@@ -2390,6 +2390,7 @@
         let uploadInboxPage = 1;
         let uploadInboxTotalPages = 1;
         let lastUploadOpenTouchHandledAt = 0;
+        let ttsEnhancedMessageValue = '';
 
         function setUploadStatus(message, kind = '') {
             if (!webUploadStatus) return;
@@ -2403,11 +2404,20 @@
             webTtsStatus.dataset.kind = kind;
         }
 
+        function updateTtsEnhanceButtonState() {
+            if (!webTtsEnhanceButton) return;
+            const currentMessage = webTtsMessage?.value?.trim() || '';
+            const alreadyEnhanced = Boolean(currentMessage && currentMessage === ttsEnhancedMessageValue);
+            webTtsEnhanceButton.disabled = alreadyEnhanced;
+            webTtsEnhanceButton.textContent = alreadyEnhanced ? 'Enhanced' : 'Enhance';
+        }
+
         function openTtsModal() {
             if (!discordUser) {
                 openLoginModal();
                 return;
             }
+            updateTtsEnhanceButtonState();
             setTtsStatus('Pick a voice or language, then send the message to the bot.');
             if (typeof webTtsDialog?.showModal === 'function') {
                 webTtsDialog.showModal();
@@ -2471,6 +2481,8 @@
 
                 setTtsStatus('TTS request sent.', 'success');
                 webTtsForm?.reset();
+                ttsEnhancedMessageValue = '';
+                updateTtsEnhanceButtonState();
                 setTimeout(closeTtsModal, 650);
             } catch (error) {
                 console.error('TTS request failed:', error);
@@ -2493,6 +2505,12 @@
             if (!message) {
                 setTtsStatus('Please enter a message to enhance.', 'error');
                 webTtsMessage?.focus();
+                return;
+            }
+            if (message === ttsEnhancedMessageValue) {
+                setTtsStatus('This message has already been enhanced. Edit it to enhance again.', 'error');
+                webTtsMessage?.focus();
+                updateTtsEnhanceButtonState();
                 return;
             }
 
@@ -2523,16 +2541,17 @@
                 }
                 if (webTtsMessage && payload.message) {
                     webTtsMessage.value = payload.message.slice(0, 500);
+                    ttsEnhancedMessageValue = webTtsMessage.value.trim();
                     webTtsMessage.focus();
                 }
+                updateTtsEnhanceButtonState();
                 setTtsStatus('Message enhanced. Review it, then send.', 'success');
             } catch (error) {
                 console.error('TTS enhancement failed:', error);
                 setTtsStatus('Network error while enhancing TTS.', 'error');
             } finally {
                 if (webTtsEnhanceButton) {
-                    webTtsEnhanceButton.disabled = false;
-                    webTtsEnhanceButton.textContent = 'Enhance';
+                    updateTtsEnhanceButtonState();
                 }
             }
         }
@@ -2879,6 +2898,11 @@
         }
         if (webTtsCancelButton) {
             webTtsCancelButton.addEventListener('click', closeTtsModal);
+        }
+        if (webTtsMessage) {
+            webTtsMessage.addEventListener('input', () => {
+                updateTtsEnhanceButtonState();
+            });
         }
         if (webTtsEnhanceButton) {
             webTtsEnhanceButton.addEventListener('click', handleWebTtsEnhance);
