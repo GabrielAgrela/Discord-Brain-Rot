@@ -114,6 +114,7 @@ This README is based on the current codebase behavior (not historical README ass
 - Unauthenticated web play/control buttons use a red locked state to prompt Discord login before sending bot actions.
 - Web sound playback now requires Discord login; web requests carry the authenticated Discord user so playback is logged as that user instead of a bot/system account.
 - Web play buttons use `sound_id` under the hood so censored labels still play the real sound correctly.
+- Long-pressing a web play button opens a sound-options modal for authenticated users with rename, favorite/unfavorite, same-algorithm similar sound suggestions, and add-to-list actions.
 - Bot-side web playback polling defaults to `PLAYBACK_QUEUE_INTERVAL=0.25` seconds for low-latency play-button response.
 - If `DEFAULT_GUILD_ID` is unset, web playback now auto-resolves the guild only when exactly one known guild ID exists in stable bot data (`guild_settings`, `sounds`, `actions`, or `web_bot_status`); `playback_queue` is used only as a last-resort fallback when those tables are empty, and multi-guild callers must send `guild_id` explicitly.
 - Bot background task consumes web playback/control requests from the internal transport table.
@@ -229,6 +230,10 @@ This README is based on the current codebase behavior (not historical README ass
 - `GET /api/favorites`
 - `GET /api/all_sounds`
 - `GET /api/guilds`
+- `GET /api/sounds/<sound_id>/options`
+- `POST /api/sounds/<sound_id>/rename`
+- `POST /api/sounds/<sound_id>/favorite`
+- `POST /api/sounds/<sound_id>/lists`
 - `POST /api/play_sound`
 - `POST /api/upload_sound`
 - `GET /api/upload_sound/<job_id>`

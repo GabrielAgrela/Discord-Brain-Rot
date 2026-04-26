@@ -343,7 +343,7 @@
                         <tbody id="favoritesTableBody">
                             {% for item in favorites_data.get('items', []) %}
                             {% set filename_value = item.get('display_filename') or '' %}
-                            <tr>
+                            <tr class="sound-options-row" data-sound-id="{{ item.get('sound_id') }}">
                                 <td class="filename" title="{{ filename_value }}">
                                     <span class="sound-title">{{ filename_value|replace('.mp3', '') }}</span>
                                     {% if item.get('display_duration') %}
@@ -433,7 +433,7 @@
                         <tbody id="allSoundsTableBody">
                             {% for item in all_sounds_data.get('items', []) %}
                             {% set filename_value = item.get('display_filename') or '' %}
-                            <tr>
+                            <tr class="sound-options-row" data-sound-id="{{ item.get('sound_id') }}">
                                 <td class="filename" title="{{ filename_value }}">
                                     <span class="sound-title">{{ filename_value|replace('.mp3', '') }}</span>
                                     {% if item.get('display_duration') %}
@@ -475,6 +475,10 @@
             </section>
         </div>
     </main>
+
+    <div id="soundRowContextMenu" class="sound-row-context-menu" role="menu" aria-hidden="true">
+        <button type="button" id="soundRowEditOption" role="menuitem">Edit</button>
+    </div>
 
     <dialog id="webUploadDialog" class="web-upload-dialog" aria-labelledby="webUploadTitle">
         <form id="webUploadForm" class="web-upload-modal-form">
@@ -655,6 +659,62 @@
                     {% if discord_user %}Send{% else %}🔒{% endif %}
                 </button>
             </div>
+        </form>
+    </dialog>
+
+    <dialog id="soundOptionsDialog" class="web-upload-dialog sound-options-dialog" aria-labelledby="soundOptionsTitle">
+        <form id="soundOptionsForm" class="web-upload-modal-form">
+            <div class="web-upload-modal-header">
+                <div>
+                    <p class="card-kicker">Sound Options</p>
+                    <h2 id="soundOptionsTitle" class="web-upload-title">Edit sound</h2>
+                    <p id="soundOptionsStatus" class="web-upload-status">
+                        Rename, favorite, find similar sounds, or add this sound to a list.
+                    </p>
+                </div>
+                <button type="button" id="soundOptionsCloseButton" class="web-upload-close" aria-label="Close sound options modal">×</button>
+            </div>
+
+            <label class="web-upload-field">
+                <span>Rename Sound</span>
+                <div class="sound-options-inline">
+                    <input
+                        id="soundOptionsRenameInput"
+                        class="web-upload-input"
+                        type="text"
+                        maxlength="80"
+                        placeholder="New sound name"
+                    >
+                    <button type="button" id="soundOptionsRenameButton" class="web-upload-secondary">Rename</button>
+                </div>
+            </label>
+
+            <div class="sound-options-actions">
+                <button type="button" id="soundOptionsFavoriteButton" class="web-upload-submit">Favorite</button>
+            </div>
+
+            <label class="web-upload-field">
+                <span>Add to List</span>
+                <div class="sound-options-inline">
+                    <select id="soundOptionsListSelect" class="web-upload-input">
+                        <option value="">Choose a list</option>
+                    </select>
+                    <button type="button" id="soundOptionsAddToListButton" class="web-upload-secondary">Add</button>
+                </div>
+            </label>
+
+            <section class="sound-options-section">
+                <div class="web-upload-queue-header">
+                    <span>Similar Sounds</span>
+                    <span>Matches</span>
+                </div>
+                <div id="soundOptionsSimilarList" class="sound-options-similar-list">
+                    <p class="web-upload-empty">Open edit options to load similar sounds.</p>
+                </div>
+                <div id="soundOptionsSimilarScrollbar" class="sound-options-similar-scrollbar" aria-hidden="true">
+                    <div id="soundOptionsSimilarScrollbarThumb" class="sound-options-similar-scrollbar-thumb"></div>
+                </div>
+            </section>
         </form>
     </dialog>
 
@@ -1551,6 +1611,9 @@
                                     timestampCell.title = item.timestamp;
                                     row.appendChild(timestampCell);
                                 } else if (endpoint === 'favorites') {
+                                    row.className = 'sound-options-row';
+                                    row.dataset.soundId = item.sound_id;
+
                                     const filenameCell = document.createElement('td');
                                     filenameCell.className = 'filename';
                                     filenameCell.title = item.display_filename || '';
@@ -1565,6 +1628,9 @@
                                     playCell.appendChild(playButton);
                                     row.appendChild(playCell);
                                 } else if (endpoint === 'all_sounds') {
+                                    row.className = 'sound-options-row';
+                                    row.dataset.soundId = item.sound_id;
+
                                     const filenameCell = document.createElement('td');
                                     filenameCell.className = 'filename';
                                     filenameCell.title = item.display_filename || '';
@@ -1807,10 +1873,328 @@
 
         let lastPlayTouchHandledAt = 0;
         let lastWebControlTouchHandledAt = 0;
+        let soundOptionsLongPressTimer = null;
+        let suppressNextPlayActivationUntil = 0;
+        let activeSoundOptionsId = null;
+        let contextMenuSoundId = null;
+
+        function handleSoundOptionsPressStart(event) {
+            if (event.pointerType === 'mouse' || event.button === 2) {
+                return;
+            }
+            const button = event.target.closest('.play-button');
+            if (!button || !document.querySelector('.tables-grid')?.contains(button)) {
+                return;
+            }
+            const soundId = button.getAttribute('data-sound-id');
+            if (!soundId || button.disabled) {
+                return;
+            }
+            clearSoundOptionsLongPress();
+            soundOptionsLongPressTimer = window.setTimeout(() => {
+                suppressNextPlayActivationUntil = Date.now() + 900;
+                if (!discordUser) {
+                    openLoginModal();
+                    return;
+                }
+                openSoundOptionsModal(soundId);
+            }, 650);
+        }
+
+        function clearSoundOptionsLongPress() {
+            if (soundOptionsLongPressTimer) {
+                window.clearTimeout(soundOptionsLongPressTimer);
+                soundOptionsLongPressTimer = null;
+            }
+        }
+
+        function setSoundOptionsStatus(message, kind = '') {
+            if (!soundOptionsStatus) return;
+            soundOptionsStatus.textContent = message;
+            soundOptionsStatus.dataset.kind = kind;
+        }
+
+        function openSoundOptionsDialog() {
+            if (typeof soundOptionsDialog?.showModal === 'function') {
+                soundOptionsDialog.showModal();
+            } else if (soundOptionsDialog) {
+                soundOptionsDialog.setAttribute('open', '');
+            }
+            requestAnimationFrame(updateSoundOptionsSimilarScrollbar);
+        }
+
+        function closeSoundOptionsModal() {
+            if (typeof soundOptionsDialog?.close === 'function') {
+                soundOptionsDialog.close();
+            } else if (soundOptionsDialog) {
+                soundOptionsDialog.removeAttribute('open');
+            }
+        }
+
+        async function openSoundOptionsModal(soundId) {
+            activeSoundOptionsId = soundId;
+            setSoundOptionsStatus('Loading sound options...', 'loading');
+            if (soundOptionsRenameInput) {
+                soundOptionsRenameInput.value = '';
+            }
+            renderSoundOptionsLists([]);
+            renderSimilarSounds([]);
+            openSoundOptionsDialog();
+
+            const params = new URLSearchParams();
+            appendGuildParam(params);
+            try {
+                const response = await fetch(`/api/sounds/${encodeURIComponent(soundId)}/options?${params.toString()}`);
+                const payload = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    if (response.status === 401 && payload.login_url) {
+                        window.location.href = payload.login_url;
+                        return;
+                    }
+                    setSoundOptionsStatus(payload.error || 'Could not load sound options.', 'error');
+                    return;
+                }
+                const filename = payload.sound?.display_filename || '';
+                const bareName = filename.replace(/\.mp3$/i, '');
+                if (soundOptionsTitle) {
+                    soundOptionsTitle.textContent = bareName || 'Sound Options';
+                }
+                if (soundOptionsRenameInput) {
+                    soundOptionsRenameInput.value = bareName;
+                }
+                if (soundOptionsFavoriteButton) {
+                    soundOptionsFavoriteButton.textContent = payload.sound?.favorite ? 'Unfavorite' : 'Favorite';
+                }
+                renderSoundOptionsLists(payload.lists || []);
+                renderSimilarSounds(payload.similar_sounds || []);
+                setSoundOptionsStatus('Choose an action for this sound.');
+            } catch (error) {
+                console.error('Sound options failed:', error);
+                setSoundOptionsStatus('Network error while loading options.', 'error');
+            }
+        }
+
+        function renderSoundOptionsLists(lists) {
+            if (!soundOptionsListSelect) return;
+            soundOptionsListSelect.innerHTML = '';
+            const placeholder = document.createElement('option');
+            placeholder.value = '';
+            placeholder.textContent = lists.length ? 'Choose a list' : 'No lists available';
+            soundOptionsListSelect.appendChild(placeholder);
+            lists.forEach(list => {
+                const option = document.createElement('option');
+                option.value = list.id;
+                option.textContent = list.label || list.name;
+                soundOptionsListSelect.appendChild(option);
+            });
+        }
+
+        function renderSimilarSounds(similarSounds) {
+            if (!soundOptionsSimilarList) return;
+            if (!similarSounds.length) {
+                soundOptionsSimilarList.innerHTML = '<p class="web-upload-empty">No similar sounds found.</p>';
+                requestAnimationFrame(updateSoundOptionsSimilarScrollbar);
+                return;
+            }
+            const fragment = document.createDocumentFragment();
+            similarSounds.forEach(sound => {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'sound-options-similar-button';
+                button.dataset.soundId = sound.sound_id;
+
+                const label = document.createElement('span');
+                label.className = 'sound-options-similar-name';
+                label.textContent = (sound.display_filename || '').replace(/\.mp3$/i, '');
+                const score = document.createElement('span');
+                score.className = 'sound-options-score';
+                score.textContent = `${sound.score || 0}%`;
+                button.appendChild(label);
+                button.appendChild(score);
+                fragment.appendChild(button);
+            });
+            soundOptionsSimilarList.replaceChildren(fragment);
+            requestAnimationFrame(updateSoundOptionsSimilarScrollbar);
+        }
+
+        function updateSoundOptionsSimilarScrollbar() {
+            if (!soundOptionsSimilarList || !soundOptionsSimilarScrollbar || !soundOptionsSimilarScrollbarThumb) return;
+            const section = soundOptionsSimilarList.closest('.sound-options-section');
+            const scrollable = soundOptionsSimilarList.scrollHeight > soundOptionsSimilarList.clientHeight + 1;
+            if (section) {
+                section.classList.toggle('has-scrollbar', scrollable);
+            }
+            if (!scrollable) {
+                soundOptionsSimilarScrollbarThumb.style.height = '0px';
+                soundOptionsSimilarScrollbarThumb.style.transform = 'translateY(0px)';
+                return;
+            }
+
+            const trackHeight = soundOptionsSimilarScrollbar.clientHeight;
+            const thumbHeight = Math.max(30, Math.round((soundOptionsSimilarList.clientHeight / soundOptionsSimilarList.scrollHeight) * trackHeight));
+            const maxThumbTop = Math.max(0, trackHeight - thumbHeight);
+            const maxScrollTop = Math.max(1, soundOptionsSimilarList.scrollHeight - soundOptionsSimilarList.clientHeight);
+            const thumbTop = Math.round((soundOptionsSimilarList.scrollTop / maxScrollTop) * maxThumbTop);
+            soundOptionsSimilarScrollbarThumb.style.height = `${thumbHeight}px`;
+            soundOptionsSimilarScrollbarThumb.style.transform = `translateY(${thumbTop}px)`;
+        }
+
+        async function postSoundOption(path, body = {}) {
+            const response = await fetch(path, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    ...body,
+                    guild_id: getSelectedGuildId() || undefined
+                })
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                if (response.status === 401 && payload.login_url) {
+                    window.location.href = payload.login_url;
+                    return null;
+                }
+                throw new Error(payload.error || 'Request failed.');
+            }
+            return payload;
+        }
+
+        async function handleSoundOptionsRename() {
+            if (!activeSoundOptionsId || !soundOptionsRenameInput) return;
+            const newName = soundOptionsRenameInput.value.trim();
+            if (!newName) {
+                setSoundOptionsStatus('Enter a new sound name.', 'error');
+                return;
+            }
+            soundOptionsRenameButton.disabled = true;
+            try {
+                const payload = await postSoundOption(`/api/sounds/${encodeURIComponent(activeSoundOptionsId)}/rename`, { new_name: newName });
+                if (!payload) return;
+                setSoundOptionsStatus('Sound renamed.', 'success');
+                fetchFavorites(null, true, true);
+                fetchAllSounds(null, true, true);
+                openSoundOptionsModal(activeSoundOptionsId);
+            } catch (error) {
+                setSoundOptionsStatus(error.message, 'error');
+            } finally {
+                soundOptionsRenameButton.disabled = false;
+            }
+        }
+
+        async function handleSoundOptionsFavorite() {
+            if (!activeSoundOptionsId) return;
+            soundOptionsFavoriteButton.disabled = true;
+            try {
+                const payload = await postSoundOption(`/api/sounds/${encodeURIComponent(activeSoundOptionsId)}/favorite`);
+                if (!payload) return;
+                soundOptionsFavoriteButton.textContent = payload.favorite ? 'Unfavorite' : 'Favorite';
+                setSoundOptionsStatus(payload.favorite ? 'Added to favorites.' : 'Removed from favorites.', 'success');
+                fetchFavorites(null, true, true);
+            } catch (error) {
+                setSoundOptionsStatus(error.message, 'error');
+            } finally {
+                soundOptionsFavoriteButton.disabled = false;
+            }
+        }
+
+        async function handleSoundOptionsAddToList() {
+            if (!activeSoundOptionsId || !soundOptionsListSelect?.value) {
+                setSoundOptionsStatus('Choose a list first.', 'error');
+                return;
+            }
+            soundOptionsAddToListButton.disabled = true;
+            try {
+                const payload = await postSoundOption(`/api/sounds/${encodeURIComponent(activeSoundOptionsId)}/lists`, {
+                    list_id: soundOptionsListSelect.value
+                });
+                if (!payload) return;
+                setSoundOptionsStatus(payload.message || 'List updated.', payload.added ? 'success' : '');
+                fetchAllSounds(null, false, true);
+            } catch (error) {
+                setSoundOptionsStatus(error.message, 'error');
+            } finally {
+                soundOptionsAddToListButton.disabled = false;
+            }
+        }
+
+        async function handleSimilarSoundPlay(event) {
+            const button = event.target.closest('.sound-options-similar-button');
+            if (!button?.dataset.soundId) return;
+            button.disabled = true;
+            try {
+                await postSoundOption('/api/play_sound', { sound_id: button.dataset.soundId });
+                setSoundOptionsStatus('Similar sound sent.', 'success');
+            } catch (error) {
+                setSoundOptionsStatus(error.message, 'error');
+            } finally {
+                button.disabled = false;
+            }
+        }
+
+        function closeSoundRowContextMenu() {
+            if (!soundRowContextMenu) return;
+            soundRowContextMenu.classList.remove('open');
+            soundRowContextMenu.setAttribute('aria-hidden', 'true');
+            contextMenuSoundId = null;
+        }
+
+        function openSoundRowContextMenu(event) {
+            const row = event.target.closest('.sound-options-row');
+            if (!row || !document.querySelector('.tables-grid')?.contains(row)) {
+                closeSoundRowContextMenu();
+                return;
+            }
+
+            const soundId = row.dataset.soundId || row.querySelector('.play-button')?.dataset.soundId;
+            if (!soundId) {
+                return;
+            }
+
+            event.preventDefault();
+            clearSoundOptionsLongPress();
+            contextMenuSoundId = soundId;
+
+            if (!soundRowContextMenu) {
+                if (!discordUser) {
+                    openLoginModal();
+                    return;
+                }
+                openSoundOptionsModal(soundId);
+                return;
+            }
+
+            const menuWidth = soundRowContextMenu.offsetWidth || 132;
+            const menuHeight = soundRowContextMenu.offsetHeight || 44;
+            const left = Math.min(event.clientX, window.innerWidth - menuWidth - 8);
+            const top = Math.min(event.clientY, window.innerHeight - menuHeight - 8);
+
+            soundRowContextMenu.style.left = `${Math.max(8, left)}px`;
+            soundRowContextMenu.style.top = `${Math.max(8, top)}px`;
+            soundRowContextMenu.classList.add('open');
+            soundRowContextMenu.setAttribute('aria-hidden', 'false');
+        }
+
+        function handleSoundRowEditOption() {
+            const soundId = contextMenuSoundId;
+            closeSoundRowContextMenu();
+            if (!soundId) return;
+            if (!discordUser) {
+                openLoginModal();
+                return;
+            }
+            openSoundOptionsModal(soundId);
+        }
 
         async function handlePlayButtonActivation(event) {
             const button = event.target.closest('.play-button');
             if (!button || !document.querySelector('.tables-grid')?.contains(button)) {
+                return;
+            }
+
+            clearSoundOptionsLongPress();
+            if (Date.now() < suppressNextPlayActivationUntil) {
+                event.preventDefault();
+                event.stopPropagation();
                 return;
             }
 
@@ -1953,6 +2337,12 @@
         const tablesGrid = document.querySelector('.tables-grid');
         tablesGrid.addEventListener('click', handlePlayButtonActivation);
         tablesGrid.addEventListener('touchend', handlePlayButtonActivation, { passive: false });
+        tablesGrid.addEventListener('contextmenu', openSoundRowContextMenu);
+        tablesGrid.addEventListener('touchstart', handleSoundOptionsPressStart, { passive: true });
+        tablesGrid.addEventListener('mouseup', clearSoundOptionsLongPress);
+        tablesGrid.addEventListener('mouseleave', clearSoundOptionsLongPress);
+        tablesGrid.addEventListener('touchmove', clearSoundOptionsLongPress, { passive: true });
+        tablesGrid.addEventListener('touchcancel', clearSoundOptionsLongPress);
         document.addEventListener('click', handleWebControlActivation);
         document.addEventListener('touchend', handleWebControlActivation, { passive: false });
 
@@ -1981,6 +2371,21 @@
         const webTtsMessage = document.getElementById('webTtsMessage');
         const webTtsProfile = document.getElementById('webTtsProfile');
         const webTtsEnhanceButton = document.getElementById('webTtsEnhanceButton');
+        const soundOptionsDialog = document.getElementById('soundOptionsDialog');
+        const soundOptionsForm = document.getElementById('soundOptionsForm');
+        const soundOptionsTitle = document.getElementById('soundOptionsTitle');
+        const soundOptionsStatus = document.getElementById('soundOptionsStatus');
+        const soundOptionsCloseButton = document.getElementById('soundOptionsCloseButton');
+        const soundOptionsRenameInput = document.getElementById('soundOptionsRenameInput');
+        const soundOptionsRenameButton = document.getElementById('soundOptionsRenameButton');
+        const soundOptionsFavoriteButton = document.getElementById('soundOptionsFavoriteButton');
+        const soundOptionsListSelect = document.getElementById('soundOptionsListSelect');
+        const soundOptionsAddToListButton = document.getElementById('soundOptionsAddToListButton');
+        const soundOptionsSimilarList = document.getElementById('soundOptionsSimilarList');
+        const soundOptionsSimilarScrollbar = document.getElementById('soundOptionsSimilarScrollbar');
+        const soundOptionsSimilarScrollbarThumb = document.getElementById('soundOptionsSimilarScrollbarThumb');
+        const soundRowContextMenu = document.getElementById('soundRowContextMenu');
+        const soundRowEditOption = document.getElementById('soundRowEditOption');
         const uploadQueueItems = new Map();
         let uploadInboxPage = 1;
         let uploadInboxTotalPages = 1;
@@ -2477,6 +2882,46 @@
         }
         if (webTtsEnhanceButton) {
             webTtsEnhanceButton.addEventListener('click', handleWebTtsEnhance);
+        }
+        if (soundOptionsCloseButton) {
+            soundOptionsCloseButton.addEventListener('click', closeSoundOptionsModal);
+        }
+        if (soundOptionsRenameButton) {
+            soundOptionsRenameButton.addEventListener('click', handleSoundOptionsRename);
+        }
+        if (soundOptionsFavoriteButton) {
+            soundOptionsFavoriteButton.addEventListener('click', handleSoundOptionsFavorite);
+        }
+        if (soundOptionsAddToListButton) {
+            soundOptionsAddToListButton.addEventListener('click', handleSoundOptionsAddToList);
+        }
+        if (soundOptionsSimilarList) {
+            soundOptionsSimilarList.addEventListener('click', handleSimilarSoundPlay);
+            soundOptionsSimilarList.addEventListener('scroll', updateSoundOptionsSimilarScrollbar, { passive: true });
+            window.addEventListener('resize', updateSoundOptionsSimilarScrollbar);
+        }
+        if (soundRowEditOption) {
+            soundRowEditOption.addEventListener('click', handleSoundRowEditOption);
+        }
+        if (soundRowContextMenu) {
+            soundRowContextMenu.addEventListener('click', event => event.stopPropagation());
+            document.addEventListener('click', closeSoundRowContextMenu);
+            document.addEventListener('scroll', closeSoundRowContextMenu, true);
+            document.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape') {
+                    closeSoundRowContextMenu();
+                }
+            });
+        }
+        if (soundOptionsForm) {
+            soundOptionsForm.addEventListener('submit', event => event.preventDefault());
+        }
+        if (soundOptionsDialog) {
+            soundOptionsDialog.addEventListener('click', (event) => {
+                if (event.target === soundOptionsDialog) {
+                    closeSoundOptionsModal();
+                }
+            });
         }
         if (webTtsDialog) {
             webTtsDialog.addEventListener('click', (event) => {

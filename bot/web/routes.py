@@ -29,6 +29,7 @@ from werkzeug.datastructures import FileStorage
 from config import TTS_PROFILES
 from bot.models.web import AnalyticsQuery, DiscordWebUser, PaginatedQuery
 from bot.repositories.action import ActionRepository
+from bot.repositories.list import ListRepository
 from bot.repositories.sound import SoundRepository
 from bot.repositories.web_analytics import WebAnalyticsRepository
 from bot.repositories.web_content import WebContentRepository
@@ -42,6 +43,7 @@ from bot.services.web_content import WebContentService
 from bot.services.web_control_room import WebControlRoomService
 from bot.services.web_guild import WebGuildService
 from bot.services.web_playback import WebPlaybackService
+from bot.services.web_sound_options import WebSoundOptionsService
 from bot.services.web_tts_enhancer import WebTtsEnhancerService
 from bot.services.web_upload import WebUploadService
 
@@ -197,6 +199,109 @@ def register_web_routes(app: Flask) -> None:
                 current_user=_get_current_discord_user(),
             )
         )
+
+    @app.route("/api/sounds/<int:sound_id>/options")
+    @_require_discord_login_api
+    def get_sound_options(sound_id: int) -> Any:
+        """Return long-press options for one sound."""
+        selected_guild_id = _get_selected_guild_id(request.args)
+        _remember_selected_guild_id(selected_guild_id)
+        try:
+            return jsonify(
+                _get_web_sound_options_service().get_options(
+                    sound_id,
+                    guild_id=selected_guild_id,
+                )
+            ), 200
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except sqlite3.Error:
+            logger.exception("Database error loading sound options")
+            return jsonify({"error": "Database error"}), 500
+        except Exception:
+            logger.exception("Unexpected error loading sound options")
+            return jsonify({"error": "Internal server error"}), 500
+
+    @app.route("/api/sounds/<int:sound_id>/rename", methods=["POST"])
+    @_require_discord_login_api
+    def rename_sound(sound_id: int) -> Any:
+        """Rename a sound from the web options modal."""
+        data = request.get_json(silent=True) or {}
+        _remember_selected_guild_id(data.get("guild_id"))
+        current_user = _get_current_discord_user()
+        if current_user is None:
+            return jsonify({"error": "Discord login required"}), 401
+        try:
+            return jsonify(
+                _get_web_sound_options_service().rename_sound(
+                    sound_id,
+                    str(data.get("new_name") or ""),
+                    current_user,
+                    guild_id=_get_selected_guild_id(data),
+                )
+            ), 200
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except sqlite3.Error:
+            logger.exception("Database error renaming sound")
+            return jsonify({"error": "Database error"}), 500
+        except Exception:
+            logger.exception("Unexpected error renaming sound")
+            return jsonify({"error": "Internal server error"}), 500
+
+    @app.route("/api/sounds/<int:sound_id>/favorite", methods=["POST"])
+    @_require_discord_login_api
+    def toggle_sound_favorite(sound_id: int) -> Any:
+        """Toggle favorite state from the web options modal."""
+        data = request.get_json(silent=True) or {}
+        _remember_selected_guild_id(data.get("guild_id"))
+        current_user = _get_current_discord_user()
+        if current_user is None:
+            return jsonify({"error": "Discord login required"}), 401
+        try:
+            return jsonify(
+                _get_web_sound_options_service().toggle_favorite(
+                    sound_id,
+                    current_user,
+                    guild_id=_get_selected_guild_id(data),
+                )
+            ), 200
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except sqlite3.Error:
+            logger.exception("Database error toggling favorite")
+            return jsonify({"error": "Database error"}), 500
+        except Exception:
+            logger.exception("Unexpected error toggling favorite")
+            return jsonify({"error": "Internal server error"}), 500
+
+    @app.route("/api/sounds/<int:sound_id>/lists", methods=["POST"])
+    @_require_discord_login_api
+    def add_sound_to_list(sound_id: int) -> Any:
+        """Add a sound to a list from the web options modal."""
+        data = request.get_json(silent=True) or {}
+        _remember_selected_guild_id(data.get("guild_id"))
+        current_user = _get_current_discord_user()
+        if current_user is None:
+            return jsonify({"error": "Discord login required"}), 401
+        try:
+            list_id = int(data.get("list_id"))
+            return jsonify(
+                _get_web_sound_options_service().add_to_list(
+                    sound_id,
+                    list_id,
+                    current_user,
+                    guild_id=_get_selected_guild_id(data),
+                )
+            ), 200
+        except (TypeError, ValueError) as exc:
+            return jsonify({"error": str(exc) or "Choose a list."}), 400
+        except sqlite3.Error:
+            logger.exception("Database error adding sound to list")
+            return jsonify({"error": "Database error"}), 500
+        except Exception:
+            logger.exception("Unexpected error adding sound to list")
+            return jsonify({"error": "Internal server error"}), 500
 
     @app.route("/api/play_sound", methods=["POST"])
     @_require_discord_login_api
@@ -493,6 +598,16 @@ def _get_web_playback_service() -> WebPlaybackService:
     return WebPlaybackService(
         sound_repository=SoundRepository(db_path=db_path, use_shared=False),
         db_path=db_path,
+    )
+
+
+def _get_web_sound_options_service() -> WebSoundOptionsService:
+    """Build a sound-options service for the current request config."""
+    db_path = current_app.config["DATABASE_PATH"]
+    return WebSoundOptionsService(
+        sound_repository=SoundRepository(db_path=db_path, use_shared=False),
+        list_repository=ListRepository(db_path=db_path, use_shared=False),
+        action_repository=ActionRepository(db_path=db_path, use_shared=False),
     )
 
 

@@ -60,8 +60,52 @@ html.theme-dark {
     --chart-grid: rgba(244, 240, 232, 0.12);
 }
 
+html {
+    background: #f7f1e8;
+}
+
+html.theme-dark {
+    background: #0d100f;
+}
+
 * {
     box-sizing: border-box;
+}
+
+* {
+    scrollbar-width: thin;
+    scrollbar-color: var(--accent) rgba(255, 255, 255, 0.08);
+}
+
+*::-webkit-scrollbar {
+    width: 0.4rem;
+    height: 0.4rem;
+}
+
+*::-webkit-scrollbar-track {
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+*::-webkit-scrollbar-thumb {
+    min-height: 1.85rem;
+    border-radius: 999px;
+    background: var(--accent);
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+
+*::-webkit-scrollbar-corner {
+    background: transparent;
+}
+
+html.theme-dark,
+html.theme-dark body {
+    scrollbar-color: var(--accent) rgba(255, 255, 255, 0.08);
+}
+
+html.theme-dark::-webkit-scrollbar-track,
+html.theme-dark body::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.08);
 }
 
 html,
@@ -1427,6 +1471,170 @@ html.theme-dark .web-upload-secondary {
     box-shadow: 3px 3px 0 rgba(164, 43, 35, 0.16);
 }
 
+.sound-options-dialog {
+    width: min(31rem, calc(100vw - 1.5rem));
+}
+
+.sound-options-dialog .web-upload-modal-form {
+    gap: 0.95rem;
+}
+
+.sound-options-dialog .web-upload-title {
+    max-width: 22rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.sound-options-inline {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.55rem;
+    align-items: center;
+}
+
+.sound-options-actions {
+    display: flex;
+    justify-content: flex-start;
+}
+
+.sound-options-actions .web-upload-submit {
+    min-width: 8rem;
+}
+
+.sound-options-section {
+    position: relative;
+    display: grid;
+    gap: 0.55rem;
+    padding: 0.72rem;
+    border: 1px solid rgba(23, 18, 13, 0.12);
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.34);
+}
+
+html.theme-dark .sound-options-section {
+    border-color: rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.sound-options-similar-list {
+    display: grid;
+    gap: 0.42rem;
+    max-height: min(32vh, 15rem);
+    overflow: auto;
+    padding-right: 0.58rem;
+    scrollbar-width: none;
+}
+
+.sound-options-similar-list::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+}
+
+.sound-options-similar-scrollbar {
+    position: absolute;
+    top: 2.9rem;
+    right: 0.54rem;
+    bottom: 0.9rem;
+    width: 0.4rem;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.16s ease;
+}
+
+.sound-options-section.has-scrollbar .sound-options-similar-scrollbar {
+    opacity: 1;
+}
+
+.sound-options-similar-scrollbar-thumb {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    min-height: 1.85rem;
+    border-radius: 999px;
+    background: var(--accent);
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06);
+    transform: translateY(0);
+    will-change: height, transform;
+}
+
+.sound-options-similar-button {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.75rem;
+    width: 100%;
+    min-height: 2.7rem;
+    padding: 0.62rem 0.72rem;
+    border: 1px solid rgba(23, 18, 13, 0.14);
+    border-radius: 14px;
+    background: rgba(255, 250, 241, 0.78);
+    color: var(--ink);
+    cursor: pointer;
+    font: inherit;
+    text-align: left;
+    transition:
+        transform 0.16s ease,
+        border-color 0.16s ease,
+        box-shadow 0.16s ease,
+        background 0.16s ease;
+}
+
+.sound-options-similar-button:hover:not(:disabled) {
+    transform: translateY(-1px);
+    border-color: rgba(197, 72, 52, 0.42);
+    box-shadow: 0 10px 22px rgba(23, 18, 13, 0.12);
+}
+
+.sound-options-similar-button:disabled {
+    cursor: not-allowed;
+    opacity: 0.64;
+}
+
+html.theme-dark .sound-options-similar-button {
+    border-color: rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.sound-options-similar-name {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--ink);
+    font-size: 0.86rem;
+    font-weight: 800;
+    line-height: 1.15;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.sound-options-score {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 2.55rem;
+    padding: 0.18rem 0.42rem;
+    border-radius: 999px;
+    background: var(--accent-soft);
+    color: var(--accent-deep);
+    font-size: 0.72rem;
+    font-weight: 900;
+    white-space: nowrap;
+}
+
+@media (max-width: 560px) {
+    .sound-options-inline {
+        grid-template-columns: 1fr;
+    }
+
+    .sound-options-inline .web-upload-secondary {
+        width: 100%;
+    }
+}
+
 .web-upload-queue {
     display: grid;
     gap: 0.55rem;
@@ -1922,24 +2130,70 @@ html.theme-dark .table-container {
 .table-container,
 .activity-feed {
     scrollbar-width: thin;
-    scrollbar-color: rgba(23, 18, 13, 0.22) rgba(255, 255, 255, 0.45);
+    scrollbar-color: var(--accent) rgba(255, 255, 255, 0.08);
 }
 
 .table-container::-webkit-scrollbar,
 .activity-feed::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
+    width: 0.4rem;
+    height: 0.4rem;
 }
 
 .table-container::-webkit-scrollbar-track,
 .activity-feed::-webkit-scrollbar-track {
-    background: rgba(255, 255, 255, 0.45);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
 }
 
 .table-container::-webkit-scrollbar-thumb,
 .activity-feed::-webkit-scrollbar-thumb {
-    background: rgba(23, 18, 13, 0.22);
+    min-height: 1.85rem;
+    background: var(--accent);
     border-radius: 999px;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+
+.sound-row-context-menu {
+    position: fixed;
+    z-index: 1200;
+    display: none;
+    min-width: 8.25rem;
+    padding: 0.35rem;
+    border: 1px solid rgba(23, 18, 13, 0.14);
+    border-radius: 8px;
+    background: rgba(255, 250, 241, 0.98);
+    box-shadow: 0 16px 34px rgba(23, 18, 13, 0.18);
+}
+
+.sound-row-context-menu.open {
+    display: block;
+}
+
+.sound-row-context-menu button {
+    width: 100%;
+    min-height: 2.25rem;
+    padding: 0.45rem 0.65rem;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--ink);
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.88rem;
+    font-weight: 800;
+    text-align: left;
+}
+
+.sound-row-context-menu button:hover,
+.sound-row-context-menu button:focus-visible {
+    outline: none;
+    background: rgba(197, 72, 52, 0.1);
+}
+
+html.theme-dark .sound-row-context-menu {
+    border-color: rgba(255, 255, 255, 0.12);
+    background: rgba(28, 32, 29, 0.98);
+    box-shadow: 0 16px 34px rgba(0, 0, 0, 0.36);
 }
 
 table {

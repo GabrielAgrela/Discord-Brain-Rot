@@ -40,13 +40,95 @@ class SoundRepository(BaseRepository[Sound]):
             slap=bool(row['slap']) if 'slap' in row.keys() else False,
         )
     
-    def get_by_id(self, id: int) -> Optional[Sound]:
+    def get_by_id(
+        self,
+        id: int,
+        guild_id: Optional[int | str] = None,
+    ) -> Optional[Sound]:
         """Get a sound by its database ID."""
-        row = self._execute_one(
-            "SELECT * FROM sounds WHERE id = ?",
-            (id,)
-        )
+        if guild_id is None:
+            row = self._execute_one(
+                "SELECT * FROM sounds WHERE id = ?",
+                (id,)
+            )
+        else:
+            row = self._execute_one(
+                """
+                SELECT * FROM sounds
+                WHERE id = ? AND (guild_id = ? OR guild_id IS NULL)
+                """,
+                (id, str(guild_id)),
+            )
         return self._row_to_entity(row) if row else None
+
+    def get_similarity_candidates(
+        self,
+        guild_id: Optional[int | str] = None,
+    ) -> list[sqlite3.Row]:
+        """
+        Get sounds eligible for web similarity scoring.
+
+        Args:
+            guild_id: Optional selected guild scope.
+
+        Returns:
+            Raw sound rows for service-layer scoring.
+        """
+        if guild_id is None:
+            return self._execute(
+                "SELECT * FROM sounds WHERE is_elevenlabs = 0",
+            )
+        return self._execute(
+            """
+            SELECT * FROM sounds
+            WHERE is_elevenlabs = 0
+              AND (guild_id = ? OR guild_id IS NULL)
+            """,
+            (str(guild_id),),
+        )
+
+    def update_sound_by_id(
+        self,
+        sound_id: int,
+        *,
+        new_filename: str | None = None,
+        favorite: int | None = None,
+        guild_id: Optional[int | str] = None,
+    ) -> bool:
+        """
+        Update a sound by ID, optionally scoped by guild.
+
+        Args:
+            sound_id: Sound database ID.
+            new_filename: Optional replacement Filename value.
+            favorite: Optional favorite flag.
+            guild_id: Optional selected guild scope.
+
+        Returns:
+            True when an update was requested.
+        """
+        updates = []
+        params: list[object] = []
+        if new_filename is not None:
+            updates.append("Filename = ?")
+            params.append(new_filename)
+        if favorite is not None:
+            updates.append("favorite = ?")
+            params.append(favorite)
+        if not updates:
+            return False
+
+        params.append(sound_id)
+        guild_clause = ""
+        if guild_id is not None:
+            guild_clause = " AND (guild_id = ? OR guild_id IS NULL)"
+            params.append(str(guild_id))
+
+        self._execute_write(
+            f"UPDATE sounds SET {', '.join(updates)} WHERE id = ?{guild_clause}",
+            tuple(params),
+        )
+        return True
     
     def get_by_filename(self, filename: str, guild_id: Optional[int | str] = None) -> Optional[Sound]:
         """

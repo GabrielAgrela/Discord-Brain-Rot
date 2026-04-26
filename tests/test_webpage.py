@@ -981,6 +981,10 @@ def test_soundboard_page_renders_shared_redesign(web_client):
     assert 'id="webTtsProfile"' in html
     assert 'id="webTtsMessage"' in html
     assert 'id="webTtsEnhanceButton"' in html
+    assert 'id="soundRowContextMenu"' in html
+    assert 'id="soundRowEditOption"' in html
+    assert 'class="sound-options-row" data-sound-id="1"' in html
+    assert "tablesGrid.addEventListener('contextmenu', openSoundRowContextMenu)" in html
     assert "/api/tts/enhance" in html
     assert "window.prompt" not in html
     assert 'id="controlRoomUpdated"' not in html
@@ -1398,6 +1402,120 @@ def test_all_sounds_endpoint_returns_and_applies_sound_list_filter(web_client):
             ],
         },
     }
+
+
+def test_sound_options_endpoint_returns_lists_and_similar_sounds(web_client):
+    client, db_path = web_client
+    _login_web_user(client)
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executemany(
+            "INSERT INTO sounds (id, originalfilename, Filename, guild_id, favorite, slap, is_elevenlabs, timestamp) VALUES (?, ?, ?, ?, ?, 0, 0, ?)",
+            [
+                (1, "alpha meme.mp3", "alpha meme.mp3", "111", 0, "2026-04-04 12:00:00"),
+                (2, "alpha remix.mp3", "alpha remix.mp3", "111", 0, "2026-04-04 12:01:00"),
+                (3, "other.mp3", "other.mp3", "222", 0, "2026-04-04 12:02:00"),
+            ],
+        )
+        conn.execute(
+            "INSERT INTO sound_lists (id, list_name, creator, guild_id, created_at) VALUES (10, 'Bits', 'alice', '111', '2026-04-04 12:00:00')"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    response = client.get("/api/sounds/1/options?guild_id=111")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["sound"] == {
+        "sound_id": 1,
+        "display_filename": "alpha meme.mp3",
+        "favorite": False,
+    }
+    assert payload["lists"] == [
+        {"id": 10, "name": "Bits", "creator": "alice", "sound_count": 0, "label": "Bits (alice)"}
+    ]
+    assert payload["similar_sounds"][0]["sound_id"] == 2
+    assert all(item["sound_id"] != 3 for item in payload["similar_sounds"])
+
+
+def test_sound_options_can_rename_and_toggle_favorite(web_client):
+    client, db_path = web_client
+    _login_web_user(client, username="web-user")
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO sounds (id, originalfilename, Filename, guild_id, favorite, slap, is_elevenlabs, timestamp) VALUES (1, 'old.mp3', 'old.mp3', '111', 0, 0, 0, '2026-04-04 12:00:00')"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    rename_response = client.post(
+        "/api/sounds/1/rename",
+        json={"new_name": "new name", "guild_id": "111"},
+    )
+    favorite_response = client.post(
+        "/api/sounds/1/favorite",
+        json={"guild_id": "111"},
+    )
+
+    assert rename_response.status_code == 200
+    assert rename_response.get_json()["sound"]["display_filename"] == "new name.mp3"
+    assert favorite_response.status_code == 200
+    assert favorite_response.get_json()["favorite"] is True
+    conn = sqlite3.connect(db_path)
+    try:
+        sound_row = conn.execute(
+            "SELECT Filename, favorite FROM sounds WHERE id = 1"
+        ).fetchone()
+        actions = conn.execute(
+            "SELECT username, action, target, guild_id FROM actions ORDER BY id"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert sound_row == ("new name.mp3", 1)
+    assert actions == [
+        ("web-user", "change_filename", "old.mp3 to new name.mp3", "111"),
+        ("web-user", "favorite_sound", "1", "111"),
+    ]
+
+
+def test_sound_options_can_add_sound_to_list(web_client):
+    client, db_path = web_client
+    _login_web_user(client, username="web-user")
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO sounds (id, originalfilename, Filename, guild_id, favorite, slap, is_elevenlabs, timestamp) VALUES (1, 'clip.mp3', 'clip.mp3', '111', 0, 0, 0, '2026-04-04 12:00:00')"
+        )
+        conn.execute(
+            "INSERT INTO sound_lists (id, list_name, creator, guild_id, created_at) VALUES (10, 'Bits', 'alice', '111', '2026-04-04 12:00:00')"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    response = client.post(
+        "/api/sounds/1/lists",
+        json={"list_id": 10, "guild_id": "111"},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["added"] is True
+    conn = sqlite3.connect(db_path)
+    try:
+        list_item = conn.execute(
+            "SELECT list_id, sound_filename FROM sound_list_items"
+        ).fetchone()
+        action = conn.execute(
+            "SELECT username, action, target, guild_id FROM actions"
+        ).fetchone()
+    finally:
+        conn.close()
+    assert list_item == (10, "clip.mp3")
+    assert action == ("web-user", "add_sound_to_list", "Bits:clip.mp3", "111")
 
 
 def test_favorites_endpoint_returns_and_applies_user_filter(web_client):
