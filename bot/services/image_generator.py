@@ -30,6 +30,9 @@ class ImageGeneratorService:
         self.rl_store_template_path = os.path.abspath(
             os.path.join(os.path.dirname(__file__), "..", "..", "templates", "rl_store_card.html")
         )
+        self.loading_gif_path = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "assets", "loading.gif")
+        )
         self._hti = None
         self._temp_dir = os.path.abspath(
             os.path.join(os.path.dirname(__file__), "..", "..", "Debug", "sound_cards")
@@ -735,9 +738,7 @@ class ImageGeneratorService:
         Returns:
             GIF image bytes or None if generation failed
         """
-        cache_path = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "..", "..", "Data", "loading.gif")
-        )
+        cache_path = self.loading_gif_path
 
         if os.path.exists(cache_path):
             with open(cache_path, "rb") as gif_file:
