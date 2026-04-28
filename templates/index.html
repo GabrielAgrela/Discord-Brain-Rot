@@ -98,13 +98,19 @@
             </div>
             <div class="nav-actions">
                 {% if discord_user %}
-                <a href="/logout?next=/" class="auth-user-link" title="Logout {{ display_name }}">
-                    <img class="auth-avatar" src="{{ avatar_url }}" alt="{{ display_name }}">
-                    <span class="auth-user-meta">
-                        <span class="auth-user-name">{{ display_name }}</span>
-                        <span class="auth-user-logout">Logout</span>
-                    </span>
-                </a>
+                <div class="auth-user-cluster">
+                    <a href="/logout?next=/" class="auth-user-link" title="Logout {{ display_name }}">
+                        <img class="auth-avatar" src="{{ avatar_url }}" alt="{{ display_name }}">
+                        <span class="auth-user-meta">
+                            <span class="auth-user-name">{{ display_name }}</span>
+                            <span class="auth-user-logout">Logout</span>
+                        </span>
+                    </a>
+                    {% if web_user_is_admin %}
+                    <button type="button" id="webUploadInboxOpenButton" class="auth-inbox-button"
+                        aria-label="Open moderation inbox" title="Moderation inbox">&#9993;&#65038;</button>
+                    {% endif %}
+                </div>
                 {% elif discord_oauth_configured %}
                 <a href="{{ discord_login_url }}" class="auth-button">
                     <span class="auth-button-icon" aria-hidden="true">
@@ -154,16 +160,6 @@
                     </button>
                 </div>
                 <div class="control-room-metric control-room-metric--action">
-                    <span class="control-room-metric-label">Mute</span>
-                    <button type="button" id="controlRoomMuteButton"
-                        class="control-room-metric-button web-control-button{% if not discord_user %} login-required{% endif %}"
-                        data-control-action="toggle_mute"
-                        title="{% if discord_user %}Toggle mute{% else %}Login with Discord to use bot controls{% endif %}"
-                        aria-label="{% if discord_user %}Toggle mute{% else %}Login with Discord to use bot controls{% endif %}">
-                        {% if discord_user %}🔇{% else %}🔒{% endif %}
-                    </button>
-                </div>
-                <div class="control-room-metric control-room-metric--action">
                     <span class="control-room-metric-label">TTS</span>
                     <button type="button" id="controlRoomTtsButton"
                         class="control-room-metric-button web-control-button{% if not discord_user %} login-required{% endif %}"
@@ -181,6 +177,16 @@
                         title="{% if discord_user %}Slap{% else %}Login with Discord to use bot controls{% endif %}"
                         aria-label="{% if discord_user %}Slap{% else %}Login with Discord to use bot controls{% endif %}">
                         {% if discord_user %}👋{% else %}🔒{% endif %}
+                    </button>
+                </div>
+                <div class="control-room-metric control-room-metric--action">
+                    <span class="control-room-metric-label">Mute</span>
+                    <button type="button" id="controlRoomMuteButton"
+                        class="control-room-metric-button web-control-button{% if not discord_user %} login-required{% endif %}"
+                        data-control-action="toggle_mute"
+                        title="{% if discord_user %}Toggle mute{% else %}Login with Discord to use bot controls{% endif %}"
+                        aria-label="{% if discord_user %}Toggle mute{% else %}Login with Discord to use bot controls{% endif %}">
+                        {% if discord_user %}🔇{% else %}🔒{% endif %}
                     </button>
                 </div>
             </div>
@@ -495,21 +501,33 @@
                 </div>
             </section>
 
-            {% if web_user_is_admin %}
-            <details class="web-upload-admin" id="webUploadAdmin">
-                <summary>Admin moderation inbox</summary>
-                <div id="webUploadInbox" class="web-upload-inbox">
-                    <p class="web-upload-empty">Loading uploads...</p>
-                </div>
-                <div id="webUploadInboxPagination" class="web-upload-inbox-pagination" hidden>
-                    <button type="button" id="webUploadInboxPrev">Prev</button>
-                    <span id="webUploadInboxPage">1 / 1</span>
-                    <button type="button" id="webUploadInboxNext">Next</button>
-                </div>
-            </details>
-            {% endif %}
         </form>
     </dialog>
+
+    {% if web_user_is_admin %}
+    <dialog id="webUploadInboxDialog" class="web-upload-dialog web-upload-inbox-dialog"
+        aria-labelledby="webUploadInboxTitle">
+        <div class="web-upload-modal-form">
+            <div class="web-upload-modal-header">
+                <div>
+                    <p class="card-kicker">Moderation</p>
+                    <h2 id="webUploadInboxTitle" class="web-upload-title">Upload inbox</h2>
+                    <p class="web-upload-status">Approve uploads or reject them to hide and block playback.</p>
+                </div>
+                <button id="webUploadInboxCloseButton" type="button" class="web-upload-close"
+                    aria-label="Close moderation inbox">×</button>
+            </div>
+            <div id="webUploadInbox" class="web-upload-inbox" aria-live="polite">
+                <p class="web-upload-empty">Loading uploads...</p>
+            </div>
+            <div id="webUploadInboxPagination" class="web-upload-inbox-pagination" hidden>
+                <button type="button" id="webUploadInboxPrev">Prev</button>
+                <span id="webUploadInboxPage">1 / 1</span>
+                <button type="button" id="webUploadInboxNext">Next</button>
+            </div>
+        </div>
+    </dialog>
+    {% endif %}
 
     <dialog id="webTtsDialog" class="web-upload-dialog web-tts-dialog" aria-labelledby="webTtsTitle">
         <form id="webTtsForm" class="web-upload-modal-form">
@@ -1857,22 +1875,23 @@
             if (event.pointerType === 'mouse' || event.button === 2) {
                 return;
             }
-            const button = event.target.closest('.play-button');
-            if (!button || !document.querySelector('.tables-grid')?.contains(button)) {
+            const row = event.target.closest('.sound-options-row');
+            if (!row || !document.querySelector('.tables-grid')?.contains(row)) {
                 return;
             }
-            const soundId = button.getAttribute('data-sound-id');
-            if (!soundId || button.disabled) {
+            const soundId = row.dataset.soundId || row.querySelector('.play-button')?.dataset.soundId;
+            if (!soundId || row.querySelector('.play-button')?.disabled) {
                 return;
             }
+            const touch = event.touches?.[0] || event.changedTouches?.[0];
+            const rowRect = row.getBoundingClientRect();
+            const clientX = touch?.clientX ?? event.clientX ?? rowRect.left + Math.min(rowRect.width / 2, 180);
+            const clientY = touch?.clientY ?? event.clientY ?? rowRect.top + Math.min(rowRect.height / 2, 28);
             clearSoundOptionsLongPress();
             soundOptionsLongPressTimer = window.setTimeout(() => {
+                soundOptionsLongPressTimer = null;
                 suppressNextPlayActivationUntil = Date.now() + 900;
-                if (!discordUser) {
-                    openLoginModal();
-                    return;
-                }
-                openSoundRenameModal(soundId);
+                openSoundRowContextMenuForRow(row, clientX, clientY, event);
             }, 650);
         }
 
@@ -2347,12 +2366,16 @@
                 return;
             }
 
+            openSoundRowContextMenuForRow(row, event.clientX, event.clientY, event);
+        }
+
+        function openSoundRowContextMenuForRow(row, clientX, clientY, event = null) {
             const soundId = row.dataset.soundId || row.querySelector('.play-button')?.dataset.soundId;
             if (!soundId) {
                 return;
             }
 
-            event.preventDefault();
+            event?.preventDefault?.();
             clearSoundOptionsLongPress();
             contextMenuSoundId = soundId;
             contextMenuSoundIsFavorite = row.dataset.favorite === 'true';
@@ -2375,8 +2398,11 @@
 
             const menuWidth = soundRowContextMenu.offsetWidth || 132;
             const menuHeight = soundRowContextMenu.offsetHeight || 176;
-            const left = Math.min(event.clientX, window.innerWidth - menuWidth - 8);
-            const top = Math.min(event.clientY, window.innerHeight - menuHeight - 8);
+            const rowRect = row.getBoundingClientRect();
+            const fallbackX = rowRect.left + Math.min(rowRect.width / 2, 180);
+            const fallbackY = rowRect.top + Math.min(rowRect.height / 2, 28);
+            const left = Math.min(clientX ?? fallbackX, window.innerWidth - menuWidth - 8);
+            const top = Math.min(clientY ?? fallbackY, window.innerHeight - menuHeight - 8);
 
             soundRowContextMenu.style.left = `${Math.max(8, left)}px`;
             soundRowContextMenu.style.top = `${Math.max(8, top)}px`;
@@ -2495,12 +2521,12 @@
         }
 
         async function handlePlayButtonActivation(event) {
+            clearSoundOptionsLongPress();
             const button = event.target.closest('.play-button');
             if (!button || !document.querySelector('.tables-grid')?.contains(button)) {
                 return;
             }
 
-            clearSoundOptionsLongPress();
             if (Date.now() < suppressNextPlayActivationUntil) {
                 event.preventDefault();
                 event.stopPropagation();
@@ -2640,6 +2666,9 @@
         const webUploadCancelButton = document.getElementById('webUploadCancelButton');
         const webUploadStatus = document.getElementById('webUploadStatus');
         const webUploadSubmit = document.getElementById('webUploadSubmit');
+        const webUploadInboxDialog = document.getElementById('webUploadInboxDialog');
+        const webUploadInboxOpenButton = document.getElementById('webUploadInboxOpenButton');
+        const webUploadInboxCloseButton = document.getElementById('webUploadInboxCloseButton');
         const webUploadInbox = document.getElementById('webUploadInbox');
         const webUploadFile = document.getElementById('webUploadFile');
         const webUploadFileName = document.getElementById('webUploadFileName');
@@ -2874,9 +2903,6 @@
             } else if (webUploadDialog) {
                 webUploadDialog.setAttribute('open', '');
             }
-            if (webUserIsAdmin) {
-                loadUploadInbox();
-            }
         }
 
         function handleUploadOpenActivation(event) {
@@ -2895,6 +2921,22 @@
             } else if (webUploadDialog) {
                 webUploadDialog.removeAttribute('open');
             }
+        }
+
+        function openUploadInboxModal() {
+            if (!discordUser) {
+                openLoginModal();
+                return;
+            }
+            if (!webUserIsAdmin) {
+                return;
+            }
+            openDialog(webUploadInboxDialog);
+            loadUploadInbox();
+        }
+
+        function closeUploadInboxModal() {
+            closeDialog(webUploadInboxDialog);
         }
 
         async function handleWebUploadSubmit(event) {
@@ -3092,12 +3134,30 @@
                 }
                 uploadInboxPage = payload.page || 1;
                 uploadInboxTotalPages = payload.total_pages || 1;
+                updateUploadInboxBadge(payload.unreviewed_count || 0);
                 renderUploadInbox(payload.uploads || []);
                 renderUploadInboxPagination();
             } catch (error) {
                 console.error('Error loading uploads:', error);
                 webUploadInbox.innerHTML = '<p class="web-upload-empty">Could not load uploads.</p>';
             }
+        }
+
+        function updateUploadInboxBadge(unreviewedCount) {
+            if (!webUploadInboxOpenButton) return;
+            const count = Number(unreviewedCount) || 0;
+            const hasUnreviewed = count > 0;
+            webUploadInboxOpenButton.classList.toggle('has-unreviewed', hasUnreviewed);
+            webUploadInboxOpenButton.textContent = hasUnreviewed ? '!' : '\u2709\uFE0E';
+            webUploadInboxOpenButton.setAttribute(
+                'aria-label',
+                hasUnreviewed
+                    ? `Open moderation inbox, ${count} unreviewed upload${count === 1 ? '' : 's'}`
+                    : 'Open moderation inbox'
+            );
+            webUploadInboxOpenButton.title = hasUnreviewed
+                ? `${count} unreviewed upload${count === 1 ? '' : 's'}`
+                : 'Moderation inbox';
         }
 
         function renderUploadInbox(uploads) {
@@ -3112,13 +3172,15 @@
             uploads.forEach(upload => {
                 const row = document.createElement('article');
                 row.className = `web-upload-item status-${upload.status || 'approved'}`;
+                const isReviewed = Boolean(upload.moderated_at || upload.moderator_username);
 
                 const meta = document.createElement('div');
                 meta.className = 'web-upload-item-meta';
                 const title = document.createElement('strong');
                 title.textContent = (upload.filename || '').replace('.mp3', '');
                 const sub = document.createElement('span');
-                sub.textContent = `${upload.status || 'approved'} by ${upload.uploaded_by_username || 'unknown'} · ${formatTimeAgo(upload.created_at)}`;
+                const reviewLabel = isReviewed ? (upload.status || 'approved') : 'unreviewed';
+                sub.textContent = `${reviewLabel} by ${upload.uploaded_by_username || 'unknown'} · ${formatTimeAgo(upload.created_at)}`;
                 meta.appendChild(title);
                 meta.appendChild(sub);
 
@@ -3129,7 +3191,7 @@
                     button.type = 'button';
                     button.className = 'web-upload-moderate';
                     button.textContent = status === 'approved' ? 'Approve' : 'Reject';
-                    button.disabled = upload.status === status;
+                    button.disabled = isReviewed && upload.status === status;
                     button.dataset.uploadId = upload.id;
                     button.dataset.status = status;
                     actions.appendChild(button);
@@ -3191,6 +3253,12 @@
         if (webUploadOpenButton) {
             webUploadOpenButton.addEventListener('click', handleUploadOpenActivation);
             webUploadOpenButton.addEventListener('touchend', handleUploadOpenActivation, { passive: false });
+        }
+        if (webUploadInboxOpenButton) {
+            webUploadInboxOpenButton.addEventListener('click', openUploadInboxModal);
+        }
+        if (webUploadInboxCloseButton) {
+            webUploadInboxCloseButton.addEventListener('click', closeUploadInboxModal);
         }
         if (webUploadCloseButton) {
             webUploadCloseButton.addEventListener('click', closeUploadModal);
@@ -3346,6 +3414,13 @@
             webUploadDialog.addEventListener('click', (event) => {
                 if (event.target === webUploadDialog) {
                     closeUploadModal();
+                }
+            });
+        }
+        if (webUploadInboxDialog) {
+            webUploadInboxDialog.addEventListener('click', (event) => {
+                if (event.target === webUploadInboxDialog) {
+                    closeUploadInboxModal();
                 }
             });
         }

@@ -77,6 +77,12 @@ class WebPlaybackService:
         """
         sound_filename = str(payload.get("sound_filename", "")).strip()
         if sound_filename:
+            sound = self.sound_repository.get_by_filename(
+                sound_filename,
+                guild_id=payload.get("guild_id"),
+            )
+            if sound is not None and getattr(sound, "blacklist", False) is True:
+                raise ValueError("Sound is rejected")
             return sound_filename
 
         sound_id = payload.get("sound_id")
@@ -91,6 +97,8 @@ class WebPlaybackService:
         sound = self.sound_repository.get_by_id(sound_id_int)
         if sound is None:
             raise ValueError("Unknown sound_id")
+        if getattr(sound, "blacklist", False) is True:
+            raise ValueError("Sound is rejected")
         return sound.filename
 
     def queue_request(

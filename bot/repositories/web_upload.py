@@ -151,6 +151,29 @@ class WebUploadRepository(BaseRepository[dict[str, Any]]):
             )
         return int(row["total"]) if row else 0
 
+    def count_unreviewed(self, *, guild_id: int | str | None = None) -> int:
+        """
+        Count upload records that have not received an explicit moderation decision.
+
+        Args:
+            guild_id: Optional guild scope.
+        """
+        conditions = ["moderator_username IS NULL", "moderated_at IS NULL"]
+        params: list[object] = []
+        if guild_id is not None:
+            conditions.append("(guild_id = ? OR guild_id IS NULL)")
+            params.append(str(guild_id))
+
+        row = self._execute_one(
+            f"""
+            SELECT COUNT(*) AS total
+            FROM web_uploads
+            WHERE {' AND '.join(conditions)}
+            """,
+            tuple(params),
+        )
+        return int(row["total"]) if row else 0
+
     def moderate(
         self,
         upload_id: int,
@@ -200,6 +223,13 @@ class WebUploadRepository(BaseRepository[dict[str, Any]]):
                 "UPDATE sounds SET blacklist = ? WHERE id = ?",
                 (1 if blacklist else 0, int(sound_id)),
             )
+            try:
+                from bot.database import Database
+
+                Database._sound_cache = None
+                Database._sound_cache_normalized = None
+            except Exception:
+                pass
         except sqlite3.OperationalError:
             # Some legacy/test schemas do not include blacklist; upload record
             # status still preserves moderation state.

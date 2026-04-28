@@ -298,6 +298,42 @@ def test_play_sound_endpoint_accepts_sound_id_payload(web_client):
     assert row == (359077662742020107, "jews did 911.mp3", "Discord User", "123")
 
 
+def test_play_sound_endpoint_rejects_blacklisted_sound_id(web_client):
+    client, db_path = web_client
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO guild_settings (guild_id) VALUES (?)",
+            ("359077662742020107",),
+        )
+        conn.execute(
+            """
+            INSERT INTO sounds (id, originalfilename, Filename, favorite, blacklist, slap, is_elevenlabs, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (1, "rejected.mp3", "rejected.mp3", 0, 1, 0, 0, "2026-04-01 12:00:00"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    _login_web_user(client, username="discord-user", global_name="Discord User")
+
+    response = client.post("/api/play_sound", json={"sound_id": 1})
+
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "Sound is rejected"}
+
+    conn = sqlite3.connect(db_path)
+    try:
+        queue_count = conn.execute("SELECT COUNT(*) FROM playback_queue").fetchone()[0]
+    finally:
+        conn.close()
+
+    assert queue_count == 0
+
+
 def test_play_sound_endpoint_accepts_similar_play_action(web_client):
     client, db_path = web_client
 
@@ -421,6 +457,41 @@ def test_web_table_endpoints_scope_to_selected_guild(web_client):
             "slap": False,
             "timestamp": "2026-04-02 12:00:00",
         }
+    ]
+
+
+def test_web_sound_tables_hide_blacklisted_sounds(web_client):
+    client, db_path = web_client
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executemany(
+            """
+            INSERT INTO sounds (
+                id, originalfilename, Filename, guild_id, favorite, blacklist,
+                slap, is_elevenlabs, timestamp
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (1, "visible.mp3", "visible.mp3", "111", 1, 0, 0, 0, "2026-04-01 12:00:00"),
+                (2, "rejected.mp3", "rejected.mp3", "111", 1, 1, 0, 0, "2026-04-02 12:00:00"),
+            ],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    favorites_response = client.get("/api/favorites?guild_id=111")
+    all_sounds_response = client.get("/api/all_sounds?guild_id=111")
+
+    assert favorites_response.status_code == 200
+    assert all_sounds_response.status_code == 200
+    assert [item["display_filename"] for item in favorites_response.get_json()["items"]] == [
+        "visible.mp3"
+    ]
+    assert [item["display_filename"] for item in all_sounds_response.get_json()["items"]] == [
+        "visible.mp3"
     ]
 
 
@@ -551,6 +622,7 @@ def test_web_upload_inbox_is_admin_only(web_client, monkeypatch):
         "per_page": 50,
         "total": 0,
         "total_pages": 1,
+        "unreviewed_count": 0,
     }
 
 
@@ -608,7 +680,62 @@ def test_web_upload_inbox_supports_pagination(web_client):
     assert payload["per_page"] == 2
     assert payload["total"] == 3
     assert payload["total_pages"] == 2
+    assert payload["unreviewed_count"] == 3
     assert [upload["filename"] for upload in payload["uploads"]] == ["first.mp3"]
+
+
+def test_web_upload_inbox_counts_only_unreviewed_uploads(web_client):
+    client, db_path = web_client
+    _login_web_user(
+        client,
+        username="discord-user",
+        global_name="Discord User",
+        admin_guild_ids=["111"],
+    )
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS web_uploads (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id TEXT,
+                sound_id INTEGER,
+                filename TEXT NOT NULL,
+                original_filename TEXT NOT NULL,
+                uploaded_by_username TEXT NOT NULL,
+                uploaded_by_user_id TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'approved',
+                moderator_username TEXT,
+                moderated_at DATETIME,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        conn.executemany(
+            """
+            INSERT INTO web_uploads (
+                guild_id, sound_id, filename, original_filename,
+                uploaded_by_username, uploaded_by_user_id, status,
+                moderator_username, moderated_at, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                ("111", 1, "needs-review.mp3", "needs-review.mp3", "User", "1", "approved", None, None, "2026-04-01 10:00:00"),
+                ("111", 2, "approved.mp3", "approved.mp3", "User", "1", "approved", "Mod", "2026-04-01 11:00:00", "2026-04-01 11:00:00"),
+                ("111", 3, "rejected.mp3", "rejected.mp3", "User", "1", "rejected", "Mod", "2026-04-01 12:00:00", "2026-04-01 12:00:00"),
+                ("222", 4, "other-guild.mp3", "other-guild.mp3", "User", "1", "approved", None, None, "2026-04-01 13:00:00"),
+            ],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    response = client.get("/api/uploads?guild_id=111")
+
+    assert response.status_code == 200
+    assert response.get_json()["unreviewed_count"] == 1
 
 
 def test_web_upload_moderation_rejects_and_blacklists_sound_for_admin(web_client, monkeypatch):
@@ -980,6 +1107,19 @@ def test_web_app_configures_persistent_session_defaults():
     assert app.config["PERMANENT_SESSION_LIFETIME"] == timedelta(days=30)
 
 
+def test_soundboard_admin_upload_inbox_uses_envelope_when_no_review_needed(web_client):
+    client, _ = web_client
+    _login_web_user(client, admin_guild_ids=["359077662742020107"])
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert 'id="webUploadInboxOpenButton" class="auth-inbox-button"' in html
+    assert 'aria-label="Open moderation inbox" title="Moderation inbox">&#9993;&#65038;</button>' in html
+    assert "webUploadInboxOpenButton.textContent = hasUnreviewed ? '!' : '\\u2709\\uFE0E';" in html
+
+
 def test_soundboard_page_renders_shared_redesign(web_client):
     client, db_path = web_client
 
@@ -1058,6 +1198,8 @@ def test_soundboard_page_renders_shared_redesign(web_client):
     assert 'data-favorite="false"' in html
     assert "Unmake slap" in html
     assert "tablesGrid.addEventListener('contextmenu', openSoundRowContextMenu)" in html
+    assert "openSoundRowContextMenuForRow(row, clientX, clientY, event)" in html
+    assert "tablesGrid.addEventListener('touchstart', handleSoundOptionsPressStart" in html
     assert "/api/tts/enhance" in html
     assert "window.prompt" not in html
     assert 'id="controlRoomUpdated"' not in html
@@ -1176,6 +1318,7 @@ def test_web_static_stylesheet_is_served(web_client):
     assert "html.theme-dark .favorite-button" not in stylesheet
     assert ".sound-action-cell" not in stylesheet
     assert "html.theme-dark .nav-brand-mark" in stylesheet
+    assert "html.theme-dark .auth-inbox-button" in stylesheet
     assert "background: var(--error)" in stylesheet
     assert "animation: none" in stylesheet
     assert "body.page-soundboard .library-controls" in stylesheet

@@ -9,6 +9,7 @@ from unittest.mock import Mock, MagicMock, AsyncMock, patch
 import asyncio
 import os
 import sys
+from types import SimpleNamespace
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -97,6 +98,26 @@ class TestSoundService:
             7,
             guild_id=321,
         )
+
+    @pytest.mark.asyncio
+    async def test_play_request_rejects_blacklisted_exact_match(self, sound_service):
+        """Rejected sounds should not play through Discord slash commands."""
+        guild = Mock(id=321)
+        sound_service.sound_repo.get_by_filename = Mock(
+            return_value=SimpleNamespace(filename="rejected.mp3", blacklist=True)
+        )
+        sound_service.message_service.send_error = AsyncMock()
+        sound_service.audio_service.play_audio = AsyncMock()
+        sound_service.action_repo.insert = Mock()
+
+        result = await sound_service.play_request("rejected", "user", guild=guild)
+
+        assert result is False
+        sound_service.message_service.send_error.assert_awaited_once_with(
+            "Sound 'rejected' has been rejected."
+        )
+        sound_service.audio_service.play_audio.assert_not_called()
+        sound_service.action_repo.insert.assert_not_called()
 
 
 class TestSoundServiceFilename:

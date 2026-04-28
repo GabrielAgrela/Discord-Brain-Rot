@@ -37,6 +37,7 @@ class SoundRepository(BaseRepository[Sound]):
             filename=row['filename'],
             date=date_value,
             favorite=bool(row['favorite']),
+            blacklist=bool(row['blacklist']) if 'blacklist' in row.keys() else False,
             slap=bool(row['slap']) if 'slap' in row.keys() else False,
         )
     
@@ -275,7 +276,7 @@ class SoundRepository(BaseRepository[Sound]):
         Returns:
             List of random Sound entities
         """
-        conditions = []
+        conditions = ["blacklist = 0"]
         if favorite_only:
             conditions.append("favorite = 1")
         
@@ -303,7 +304,7 @@ class SoundRepository(BaseRepository[Sound]):
         Returns:
             List of sound tuples
         """
-        conditions = ["slap = 0", "is_elevenlabs = 0"]  # Exclude slap and ElevenLabs sounds
+        conditions = ["slap = 0", "is_elevenlabs = 0", "blacklist = 0"]  # Exclude slap, ElevenLabs, and rejected sounds
         if favorite:
             conditions.append("favorite = 1")
         params: list = []
@@ -357,6 +358,7 @@ class SoundRepository(BaseRepository[Sound]):
                 FROM sounds s
                 INNER JOIN UserFavorites uf ON CAST(uf.target AS INTEGER) = s.id
                 WHERE uf.rn = 1 AND uf.action = 'favorite_sound'
+                  AND s.blacklist = 0
                 {guild_clause}
                 ORDER BY uf.favorited_at DESC, s.id DESC
                 LIMIT ?
@@ -386,7 +388,7 @@ class SoundRepository(BaseRepository[Sound]):
                 SELECT s.*
                 FROM sounds s
                 LEFT JOIN LatestFavorite lf ON lf.sound_id = s.id
-                WHERE s.favorite = 1 AND s.is_elevenlabs = 0
+                WHERE s.favorite = 1 AND s.is_elevenlabs = 0 AND s.blacklist = 0
                 {guild_clause}
                 ORDER BY lf.last_favorited DESC, s.id DESC
                 LIMIT ?
@@ -396,7 +398,7 @@ class SoundRepository(BaseRepository[Sound]):
             return [tuple(row) for row in rows]
         
         # Standard filtering (non-favorite queries)
-        conditions = ["is_elevenlabs = 0"]  # Always exclude ElevenLabs sounds from listings
+        conditions = ["is_elevenlabs = 0", "blacklist = 0"]  # Always exclude ElevenLabs and rejected sounds from listings
         if favorite is not None:
             conditions.append(f"favorite = {1 if favorite else 0}")
         if slap is not None:

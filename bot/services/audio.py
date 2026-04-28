@@ -1322,8 +1322,16 @@ class AudioService:
                     description=f"Muted for {self.mute_service.get_remaining_formatted()}",
                     color=discord.Color.orange(),
                     delete_time=5
-                )
+            )
             return
+
+        sound_repo = getattr(self, "sound_repo", None)
+        if not is_tts and sound_repo is not None:
+            sound = await asyncio.to_thread(sound_repo.get_by_filename, audio_file, guild_id)
+            if sound is not None and getattr(sound, "blacklist", False) is True:
+                if self.message_service:
+                    await self.message_service.send_error(f"Sound '{audio_file}' has been rejected.")
+                return False
 
         # Per-guild rate limiting and backpressure for non-TTS plays.
         if not is_tts and not self._track_guild_play_request(guild_id):

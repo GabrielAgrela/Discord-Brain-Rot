@@ -236,6 +236,9 @@ class SoundService:
         # Always try exact match first (before fuzzy search)
         exact_match = self.sound_repo.get_by_filename(sound_id_or_name, guild_id=guild_id)
         if exact_match:
+            if getattr(exact_match, "blacklist", False) is True:
+                await self.message_service.send_error(f"Sound '{sound_id_or_name}' has been rejected.")
+                return False
             filenames = [exact_match.filename]
         elif exact:
             # User requested exact match only, but no exact match found
@@ -250,8 +253,12 @@ class SoundService:
                 sound_data = r[0]
                 # Robustly get filename from Row, dict, or tuple
                 if isinstance(sound_data, (sqlite3.Row, dict)):
+                    if sound_data.get("blacklist", 0):
+                        continue
                     filenames.append(sound_data['Filename'])
                 else:
+                    if len(sound_data) > 5 and sound_data[5]:
+                        continue
                     filenames.append(sound_data[2])
 
         if not filenames:

@@ -152,7 +152,7 @@ class WebContentRepository(BaseRepository[dict[str, Any]]):
         Returns:
             List of raw favorite sound rows.
         """
-        conditions = ["s.favorite = 1", "s.is_elevenlabs = 0"]
+        conditions = ["s.favorite = 1", "s.is_elevenlabs = 0", "s.blacklist = 0"]
         params: list[object] = []
         self._append_sound_guild_condition(conditions, params, query.guild_id, alias="s")
 
@@ -231,7 +231,7 @@ class WebContentRepository(BaseRepository[dict[str, Any]]):
         Returns:
             Matching row count.
         """
-        conditions = ["favorite = 1", "is_elevenlabs = 0"]
+        conditions = ["favorite = 1", "is_elevenlabs = 0", "blacklist = 0"]
         params: list[object] = []
         self._append_sound_guild_condition(conditions, params, query.guild_id)
 
@@ -308,6 +308,7 @@ class WebContentRepository(BaseRepository[dict[str, Any]]):
                 FROM sounds
                 WHERE favorite = 1
                   AND is_elevenlabs = 0
+                  AND blacklist = 0
                   AND Filename IS NOT NULL
                   AND TRIM(Filename) != ''
                   {self._guild_filter_sql("guild_id", guild_id, prefix="AND")}
@@ -340,6 +341,7 @@ class WebContentRepository(BaseRepository[dict[str, Any]]):
                   AND latest.action = 'favorite_sound'
                   AND s.favorite = 1
                   AND s.is_elevenlabs = 0
+                  AND s.blacklist = 0
                   {self._guild_filter_sql("s.guild_id", guild_id, prefix="AND")}
                 ORDER BY value COLLATE NOCASE ASC
                 """,
@@ -358,7 +360,7 @@ class WebContentRepository(BaseRepository[dict[str, Any]]):
         Returns:
             List of raw sound rows.
         """
-        conditions = ["s.is_elevenlabs = 0"]
+        conditions = ["s.is_elevenlabs = 0", "s.blacklist = 0"]
         params: list[object] = []
         self._append_sound_guild_condition(conditions, params, query.guild_id, alias="s")
 
@@ -421,7 +423,7 @@ class WebContentRepository(BaseRepository[dict[str, Any]]):
         Returns:
             Matching row count.
         """
-        conditions = ["s.is_elevenlabs = 0"]
+        conditions = ["s.is_elevenlabs = 0", "s.blacklist = 0"]
         params: list[object] = []
         self._append_sound_guild_condition(conditions, params, query.guild_id, alias="s")
 
@@ -490,6 +492,7 @@ class WebContentRepository(BaseRepository[dict[str, Any]]):
                 SELECT DISTINCT Filename AS value
                 FROM sounds
                 WHERE is_elevenlabs = 0
+                  AND blacklist = 0
                   AND Filename IS NOT NULL
                   AND TRIM(Filename) != ''
                   {self._guild_filter_sql("guild_id", guild_id, prefix="AND")}
@@ -504,6 +507,7 @@ class WebContentRepository(BaseRepository[dict[str, Any]]):
                 SELECT DISTINCT date(timestamp) AS value
                 FROM sounds
                 WHERE is_elevenlabs = 0
+                  AND blacklist = 0
                   AND timestamp IS NOT NULL
                   AND TRIM(timestamp) != ''
                   {self._guild_filter_sql("guild_id", guild_id, prefix="AND")}

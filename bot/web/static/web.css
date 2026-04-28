@@ -334,7 +334,8 @@ html.theme-dark .nav-brand-mark {
 }
 
 .auth-button,
-.auth-user-link {
+.auth-user-link,
+.auth-user-cluster {
     order: 0;
 }
 
@@ -448,6 +449,55 @@ html.theme-dark .nav-brand-mark {
     background: rgba(255, 252, 247, 0.88);
     border: 1px solid var(--border-strong);
     box-shadow: var(--shadow-sm);
+}
+
+.auth-user-cluster {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+}
+
+.auth-inbox-button {
+    position: absolute;
+    top: -0.28rem;
+    right: -0.28rem;
+    z-index: 2;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.35rem;
+    height: 1.35rem;
+    padding: 0;
+    border: 1px solid var(--paper);
+    border-radius: 999px;
+    background: var(--ink);
+    color: #fffaf4;
+    box-shadow: 0 3px 8px rgba(23, 18, 13, 0.22);
+    cursor: pointer;
+    font-size: 0.82rem;
+    font-weight: 900;
+    line-height: 1;
+}
+
+.auth-inbox-button.has-unreviewed {
+    background: var(--accent);
+}
+
+html.theme-dark .auth-inbox-button {
+    background: #050706;
+    border-color: rgba(244, 240, 232, 0.5);
+    color: #f4f0e8;
+    box-shadow: 0 3px 8px rgba(0, 0, 0, 0.34);
+}
+
+html.theme-dark .auth-inbox-button.has-unreviewed {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #050706;
+}
+
+.auth-inbox-button:hover {
+    transform: translateY(-1px);
 }
 
 .guild-selector-shell {
@@ -1192,6 +1242,11 @@ html.theme-dark .control-room-metric + .control-room-metric::before {
     width: min(30rem, calc(100vw - 1.5rem));
 }
 
+.web-upload-inbox-dialog {
+    margin: 4.8rem max(0.75rem, calc((100vw - min(1180px, calc(100% - 2rem))) / 2)) auto auto;
+    width: min(31rem, calc(100vw - 1.5rem));
+}
+
 .web-upload-dialog::backdrop {
     background: rgba(23, 18, 13, 0.48);
     backdrop-filter: blur(5px);
@@ -1769,6 +1824,8 @@ html.theme-dark .web-upload-queue-item {
 
 .web-upload-inbox {
     margin-top: 0.65rem;
+    max-height: min(58vh, 29rem);
+    overflow-y: auto;
 }
 
 .web-upload-empty {
@@ -3672,8 +3729,8 @@ body.page-soundboard .tables-grid > .card {
         z-index: 35;
         grid-template-columns: minmax(0, 1fr) repeat(2, 2rem);
         grid-template-areas:
-            "status upload mute"
-            "voice tts slap";
+            "status slap mute"
+            "voice upload tts";
         align-items: center;
         column-gap: 0.42rem;
         row-gap: 0.38rem;
@@ -3723,17 +3780,17 @@ body.page-soundboard .tables-grid > .card {
     }
 
     .control-room-metric:nth-child(3) {
-        grid-area: mute;
-        justify-self: end;
-    }
-
-    .control-room-metric:nth-child(4) {
         grid-area: tts;
         justify-self: end;
     }
 
-    .control-room-metric:nth-child(5) {
+    .control-room-metric:nth-child(4) {
         grid-area: slap;
+        justify-self: end;
+    }
+
+    .control-room-metric:nth-child(5) {
+        grid-area: mute;
         justify-self: end;
     }
 

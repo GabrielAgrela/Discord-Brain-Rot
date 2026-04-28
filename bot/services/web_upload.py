@@ -392,6 +392,7 @@ class WebUploadService:
             "per_page": safe_limit,
             "total": total,
             "total_pages": total_pages,
+            "unreviewed_count": self.upload_repository.count_unreviewed(guild_id=guild_id),
         }
 
     def moderate_upload(

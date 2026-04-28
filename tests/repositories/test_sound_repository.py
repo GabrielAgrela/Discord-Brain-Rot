@@ -235,3 +235,24 @@ class TestSoundRepositoryEdgeCases:
         assert "global.mp3" in filenames
         assert "guild42.mp3" in filenames
         assert "guild43.mp3" not in filenames
+
+    def test_get_sounds_excludes_blacklisted_sounds(self, sound_repository, db_connection):
+        """Rejected sounds should not appear in Discord sound listings."""
+        cursor = db_connection.cursor()
+        cursor.executemany(
+            """
+            INSERT INTO sounds (originalfilename, Filename, date, favorite, blacklist, slap, is_elevenlabs, timestamp, guild_id)
+            VALUES (?, ?, ?, 0, ?, 0, 0, ?, ?)
+            """,
+            [
+                ("visible.mp3", "visible.mp3", "2025-01-01 00:00:00", 0, "2025-01-01 00:00:00", "42"),
+                ("rejected.mp3", "rejected.mp3", "2025-01-01 00:00:01", 1, "2025-01-01 00:00:01", "42"),
+            ],
+        )
+        db_connection.commit()
+
+        sounds = sound_repository.get_sounds(num_sounds=20, guild_id=42)
+        filenames = {row[2] for row in sounds}
+
+        assert "visible.mp3" in filenames
+        assert "rejected.mp3" not in filenames

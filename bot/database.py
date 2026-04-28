@@ -452,6 +452,8 @@ class Database:
             sound_dict = sound if isinstance(sound, dict) else dict(sound)
             if sound_dict.get('is_elevenlabs', 0) == 1:
                 continue
+            if sound_dict.get('blacklist', 0) == 1:
+                continue
             sound_guild_id = sound_dict.get("guild_id")
             if guild_id is not None and sound_guild_id not in (None, str(guild_id), guild_id):
                 continue

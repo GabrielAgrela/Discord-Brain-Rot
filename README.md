@@ -103,7 +103,9 @@ This README is based on the current codebase behavior (not historical README ass
 - Favorites and All Sounds rows show MP3 duration under the sound name when the file is available on disk.
 - Authenticated users can open the web upload modal from the control-room upload icon and queue a sound with the same fields as the bot upload modal: MP3/TikTok/YouTube/Instagram URL, MP3 file, optional custom name, and optional video time limit.
 - Desktop nav uses text labels for Soundboard and Analytics; mobile nav compacts those controls to emoji-only buttons.
-- Web uploads clear the form after submit, show active items in the modal processing queue, run in the background, insert into the selected guild sound library when processing finishes, and are recorded in a paginated admin-only upload inbox.
+- Web uploads clear the form after submit, show active items in the modal processing queue, run in the background, insert into the selected guild sound library when processing finishes, and are recorded in a paginated admin-only upload inbox opened from the profile control.
+- The profile moderation control shows an exclamation alert only while uploads are still unreviewed by a moderator.
+- Rejected web uploads stay in the moderation audit trail, but their linked sounds are hidden from soundboard tables and blocked from web and Discord playback.
 - Web upload moderation is restricted to users who match the bot admin/mod rule for the selected guild (`OWNER_USER_IDS`, Administrator, Manage Server, or Manage Channels). Existing web sessions may need to log out/in after this change so Discord grants the `guilds` OAuth scope.
 - Recent actions can be filtered by action/user, Favorites can be searched and filtered by favoriting user, and All Sounds can be filtered by sound list without losing server-side pagination.
 - The soundboard and analytics pages include a dark mode toggle beside the Discord login/profile control that persists in browser local storage.
