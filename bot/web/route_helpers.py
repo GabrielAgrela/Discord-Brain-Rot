@@ -354,7 +354,11 @@ def _get_filter_values(param_name: str) -> list[str]:
 def _build_initial_soundboard_data(selected_guild_id: int | None = None) -> dict[str, dict[str, Any]]:
     """Return first-page soundboard data for the initial HTML paint."""
     service = _get_web_content_service()
-    base_query = PaginatedQuery(page=1, per_page=7, guild_id=selected_guild_id)
+    base_query = PaginatedQuery(
+        page=1,
+        per_page=7,
+        guild_id=_get_initial_soundboard_query_guild_id(selected_guild_id),
+    )
 
     return {
         "actions": _prepare_initial_payload(
@@ -369,6 +373,7 @@ def _build_initial_soundboard_data(selected_guild_id: int | None = None) -> dict
             service.get_favorites(
                 base_query,
                 current_user=_get_current_discord_user(),
+                include_durations=False,
             ),
             filter_keys=("user",),
         ),
@@ -377,10 +382,23 @@ def _build_initial_soundboard_data(selected_guild_id: int | None = None) -> dict
                 base_query,
                 filter_keys=("list",),
                 current_user=_get_current_discord_user(),
+                include_durations=False,
             ),
             filter_keys=("list",),
         ),
     }
+
+
+def _get_initial_soundboard_query_guild_id(selected_guild_id: int | None) -> int | None:
+    """Return the guild filter needed for initial soundboard table queries."""
+    if selected_guild_id is None:
+        return None
+
+    known_guilds = _get_web_guild_service().repository.get_known_guilds()
+    if len(known_guilds) == 1 and int(known_guilds[0]["guild_id"]) == int(selected_guild_id):
+        return None
+
+    return selected_guild_id
 
 
 def _prepare_initial_payload(

@@ -90,6 +90,7 @@ class WebContentService:
         include_filters: bool = True,
         filter_keys: tuple[str, ...] | None = None,
         current_user: DiscordWebUser | None = None,
+        include_durations: bool = True,
     ) -> dict[str, Any]:
         """
         Build the JSON payload for the favorites table.
@@ -99,6 +100,7 @@ class WebContentService:
             include_filters: Whether to include filter metadata in the response.
             filter_keys: Optional subset of favorite filter groups to fetch.
             current_user: Optional authenticated Discord web user.
+            include_durations: Whether to read MP3 metadata for displayed sounds.
 
         Returns:
             API response payload.
@@ -109,7 +111,11 @@ class WebContentService:
         return {
             "items": [
                 {
-                    **self._format_sound_item(row, should_censor=should_censor),
+                    **self._format_sound_item(
+                        row,
+                        should_censor=should_censor,
+                        include_duration=include_durations,
+                    ),
                     "favorite": bool(row.get("favorite")),
                     "slap": bool(row.get("slap")),
                 }
@@ -125,6 +131,7 @@ class WebContentService:
         include_filters: bool = True,
         filter_keys: tuple[str, ...] | None = None,
         current_user: DiscordWebUser | None = None,
+        include_durations: bool = True,
     ) -> dict[str, Any]:
         """
         Build the JSON payload for the all-sounds table.
@@ -134,6 +141,7 @@ class WebContentService:
             include_filters: Whether to include filter metadata in the response.
             filter_keys: Optional subset of all-sounds filter groups to fetch.
             current_user: Optional authenticated Discord web user.
+            include_durations: Whether to read MP3 metadata for displayed sounds.
 
         Returns:
             API response payload.
@@ -144,7 +152,11 @@ class WebContentService:
         return {
             "items": [
                 {
-                    **self._format_sound_item(row, should_censor=should_censor),
+                    **self._format_sound_item(
+                        row,
+                        should_censor=should_censor,
+                        include_duration=include_durations,
+                    ),
                     "favorite": bool(row.get("favorite")),
                     "slap": bool(row.get("slap")),
                     "timestamp": row["timestamp"],
@@ -198,6 +210,7 @@ class WebContentService:
         self,
         row: dict[str, Any],
         should_censor: bool,
+        include_duration: bool = True,
     ) -> dict[str, Any]:
         """Format a sound row for web table output."""
         item = {
@@ -207,6 +220,9 @@ class WebContentService:
                 should_censor=should_censor,
             ),
         }
+        if not include_duration:
+            return item
+
         duration_seconds = self._read_sound_duration_seconds(row.get("filename"))
         if duration_seconds is not None:
             item["display_duration"] = self._format_duration(duration_seconds)

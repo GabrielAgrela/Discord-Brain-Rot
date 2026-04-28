@@ -74,11 +74,13 @@ class WebContentRepository(BaseRepository[dict[str, Any]]):
         conditions, params = self._build_action_conditions(query)
         where_clause = f" WHERE {' AND '.join(conditions)}" if conditions else ""
 
+        sound_join = "LEFT JOIN sounds s ON a.target = s.id" if self._action_count_needs_sound_join(query) else ""
+
         row = self._execute_one(
             f"""
             SELECT COUNT(*) AS count
             FROM actions a
-            LEFT JOIN sounds s ON a.target = s.id
+            {sound_join}
             {where_clause}
             """,
             tuple(params),
@@ -585,6 +587,11 @@ class WebContentRepository(BaseRepository[dict[str, Any]]):
             params.append(str(query.guild_id))
 
         return conditions, params
+
+    @staticmethod
+    def _action_count_needs_sound_join(query: PaginatedQuery) -> bool:
+        """Return whether an action count must join sounds for filters/search."""
+        return bool(query.search_query or query.filters.get("sound"))
 
     @staticmethod
     def _append_sound_guild_condition(

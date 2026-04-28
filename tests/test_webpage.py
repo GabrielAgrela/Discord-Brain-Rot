@@ -1488,6 +1488,35 @@ def test_web_sound_tables_include_mp3_duration_when_file_exists(web_client, monk
     assert all_sounds_response.get_json()["items"][0]["display_duration"] == "1:12"
 
 
+def test_soundboard_index_does_not_read_mp3_durations(web_client, monkeypatch):
+    client, db_path = web_client
+    sounds_dir = Path(app.config["SOUNDS_DIR"])
+    (sounds_dir / "alpha.mp3").write_bytes(b"fake mp3")
+
+    def fail_if_mp3_is_read(path: str):
+        raise AssertionError(f"Index route should not read MP3 metadata: {path}")
+
+    monkeypatch.setattr("bot.services.web_content.MP3", fail_if_mp3_is_read)
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            INSERT INTO sounds (id, originalfilename, Filename, favorite, slap, is_elevenlabs, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (1, "alpha.mp3", "alpha.mp3", 1, 0, 0, "2026-04-01 12:00:00"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert "alpha" in response.get_data(as_text=True)
+
+
 def test_web_table_endpoints_return_filter_options_and_apply_column_filters(web_client):
     client, db_path = web_client
 

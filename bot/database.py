@@ -205,6 +205,16 @@ class Database:
 
             # Helpful indexes for scoped queries.
             self.conn.execute("CREATE INDEX IF NOT EXISTS idx_actions_guild_id ON actions(guild_id)")
+            self.conn.execute("CREATE INDEX IF NOT EXISTS idx_actions_timestamp_id ON actions(timestamp DESC, id DESC)")
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_actions_guild_timestamp_id "
+                "ON actions(guild_id, timestamp DESC, id DESC)"
+            )
+            self.conn.execute("CREATE INDEX IF NOT EXISTS idx_actions_action ON actions(action)")
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_actions_username_nocase "
+                "ON actions(username COLLATE NOCASE)"
+            )
             self.conn.execute("CREATE INDEX IF NOT EXISTS idx_sounds_guild_id ON sounds(guild_id)")
             self.conn.execute("CREATE INDEX IF NOT EXISTS idx_users_guild_event ON users(guild_id, id, event)")
             self.conn.execute("CREATE INDEX IF NOT EXISTS idx_voice_activity_guild ON voice_activity(guild_id, join_time)")
