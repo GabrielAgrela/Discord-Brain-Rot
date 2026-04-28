@@ -1,0 +1,312 @@
+    <div id="soundRowContextMenu" class="sound-row-context-menu" role="menu" aria-hidden="true">
+        <button type="button" id="soundRowRenameOption" role="menuitem">Rename</button>
+        <button type="button" id="soundRowAddToListOption" role="menuitem">Add to list</button>
+        <button type="button" id="soundRowSimilarOption" role="menuitem">Play similar</button>
+        <button type="button" id="soundRowEventOption" role="menuitem">Set event</button>
+        <button type="button" id="soundRowFavoriteOption" role="menuitem">Favorite</button>
+        <button type="button" id="soundRowSlapOption" role="menuitem">Make slap</button>
+    </div>
+
+    <dialog id="webUploadDialog" class="web-upload-dialog" aria-labelledby="webUploadTitle">
+        <form id="webUploadForm" class="web-upload-modal-form">
+            <div class="web-upload-modal-header">
+                <div>
+                    <p class="card-kicker">Upload Sound</p>
+                    <h2 id="webUploadTitle" class="web-upload-title">URL or MP3 file</h2>
+                    <p id="webUploadStatus" class="web-upload-status">
+                        {% if discord_user %}
+                        File uploads take priority. URLs support MP3, TikTok, YouTube, and Instagram.
+                        {% else %}
+                        Login with Discord to upload sounds.
+                        {% endif %}
+                    </p>
+                </div>
+                <button type="button" id="webUploadCloseButton" class="web-upload-close"
+                    aria-label="Close upload modal">×</button>
+            </div>
+
+            <label class="web-upload-field">
+                <span>URL (MP3/TikTok/YouTube/Instagram)</span>
+                <textarea id="webUploadUrl" name="source_url" class="web-upload-input web-upload-textarea"
+                    maxlength="500" placeholder="Paste URL here, OR upload a file below" {% if not discord_user
+                    %}disabled{% endif %}></textarea>
+            </label>
+
+            <label class="web-upload-field">
+                <span>Upload MP3 File (or use URL above)</span>
+                <span class="web-upload-file-picker">
+                    <input id="webUploadFile" name="sound_file" class="web-upload-file-input" type="file"
+                        accept="audio/mpeg,.mp3" {% if not discord_user %}disabled{% endif %}>
+                    <span class="web-upload-file-button" aria-hidden="true">Choose MP3</span>
+                    <span id="webUploadFileName" class="web-upload-file-name">No file selected</span>
+                </span>
+            </label>
+
+            <label class="web-upload-field">
+                <span>Custom Name (Optional)</span>
+                <input id="webUploadName" name="custom_name" class="web-upload-input" type="text" maxlength="50"
+                    placeholder="Enter a custom name for the sound" {% if not discord_user %}disabled{% endif %}>
+            </label>
+
+            <label class="web-upload-field">
+                <span>Time Limit (Optional, for videos)</span>
+                <input id="webUploadTimeLimit" name="time_limit" class="web-upload-input" type="number" min="1"
+                    max="999" placeholder="Enter time limit in seconds (e.g., 30)" {% if not discord_user %}disabled{%
+                    endif %}>
+            </label>
+
+            <div class="web-upload-modal-actions">
+                <button type="button" class="web-upload-secondary" id="webUploadCancelButton">Cancel</button>
+                <button id="webUploadSubmit"
+                    class="web-upload-submit{% if not discord_user %} login-required{% endif %}" type="submit" {% if not
+                    discord_user %}disabled{% endif %}>
+                    {% if discord_user %}Upload{% else %}🔒{% endif %}
+                </button>
+            </div>
+
+            <section class="web-upload-queue" aria-live="polite" aria-label="Processing uploads">
+                <div class="web-upload-queue-header">
+                    <span>Processing Queue</span>
+                    <span id="webUploadQueueCount">0</span>
+                </div>
+                <div id="webUploadQueueList" class="web-upload-queue-list">
+                    <p class="web-upload-empty">No uploads processing.</p>
+                </div>
+            </section>
+
+        </form>
+    </dialog>
+
+    {% if web_user_is_admin %}
+    <dialog id="webUploadInboxDialog" class="web-upload-dialog web-upload-inbox-dialog"
+        aria-labelledby="webUploadInboxTitle">
+        <div class="web-upload-modal-form">
+            <div class="web-upload-modal-header">
+                <div>
+                    <p class="card-kicker">Moderation</p>
+                    <h2 id="webUploadInboxTitle" class="web-upload-title">Upload inbox</h2>
+                    <p class="web-upload-status">Approve uploads or reject them to hide and block playback.</p>
+                </div>
+                <button id="webUploadInboxCloseButton" type="button" class="web-upload-close"
+                    aria-label="Close moderation inbox">×</button>
+            </div>
+            <div id="webUploadInbox" class="web-upload-inbox" aria-live="polite">
+                <p class="web-upload-empty">Loading uploads...</p>
+            </div>
+            <div id="webUploadInboxPagination" class="web-upload-inbox-pagination" hidden>
+                <button type="button" id="webUploadInboxPrev">Prev</button>
+                <span id="webUploadInboxPage">1 / 1</span>
+                <button type="button" id="webUploadInboxNext">Next</button>
+            </div>
+        </div>
+    </dialog>
+    {% endif %}
+
+    <dialog id="webTtsDialog" class="web-upload-dialog web-tts-dialog" aria-labelledby="webTtsTitle">
+        <form id="webTtsForm" class="web-upload-modal-form">
+            <div class="web-upload-modal-header">
+                <div>
+                    <p class="card-kicker">Text to Speech</p>
+                    <h2 id="webTtsTitle" class="web-upload-title">Say it in voice chat</h2>
+                    <p id="webTtsStatus" class="web-upload-status">
+                        {% if discord_user %}
+                        Pick a voice or language, then send the message to the bot.
+                        {% else %}
+                        Login with Discord to use TTS.
+                        {% endif %}
+                    </p>
+                </div>
+                <button type="button" id="webTtsCloseButton" class="web-upload-close"
+                    aria-label="Close TTS modal">×</button>
+            </div>
+
+            <label class="web-upload-field">
+                <span>Voice / Language</span>
+                <select id="webTtsProfile" name="profile" class="web-upload-input" {% if not discord_user %}disabled{%
+                    endif %}>
+                    {% for option in tts_profile_options %}
+                    <option value="{{ option.value }}" {% if option.value=='ventura' %}selected{% endif %}>
+                        {{ option.label }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </label>
+
+            <label class="web-upload-field">
+                <span>Message</span>
+                <div class="web-tts-message-box">
+                    <textarea id="webTtsMessage" name="message"
+                        class="web-upload-input web-upload-textarea web-tts-message" maxlength="20000"
+                        placeholder="Type what the bot should say" required {% if not discord_user %}disabled{% endif
+                        %}></textarea>
+                    <button type="button" id="webTtsEnhanceButton"
+                        class="web-tts-enhance-button{% if not discord_user %} login-required{% endif %}"
+                        title="{% if discord_user %}Enhance for ElevenLabs tags{% else %}Login with Discord to enhance TTS{% endif %}"
+                        aria-label="{% if discord_user %}Enhance for ElevenLabs tags{% else %}Login with Discord to enhance TTS{% endif %}"
+                        {% if not discord_user %}disabled{% endif %}>
+                        Enhance
+                    </button>
+                </div>
+            </label>
+
+            <div class="web-upload-modal-actions">
+                <button type="button" class="web-upload-secondary" id="webTtsCancelButton">Cancel</button>
+                <button id="webTtsSubmit" class="web-upload-submit{% if not discord_user %} login-required{% endif %}"
+                    type="submit" {% if not discord_user %}disabled{% endif %}>
+                    {% if discord_user %}Send{% else %}🔒{% endif %}
+                </button>
+            </div>
+        </form>
+    </dialog>
+
+    <dialog id="soundRenameDialog" class="web-upload-dialog sound-options-dialog" aria-labelledby="soundRenameTitle">
+        <form id="soundRenameForm" class="web-upload-modal-form">
+            <div class="web-upload-modal-header">
+                <div>
+                    <p class="card-kicker">Rename Sound</p>
+                    <h2 id="soundRenameTitle" class="web-upload-title">Rename sound</h2>
+                    <p id="soundRenameStatus" class="web-upload-status">
+                        Choose a new name for this sound.
+                    </p>
+                </div>
+                <button type="button" id="soundRenameCloseButton" class="web-upload-close"
+                    aria-label="Close rename modal">×</button>
+            </div>
+
+            <label class="web-upload-field">
+                <span>Sound Name</span>
+                <div class="sound-options-inline sound-rename-inline">
+                    <input id="soundRenameInput" class="web-upload-input" type="text" maxlength="80"
+                        placeholder="New sound name">
+                    <button type="button" id="soundRenameButton" class="web-upload-secondary">Rename</button>
+                </div>
+            </label>
+        </form>
+    </dialog>
+
+    <dialog id="soundListDialog" class="web-upload-dialog sound-options-dialog" aria-labelledby="soundListTitle">
+        <form id="soundListForm" class="web-upload-modal-form">
+            <div class="web-upload-modal-header">
+                <div>
+                    <p class="card-kicker">Add to List</p>
+                    <h2 id="soundListTitle" class="web-upload-title">Add to list</h2>
+                    <p id="soundListStatus" class="web-upload-status">
+                        Choose which list should include this sound.
+                    </p>
+                </div>
+                <button type="button" id="soundListCloseButton" class="web-upload-close"
+                    aria-label="Close add to list modal">×</button>
+            </div>
+
+            <label class="web-upload-field">
+                <span>List</span>
+                <div class="sound-options-inline">
+                    <select id="soundListSelect" class="web-upload-input">
+                        <option value="">Choose a list</option>
+                    </select>
+                    <button type="button" id="soundAddToListButton" class="web-upload-secondary">Add</button>
+                </div>
+            </label>
+        </form>
+    </dialog>
+
+    <dialog id="soundSimilarDialog" class="web-upload-dialog sound-options-dialog" aria-labelledby="soundSimilarTitle">
+        <form id="soundSimilarForm" class="web-upload-modal-form">
+            <div class="web-upload-modal-header">
+                <div>
+                    <p class="card-kicker">Similar Sounds</p>
+                    <h2 id="soundSimilarTitle" class="web-upload-title">Play similar</h2>
+                    <p id="soundSimilarStatus" class="web-upload-status">
+                        Choose a related sound to send to voice chat.
+                    </p>
+                </div>
+                <button type="button" id="soundSimilarCloseButton" class="web-upload-close"
+                    aria-label="Close similar sounds modal">×</button>
+            </div>
+
+            <section class="sound-options-section" aria-label="Similar sounds">
+                <div id="soundSimilarList" class="sound-options-similar-list">
+                    <p class="web-upload-empty">Loading similar sounds...</p>
+                </div>
+                <div class="sound-options-similar-scrollbar" aria-hidden="true">
+                    <span class="sound-options-similar-scrollbar-thumb"></span>
+                </div>
+            </section>
+        </form>
+    </dialog>
+
+    <dialog id="soundEventDialog" class="web-upload-dialog sound-options-dialog" aria-labelledby="soundEventTitle">
+        <form id="soundEventForm" class="web-upload-modal-form">
+            <div class="web-upload-modal-header">
+                <div>
+                    <p class="card-kicker">Set Event</p>
+                    <h2 id="soundEventTitle" class="web-upload-title">Set event</h2>
+                    <p id="soundEventStatus" class="web-upload-status">
+                        Add or remove this sound for a user's join or leave event.
+                    </p>
+                </div>
+                <button type="button" id="soundEventCloseButton" class="web-upload-close"
+                    aria-label="Close event modal">×</button>
+            </div>
+
+            <label class="web-upload-field">
+                <span>Event</span>
+                <select id="soundEventTypeSelect" class="web-upload-input">
+                    <option value="join" selected>Join Event</option>
+                    <option value="leave">Leave Event</option>
+                </select>
+            </label>
+
+            <label class="web-upload-field">
+                <span>User</span>
+                <select id="soundEventUserInput" class="web-upload-input">
+                    {% if discord_user %}
+                    <option value="{{ discord_user.username }}" selected>{{ discord_user.username }}</option>
+                    {% else %}
+                    <option value="">No users available</option>
+                    {% endif %}
+                </select>
+            </label>
+
+            <div class="web-upload-modal-actions">
+                <button type="button" class="web-upload-secondary" id="soundEventCancelButton">Cancel</button>
+                <button type="submit" id="soundEventSubmitButton" class="web-upload-submit">Add Event</button>
+            </div>
+        </form>
+    </dialog>
+
+    <div id="loginModal" class="login-modal" aria-hidden="true">
+        <div class="login-modal-card" role="dialog" aria-modal="true" aria-labelledby="loginModalTitle">
+            <h2 id="loginModalTitle" class="login-modal-title">Login Required</h2>
+            <p class="login-modal-text">
+                Log in with Discord to play sounds from the website and attach the request to your account.
+            </p>
+            <div class="login-modal-actions">
+                <button id="loginModalClose" type="button" class="login-modal-close">Not Now</button>
+                <a href="{{ discord_login_url }}" class="login-modal-login auth-button">
+                    <span class="auth-button-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" role="presentation" focusable="false">
+                            <path fill="currentColor"
+                                d="M20.317 4.369A19.791 19.791 0 0 0 15.885 3a13.92 13.92 0 0 0-.602 1.245a18.27 18.27 0 0 0-5.566 0A13.92 13.92 0 0 0 9.115 3a19.736 19.736 0 0 0-4.433 1.369C1.88 8.58 1.12 12.686 1.5 16.734A19.92 19.92 0 0 0 6.818 19a14.99 14.99 0 0 0 1.143-1.873a12.93 12.93 0 0 1-1.798-.868c.151-.113.3-.231.441-.353c3.467 1.628 7.235 1.628 10.661 0c.143.122.29.24.441.353c-.576.336-1.178.627-1.798.868A14.7 14.7 0 0 0 17.051 19a19.856 19.856 0 0 0 5.449-2.266c.456-4.694-.778-8.762-2.183-12.365ZM8.261 14.228c-1.037 0-1.887-.949-1.887-2.114c0-1.165.831-2.114 1.887-2.114c1.055 0 1.905.949 1.887 2.114c0 1.165-.832 2.114-1.887 2.114Zm7.478 0c-1.037 0-1.887-.949-1.887-2.114c0-1.165.831-2.114 1.887-2.114s1.905.949 1.887 2.114c0 1.165-.831 2.114-1.887 2.114Z" />
+                        </svg>
+                    </span>
+                    <span class="auth-button-label">Login <span class="auth-button-label-extended">with
+                            Discord</span></span>
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <div id="voiceMembersModal" class="voice-members-modal" aria-hidden="true">
+        <div class="voice-members-card" role="dialog" aria-modal="true" aria-labelledby="voiceMembersModalTitle">
+            <div class="voice-members-header">
+                <div>
+                    <p class="card-kicker">Voice Channel</p>
+                    <h2 id="voiceMembersModalTitle" class="voice-members-title">Disconnected</h2>
+                </div>
+                <button id="voiceMembersModalClose" type="button" class="voice-members-close"
+                    aria-label="Close voice members modal">×</button>
+            </div>
+            <div id="voiceMembersList" class="voice-members-list"></div>
+        </div>
+    </div>

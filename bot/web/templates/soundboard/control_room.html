@@ -1,0 +1,60 @@
+        <section class="control-room" aria-label="Bot control room">
+            <div class="control-room-status">
+                <div class="control-room-status-main">
+                    <span id="controlRoomStateDot" class="control-room-dot idle" aria-hidden="true"></span>
+                    <div class="control-room-copy">
+                        <p class="card-kicker">Control Room</p>
+                        <h2 id="controlRoomNowPlaying" class="control-room-title">Bot status loading</h2>
+                        <p id="controlRoomRequester" class="control-room-subtitle">Checking voice state</p>
+                    </div>
+                </div>
+            </div>
+            <div class="control-room-metrics">
+                <div class="control-room-metric">
+                    <span class="control-room-metric-label">Voice</span>
+                    <button type="button" id="controlRoomVoiceButton" class="control-room-voice-button"
+                        aria-haspopup="dialog" aria-label="Show voice channel members" disabled>
+                        <strong id="controlRoomVoice">Disconnected</strong>
+                    </button>
+                </div>
+                <div class="control-room-metric control-room-metric--action">
+                    <span class="control-room-metric-label">Upload</span>
+                    <button type="button" id="webUploadOpenButton"
+                        class="control-room-metric-button web-upload-control-button{% if not discord_user %} login-required{% endif %}"
+                        title="{% if discord_user %}Upload sound{% else %}Login with Discord to upload sounds{% endif %}"
+                        aria-label="{% if discord_user %}Upload sound{% else %}Login with Discord to upload sounds{% endif %}">
+                        {% if discord_user %}⬆️{% else %}🔒{% endif %}
+                    </button>
+                </div>
+                <div class="control-room-metric control-room-metric--action">
+                    <span class="control-room-metric-label">TTS</span>
+                    <button type="button" id="controlRoomTtsButton"
+                        class="control-room-metric-button web-control-button{% if not discord_user %} login-required{% endif %}"
+                        data-control-action="tts"
+                        title="{% if discord_user %}Text to speech{% else %}Login with Discord to use bot controls{% endif %}"
+                        aria-label="{% if discord_user %}Text to speech{% else %}Login with Discord to use bot controls{% endif %}">
+                        {% if discord_user %}💬{% else %}🔒{% endif %}
+                    </button>
+                </div>
+                <div class="control-room-metric control-room-metric--action">
+                    <span class="control-room-metric-label">Slap</span>
+                    <button type="button" id="controlRoomSlapButton"
+                        class="control-room-metric-button web-control-button{% if not discord_user %} login-required{% endif %}"
+                        data-control-action="slap"
+                        title="{% if discord_user %}Slap{% else %}Login with Discord to use bot controls{% endif %}"
+                        aria-label="{% if discord_user %}Slap{% else %}Login with Discord to use bot controls{% endif %}">
+                        {% if discord_user %}👋{% else %}🔒{% endif %}
+                    </button>
+                </div>
+                <div class="control-room-metric control-room-metric--action">
+                    <span class="control-room-metric-label">Mute</span>
+                    <button type="button" id="controlRoomMuteButton"
+                        class="control-room-metric-button web-control-button{% if not discord_user %} login-required{% endif %}"
+                        data-control-action="toggle_mute"
+                        title="{% if discord_user %}Toggle mute{% else %}Login with Discord to use bot controls{% endif %}"
+                        aria-label="{% if discord_user %}Toggle mute{% else %}Login with Discord to use bot controls{% endif %}">
+                        {% if discord_user %}🔇{% else %}🔒{% endif %}
+                    </button>
+                </div>
+            </div>
+        </section>

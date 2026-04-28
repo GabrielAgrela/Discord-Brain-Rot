@@ -397,9 +397,9 @@ Discord-Brain-Rot/
 │   ├── repositories/
 │   ├── models/
 │   ├── ui/
+│   ├── web/
 │   └── downloaders/
 ├── templates/
-├── static/
 ├── Data/
 ├── Sounds/
 ├── Downloads/
@@ -414,8 +414,8 @@ Discord-Brain-Rot/
 - Recommended bot permissions: `Send Messages`, `Embed Links`, `Read Message History`, `Connect`, `Speak`, `Use Voice Activity`, `Manage Messages`.
 - Slash command propagation note: global commands can take up to about 1 hour to appear in newly invited guilds.
 - Bot auto-messaging falls back to a text channel named `bot` when `/setup` has not configured a text channel.
-- Web dashboard routes are not started unless the `web` profile is enabled.
-- `templates/sound_card.html` is runtime-critical and tracked in git.
+- Web dashboard routes are not started unless the `web` profile is enabled. Flask page templates/static assets live under `bot/web/`.
+- `templates/sound_card.html` and `templates/rl_store_card.html` are runtime-critical image-card templates and tracked in git.
 
 ## License
 

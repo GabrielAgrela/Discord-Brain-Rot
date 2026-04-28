@@ -1,0 +1,231 @@
+        <div class="tables-grid">
+            <section class="card card--recent">
+                <div class="card-header">
+                    <div class="card-title-stack">
+                        <p class="card-kicker">Live Feed</p>
+                        <h2 class="card-title">Recent Actions</h2>
+                    </div>
+                </div>
+
+                <div id="filtersActions" class="filters-grid cols-2">
+                    <div class="filter-group">
+                        <div class="select-shell">
+                            <select id="actions-action-filter" class="filter-select" data-endpoint="actions"
+                                data-filter-key="action" aria-label="Filter recent actions by action">
+                                <option value="" selected>All Action</option>
+                                {% for value in actions_data.get('filters', {}).get('action', []) %}
+                                <option value="{{ value }}">{{ action_labels.get(value, value) }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                    <div class="filter-group">
+                        <div class="select-shell">
+                            <select id="actions-user-filter" class="filter-select" data-endpoint="actions"
+                                data-filter-key="user" aria-label="Filter recent actions by user">
+                                <option value="" selected>All User</option>
+                                {% for value in actions_data.get('filters', {}).get('user', []) %}
+                                <option value="{{ value }}">{{ value }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="table-container">
+                    <table id="actionsTable">
+                        <thead>
+                            <tr>
+                                <th>Action</th>
+                                <th>Sound</th>
+                                <th>User</th>
+                                <th>Time</th>
+                            </tr>
+                        </thead>
+                        <tbody id="actionsTableBody">
+                            {% for item in actions_data.get('items', []) %}
+                            {% set action_value = item.get('action') or '' %}
+                            {% set filename_value = item.get('display_filename') or '-' %}
+                            {% set username_value = item.get('display_username') or '' %}
+                            <tr>
+                                <td>
+                                    <span class="action-badge {{ action_badge_class(action_value) }}"
+                                        title="{{ action_value }}">
+                                        {{ action_labels.get(action_value, action_value) }}
+                                    </span>
+                                </td>
+                                <td class="filename" title="{{ filename_value }}">{{ filename_value|replace('.mp3', '')
+                                    }}</td>
+                                <td>{{ username_value }}</td>
+                                <td title="{{ item.get('timestamp') or '' }}">{{ item.get('display_time_ago') or
+                                    item.get('timestamp') or '' }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="pagination">
+                    <button id="prevPageActions" disabled>Prev</button>
+                    <span class="pagination-info">
+                        Page
+                        <input id="pageInputActions" class="pagination-page-input" type="number" min="1"
+                            max="{{ actions_data.get('total_pages', 1) or 1 }}" value="1"
+                            aria-label="Recent Actions page">
+                        / <span id="totalPagesActions">{{ actions_data.get('total_pages', 1) }}</span>
+                    </span>
+                    <button id="nextPageActions" {% if actions_data.get('total_pages', 1) <=1 %}disabled{% endif
+                        %}>Next</button>
+                </div>
+            </section>
+
+            <section class="card card--favorites">
+                <div class="card-header">
+                    <div class="card-title-stack">
+                        <p class="card-kicker">Quick Picks</p>
+                        <h2 class="card-title">Favorites</h2>
+                    </div>
+                </div>
+
+                <div class="library-controls">
+                    <div class="filter-group">
+                        <input type="text" id="searchFavorites" class="search-input" placeholder="Search favorites..."
+                            aria-label="Search favorites">
+                    </div>
+                    <div id="filtersFavorites" class="library-filter-slot">
+                        <div class="filter-group">
+                            <div class="select-shell">
+                                <select id="favorites-user-filter" class="filter-select" data-endpoint="favorites"
+                                    data-filter-key="user" aria-label="Filter favorites by user">
+                                    <option value="" selected>All Users</option>
+                                    {% for option in favorites_data.get('filters', {}).get('user', []) %}
+                                    <option value="{{ option }}">{{ option }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="table-container">
+                    <table id="favoritesTable">
+                        <thead>
+                            <tr>
+                                <th>Sound</th>
+                                <th>Play</th>
+                            </tr>
+                        </thead>
+                        <tbody id="favoritesTableBody">
+                            {% for item in favorites_data.get('items', []) %}
+                            {% set filename_value = item.get('display_filename') or '' %}
+                            <tr class="sound-options-row" data-sound-id="{{ item.get('sound_id') }}" data-favorite="true" data-slap="{{ 'true' if item.get('slap') else 'false' }}">
+                                <td class="filename" title="{{ filename_value }}">
+                                    <span class="sound-title">{{ filename_value|replace('.mp3', '') }}</span>
+                                    {% if item.get('display_duration') %}
+                                    <span class="sound-duration">{{ item.get('display_duration') }}</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <button class="play-button{% if not discord_user %} login-required{% endif %}"
+                                        data-sound-id="{{ item.get('sound_id') }}"
+                                        title="{% if discord_user %}Play sound{% else %}Login with Discord to play{% endif %}"
+                                        aria-label="{% if discord_user %}Play sound{% else %}Login with Discord to play{% endif %}">
+                                        {% if discord_user %}▶{% else %}🔒{% endif %}
+                                    </button>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="pagination">
+                    <button id="prevPageFavorites" disabled>Prev</button>
+                    <span class="pagination-info">
+                        Page
+                        <input id="pageInputFavorites" class="pagination-page-input" type="number" min="1"
+                            max="{{ favorites_data.get('total_pages', 1) or 1 }}" value="1" aria-label="Favorites page">
+                        / <span id="totalPagesFavorites">{{ favorites_data.get('total_pages', 1) }}</span>
+                    </span>
+                    <button id="nextPageFavorites" {% if favorites_data.get('total_pages', 1) <=1 %}disabled{% endif
+                        %}>Next</button>
+                </div>
+            </section>
+
+            <section class="card card--library">
+                <div class="card-header">
+                    <div class="card-title-stack">
+                        <p class="card-kicker">Deep Cut Archive</p>
+                        <h2 class="card-title">All Sounds</h2>
+                    </div>
+                </div>
+
+                <div class="library-controls">
+                    <div class="filter-group">
+                        <input type="text" id="searchAllSounds" class="search-input"
+                            placeholder="Search the full library..." aria-label="Search all sounds">
+                    </div>
+                    <div id="filtersAllSounds" class="library-filter-slot">
+                        <div class="filter-group">
+                            <div class="select-shell">
+                                <select id="all_sounds-list-filter" class="filter-select" data-endpoint="all_sounds"
+                                    data-filter-key="list" aria-label="Filter all sounds by list">
+                                    <option value="" selected>All Lists</option>
+                                    {% for option in all_sounds_data.get('filters', {}).get('list', []) %}
+                                    <option value="{{ option.get('value') }}">{{ option.get('label') }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="table-container">
+                    <table id="allSoundsTable">
+                        <thead>
+                            <tr>
+                                <th>Sound</th>
+                                <th>Date</th>
+                                <th>Play</th>
+                            </tr>
+                        </thead>
+                        <tbody id="allSoundsTableBody">
+                            {% for item in all_sounds_data.get('items', []) %}
+                            {% set filename_value = item.get('display_filename') or '' %}
+                            <tr class="sound-options-row" data-sound-id="{{ item.get('sound_id') }}" data-favorite="{{ 'true' if item.get('favorite') else 'false' }}" data-slap="{{ 'true' if item.get('slap') else 'false' }}">
+                                <td class="filename" title="{{ filename_value }}">
+                                    <span class="sound-title">{{ filename_value|replace('.mp3', '') }}</span>
+                                    {% if item.get('display_duration') %}
+                                    <span class="sound-duration">{{ item.get('display_duration') }}</span>
+                                    {% endif %}
+                                </td>
+                                <td title="{{ item.get('timestamp') or '' }}">{{ item.get('display_time_ago') or
+                                    item.get('timestamp') or '' }}</td>
+                                <td>
+                                    <button class="play-button{% if not discord_user %} login-required{% endif %}"
+                                        data-sound-id="{{ item.get('sound_id') }}"
+                                        title="{% if discord_user %}Play sound{% else %}Login with Discord to play{% endif %}"
+                                        aria-label="{% if discord_user %}Play sound{% else %}Login with Discord to play{% endif %}">
+                                        {% if discord_user %}▶{% else %}🔒{% endif %}
+                                    </button>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="pagination">
+                    <button id="prevPageAllSounds" disabled>Prev</button>
+                    <span class="pagination-info">
+                        Page
+                        <input id="pageInputAllSounds" class="pagination-page-input" type="number" min="1"
+                            max="{{ all_sounds_data.get('total_pages', 1) or 1 }}" value="1"
+                            aria-label="All Sounds page">
+                        / <span id="totalPagesAllSounds">{{ all_sounds_data.get('total_pages', 1) }}</span>
+                    </span>
+                    <button id="nextPageAllSounds" {% if all_sounds_data.get('total_pages', 1) <=1 %}disabled{% endif
+                        %}>Next</button>
+                </div>
+            </section>
+        </div>

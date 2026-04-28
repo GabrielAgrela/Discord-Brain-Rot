@@ -1117,7 +1117,8 @@ def test_soundboard_admin_upload_inbox_uses_envelope_when_no_review_needed(web_c
     html = response.get_data(as_text=True)
     assert 'id="webUploadInboxOpenButton" class="auth-inbox-button"' in html
     assert 'aria-label="Open moderation inbox" title="Moderation inbox">&#9993;&#65038;</button>' in html
-    assert "webUploadInboxOpenButton.textContent = hasUnreviewed ? '!' : '\\u2709\\uFE0E';" in html
+    script = client.get("/static/soundboard.js").get_data(as_text=True)
+    assert "webUploadInboxOpenButton.textContent = hasUnreviewed ? '!' : '\\u2709\\uFE0E';" in script
 
 
 def test_soundboard_page_renders_shared_redesign(web_client):
@@ -1156,7 +1157,8 @@ def test_soundboard_page_renders_shared_redesign(web_client):
     assert "All Sounds" in html
     assert 'class="placeholder-row"' not in html
     assert 'class="filter-group placeholder-filter"' not in html
-    assert "initialSoundboardData" in html
+    assert 'id="soundboard-config"' in html
+    assert "/static/soundboard.js" in html
     assert "alpha" in html
     assert "gamma" in html
     assert "alice" in html
@@ -1164,7 +1166,8 @@ def test_soundboard_page_renders_shared_redesign(web_client):
     assert 'id="pageInputActions"' in html
     assert 'id="pageInputFavorites"' in html
     assert 'id="pageInputAllSounds"' in html
-    assert "setupPageInput" in html
+    script = client.get("/static/soundboard.js").get_data(as_text=True)
+    assert "setupPageInput" in script
     assert 'class="web-controls"' not in html
     assert 'id="controlRoomMuteButton"' in html
     assert 'id="controlRoomTtsButton"' in html
@@ -1173,9 +1176,9 @@ def test_soundboard_page_renders_shared_redesign(web_client):
     assert 'id="webTtsProfile"' in html
     assert 'id="webTtsMessage"' in html
     assert 'id="webTtsEnhanceButton"' in html
-    assert "let ttsEnhancedMessageValue = ''" in html
-    assert "This message has already been enhanced. Edit it to enhance again." in html
-    assert "webTtsMessage.addEventListener('input'" in html
+    assert "let ttsEnhancedMessageValue = ''" in script
+    assert "This message has already been enhanced. Edit it to enhance again." in script
+    assert "webTtsMessage.addEventListener('input'" in script
     assert 'id="soundRowContextMenu"' in html
     assert 'id="soundRowRenameOption"' in html
     assert 'id="soundRowAddToListOption"' in html
@@ -1187,21 +1190,21 @@ def test_soundboard_page_renders_shared_redesign(web_client):
     assert 'id="soundListDialog"' in html
     assert 'id="soundSimilarDialog"' in html
     assert 'id="soundEventDialog"' in html
-    assert "play_similar_sound" in html
+    assert "play_similar_sound" in script
     assert 'id="soundEventTypeSelect"' in html
     assert 'id="soundEventUserInput"' in html
     assert "Add Event" in html
-    assert "Remove Event" in html
-    assert "Existing events:" in html
+    assert "Remove Event" in script
+    assert "Existing events:" in script
     assert 'class="favorite-button' not in html
     assert 'class="sound-options-row" data-sound-id="1" data-favorite="true" data-slap="false"' in html
     assert 'data-favorite="false"' in html
-    assert "Unmake slap" in html
-    assert "tablesGrid.addEventListener('contextmenu', openSoundRowContextMenu)" in html
-    assert "openSoundRowContextMenuForRow(row, clientX, clientY, event)" in html
-    assert "tablesGrid.addEventListener('touchstart', handleSoundOptionsPressStart" in html
-    assert "/api/tts/enhance" in html
-    assert "window.prompt" not in html
+    assert "Unmake slap" in script
+    assert "tablesGrid.addEventListener('contextmenu', openSoundRowContextMenu)" in script
+    assert "openSoundRowContextMenuForRow(row, clientX, clientY, event)" in script
+    assert "tablesGrid.addEventListener('touchstart', handleSoundOptionsPressStart" in script
+    assert "/api/tts/enhance" in script
+    assert "window.prompt" not in script
     assert 'id="controlRoomUpdated"' not in html
     assert '<span>Guild</span>' not in html
     assert 'id="webUploadOpenButton"' in html
@@ -1220,9 +1223,9 @@ def test_soundboard_page_renders_shared_redesign(web_client):
     assert 'class="web-upload-queue"' in html
     assert 'id="webUploadQueueList"' in html
     assert 'id="webUploadQueueCount"' in html
-    assert "addUploadQueueItem" in html
-    assert "renderUploadQueue" in html
-    assert "webUploadForm.reset();" in html
+    assert "addUploadQueueItem" in script
+    assert "renderUploadQueue" in script
+    assert "webUploadForm.reset();" in script
     assert 'id="actions-action-filter"' in html
     assert 'aria-label="Filter recent actions by action"' in html
     assert 'aria-label="Filter recent actions by user"' in html
@@ -1239,27 +1242,27 @@ def test_soundboard_page_renders_shared_redesign(web_client):
     assert 'for="favorites-user-filter">User</label>' not in html
     assert 'for="searchAllSounds">Search</label>' not in html
     assert 'for="all_sounds-list-filter">List</label>' not in html
-    assert "hideLabel: true" in html
-    assert "allLabel: 'All Users'" in html
-    assert "allLabel: 'All Lists'" in html
+    assert "hideLabel: true" in script
+    assert "allLabel: 'All Users'" in script
+    assert "allLabel: 'All Lists'" in script
     assert 'class="theme-toggle"' in html
     assert "brainrot-theme" in html
-    assert "applyThemePreference" in html
+    assert "applyThemePreference" in script
     assert "🌙" in html
-    assert "☀️" in html
-    assert "hasRenderableFilterPayload(endpoint, data.filters)" in html
-    assert "setEndpointLoading" in html
-    assert "aria-busy" in html
-    assert "touchend" in html
-    assert "handlePlayButtonActivation" in html
-    assert "handleWebControlActivation" in html
-    assert "requestInFlight" in html
-    assert "isButtonCooldown" not in html
-    assert "fetchFunction();" not in html
-    assert "pendingInitialRenderEndpoints" in html
-    assert "🔒" in html
+    assert "☀️" in script
+    assert "hasRenderableFilterPayload(endpoint, data.filters)" in script
+    assert "setEndpointLoading" in script
+    assert "aria-busy" in script
+    assert "touchend" in script
+    assert "handlePlayButtonActivation" in script
+    assert "handleWebControlActivation" in script
+    assert "requestInFlight" in script
+    assert "isButtonCooldown" not in script
+    assert "fetchFunction();" not in script
+    assert "pendingInitialRenderEndpoints" in script
+    assert "🔒" in script
     assert "Login with Discord to use bot controls" in html
-    assert "Play sound" in html
+    assert "Play sound" in script
     assert "Queue sound" not in html
     assert "controlRoomQueue" not in html
     assert ">Queue<" not in html
@@ -1278,10 +1281,12 @@ def test_analytics_page_renders_shared_redesign(web_client):
     assert response.status_code == 200
     html = response.get_data(as_text=True)
     assert "/static/web.css" in html
+    assert "/static/analytics.js" in html
     assert 'class="theme-toggle"' in html
     assert "brainrot-theme" in html
     assert "🌙" in html
-    assert "☀️" in html
+    script = client.get("/static/analytics.js").get_data(as_text=True)
+    assert "☀️" in script
     assert '<span class="nav-icon" aria-hidden="true">🎛️</span>' in html
     assert '<span class="nav-text">Soundboard</span>' in html
     assert '<span class="nav-icon" aria-hidden="true">📊</span>' in html
@@ -1290,7 +1295,7 @@ def test_analytics_page_renders_shared_redesign(web_client):
     assert '<span class="nav-text">Upload</span>' not in html
     assert 'class="time-selector"' in html
     assert "Activity Heatmap" in html
-    assert "🔒" in html
+    assert "🔒" in script
     assert "Watch the server’s taste evolve in real time." not in html
 
 
@@ -2074,7 +2079,7 @@ def test_soundboard_initial_render_skips_unused_filter_payloads(web_client):
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    assert "const initialSoundboardData =" in html
+    assert 'id="soundboard-config"' in html
     assert 'id="favorites-user-filter"' in html
     assert '"sound":["alpha.mp3","beta.mp3"]' not in html
     assert '"date":' not in html

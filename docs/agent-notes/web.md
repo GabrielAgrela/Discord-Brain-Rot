@@ -4,7 +4,9 @@ Read this when changing `WebPage.py`, `bot/web/`, web repositories/services, tem
 
 ## Architecture
 
-- The Flask app is layered like the bot: `WebPage.py` is only the entrypoint, `bot/web/app.py` builds the app, `bot/web/routes.py` owns route/controller wiring, and SQL/business logic belongs in `bot/repositories/web_*.py` and `bot/services/web_*.py`.
+- The Flask app is layered like the bot: `WebPage.py` is only the entrypoint, `bot/web/app.py` builds the app, `bot/web/routes.py` registers focused route modules (`*_routes.py`), and shared route helpers live in `bot/web/route_helpers.py`.
+- Flask-owned page templates and static assets live under `bot/web/templates/` and `bot/web/static/`. Root `templates/sound_card.html` and `templates/rl_store_card.html` are image-card templates used by `ImageGeneratorService`, not Flask page templates.
+- SQL/business logic belongs in `bot/repositories/web_*.py` and `bot/services/web_*.py`; route modules should stay thin request/response adapters.
 - Web routes should read SQLite through `app.config["DATABASE_PATH"]`, not a hardcoded `Data/database.db`, so tests and alternate DB configs use the same paths.
 - The web control-room panel is backed by `web_bot_status`, written by `BackgroundService.web_control_room_status_loop()` every 2 seconds. Flask reads it through `WebControlRoomRepository`/`WebControlRoomService`; do not inspect live Discord objects from Flask.
 
@@ -57,7 +59,7 @@ Read this when changing `WebPage.py`, `bot/web/`, web repositories/services, tem
 - Do not reintroduce click-time auto-shrink for `per_page`; it caused pagination to shrink after Next/Prev clicks.
 - Keep control areas vertically balanced across cards. If one card has `.library-controls`, match its reserved bottom spacing to the normal search/filter footprint.
 - Rounded-bottom padding (`--table-bottom-inset`) is visual only. Clip detection should compare the last row against the actual `.table-container` bottom.
-- First paint must stay layout-stable. Render the first page of actions/favorites/all-sounds and visible action filters server-side in `index.html`, seed JS cache from `initial_soundboard_data`, and do not immediately refetch/repaint on load.
+- First paint must stay layout-stable. Render the first page of actions/favorites/all-sounds and visible action filters server-side in `bot/web/templates/index.html`, seed JS cache through the `soundboard-config` JSON script tag, and do not immediately refetch/repaint on load.
 - Refresh calls use `include_filters=0` for actions, favorites, and all-sounds. Treat missing/empty `filters` as "no filter update", not as an empty option list.
 - Do not poll all-sounds with full filters; production sound/date filter metadata is hundreds of KB.
 - Favorites user filtering is based on the latest per-user `favorite_sound`/`unfavorite_sound` action for each sound. Keep page, count, and filter queries in sync.

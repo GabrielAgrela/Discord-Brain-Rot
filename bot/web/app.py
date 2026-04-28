@@ -24,10 +24,11 @@ def create_app() -> Flask:
     Returns:
         Configured Flask application.
     """
-    project_root = Path(__file__).resolve().parents[2]
+    web_root = Path(__file__).resolve().parent
+    project_root = web_root.parents[1]
     app = Flask(
         __name__,
-        template_folder=str(project_root / "templates"),
+        template_folder=str(web_root / "templates"),
     )
     app.config.setdefault("DATABASE_PATH", "Data/database.db")
     app.config.setdefault("SOUNDS_DIR", str(project_root / "Sounds"))

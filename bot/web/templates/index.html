@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Brain Rot Web Soundboard</title>
+    <link rel="icon"
+        href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ctext y='50' x='50%25' text-anchor='middle' font-size='48'%3E%F0%9F%A7%A0%3C/text%3E%3C/svg%3E">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Space+Grotesk:wght@400;500;700&display=optional"
+        rel="stylesheet">
+    <script>
+        try {
+            if (localStorage.getItem('brainrot-theme') === 'dark') {
+                document.documentElement.classList.add('theme-dark');
+            }
+        } catch (error) {
+            document.documentElement.classList.remove('theme-dark');
+        }
+    </script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='web.css') }}">
+</head>
+
+<body class="page page-soundboard">
+    {% if discord_user %}
+    {% set display_name = discord_user.global_name or discord_user.username %}
+    {% set avatar_url = 'https://cdn.discordapp.com/avatars/' ~ discord_user.id ~ '/' ~ discord_user.avatar ~
+    '.png?size=128' if discord_user.avatar else 'https://cdn.discordapp.com/embed/avatars/0.png' %}
+    {% endif %}
+    {% set soundboard_data = initial_soundboard_data or {} %}
+    {% set actions_data = soundboard_data.get('actions', {'items': [], 'total_pages': 1, 'filters': {}}) %}
+    {% set favorites_data = soundboard_data.get('favorites', {'items': [], 'total_pages': 1, 'filters': {}}) %}
+    {% set all_sounds_data = soundboard_data.get('all_sounds', {'items': [], 'total_pages': 1, 'filters': {}}) %}
+    {% set guild_options = guild_options or [] %}
+    {% set action_labels = {
+    'play_random_sound': 'Random',
+    'play_request': 'Played',
+    'replay_sound': 'Replayed',
+    'play_from_list': 'List',
+    'play_similar_sound': 'Similar',
+    'play_sound_periodically': 'Auto',
+    'play_random_favorite_sound': 'Favorite',
+    'play_slap': 'Slap',
+    'mute_30_minutes': 'Muted',
+    'unmute': 'Unmuted',
+    'favorite_sound': 'Favorited',
+    'unfavorite_sound': 'Unfavorited',
+    'join': 'Joined',
+    'leave': 'Left'
+    } %}
+    {% macro action_badge_class(action_value) -%}
+    {%- if 'play' in action_value -%}play
+    {%- elif 'favorite' in action_value -%}favorite
+    {%- elif action_value == 'join' -%}join
+    {%- elif action_value == 'leave' -%}leave
+    {%- elif action_value.startswith('keyword') -%}keyword
+    {%- elif 'startup' in action_value or 'periodic' in action_value or 'scheduler' in action_value or 'auto' in
+    action_value -%}system
+    {%- else -%}other
+    {%- endif -%}
+    {%- endmacro %}
+
+
+    {% include "soundboard/nav.html" %}
+
+    <main class="page-shell">
+        {% include "soundboard/control_room.html" %}
+        {% include "soundboard/tables.html" %}
+    </main>
+
+    {% include "soundboard/dialogs.html" %}
+
+    <script id="soundboard-config" type="application/json">{{ {
+        "discord_user": discord_user,
+        "web_user_is_admin": web_user_is_admin,
+        "discord_login_url": discord_login_url,
+        "initial_soundboard_data": initial_soundboard_data,
+        "initial_guild_options": guild_options,
+        "initial_selected_guild_id": selected_guild_id,
+        "tts_profile_options": tts_profile_options,
+    }|tojson }}</script>
+    <script src="{{ url_for('static', filename='soundboard.js') }}" defer></script>
+
+</body>
+
+</html>
