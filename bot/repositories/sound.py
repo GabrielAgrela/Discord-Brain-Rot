@@ -93,6 +93,7 @@ class SoundRepository(BaseRepository[Sound]):
         *,
         new_filename: str | None = None,
         favorite: int | None = None,
+        slap: int | None = None,
         guild_id: Optional[int | str] = None,
     ) -> bool:
         """
@@ -102,6 +103,7 @@ class SoundRepository(BaseRepository[Sound]):
             sound_id: Sound database ID.
             new_filename: Optional replacement Filename value.
             favorite: Optional favorite flag.
+            slap: Optional slap flag.
             guild_id: Optional selected guild scope.
 
         Returns:
@@ -115,6 +117,9 @@ class SoundRepository(BaseRepository[Sound]):
         if favorite is not None:
             updates.append("favorite = ?")
             params.append(favorite)
+        if slap is not None:
+            updates.append("slap = ?")
+            params.append(slap)
         if not updates:
             return False
 

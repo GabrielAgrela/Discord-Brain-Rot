@@ -1493,6 +1493,16 @@ html.theme-dark .web-upload-secondary {
     align-items: center;
 }
 
+.sound-rename-inline {
+    grid-template-columns: minmax(0, max-content) auto;
+    justify-content: start;
+}
+
+.sound-rename-inline .web-upload-input {
+    width: auto;
+    max-width: min(26rem, calc(100vw - 8rem));
+}
+
 .sound-options-actions {
     display: flex;
     justify-content: flex-start;
@@ -1628,6 +1638,11 @@ html.theme-dark .sound-options-similar-button {
 @media (max-width: 560px) {
     .sound-options-inline {
         grid-template-columns: 1fr;
+    }
+
+    .sound-rename-inline .web-upload-input {
+        width: 100% !important;
+        max-width: 100%;
     }
 
     .sound-options-inline .web-upload-secondary {
@@ -2157,6 +2172,8 @@ html.theme-dark .table-container {
     position: fixed;
     z-index: 1200;
     display: none;
+    width: max-content;
+    max-width: min(18rem, calc(100vw - 1rem));
     min-width: 8.25rem;
     padding: 0.35rem;
     border: 1px solid rgba(23, 18, 13, 0.14);
@@ -2166,7 +2183,7 @@ html.theme-dark .table-container {
 }
 
 .sound-row-context-menu.open {
-    display: block;
+    display: inline-grid;
 }
 
 .sound-row-context-menu button {
@@ -2182,6 +2199,7 @@ html.theme-dark .table-container {
     font-size: 0.88rem;
     font-weight: 800;
     text-align: left;
+    white-space: nowrap;
 }
 
 .sound-row-context-menu button:hover,

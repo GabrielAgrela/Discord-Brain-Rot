@@ -93,7 +93,8 @@ async def check_playback_queue():
                 request_username,
                 request_user_id,
                 request_type,
-                control_action
+                control_action,
+                play_action
             FROM playback_queue
             WHERE played_at IS NULL
             ORDER BY requested_at ASC

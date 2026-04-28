@@ -108,7 +108,11 @@ class WebContentService:
         should_censor = self._should_censor(current_user)
         return {
             "items": [
-                self._format_sound_item(row, should_censor=should_censor)
+                {
+                    **self._format_sound_item(row, should_censor=should_censor),
+                    "favorite": bool(row.get("favorite")),
+                    "slap": bool(row.get("slap")),
+                }
                 for row in rows
             ],
             "total_pages": self._calculate_total_pages(total_count, query.per_page),
@@ -141,6 +145,8 @@ class WebContentService:
             "items": [
                 {
                     **self._format_sound_item(row, should_censor=should_censor),
+                    "favorite": bool(row.get("favorite")),
+                    "slap": bool(row.get("slap")),
                     "timestamp": row["timestamp"],
                 }
                 for row in rows

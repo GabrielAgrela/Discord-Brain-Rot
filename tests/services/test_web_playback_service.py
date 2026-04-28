@@ -223,6 +223,38 @@ def test_web_playback_service_queues_authenticated_user_request(tmp_path):
     assert row == (359077662742020107, "test.mp3", "Discord User", "123")
 
 
+def test_web_playback_service_queues_similar_play_action(tmp_path):
+    db_path = tmp_path / "web.db"
+    _create_web_tables(db_path)
+
+    service = WebPlaybackService(
+        sound_repository=Mock(),
+        db_path=str(db_path),
+        env={"DEFAULT_GUILD_ID": "359077662742020107"},
+    )
+
+    row_id = service.queue_request(
+        {"sound_filename": "test.mp3", "play_action": "play_similar_sound"},
+        DiscordWebUser(
+            id="123",
+            username="discord-user",
+            global_name="Discord User",
+            avatar="",
+        ),
+    )
+
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute(
+            "SELECT request_type, play_action FROM playback_queue WHERE id = ?",
+            (row_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert row == ("play_sound", "play_similar_sound")
+
+
 def test_queue_control_request_adds_control_columns_and_queues_action(tmp_path):
     db_path = tmp_path / "web.db"
     _create_web_tables(db_path)
@@ -465,6 +497,66 @@ async def test_process_playback_queue_request_marks_played_and_starts_audio(tmp_
     assert conn.execute(
         "SELECT played_at FROM playback_queue WHERE id = 1"
     ).fetchone()[0] is not None
+
+
+@pytest.mark.asyncio
+async def test_process_playback_queue_request_logs_similar_play_action(tmp_path):
+    conn = sqlite3.connect(":memory:")
+    conn.execute(
+        """
+        CREATE TABLE playback_queue (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            sound_filename TEXT NOT NULL,
+            request_username TEXT,
+            request_user_id TEXT,
+            play_action TEXT,
+            requested_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            played_at DATETIME
+        )
+        """
+    )
+    conn.execute(
+        "INSERT INTO playback_queue (id, guild_id, sound_filename, request_username, request_user_id, play_action) VALUES (?, ?, ?, ?, ?, ?)",
+        (1, 42, "similar.mp3", "Discord User", "123", "play_similar_sound"),
+    )
+    conn.commit()
+
+    class FakeDatabase:
+        def __init__(self, connection):
+            self.conn = connection
+            self.cursor = connection.cursor()
+
+        def get_sound(self, sound_filename, guild_id=None):
+            return (321, sound_filename, sound_filename)
+
+    guild = SimpleNamespace(id=42)
+    channel = object()
+    behavior = SimpleNamespace(
+        get_largest_voice_channel=Mock(return_value=channel),
+        play_audio=AsyncMock(),
+    )
+    action_logger = Mock()
+    sound_file = tmp_path / "similar.mp3"
+    sound_file.write_bytes(b"fake mp3 data")
+
+    result = await process_playback_queue_request(
+        (1, 42, "similar.mp3", "Discord User", "123", "play_sound", None, "play_similar_sound"),
+        bot=SimpleNamespace(get_guild=lambda guild_id: guild if guild_id == 42 else None),
+        behavior=behavior,
+        db=FakeDatabase(conn),
+        sound_folder=tmp_path,
+        action_logger_factory=lambda: action_logger,
+        logger=lambda _: None,
+    )
+
+    assert result is True
+    action_logger.insert.assert_called_once_with(
+        "Discord User",
+        "play_similar_sound",
+        321,
+        guild_id=42,
+    )
 
 
 @pytest.mark.asyncio

@@ -55,8 +55,8 @@ class WebTtsEnhancerService:
         normalized_text = str(text or "").strip()
         if not normalized_text:
             raise ValueError("Missing TTS message")
-        if len(normalized_text) > 500:
-            raise ValueError("TTS message must be 500 characters or fewer")
+        if len(normalized_text) > 20000:
+            raise ValueError("TTS message must be 20000 characters or fewer")
         if not self.api_key.strip():
             raise ValueError("OPENROUTER_API_KEY is not configured")
 
@@ -78,8 +78,8 @@ class WebTtsEnhancerService:
         enhanced_text = self._extract_response_text(payload)
         if not enhanced_text:
             raise RuntimeError("OpenRouter returned an empty enhancement")
-        if len(enhanced_text) > 500:
-            enhanced_text = enhanced_text[:500].rstrip()
+        if len(enhanced_text) > 5000:
+            enhanced_text = enhanced_text[:5000].rstrip()
         return enhanced_text
 
     def _build_request_payload(self, text: str) -> dict[str, Any]:

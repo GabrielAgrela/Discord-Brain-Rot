@@ -27,7 +27,8 @@
 <body class="page page-soundboard">
     {% if discord_user %}
     {% set display_name = discord_user.global_name or discord_user.username %}
-    {% set avatar_url = 'https://cdn.discordapp.com/avatars/' ~ discord_user.id ~ '/' ~ discord_user.avatar ~ '.png?size=128' if discord_user.avatar else 'https://cdn.discordapp.com/embed/avatars/0.png' %}
+    {% set avatar_url = 'https://cdn.discordapp.com/avatars/' ~ discord_user.id ~ '/' ~ discord_user.avatar ~
+    '.png?size=128' if discord_user.avatar else 'https://cdn.discordapp.com/embed/avatars/0.png' %}
     {% endif %}
     {% set soundboard_data = initial_soundboard_data or {} %}
     {% set actions_data = soundboard_data.get('actions', {'items': [], 'total_pages': 1, 'filters': {}}) %}
@@ -35,37 +36,39 @@
     {% set all_sounds_data = soundboard_data.get('all_sounds', {'items': [], 'total_pages': 1, 'filters': {}}) %}
     {% set guild_options = guild_options or [] %}
     {% set action_labels = {
-        'play_random_sound': 'Random',
-        'play_request': 'Played',
-        'replay_sound': 'Replayed',
-        'play_from_list': 'List',
-        'play_similar_sound': 'Similar',
-        'play_sound_periodically': 'Auto',
-        'play_random_favorite_sound': 'Favorite',
-        'play_slap': 'Slap',
-        'mute_30_minutes': 'Muted',
-        'unmute': 'Unmuted',
-        'favorite_sound': 'Favorited',
-        'unfavorite_sound': 'Unfavorited',
-        'join': 'Joined',
-        'leave': 'Left'
+    'play_random_sound': 'Random',
+    'play_request': 'Played',
+    'replay_sound': 'Replayed',
+    'play_from_list': 'List',
+    'play_similar_sound': 'Similar',
+    'play_sound_periodically': 'Auto',
+    'play_random_favorite_sound': 'Favorite',
+    'play_slap': 'Slap',
+    'mute_30_minutes': 'Muted',
+    'unmute': 'Unmuted',
+    'favorite_sound': 'Favorited',
+    'unfavorite_sound': 'Unfavorited',
+    'join': 'Joined',
+    'leave': 'Left'
     } %}
     {% macro action_badge_class(action_value) -%}
-        {%- if 'play' in action_value -%}play
-        {%- elif 'favorite' in action_value -%}favorite
-        {%- elif action_value == 'join' -%}join
-        {%- elif action_value == 'leave' -%}leave
-        {%- elif action_value.startswith('keyword') -%}keyword
-        {%- elif 'startup' in action_value or 'periodic' in action_value or 'scheduler' in action_value or 'auto' in action_value -%}system
-        {%- else -%}other
-        {%- endif -%}
+    {%- if 'play' in action_value -%}play
+    {%- elif 'favorite' in action_value -%}favorite
+    {%- elif action_value == 'join' -%}join
+    {%- elif action_value == 'leave' -%}leave
+    {%- elif action_value.startswith('keyword') -%}keyword
+    {%- elif 'startup' in action_value or 'periodic' in action_value or 'scheduler' in action_value or 'auto' in
+    action_value -%}system
+    {%- else -%}other
+    {%- endif -%}
     {%- endmacro %}
 
     <nav class="nav">
         <div class="nav-container">
             <a href="/" class="nav-brand">
                 <span class="nav-brand-mark" aria-hidden="true">
-                    <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ctext y='50' x='50%25' text-anchor='middle' font-size='48'%3E%F0%9F%A7%A0%3C/text%3E%3C/svg%3E" alt="">
+                    <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ctext y='50' x='50%25' text-anchor='middle' font-size='48'%3E%F0%9F%A7%A0%3C/text%3E%3C/svg%3E"
+                        alt="">
                 </span>
                 <span class="nav-brand-copy">
                     <span class="nav-brand-label">Discord Brain Rot</span>
@@ -77,10 +80,7 @@
                 <label class="guild-selector-shell" for="guildSelector">
                     <select id="guildSelector" class="guild-selector" aria-label="Select guild">
                         {% for guild in guild_options %}
-                        <option
-                            value="{{ guild.get('guild_id') }}"
-                            {% if guild.get('is_default') %}selected{% endif %}
-                        >
+                        <option value="{{ guild.get('guild_id') }}" {% if guild.get('is_default') %}selected{% endif %}>
                             {{ guild.get('name') }}
                         </option>
                         {% endfor %}
@@ -113,15 +113,11 @@
                                 d="M20.317 4.369A19.791 19.791 0 0 0 15.885 3a13.92 13.92 0 0 0-.602 1.245a18.27 18.27 0 0 0-5.566 0A13.92 13.92 0 0 0 9.115 3a19.736 19.736 0 0 0-4.433 1.369C1.88 8.58 1.12 12.686 1.5 16.734A19.92 19.92 0 0 0 6.818 19a14.99 14.99 0 0 0 1.143-1.873a12.93 12.93 0 0 1-1.798-.868c.151-.113.3-.231.441-.353c3.467 1.628 7.235 1.628 10.661 0c.143.122.29.24.441.353c-.576.336-1.178.627-1.798.868A14.7 14.7 0 0 0 17.051 19a19.856 19.856 0 0 0 5.449-2.266c.456-4.694-.778-8.762-2.183-12.365ZM8.261 14.228c-1.037 0-1.887-.949-1.887-2.114c0-1.165.831-2.114 1.887-2.114c1.055 0 1.905.949 1.887 2.114c0 1.165-.832 2.114-1.887 2.114Zm7.478 0c-1.037 0-1.887-.949-1.887-2.114c0-1.165.831-2.114 1.887-2.114s1.905.949 1.887 2.114c0 1.165-.831 2.114-1.887 2.114Z" />
                         </svg>
                     </span>
-                    <span class="auth-button-label">Login <span class="auth-button-label-extended">with Discord</span></span>
+                    <span class="auth-button-label">Login <span class="auth-button-label-extended">with
+                            Discord</span></span>
                 </a>
                 {% endif %}
-                <button
-                    type="button"
-                    class="theme-toggle"
-                    aria-label="Enable dark mode"
-                    aria-pressed="false"
-                >
+                <button type="button" class="theme-toggle" aria-label="Enable dark mode" aria-pressed="false">
                     🌙
                 </button>
             </div>
@@ -143,65 +139,47 @@
             <div class="control-room-metrics">
                 <div class="control-room-metric">
                     <span class="control-room-metric-label">Voice</span>
-                    <button
-                        type="button"
-                        id="controlRoomVoiceButton"
-                        class="control-room-voice-button"
-                        aria-haspopup="dialog"
-                        aria-label="Show voice channel members"
-                        disabled
-                    >
+                    <button type="button" id="controlRoomVoiceButton" class="control-room-voice-button"
+                        aria-haspopup="dialog" aria-label="Show voice channel members" disabled>
                         <strong id="controlRoomVoice">Disconnected</strong>
                     </button>
                 </div>
                 <div class="control-room-metric control-room-metric--action">
                     <span class="control-room-metric-label">Upload</span>
-                    <button
-                        type="button"
-                        id="webUploadOpenButton"
+                    <button type="button" id="webUploadOpenButton"
                         class="control-room-metric-button web-upload-control-button{% if not discord_user %} login-required{% endif %}"
                         title="{% if discord_user %}Upload sound{% else %}Login with Discord to upload sounds{% endif %}"
-                        aria-label="{% if discord_user %}Upload sound{% else %}Login with Discord to upload sounds{% endif %}"
-                    >
+                        aria-label="{% if discord_user %}Upload sound{% else %}Login with Discord to upload sounds{% endif %}">
                         {% if discord_user %}⬆️{% else %}🔒{% endif %}
                     </button>
                 </div>
                 <div class="control-room-metric control-room-metric--action">
                     <span class="control-room-metric-label">Mute</span>
-                    <button
-                        type="button"
-                        id="controlRoomMuteButton"
+                    <button type="button" id="controlRoomMuteButton"
                         class="control-room-metric-button web-control-button{% if not discord_user %} login-required{% endif %}"
                         data-control-action="toggle_mute"
                         title="{% if discord_user %}Toggle mute{% else %}Login with Discord to use bot controls{% endif %}"
-                        aria-label="{% if discord_user %}Toggle mute{% else %}Login with Discord to use bot controls{% endif %}"
-                    >
+                        aria-label="{% if discord_user %}Toggle mute{% else %}Login with Discord to use bot controls{% endif %}">
                         {% if discord_user %}🔇{% else %}🔒{% endif %}
                     </button>
                 </div>
                 <div class="control-room-metric control-room-metric--action">
                     <span class="control-room-metric-label">TTS</span>
-                    <button
-                        type="button"
-                        id="controlRoomTtsButton"
+                    <button type="button" id="controlRoomTtsButton"
                         class="control-room-metric-button web-control-button{% if not discord_user %} login-required{% endif %}"
                         data-control-action="tts"
                         title="{% if discord_user %}Text to speech{% else %}Login with Discord to use bot controls{% endif %}"
-                        aria-label="{% if discord_user %}Text to speech{% else %}Login with Discord to use bot controls{% endif %}"
-                    >
+                        aria-label="{% if discord_user %}Text to speech{% else %}Login with Discord to use bot controls{% endif %}">
                         {% if discord_user %}💬{% else %}🔒{% endif %}
                     </button>
                 </div>
                 <div class="control-room-metric control-room-metric--action">
                     <span class="control-room-metric-label">Slap</span>
-                    <button
-                        type="button"
-                        id="controlRoomSlapButton"
+                    <button type="button" id="controlRoomSlapButton"
                         class="control-room-metric-button web-control-button{% if not discord_user %} login-required{% endif %}"
                         data-control-action="slap"
                         title="{% if discord_user %}Slap{% else %}Login with Discord to use bot controls{% endif %}"
-                        aria-label="{% if discord_user %}Slap{% else %}Login with Discord to use bot controls{% endif %}"
-                    >
+                        aria-label="{% if discord_user %}Slap{% else %}Login with Discord to use bot controls{% endif %}">
                         {% if discord_user %}👋{% else %}🔒{% endif %}
                     </button>
                 </div>
@@ -259,16 +237,16 @@
                             {% set username_value = item.get('display_username') or '' %}
                             <tr>
                                 <td>
-                                    <span
-                                        class="action-badge {{ action_badge_class(action_value) }}"
-                                        title="{{ action_value }}"
-                                    >
+                                    <span class="action-badge {{ action_badge_class(action_value) }}"
+                                        title="{{ action_value }}">
                                         {{ action_labels.get(action_value, action_value) }}
                                     </span>
                                 </td>
-                                <td class="filename" title="{{ filename_value }}">{{ filename_value|replace('.mp3', '') }}</td>
+                                <td class="filename" title="{{ filename_value }}">{{ filename_value|replace('.mp3', '')
+                                    }}</td>
                                 <td>{{ username_value }}</td>
-                                <td title="{{ item.get('timestamp') or '' }}">{{ item.get('display_time_ago') or item.get('timestamp') or '' }}</td>
+                                <td title="{{ item.get('timestamp') or '' }}">{{ item.get('display_time_ago') or
+                                    item.get('timestamp') or '' }}</td>
                             </tr>
                             {% endfor %}
                         </tbody>
@@ -279,18 +257,13 @@
                     <button id="prevPageActions" disabled>Prev</button>
                     <span class="pagination-info">
                         Page
-                        <input
-                            id="pageInputActions"
-                            class="pagination-page-input"
-                            type="number"
-                            min="1"
-                            max="{{ actions_data.get('total_pages', 1) or 1 }}"
-                            value="1"
-                            aria-label="Recent Actions page"
-                        >
+                        <input id="pageInputActions" class="pagination-page-input" type="number" min="1"
+                            max="{{ actions_data.get('total_pages', 1) or 1 }}" value="1"
+                            aria-label="Recent Actions page">
                         / <span id="totalPagesActions">{{ actions_data.get('total_pages', 1) }}</span>
                     </span>
-                    <button id="nextPageActions" {% if actions_data.get('total_pages', 1) <= 1 %}disabled{% endif %}>Next</button>
+                    <button id="nextPageActions" {% if actions_data.get('total_pages', 1) <=1 %}disabled{% endif
+                        %}>Next</button>
                 </div>
             </section>
 
@@ -304,24 +277,14 @@
 
                 <div class="library-controls">
                     <div class="filter-group">
-                        <input
-                            type="text"
-                            id="searchFavorites"
-                            class="search-input"
-                            placeholder="Search favorites..."
-                            aria-label="Search favorites"
-                        >
+                        <input type="text" id="searchFavorites" class="search-input" placeholder="Search favorites..."
+                            aria-label="Search favorites">
                     </div>
                     <div id="filtersFavorites" class="library-filter-slot">
                         <div class="filter-group">
                             <div class="select-shell">
-                                <select
-                                    id="favorites-user-filter"
-                                    class="filter-select"
-                                    data-endpoint="favorites"
-                                    data-filter-key="user"
-                                    aria-label="Filter favorites by user"
-                                >
+                                <select id="favorites-user-filter" class="filter-select" data-endpoint="favorites"
+                                    data-filter-key="user" aria-label="Filter favorites by user">
                                     <option value="" selected>All Users</option>
                                     {% for option in favorites_data.get('filters', {}).get('user', []) %}
                                     <option value="{{ option }}">{{ option }}</option>
@@ -343,7 +306,7 @@
                         <tbody id="favoritesTableBody">
                             {% for item in favorites_data.get('items', []) %}
                             {% set filename_value = item.get('display_filename') or '' %}
-                            <tr class="sound-options-row" data-sound-id="{{ item.get('sound_id') }}">
+                            <tr class="sound-options-row" data-sound-id="{{ item.get('sound_id') }}" data-favorite="true" data-slap="{{ 'true' if item.get('slap') else 'false' }}">
                                 <td class="filename" title="{{ filename_value }}">
                                     <span class="sound-title">{{ filename_value|replace('.mp3', '') }}</span>
                                     {% if item.get('display_duration') %}
@@ -368,18 +331,12 @@
                     <button id="prevPageFavorites" disabled>Prev</button>
                     <span class="pagination-info">
                         Page
-                        <input
-                            id="pageInputFavorites"
-                            class="pagination-page-input"
-                            type="number"
-                            min="1"
-                            max="{{ favorites_data.get('total_pages', 1) or 1 }}"
-                            value="1"
-                            aria-label="Favorites page"
-                        >
+                        <input id="pageInputFavorites" class="pagination-page-input" type="number" min="1"
+                            max="{{ favorites_data.get('total_pages', 1) or 1 }}" value="1" aria-label="Favorites page">
                         / <span id="totalPagesFavorites">{{ favorites_data.get('total_pages', 1) }}</span>
                     </span>
-                    <button id="nextPageFavorites" {% if favorites_data.get('total_pages', 1) <= 1 %}disabled{% endif %}>Next</button>
+                    <button id="nextPageFavorites" {% if favorites_data.get('total_pages', 1) <=1 %}disabled{% endif
+                        %}>Next</button>
                 </div>
             </section>
 
@@ -393,24 +350,14 @@
 
                 <div class="library-controls">
                     <div class="filter-group">
-                        <input
-                            type="text"
-                            id="searchAllSounds"
-                            class="search-input"
-                            placeholder="Search the full library..."
-                            aria-label="Search all sounds"
-                        >
+                        <input type="text" id="searchAllSounds" class="search-input"
+                            placeholder="Search the full library..." aria-label="Search all sounds">
                     </div>
                     <div id="filtersAllSounds" class="library-filter-slot">
                         <div class="filter-group">
                             <div class="select-shell">
-                                <select
-                                    id="all_sounds-list-filter"
-                                    class="filter-select"
-                                    data-endpoint="all_sounds"
-                                    data-filter-key="list"
-                                    aria-label="Filter all sounds by list"
-                                >
+                                <select id="all_sounds-list-filter" class="filter-select" data-endpoint="all_sounds"
+                                    data-filter-key="list" aria-label="Filter all sounds by list">
                                     <option value="" selected>All Lists</option>
                                     {% for option in all_sounds_data.get('filters', {}).get('list', []) %}
                                     <option value="{{ option.get('value') }}">{{ option.get('label') }}</option>
@@ -433,14 +380,15 @@
                         <tbody id="allSoundsTableBody">
                             {% for item in all_sounds_data.get('items', []) %}
                             {% set filename_value = item.get('display_filename') or '' %}
-                            <tr class="sound-options-row" data-sound-id="{{ item.get('sound_id') }}">
+                            <tr class="sound-options-row" data-sound-id="{{ item.get('sound_id') }}" data-favorite="{{ 'true' if item.get('favorite') else 'false' }}" data-slap="{{ 'true' if item.get('slap') else 'false' }}">
                                 <td class="filename" title="{{ filename_value }}">
                                     <span class="sound-title">{{ filename_value|replace('.mp3', '') }}</span>
                                     {% if item.get('display_duration') %}
                                     <span class="sound-duration">{{ item.get('display_duration') }}</span>
                                     {% endif %}
                                 </td>
-                                <td title="{{ item.get('timestamp') or '' }}">{{ item.get('display_time_ago') or item.get('timestamp') or '' }}</td>
+                                <td title="{{ item.get('timestamp') or '' }}">{{ item.get('display_time_ago') or
+                                    item.get('timestamp') or '' }}</td>
                                 <td>
                                     <button class="play-button{% if not discord_user %} login-required{% endif %}"
                                         data-sound-id="{{ item.get('sound_id') }}"
@@ -459,25 +407,25 @@
                     <button id="prevPageAllSounds" disabled>Prev</button>
                     <span class="pagination-info">
                         Page
-                        <input
-                            id="pageInputAllSounds"
-                            class="pagination-page-input"
-                            type="number"
-                            min="1"
-                            max="{{ all_sounds_data.get('total_pages', 1) or 1 }}"
-                            value="1"
-                            aria-label="All Sounds page"
-                        >
+                        <input id="pageInputAllSounds" class="pagination-page-input" type="number" min="1"
+                            max="{{ all_sounds_data.get('total_pages', 1) or 1 }}" value="1"
+                            aria-label="All Sounds page">
                         / <span id="totalPagesAllSounds">{{ all_sounds_data.get('total_pages', 1) }}</span>
                     </span>
-                    <button id="nextPageAllSounds" {% if all_sounds_data.get('total_pages', 1) <= 1 %}disabled{% endif %}>Next</button>
+                    <button id="nextPageAllSounds" {% if all_sounds_data.get('total_pages', 1) <=1 %}disabled{% endif
+                        %}>Next</button>
                 </div>
             </section>
         </div>
     </main>
 
     <div id="soundRowContextMenu" class="sound-row-context-menu" role="menu" aria-hidden="true">
-        <button type="button" id="soundRowEditOption" role="menuitem">Edit</button>
+        <button type="button" id="soundRowRenameOption" role="menuitem">Rename</button>
+        <button type="button" id="soundRowAddToListOption" role="menuitem">Add to list</button>
+        <button type="button" id="soundRowSimilarOption" role="menuitem">Play similar</button>
+        <button type="button" id="soundRowEventOption" role="menuitem">Set event</button>
+        <button type="button" id="soundRowFavoriteOption" role="menuitem">Favorite</button>
+        <button type="button" id="soundRowSlapOption" role="menuitem">Make slap</button>
     </div>
 
     <dialog id="webUploadDialog" class="web-upload-dialog" aria-labelledby="webUploadTitle">
@@ -494,32 +442,22 @@
                         {% endif %}
                     </p>
                 </div>
-                <button type="button" id="webUploadCloseButton" class="web-upload-close" aria-label="Close upload modal">×</button>
+                <button type="button" id="webUploadCloseButton" class="web-upload-close"
+                    aria-label="Close upload modal">×</button>
             </div>
 
             <label class="web-upload-field">
                 <span>URL (MP3/TikTok/YouTube/Instagram)</span>
-                <textarea
-                    id="webUploadUrl"
-                    name="source_url"
-                    class="web-upload-input web-upload-textarea"
-                    maxlength="500"
-                    placeholder="Paste URL here, OR upload a file below"
-                    {% if not discord_user %}disabled{% endif %}
-                ></textarea>
+                <textarea id="webUploadUrl" name="source_url" class="web-upload-input web-upload-textarea"
+                    maxlength="500" placeholder="Paste URL here, OR upload a file below" {% if not discord_user
+                    %}disabled{% endif %}></textarea>
             </label>
 
             <label class="web-upload-field">
                 <span>Upload MP3 File (or use URL above)</span>
                 <span class="web-upload-file-picker">
-                    <input
-                        id="webUploadFile"
-                        name="sound_file"
-                        class="web-upload-file-input"
-                        type="file"
-                        accept="audio/mpeg,.mp3"
-                        {% if not discord_user %}disabled{% endif %}
-                    >
+                    <input id="webUploadFile" name="sound_file" class="web-upload-file-input" type="file"
+                        accept="audio/mpeg,.mp3" {% if not discord_user %}disabled{% endif %}>
                     <span class="web-upload-file-button" aria-hidden="true">Choose MP3</span>
                     <span id="webUploadFileName" class="web-upload-file-name">No file selected</span>
                 </span>
@@ -527,39 +465,22 @@
 
             <label class="web-upload-field">
                 <span>Custom Name (Optional)</span>
-                <input
-                    id="webUploadName"
-                    name="custom_name"
-                    class="web-upload-input"
-                    type="text"
-                    maxlength="50"
-                    placeholder="Enter a custom name for the sound"
-                    {% if not discord_user %}disabled{% endif %}
-                >
+                <input id="webUploadName" name="custom_name" class="web-upload-input" type="text" maxlength="50"
+                    placeholder="Enter a custom name for the sound" {% if not discord_user %}disabled{% endif %}>
             </label>
 
             <label class="web-upload-field">
                 <span>Time Limit (Optional, for videos)</span>
-                <input
-                    id="webUploadTimeLimit"
-                    name="time_limit"
-                    class="web-upload-input"
-                    type="number"
-                    min="1"
-                    max="999"
-                    placeholder="Enter time limit in seconds (e.g., 30)"
-                    {% if not discord_user %}disabled{% endif %}
-                >
+                <input id="webUploadTimeLimit" name="time_limit" class="web-upload-input" type="number" min="1"
+                    max="999" placeholder="Enter time limit in seconds (e.g., 30)" {% if not discord_user %}disabled{%
+                    endif %}>
             </label>
 
             <div class="web-upload-modal-actions">
                 <button type="button" class="web-upload-secondary" id="webUploadCancelButton">Cancel</button>
-                <button
-                    id="webUploadSubmit"
-                    class="web-upload-submit{% if not discord_user %} login-required{% endif %}"
-                    type="submit"
-                    {% if not discord_user %}disabled{% endif %}
-                >
+                <button id="webUploadSubmit"
+                    class="web-upload-submit{% if not discord_user %} login-required{% endif %}" type="submit" {% if not
+                    discord_user %}disabled{% endif %}>
                     {% if discord_user %}Upload{% else %}🔒{% endif %}
                 </button>
             </div>
@@ -604,19 +525,16 @@
                         {% endif %}
                     </p>
                 </div>
-                <button type="button" id="webTtsCloseButton" class="web-upload-close" aria-label="Close TTS modal">×</button>
+                <button type="button" id="webTtsCloseButton" class="web-upload-close"
+                    aria-label="Close TTS modal">×</button>
             </div>
 
             <label class="web-upload-field">
                 <span>Voice / Language</span>
-                <select
-                    id="webTtsProfile"
-                    name="profile"
-                    class="web-upload-input"
-                    {% if not discord_user %}disabled{% endif %}
-                >
+                <select id="webTtsProfile" name="profile" class="web-upload-input" {% if not discord_user %}disabled{%
+                    endif %}>
                     {% for option in tts_profile_options %}
-                    <option value="{{ option.value }}" {% if option.value == 'ventura' %}selected{% endif %}>
+                    <option value="{{ option.value }}" {% if option.value=='ventura' %}selected{% endif %}>
                         {{ option.label }}
                     </option>
                     {% endfor %}
@@ -626,23 +544,15 @@
             <label class="web-upload-field">
                 <span>Message</span>
                 <div class="web-tts-message-box">
-                    <textarea
-                        id="webTtsMessage"
-                        name="message"
-                        class="web-upload-input web-upload-textarea web-tts-message"
-                        maxlength="500"
-                        placeholder="Type what the bot should say"
-                        required
-                        {% if not discord_user %}disabled{% endif %}
-                    ></textarea>
-                    <button
-                        type="button"
-                        id="webTtsEnhanceButton"
+                    <textarea id="webTtsMessage" name="message"
+                        class="web-upload-input web-upload-textarea web-tts-message" maxlength="20000"
+                        placeholder="Type what the bot should say" required {% if not discord_user %}disabled{% endif
+                        %}></textarea>
+                    <button type="button" id="webTtsEnhanceButton"
                         class="web-tts-enhance-button{% if not discord_user %} login-required{% endif %}"
                         title="{% if discord_user %}Enhance for ElevenLabs tags{% else %}Login with Discord to enhance TTS{% endif %}"
                         aria-label="{% if discord_user %}Enhance for ElevenLabs tags{% else %}Login with Discord to enhance TTS{% endif %}"
-                        {% if not discord_user %}disabled{% endif %}
-                    >
+                        {% if not discord_user %}disabled{% endif %}>
                         Enhance
                     </button>
                 </div>
@@ -650,71 +560,127 @@
 
             <div class="web-upload-modal-actions">
                 <button type="button" class="web-upload-secondary" id="webTtsCancelButton">Cancel</button>
-                <button
-                    id="webTtsSubmit"
-                    class="web-upload-submit{% if not discord_user %} login-required{% endif %}"
-                    type="submit"
-                    {% if not discord_user %}disabled{% endif %}
-                >
+                <button id="webTtsSubmit" class="web-upload-submit{% if not discord_user %} login-required{% endif %}"
+                    type="submit" {% if not discord_user %}disabled{% endif %}>
                     {% if discord_user %}Send{% else %}🔒{% endif %}
                 </button>
             </div>
         </form>
     </dialog>
 
-    <dialog id="soundOptionsDialog" class="web-upload-dialog sound-options-dialog" aria-labelledby="soundOptionsTitle">
-        <form id="soundOptionsForm" class="web-upload-modal-form">
+    <dialog id="soundRenameDialog" class="web-upload-dialog sound-options-dialog" aria-labelledby="soundRenameTitle">
+        <form id="soundRenameForm" class="web-upload-modal-form">
             <div class="web-upload-modal-header">
                 <div>
-                    <p class="card-kicker">Sound Options</p>
-                    <h2 id="soundOptionsTitle" class="web-upload-title">Edit sound</h2>
-                    <p id="soundOptionsStatus" class="web-upload-status">
-                        Rename, favorite, find similar sounds, or add this sound to a list.
+                    <p class="card-kicker">Rename Sound</p>
+                    <h2 id="soundRenameTitle" class="web-upload-title">Rename sound</h2>
+                    <p id="soundRenameStatus" class="web-upload-status">
+                        Choose a new name for this sound.
                     </p>
                 </div>
-                <button type="button" id="soundOptionsCloseButton" class="web-upload-close" aria-label="Close sound options modal">×</button>
+                <button type="button" id="soundRenameCloseButton" class="web-upload-close"
+                    aria-label="Close rename modal">×</button>
             </div>
 
             <label class="web-upload-field">
-                <span>Rename Sound</span>
-                <div class="sound-options-inline">
-                    <input
-                        id="soundOptionsRenameInput"
-                        class="web-upload-input"
-                        type="text"
-                        maxlength="80"
-                        placeholder="New sound name"
-                    >
-                    <button type="button" id="soundOptionsRenameButton" class="web-upload-secondary">Rename</button>
+                <span>Sound Name</span>
+                <div class="sound-options-inline sound-rename-inline">
+                    <input id="soundRenameInput" class="web-upload-input" type="text" maxlength="80"
+                        placeholder="New sound name">
+                    <button type="button" id="soundRenameButton" class="web-upload-secondary">Rename</button>
                 </div>
             </label>
+        </form>
+    </dialog>
 
-            <div class="sound-options-actions">
-                <button type="button" id="soundOptionsFavoriteButton" class="web-upload-submit">Favorite</button>
+    <dialog id="soundListDialog" class="web-upload-dialog sound-options-dialog" aria-labelledby="soundListTitle">
+        <form id="soundListForm" class="web-upload-modal-form">
+            <div class="web-upload-modal-header">
+                <div>
+                    <p class="card-kicker">Add to List</p>
+                    <h2 id="soundListTitle" class="web-upload-title">Add to list</h2>
+                    <p id="soundListStatus" class="web-upload-status">
+                        Choose which list should include this sound.
+                    </p>
+                </div>
+                <button type="button" id="soundListCloseButton" class="web-upload-close"
+                    aria-label="Close add to list modal">×</button>
             </div>
 
             <label class="web-upload-field">
-                <span>Add to List</span>
+                <span>List</span>
                 <div class="sound-options-inline">
-                    <select id="soundOptionsListSelect" class="web-upload-input">
+                    <select id="soundListSelect" class="web-upload-input">
                         <option value="">Choose a list</option>
                     </select>
-                    <button type="button" id="soundOptionsAddToListButton" class="web-upload-secondary">Add</button>
+                    <button type="button" id="soundAddToListButton" class="web-upload-secondary">Add</button>
                 </div>
             </label>
+        </form>
+    </dialog>
 
-            <section class="sound-options-section">
-                <div class="web-upload-queue-header">
-                    <span>Similar Sounds</span>
-                    <span>Matches</span>
+    <dialog id="soundSimilarDialog" class="web-upload-dialog sound-options-dialog" aria-labelledby="soundSimilarTitle">
+        <form id="soundSimilarForm" class="web-upload-modal-form">
+            <div class="web-upload-modal-header">
+                <div>
+                    <p class="card-kicker">Similar Sounds</p>
+                    <h2 id="soundSimilarTitle" class="web-upload-title">Play similar</h2>
+                    <p id="soundSimilarStatus" class="web-upload-status">
+                        Choose a related sound to send to voice chat.
+                    </p>
                 </div>
-                <div id="soundOptionsSimilarList" class="sound-options-similar-list">
-                    <p class="web-upload-empty">Open edit options to load similar sounds.</p>
+                <button type="button" id="soundSimilarCloseButton" class="web-upload-close"
+                    aria-label="Close similar sounds modal">×</button>
+            </div>
+
+            <section class="sound-options-section" aria-label="Similar sounds">
+                <div id="soundSimilarList" class="sound-options-similar-list">
+                    <p class="web-upload-empty">Loading similar sounds...</p>
                 </div>
-                <div id="soundOptionsSimilarScrollbar" class="sound-options-similar-scrollbar" aria-hidden="true">
-                    <div id="soundOptionsSimilarScrollbarThumb" class="sound-options-similar-scrollbar-thumb"></div>
+                <div class="sound-options-similar-scrollbar" aria-hidden="true">
+                    <span class="sound-options-similar-scrollbar-thumb"></span>
                 </div>
             </section>
+        </form>
+    </dialog>
+
+    <dialog id="soundEventDialog" class="web-upload-dialog sound-options-dialog" aria-labelledby="soundEventTitle">
+        <form id="soundEventForm" class="web-upload-modal-form">
+            <div class="web-upload-modal-header">
+                <div>
+                    <p class="card-kicker">Set Event</p>
+                    <h2 id="soundEventTitle" class="web-upload-title">Set event</h2>
+                    <p id="soundEventStatus" class="web-upload-status">
+                        Add or remove this sound for a user's join or leave event.
+                    </p>
+                </div>
+                <button type="button" id="soundEventCloseButton" class="web-upload-close"
+                    aria-label="Close event modal">×</button>
+            </div>
+
+            <label class="web-upload-field">
+                <span>Event</span>
+                <select id="soundEventTypeSelect" class="web-upload-input">
+                    <option value="join" selected>Join Event</option>
+                    <option value="leave">Leave Event</option>
+                </select>
+            </label>
+
+            <label class="web-upload-field">
+                <span>User</span>
+                <select id="soundEventUserInput" class="web-upload-input">
+                    {% if discord_user %}
+                    <option value="{{ discord_user.username }}" selected>{{ discord_user.username }}</option>
+                    {% else %}
+                    <option value="">No users available</option>
+                    {% endif %}
+                </select>
+            </label>
+
+            <div class="web-upload-modal-actions">
+                <button type="button" class="web-upload-secondary" id="soundEventCancelButton">Cancel</button>
+                <button type="submit" id="soundEventSubmitButton" class="web-upload-submit">Add Event</button>
+            </div>
         </form>
     </dialog>
 
@@ -733,7 +699,8 @@
                                 d="M20.317 4.369A19.791 19.791 0 0 0 15.885 3a13.92 13.92 0 0 0-.602 1.245a18.27 18.27 0 0 0-5.566 0A13.92 13.92 0 0 0 9.115 3a19.736 19.736 0 0 0-4.433 1.369C1.88 8.58 1.12 12.686 1.5 16.734A19.92 19.92 0 0 0 6.818 19a14.99 14.99 0 0 0 1.143-1.873a12.93 12.93 0 0 1-1.798-.868c.151-.113.3-.231.441-.353c3.467 1.628 7.235 1.628 10.661 0c.143.122.29.24.441.353c-.576.336-1.178.627-1.798.868A14.7 14.7 0 0 0 17.051 19a19.856 19.856 0 0 0 5.449-2.266c.456-4.694-.778-8.762-2.183-12.365ZM8.261 14.228c-1.037 0-1.887-.949-1.887-2.114c0-1.165.831-2.114 1.887-2.114c1.055 0 1.905.949 1.887 2.114c0 1.165-.832 2.114-1.887 2.114Zm7.478 0c-1.037 0-1.887-.949-1.887-2.114c0-1.165.831-2.114 1.887-2.114s1.905.949 1.887 2.114c0 1.165-.831 2.114-1.887 2.114Z" />
                         </svg>
                     </span>
-                    <span class="auth-button-label">Login <span class="auth-button-label-extended">with Discord</span></span>
+                    <span class="auth-button-label">Login <span class="auth-button-label-extended">with
+                            Discord</span></span>
                 </a>
             </div>
         </div>
@@ -746,20 +713,21 @@
                     <p class="card-kicker">Voice Channel</p>
                     <h2 id="voiceMembersModalTitle" class="voice-members-title">Disconnected</h2>
                 </div>
-                <button id="voiceMembersModalClose" type="button" class="voice-members-close" aria-label="Close voice members modal">×</button>
+                <button id="voiceMembersModalClose" type="button" class="voice-members-close"
+                    aria-label="Close voice members modal">×</button>
             </div>
             <div id="voiceMembersList" class="voice-members-list"></div>
         </div>
     </div>
 
     <script>
-        const discordUser = {{ discord_user|tojson }};
-        const webUserIsAdmin = {{ web_user_is_admin|tojson }};
-        const discordLoginUrl = {{ discord_login_url|tojson }};
-        const initialSoundboardData = {{ initial_soundboard_data|tojson }};
-        const initialGuildOptions = {{ guild_options|tojson }};
-        const initialSelectedGuildId = {{ selected_guild_id|tojson }};
-        const ttsProfileOptions = {{ tts_profile_options|tojson }};
+        const discordUser = {{ discord_user| tojson }};
+        const webUserIsAdmin = {{ web_user_is_admin| tojson }};
+        const discordLoginUrl = {{ discord_login_url| tojson }};
+        const initialSoundboardData = {{ initial_soundboard_data| tojson }};
+        const initialGuildOptions = {{ guild_options| tojson }};
+        const initialSelectedGuildId = {{ selected_guild_id| tojson }};
+        const ttsProfileOptions = {{ tts_profile_options| tojson }};
         const themeToggle = document.querySelector('.theme-toggle');
         const guildSelector = document.getElementById('guildSelector');
         let webControlMuteIsMuted = false;
@@ -923,6 +891,14 @@
             button.textContent = discordUser ? '▶' : '🔒';
             button.title = discordUser ? 'Play sound' : 'Login with Discord to play';
             button.setAttribute('aria-label', button.title);
+        }
+
+        function buildSoundPlayButton(item) {
+            const playButton = document.createElement('button');
+            playButton.className = 'play-button';
+            playButton.setAttribute('data-sound-id', item.sound_id);
+            applyPlayButtonState(playButton);
+            return playButton;
         }
 
         function applyWebControlButtonState(button) {
@@ -1613,6 +1589,8 @@
                                 } else if (endpoint === 'favorites') {
                                     row.className = 'sound-options-row';
                                     row.dataset.soundId = item.sound_id;
+                                    row.dataset.favorite = 'true';
+                                    row.dataset.slap = item.slap ? 'true' : 'false';
 
                                     const filenameCell = document.createElement('td');
                                     filenameCell.className = 'filename';
@@ -1621,15 +1599,13 @@
                                     row.appendChild(filenameCell);
 
                                     const playCell = document.createElement('td');
-                                    const playButton = document.createElement('button');
-                                    playButton.className = 'play-button';
-                                    playButton.setAttribute('data-sound-id', item.sound_id);
-                                    applyPlayButtonState(playButton);
-                                    playCell.appendChild(playButton);
+                                    playCell.appendChild(buildSoundPlayButton(item));
                                     row.appendChild(playCell);
                                 } else if (endpoint === 'all_sounds') {
                                     row.className = 'sound-options-row';
                                     row.dataset.soundId = item.sound_id;
+                                    row.dataset.favorite = item.favorite ? 'true' : 'false';
+                                    row.dataset.slap = item.slap ? 'true' : 'false';
 
                                     const filenameCell = document.createElement('td');
                                     filenameCell.className = 'filename';
@@ -1643,11 +1619,7 @@
                                     row.appendChild(dateCell);
 
                                     const playCell = document.createElement('td');
-                                    const playButton = document.createElement('button');
-                                    playButton.className = 'play-button';
-                                    playButton.setAttribute('data-sound-id', item.sound_id);
-                                    applyPlayButtonState(playButton);
-                                    playCell.appendChild(playButton);
+                                    playCell.appendChild(buildSoundPlayButton(item));
                                     row.appendChild(playCell);
                                 }
 
@@ -1875,8 +1847,11 @@
         let lastWebControlTouchHandledAt = 0;
         let soundOptionsLongPressTimer = null;
         let suppressNextPlayActivationUntil = 0;
-        let activeSoundOptionsId = null;
+        let activeSoundId = null;
+        let activeSoundEvents = [];
         let contextMenuSoundId = null;
+        let contextMenuSoundIsFavorite = false;
+        let contextMenuSoundIsSlap = false;
 
         function handleSoundOptionsPressStart(event) {
             if (event.pointerType === 'mouse' || event.button === 2) {
@@ -1897,7 +1872,7 @@
                     openLoginModal();
                     return;
                 }
-                openSoundOptionsModal(soundId);
+                openSoundRenameModal(soundId);
             }, 650);
         }
 
@@ -1908,135 +1883,331 @@
             }
         }
 
-        function setSoundOptionsStatus(message, kind = '') {
-            if (!soundOptionsStatus) return;
-            soundOptionsStatus.textContent = message;
-            soundOptionsStatus.dataset.kind = kind;
+        function setSoundRenameStatus(message, kind = '') {
+            if (!soundRenameStatus) return;
+            soundRenameStatus.textContent = message;
+            soundRenameStatus.dataset.kind = kind;
         }
 
-        function openSoundOptionsDialog() {
-            if (typeof soundOptionsDialog?.showModal === 'function') {
-                soundOptionsDialog.showModal();
-            } else if (soundOptionsDialog) {
-                soundOptionsDialog.setAttribute('open', '');
-            }
-            requestAnimationFrame(updateSoundOptionsSimilarScrollbar);
+        function resizeSoundRenameInput() {
+            if (!soundRenameInput) return;
+            const textLength = (soundRenameInput.value || soundRenameInput.placeholder || '').length;
+            const widthCh = Math.max(14, Math.min(textLength + 2, 36));
+            soundRenameInput.style.width = `${widthCh}ch`;
         }
 
-        function closeSoundOptionsModal() {
-            if (typeof soundOptionsDialog?.close === 'function') {
-                soundOptionsDialog.close();
-            } else if (soundOptionsDialog) {
-                soundOptionsDialog.removeAttribute('open');
+        function setSoundListStatus(message, kind = '') {
+            if (!soundListStatus) return;
+            soundListStatus.textContent = message;
+            soundListStatus.dataset.kind = kind;
+        }
+
+        function setSoundSimilarStatus(message, kind = '') {
+            if (!soundSimilarStatus) return;
+            soundSimilarStatus.textContent = message;
+            soundSimilarStatus.dataset.kind = kind;
+        }
+
+        function setSoundEventStatus(message, kind = '') {
+            if (!soundEventStatus) return;
+            soundEventStatus.textContent = message;
+            soundEventStatus.dataset.kind = kind;
+        }
+
+        function normalizeSoundEventTarget(value) {
+            return String(value || '').trim().toLocaleLowerCase();
+        }
+
+        function getSelectedSoundEvent() {
+            return {
+                event: soundEventTypeSelect?.value || 'join',
+                targetUser: soundEventUserInput?.value || discordUser?.username || ''
+            };
+        }
+
+        function findMatchingSoundEvent() {
+            const selected = getSelectedSoundEvent();
+            const normalizedTarget = normalizeSoundEventTarget(selected.targetUser);
+            return activeSoundEvents.some(eventAssignment => (
+                eventAssignment.event === selected.event
+                && normalizeSoundEventTarget(eventAssignment.target_user) === normalizedTarget
+            ));
+        }
+
+        function formatSoundEventSummary() {
+            if (!activeSoundEvents.length) {
+                return 'No events are currently set for this sound.';
+            }
+
+            return `Existing events: ${activeSoundEvents
+                .map(eventAssignment => `${eventAssignment.target_user} ${eventAssignment.event}`)
+                .join(', ')}.`;
+        }
+
+        function updateSoundEventActionState() {
+            if (!soundEventSubmitButton) return;
+            const hasExistingEvent = findMatchingSoundEvent();
+            soundEventSubmitButton.textContent = hasExistingEvent ? 'Remove Event' : 'Add Event';
+            soundEventSubmitButton.dataset.action = hasExistingEvent ? 'remove' : 'add';
+        }
+
+        function renderSoundEventUsers(users) {
+            if (!soundEventUserInput) return;
+            const selectedValue = soundEventUserInput.value || discordUser?.username || '';
+            soundEventUserInput.innerHTML = '';
+
+            const userOptions = Array.isArray(users) ? users : [];
+            if (!userOptions.length) {
+                const option = document.createElement('option');
+                option.value = '';
+                option.textContent = 'No users available';
+                soundEventUserInput.appendChild(option);
+                return;
+            }
+
+            userOptions.forEach(userOption => {
+                const value = userOption.value || userOption.label || '';
+                if (!value) return;
+                const option = document.createElement('option');
+                option.value = value;
+                option.textContent = userOption.label || value;
+                option.selected = value === selectedValue;
+                soundEventUserInput.appendChild(option);
+            });
+
+            if (selectedValue && soundEventUserInput.value !== selectedValue) {
+                const option = document.createElement('option');
+                option.value = selectedValue;
+                option.textContent = selectedValue;
+                option.selected = true;
+                soundEventUserInput.insertBefore(option, soundEventUserInput.firstChild);
             }
         }
 
-        async function openSoundOptionsModal(soundId) {
-            activeSoundOptionsId = soundId;
-            setSoundOptionsStatus('Loading sound options...', 'loading');
-            if (soundOptionsRenameInput) {
-                soundOptionsRenameInput.value = '';
+        function openDialog(dialog) {
+            if (typeof dialog?.showModal === 'function') {
+                dialog.showModal();
+            } else if (dialog) {
+                dialog.setAttribute('open', '');
             }
-            renderSoundOptionsLists([]);
-            renderSimilarSounds([]);
-            openSoundOptionsDialog();
+        }
 
+        function closeDialog(dialog) {
+            if (typeof dialog?.close === 'function') {
+                dialog.close();
+            } else if (dialog) {
+                dialog.removeAttribute('open');
+            }
+        }
+
+        function closeSoundRenameModal() {
+            closeDialog(soundRenameDialog);
+        }
+
+        function closeSoundListModal() {
+            closeDialog(soundListDialog);
+        }
+
+        function closeSoundSimilarModal() {
+            closeDialog(soundSimilarDialog);
+        }
+
+        function closeSoundEventModal() {
+            closeDialog(soundEventDialog);
+            activeSoundEvents = [];
+        }
+
+        async function loadSoundOptions(soundId) {
             const params = new URLSearchParams();
             appendGuildParam(params);
-            try {
-                const response = await fetch(`/api/sounds/${encodeURIComponent(soundId)}/options?${params.toString()}`);
-                const payload = await response.json().catch(() => ({}));
-                if (!response.ok) {
-                    if (response.status === 401 && payload.login_url) {
-                        window.location.href = payload.login_url;
-                        return;
-                    }
-                    setSoundOptionsStatus(payload.error || 'Could not load sound options.', 'error');
-                    return;
+            const response = await fetch(`/api/sounds/${encodeURIComponent(soundId)}/options?${params.toString()}`);
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                if (response.status === 401 && payload.login_url) {
+                    window.location.href = payload.login_url;
+                    return null;
                 }
+                throw new Error(payload.error || 'Could not load sound options.');
+            }
+            return payload;
+        }
+
+        async function openSoundRenameModal(soundId) {
+            activeSoundId = soundId;
+            setSoundRenameStatus('Loading sound...', 'loading');
+            if (soundRenameInput) {
+                soundRenameInput.value = '';
+                resizeSoundRenameInput();
+            }
+            openDialog(soundRenameDialog);
+
+            try {
+                const payload = await loadSoundOptions(soundId);
+                if (!payload) return;
                 const filename = payload.sound?.display_filename || '';
                 const bareName = filename.replace(/\.mp3$/i, '');
-                if (soundOptionsTitle) {
-                    soundOptionsTitle.textContent = bareName || 'Sound Options';
+                if (soundRenameTitle) {
+                    soundRenameTitle.textContent = bareName || 'Rename sound';
                 }
-                if (soundOptionsRenameInput) {
-                    soundOptionsRenameInput.value = bareName;
+                if (soundRenameInput) {
+                    soundRenameInput.value = bareName;
+                    resizeSoundRenameInput();
+                    soundRenameInput.focus();
+                    soundRenameInput.select();
                 }
-                if (soundOptionsFavoriteButton) {
-                    soundOptionsFavoriteButton.textContent = payload.sound?.favorite ? 'Unfavorite' : 'Favorite';
-                }
-                renderSoundOptionsLists(payload.lists || []);
-                renderSimilarSounds(payload.similar_sounds || []);
-                setSoundOptionsStatus('Choose an action for this sound.');
+                setSoundRenameStatus('Choose a new name for this sound.');
             } catch (error) {
-                console.error('Sound options failed:', error);
-                setSoundOptionsStatus('Network error while loading options.', 'error');
+                console.error('Sound rename options failed:', error);
+                setSoundRenameStatus(error.message || 'Network error while loading sound.', 'error');
             }
         }
 
-        function renderSoundOptionsLists(lists) {
-            if (!soundOptionsListSelect) return;
-            soundOptionsListSelect.innerHTML = '';
+        async function openSoundListModal(soundId) {
+            activeSoundId = soundId;
+            setSoundListStatus('Loading lists...', 'loading');
+            renderSoundLists([]);
+            openDialog(soundListDialog);
+
+            try {
+                const payload = await loadSoundOptions(soundId);
+                if (!payload) return;
+                const filename = payload.sound?.display_filename || '';
+                const bareName = filename.replace(/\.mp3$/i, '');
+                if (soundListTitle) {
+                    soundListTitle.textContent = bareName || 'Add to list';
+                }
+                renderSoundLists(payload.lists || []);
+                setSoundListStatus('Choose which list should include this sound.');
+            } catch (error) {
+                console.error('Sound list options failed:', error);
+                setSoundListStatus(error.message || 'Network error while loading lists.', 'error');
+            }
+        }
+
+        function renderSoundLists(lists) {
+            if (!soundListSelect) return;
+            soundListSelect.innerHTML = '';
             const placeholder = document.createElement('option');
             placeholder.value = '';
             placeholder.textContent = lists.length ? 'Choose a list' : 'No lists available';
-            soundOptionsListSelect.appendChild(placeholder);
+            soundListSelect.appendChild(placeholder);
             lists.forEach(list => {
                 const option = document.createElement('option');
                 option.value = list.id;
                 option.textContent = list.label || list.name;
-                soundOptionsListSelect.appendChild(option);
+                soundListSelect.appendChild(option);
             });
         }
 
+        async function openSoundSimilarModal(soundId) {
+            activeSoundId = soundId;
+            setSoundSimilarStatus('Loading similar sounds...', 'loading');
+            renderSimilarSounds([]);
+            openDialog(soundSimilarDialog);
+
+            try {
+                const payload = await loadSoundOptions(soundId);
+                if (!payload) return;
+                const filename = payload.sound?.display_filename || '';
+                const bareName = filename.replace(/\.mp3$/i, '');
+                if (soundSimilarTitle) {
+                    soundSimilarTitle.textContent = bareName || 'Play similar';
+                }
+                renderSimilarSounds(payload.similar_sounds || []);
+                setSoundSimilarStatus(
+                    payload.similar_sounds?.length
+                        ? 'Choose a related sound to send to voice chat.'
+                        : 'No similar sounds found.'
+                );
+            } catch (error) {
+                console.error('Similar sound options failed:', error);
+                renderSimilarSounds([]);
+                setSoundSimilarStatus(error.message || 'Network error while loading similar sounds.', 'error');
+            }
+        }
+
         function renderSimilarSounds(similarSounds) {
-            if (!soundOptionsSimilarList) return;
+            if (!soundSimilarList) return;
             if (!similarSounds.length) {
-                soundOptionsSimilarList.innerHTML = '<p class="web-upload-empty">No similar sounds found.</p>';
-                requestAnimationFrame(updateSoundOptionsSimilarScrollbar);
+                soundSimilarList.innerHTML = '<p class="web-upload-empty">No similar sounds available.</p>';
+                updateSimilarScrollbar();
                 return;
             }
-            const fragment = document.createDocumentFragment();
-            similarSounds.forEach(sound => {
+
+            const buttons = similarSounds.map(sound => {
                 const button = document.createElement('button');
                 button.type = 'button';
                 button.className = 'sound-options-similar-button';
                 button.dataset.soundId = sound.sound_id;
 
-                const label = document.createElement('span');
-                label.className = 'sound-options-similar-name';
-                label.textContent = (sound.display_filename || '').replace(/\.mp3$/i, '');
+                const name = document.createElement('span');
+                name.className = 'sound-options-similar-name';
+                name.textContent = String(sound.display_filename || '').replace(/\.mp3$/i, '');
+
                 const score = document.createElement('span');
                 score.className = 'sound-options-score';
-                score.textContent = `${sound.score || 0}%`;
-                button.appendChild(label);
-                button.appendChild(score);
-                fragment.appendChild(button);
+                score.textContent = `${Number(sound.score || 0)}%`;
+
+                button.append(name, score);
+                return button;
             });
-            soundOptionsSimilarList.replaceChildren(fragment);
-            requestAnimationFrame(updateSoundOptionsSimilarScrollbar);
+            soundSimilarList.replaceChildren(...buttons);
+            updateSimilarScrollbar();
         }
 
-        function updateSoundOptionsSimilarScrollbar() {
-            if (!soundOptionsSimilarList || !soundOptionsSimilarScrollbar || !soundOptionsSimilarScrollbarThumb) return;
-            const section = soundOptionsSimilarList.closest('.sound-options-section');
-            const scrollable = soundOptionsSimilarList.scrollHeight > soundOptionsSimilarList.clientHeight + 1;
-            if (section) {
-                section.classList.toggle('has-scrollbar', scrollable);
-            }
-            if (!scrollable) {
-                soundOptionsSimilarScrollbarThumb.style.height = '0px';
-                soundOptionsSimilarScrollbarThumb.style.transform = 'translateY(0px)';
+        function updateSimilarScrollbar() {
+            const section = soundSimilarList?.closest('.sound-options-section');
+            const scrollbar = section?.querySelector('.sound-options-similar-scrollbar');
+            const thumb = scrollbar?.querySelector('.sound-options-similar-scrollbar-thumb');
+            if (!soundSimilarList || !section || !thumb) return;
+
+            const scrollHeight = soundSimilarList.scrollHeight;
+            const clientHeight = soundSimilarList.clientHeight;
+            const canScroll = scrollHeight > clientHeight + 1;
+            section.classList.toggle('has-scrollbar', canScroll);
+            if (!canScroll) {
+                thumb.style.height = '0px';
+                thumb.style.transform = 'translateY(0)';
                 return;
             }
 
-            const trackHeight = soundOptionsSimilarScrollbar.clientHeight;
-            const thumbHeight = Math.max(30, Math.round((soundOptionsSimilarList.clientHeight / soundOptionsSimilarList.scrollHeight) * trackHeight));
-            const maxThumbTop = Math.max(0, trackHeight - thumbHeight);
-            const maxScrollTop = Math.max(1, soundOptionsSimilarList.scrollHeight - soundOptionsSimilarList.clientHeight);
-            const thumbTop = Math.round((soundOptionsSimilarList.scrollTop / maxScrollTop) * maxThumbTop);
-            soundOptionsSimilarScrollbarThumb.style.height = `${thumbHeight}px`;
-            soundOptionsSimilarScrollbarThumb.style.transform = `translateY(${thumbTop}px)`;
+            const ratio = clientHeight / scrollHeight;
+            const thumbHeight = Math.max(30, clientHeight * ratio);
+            const maxThumbOffset = clientHeight - thumbHeight;
+            const maxScrollTop = scrollHeight - clientHeight;
+            const offset = maxScrollTop > 0
+                ? (soundSimilarList.scrollTop / maxScrollTop) * maxThumbOffset
+                : 0;
+            thumb.style.height = `${thumbHeight}px`;
+            thumb.style.transform = `translateY(${offset}px)`;
+        }
+
+        async function openSoundEventModal(soundId) {
+            activeSoundId = soundId;
+            setSoundEventStatus('Loading sound...', 'loading');
+            openDialog(soundEventDialog);
+
+            try {
+                const payload = await loadSoundOptions(soundId);
+                if (!payload) return;
+                const filename = payload.sound?.display_filename || '';
+                const bareName = filename.replace(/\.mp3$/i, '');
+                if (soundEventTitle) {
+                    soundEventTitle.textContent = bareName || 'Set event';
+                }
+                if (soundEventTypeSelect) {
+                    soundEventTypeSelect.value = 'join';
+                }
+                renderSoundEventUsers(payload.users || []);
+                activeSoundEvents = Array.isArray(payload.events) ? payload.events : [];
+                updateSoundEventActionState();
+                setSoundEventStatus(formatSoundEventSummary());
+            } catch (error) {
+                console.error('Sound event options failed:', error);
+                activeSoundEvents = [];
+                updateSoundEventActionState();
+                setSoundEventStatus(error.message || 'Network error while loading sound.', 'error');
+            }
         }
 
         async function postSoundOption(path, body = {}) {
@@ -2059,75 +2230,104 @@
             return payload;
         }
 
-        async function handleSoundOptionsRename() {
-            if (!activeSoundOptionsId || !soundOptionsRenameInput) return;
-            const newName = soundOptionsRenameInput.value.trim();
+        async function postPlaySound(soundId, playAction = 'play_request') {
+            const response = await fetch('/api/play_sound', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    sound_id: soundId,
+                    play_action: playAction,
+                    guild_id: getSelectedGuildId() || undefined
+                })
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                if (response.status === 401 && payload.login_url) {
+                    window.location.href = payload.login_url;
+                    return null;
+                }
+                throw new Error(payload.error || 'Playback request failed.');
+            }
+            return payload;
+        }
+
+        async function handleSoundRename() {
+            if (!activeSoundId || !soundRenameInput) return;
+            const newName = soundRenameInput.value.trim();
             if (!newName) {
-                setSoundOptionsStatus('Enter a new sound name.', 'error');
+                setSoundRenameStatus('Enter a new sound name.', 'error');
                 return;
             }
-            soundOptionsRenameButton.disabled = true;
+            soundRenameButton.disabled = true;
             try {
-                const payload = await postSoundOption(`/api/sounds/${encodeURIComponent(activeSoundOptionsId)}/rename`, { new_name: newName });
+                const payload = await postSoundOption(`/api/sounds/${encodeURIComponent(activeSoundId)}/rename`, { new_name: newName });
                 if (!payload) return;
-                setSoundOptionsStatus('Sound renamed.', 'success');
+                setSoundRenameStatus('Sound renamed.', 'success');
                 fetchFavorites(null, true, true);
                 fetchAllSounds(null, true, true);
-                openSoundOptionsModal(activeSoundOptionsId);
+                window.setTimeout(closeSoundRenameModal, 350);
             } catch (error) {
-                setSoundOptionsStatus(error.message, 'error');
+                setSoundRenameStatus(error.message, 'error');
             } finally {
-                soundOptionsRenameButton.disabled = false;
+                soundRenameButton.disabled = false;
             }
         }
 
-        async function handleSoundOptionsFavorite() {
-            if (!activeSoundOptionsId) return;
-            soundOptionsFavoriteButton.disabled = true;
-            try {
-                const payload = await postSoundOption(`/api/sounds/${encodeURIComponent(activeSoundOptionsId)}/favorite`);
-                if (!payload) return;
-                soundOptionsFavoriteButton.textContent = payload.favorite ? 'Unfavorite' : 'Favorite';
-                setSoundOptionsStatus(payload.favorite ? 'Added to favorites.' : 'Removed from favorites.', 'success');
-                fetchFavorites(null, true, true);
-            } catch (error) {
-                setSoundOptionsStatus(error.message, 'error');
-            } finally {
-                soundOptionsFavoriteButton.disabled = false;
-            }
-        }
-
-        async function handleSoundOptionsAddToList() {
-            if (!activeSoundOptionsId || !soundOptionsListSelect?.value) {
-                setSoundOptionsStatus('Choose a list first.', 'error');
+        async function handleSoundAddToList() {
+            if (!activeSoundId || !soundListSelect?.value) {
+                setSoundListStatus('Choose a list first.', 'error');
                 return;
             }
-            soundOptionsAddToListButton.disabled = true;
+            soundAddToListButton.disabled = true;
             try {
-                const payload = await postSoundOption(`/api/sounds/${encodeURIComponent(activeSoundOptionsId)}/lists`, {
-                    list_id: soundOptionsListSelect.value
+                const payload = await postSoundOption(`/api/sounds/${encodeURIComponent(activeSoundId)}/lists`, {
+                    list_id: soundListSelect.value
                 });
                 if (!payload) return;
-                setSoundOptionsStatus(payload.message || 'List updated.', payload.added ? 'success' : '');
+                setSoundListStatus(payload.message || 'List updated.', payload.added ? 'success' : '');
                 fetchAllSounds(null, false, true);
+                window.setTimeout(closeSoundListModal, 500);
             } catch (error) {
-                setSoundOptionsStatus(error.message, 'error');
+                setSoundListStatus(error.message, 'error');
             } finally {
-                soundOptionsAddToListButton.disabled = false;
+                soundAddToListButton.disabled = false;
             }
         }
 
-        async function handleSimilarSoundPlay(event) {
-            const button = event.target.closest('.sound-options-similar-button');
-            if (!button?.dataset.soundId) return;
-            button.disabled = true;
+        async function handleSoundEventSubmit() {
+            if (!activeSoundId || !soundEventTypeSelect) return;
+            const targetUser = soundEventUserInput?.value || '';
+            if (!targetUser) {
+                setSoundEventStatus('Choose a Discord user.', 'error');
+                return;
+            }
+            soundEventSubmitButton.disabled = true;
             try {
-                await postSoundOption('/api/play_sound', { sound_id: button.dataset.soundId });
-                setSoundOptionsStatus('Similar sound sent.', 'success');
+                const payload = await postSoundOption(`/api/sounds/${encodeURIComponent(activeSoundId)}/events`, {
+                    event: soundEventTypeSelect.value,
+                    target_user: targetUser
+                });
+                if (!payload) return;
+                setSoundEventStatus(payload.message || 'Event updated.', payload.added ? 'success' : '');
+                const normalizedTarget = normalizeSoundEventTarget(payload.target_user);
+                activeSoundEvents = activeSoundEvents.filter(eventAssignment => !(
+                    eventAssignment.event === payload.event
+                    && normalizeSoundEventTarget(eventAssignment.target_user) === normalizedTarget
+                ));
+                if (payload.added) {
+                    activeSoundEvents.push({
+                        target_user: payload.target_user,
+                        event: payload.event
+                    });
+                }
+                updateSoundEventActionState();
+                window.setTimeout(closeSoundEventModal, 650);
             } catch (error) {
-                setSoundOptionsStatus(error.message, 'error');
+                setSoundEventStatus(error.message, 'error');
             } finally {
-                button.disabled = false;
+                soundEventSubmitButton.disabled = false;
             }
         }
 
@@ -2136,6 +2336,8 @@
             soundRowContextMenu.classList.remove('open');
             soundRowContextMenu.setAttribute('aria-hidden', 'true');
             contextMenuSoundId = null;
+            contextMenuSoundIsFavorite = false;
+            contextMenuSoundIsSlap = false;
         }
 
         function openSoundRowContextMenu(event) {
@@ -2153,18 +2355,26 @@
             event.preventDefault();
             clearSoundOptionsLongPress();
             contextMenuSoundId = soundId;
+            contextMenuSoundIsFavorite = row.dataset.favorite === 'true';
+            contextMenuSoundIsSlap = row.dataset.slap === 'true';
+            if (soundRowFavoriteOption) {
+                soundRowFavoriteOption.textContent = contextMenuSoundIsFavorite ? 'Unfavorite' : 'Favorite';
+            }
+            if (soundRowSlapOption) {
+                soundRowSlapOption.textContent = contextMenuSoundIsSlap ? 'Unmake slap' : 'Make slap';
+            }
 
             if (!soundRowContextMenu) {
                 if (!discordUser) {
                     openLoginModal();
                     return;
                 }
-                openSoundOptionsModal(soundId);
+                openSoundRenameModal(soundId);
                 return;
             }
 
             const menuWidth = soundRowContextMenu.offsetWidth || 132;
-            const menuHeight = soundRowContextMenu.offsetHeight || 44;
+            const menuHeight = soundRowContextMenu.offsetHeight || 176;
             const left = Math.min(event.clientX, window.innerWidth - menuWidth - 8);
             const top = Math.min(event.clientY, window.innerHeight - menuHeight - 8);
 
@@ -2174,7 +2384,7 @@
             soundRowContextMenu.setAttribute('aria-hidden', 'false');
         }
 
-        function handleSoundRowEditOption() {
+        function handleSoundRowRenameOption() {
             const soundId = contextMenuSoundId;
             closeSoundRowContextMenu();
             if (!soundId) return;
@@ -2182,7 +2392,106 @@
                 openLoginModal();
                 return;
             }
-            openSoundOptionsModal(soundId);
+            openSoundRenameModal(soundId);
+        }
+
+        function handleSoundRowAddToListOption() {
+            const soundId = contextMenuSoundId;
+            closeSoundRowContextMenu();
+            if (!soundId) return;
+            if (!discordUser) {
+                openLoginModal();
+                return;
+            }
+            openSoundListModal(soundId);
+        }
+
+        function handleSoundRowSimilarOption() {
+            const soundId = contextMenuSoundId;
+            closeSoundRowContextMenu();
+            if (!soundId) return;
+            if (!discordUser) {
+                openLoginModal();
+                return;
+            }
+            openSoundSimilarModal(soundId);
+        }
+
+        function handleSoundRowEventOption() {
+            const soundId = contextMenuSoundId;
+            closeSoundRowContextMenu();
+            if (!soundId) return;
+            if (!discordUser) {
+                openLoginModal();
+                return;
+            }
+            openSoundEventModal(soundId);
+        }
+
+        async function handleSoundRowFavoriteOption() {
+            const soundId = contextMenuSoundId;
+            closeSoundRowContextMenu();
+            if (!soundId) return;
+            if (!discordUser) {
+                openLoginModal();
+                return;
+            }
+
+            try {
+                await postSoundOption(`/api/sounds/${encodeURIComponent(soundId)}/favorite`);
+                fetchFavorites(null, true, true);
+                fetchAllSounds(null, false, true);
+            } catch (error) {
+                console.error('Favorite failed:', error);
+            }
+        }
+
+        async function handleSoundRowSlapOption() {
+            const soundId = contextMenuSoundId;
+            closeSoundRowContextMenu();
+            if (!soundId) return;
+            if (!discordUser) {
+                openLoginModal();
+                return;
+            }
+
+            try {
+                await postSoundOption(`/api/sounds/${encodeURIComponent(soundId)}/slap`);
+                fetchFavorites(null, true, true);
+                fetchAllSounds(null, false, true);
+            } catch (error) {
+                console.error('Slap toggle failed:', error);
+            }
+        }
+
+        async function handleSimilarSoundPlay(event) {
+            const button = event.target.closest('.sound-options-similar-button');
+            if (!button || !soundSimilarList?.contains(button)) {
+                return;
+            }
+            const soundId = button.dataset.soundId;
+            if (!soundId || button.disabled) return;
+            if (!discordUser) {
+                openLoginModal();
+                return;
+            }
+
+            button.disabled = true;
+            const originalNodes = Array.from(button.childNodes).map(node => node.cloneNode(true));
+            const restoreButton = () => {
+                button.disabled = false;
+                button.replaceChildren(...originalNodes.map(node => node.cloneNode(true)));
+            };
+            try {
+                await postPlaySound(soundId, 'play_similar_sound');
+                button.textContent = 'Sent';
+                setSoundSimilarStatus('Similar sound sent.', 'success');
+                window.setTimeout(restoreButton, 1400);
+            } catch (error) {
+                button.textContent = 'Error';
+                setSoundSimilarStatus(error.message || 'Could not send similar sound.', 'error');
+                window.setTimeout(restoreButton, 1800);
+            }
         }
 
         async function handlePlayButtonActivation(event) {
@@ -2216,36 +2525,14 @@
             button.textContent = '⏳';
 
             try {
-                const response = await fetch('/api/play_sound', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ sound_id: soundId, guild_id: getSelectedGuildId() || undefined })
-                });
-
-                if (response.ok) {
-                    button.textContent = '✓';
-                    button.title = 'Sent';
-                    button.classList.add('sent');
-                    setTimeout(() => {
-                        applyPlayButtonState(button);
-                        button.classList.remove('sent');
-                    }, 2000);
-                } else {
-                    const payload = await response.json().catch(() => ({}));
-                    if (response.status === 401 && payload.login_url) {
-                        window.location.href = payload.login_url;
-                        return;
-                    }
-                    button.textContent = '✗';
-                    button.title = 'Error';
-                    button.classList.add('error');
-                    setTimeout(() => {
-                        applyPlayButtonState(button);
-                        button.classList.remove('error');
-                    }, 2000);
-                }
+                await postPlaySound(soundId);
+                button.textContent = '✓';
+                button.title = 'Sent';
+                button.classList.add('sent');
+                setTimeout(() => {
+                    applyPlayButtonState(button);
+                    button.classList.remove('sent');
+                }, 2000);
             } catch (error) {
                 console.error('Network error:', error);
                 button.textContent = '✗';
@@ -2371,21 +2658,42 @@
         const webTtsMessage = document.getElementById('webTtsMessage');
         const webTtsProfile = document.getElementById('webTtsProfile');
         const webTtsEnhanceButton = document.getElementById('webTtsEnhanceButton');
-        const soundOptionsDialog = document.getElementById('soundOptionsDialog');
-        const soundOptionsForm = document.getElementById('soundOptionsForm');
-        const soundOptionsTitle = document.getElementById('soundOptionsTitle');
-        const soundOptionsStatus = document.getElementById('soundOptionsStatus');
-        const soundOptionsCloseButton = document.getElementById('soundOptionsCloseButton');
-        const soundOptionsRenameInput = document.getElementById('soundOptionsRenameInput');
-        const soundOptionsRenameButton = document.getElementById('soundOptionsRenameButton');
-        const soundOptionsFavoriteButton = document.getElementById('soundOptionsFavoriteButton');
-        const soundOptionsListSelect = document.getElementById('soundOptionsListSelect');
-        const soundOptionsAddToListButton = document.getElementById('soundOptionsAddToListButton');
-        const soundOptionsSimilarList = document.getElementById('soundOptionsSimilarList');
-        const soundOptionsSimilarScrollbar = document.getElementById('soundOptionsSimilarScrollbar');
-        const soundOptionsSimilarScrollbarThumb = document.getElementById('soundOptionsSimilarScrollbarThumb');
+        const soundRenameDialog = document.getElementById('soundRenameDialog');
+        const soundRenameForm = document.getElementById('soundRenameForm');
+        const soundRenameTitle = document.getElementById('soundRenameTitle');
+        const soundRenameStatus = document.getElementById('soundRenameStatus');
+        const soundRenameCloseButton = document.getElementById('soundRenameCloseButton');
+        const soundRenameInput = document.getElementById('soundRenameInput');
+        const soundRenameButton = document.getElementById('soundRenameButton');
+        const soundListDialog = document.getElementById('soundListDialog');
+        const soundListForm = document.getElementById('soundListForm');
+        const soundListTitle = document.getElementById('soundListTitle');
+        const soundListStatus = document.getElementById('soundListStatus');
+        const soundListCloseButton = document.getElementById('soundListCloseButton');
+        const soundListSelect = document.getElementById('soundListSelect');
+        const soundAddToListButton = document.getElementById('soundAddToListButton');
+        const soundSimilarDialog = document.getElementById('soundSimilarDialog');
+        const soundSimilarForm = document.getElementById('soundSimilarForm');
+        const soundSimilarTitle = document.getElementById('soundSimilarTitle');
+        const soundSimilarStatus = document.getElementById('soundSimilarStatus');
+        const soundSimilarCloseButton = document.getElementById('soundSimilarCloseButton');
+        const soundSimilarList = document.getElementById('soundSimilarList');
+        const soundEventDialog = document.getElementById('soundEventDialog');
+        const soundEventForm = document.getElementById('soundEventForm');
+        const soundEventTitle = document.getElementById('soundEventTitle');
+        const soundEventStatus = document.getElementById('soundEventStatus');
+        const soundEventCloseButton = document.getElementById('soundEventCloseButton');
+        const soundEventCancelButton = document.getElementById('soundEventCancelButton');
+        const soundEventTypeSelect = document.getElementById('soundEventTypeSelect');
+        const soundEventUserInput = document.getElementById('soundEventUserInput');
+        const soundEventSubmitButton = document.getElementById('soundEventSubmitButton');
         const soundRowContextMenu = document.getElementById('soundRowContextMenu');
-        const soundRowEditOption = document.getElementById('soundRowEditOption');
+        const soundRowRenameOption = document.getElementById('soundRowRenameOption');
+        const soundRowAddToListOption = document.getElementById('soundRowAddToListOption');
+        const soundRowSimilarOption = document.getElementById('soundRowSimilarOption');
+        const soundRowEventOption = document.getElementById('soundRowEventOption');
+        const soundRowFavoriteOption = document.getElementById('soundRowFavoriteOption');
+        const soundRowSlapOption = document.getElementById('soundRowSlapOption');
         const uploadQueueItems = new Map();
         let uploadInboxPage = 1;
         let uploadInboxTotalPages = 1;
@@ -2907,25 +3215,52 @@
         if (webTtsEnhanceButton) {
             webTtsEnhanceButton.addEventListener('click', handleWebTtsEnhance);
         }
-        if (soundOptionsCloseButton) {
-            soundOptionsCloseButton.addEventListener('click', closeSoundOptionsModal);
+        if (soundRenameCloseButton) {
+            soundRenameCloseButton.addEventListener('click', closeSoundRenameModal);
         }
-        if (soundOptionsRenameButton) {
-            soundOptionsRenameButton.addEventListener('click', handleSoundOptionsRename);
+        if (soundRenameButton) {
+            soundRenameButton.addEventListener('click', handleSoundRename);
         }
-        if (soundOptionsFavoriteButton) {
-            soundOptionsFavoriteButton.addEventListener('click', handleSoundOptionsFavorite);
+        if (soundRenameInput) {
+            soundRenameInput.addEventListener('input', resizeSoundRenameInput);
+            resizeSoundRenameInput();
         }
-        if (soundOptionsAddToListButton) {
-            soundOptionsAddToListButton.addEventListener('click', handleSoundOptionsAddToList);
+        if (soundListCloseButton) {
+            soundListCloseButton.addEventListener('click', closeSoundListModal);
         }
-        if (soundOptionsSimilarList) {
-            soundOptionsSimilarList.addEventListener('click', handleSimilarSoundPlay);
-            soundOptionsSimilarList.addEventListener('scroll', updateSoundOptionsSimilarScrollbar, { passive: true });
-            window.addEventListener('resize', updateSoundOptionsSimilarScrollbar);
+        if (soundAddToListButton) {
+            soundAddToListButton.addEventListener('click', handleSoundAddToList);
         }
-        if (soundRowEditOption) {
-            soundRowEditOption.addEventListener('click', handleSoundRowEditOption);
+        if (soundSimilarCloseButton) {
+            soundSimilarCloseButton.addEventListener('click', closeSoundSimilarModal);
+        }
+        if (soundSimilarList) {
+            soundSimilarList.addEventListener('click', handleSimilarSoundPlay);
+            soundSimilarList.addEventListener('scroll', updateSimilarScrollbar, { passive: true });
+        }
+        if (soundEventCloseButton) {
+            soundEventCloseButton.addEventListener('click', closeSoundEventModal);
+        }
+        if (soundEventCancelButton) {
+            soundEventCancelButton.addEventListener('click', closeSoundEventModal);
+        }
+        if (soundRowRenameOption) {
+            soundRowRenameOption.addEventListener('click', handleSoundRowRenameOption);
+        }
+        if (soundRowAddToListOption) {
+            soundRowAddToListOption.addEventListener('click', handleSoundRowAddToListOption);
+        }
+        if (soundRowSimilarOption) {
+            soundRowSimilarOption.addEventListener('click', handleSoundRowSimilarOption);
+        }
+        if (soundRowEventOption) {
+            soundRowEventOption.addEventListener('click', handleSoundRowEventOption);
+        }
+        if (soundRowFavoriteOption) {
+            soundRowFavoriteOption.addEventListener('click', handleSoundRowFavoriteOption);
+        }
+        if (soundRowSlapOption) {
+            soundRowSlapOption.addEventListener('click', handleSoundRowSlapOption);
         }
         if (soundRowContextMenu) {
             soundRowContextMenu.addEventListener('click', event => event.stopPropagation());
@@ -2937,13 +3272,66 @@
                 }
             });
         }
-        if (soundOptionsForm) {
-            soundOptionsForm.addEventListener('submit', event => event.preventDefault());
+        if (soundRenameForm) {
+            soundRenameForm.addEventListener('submit', event => {
+                event.preventDefault();
+                handleSoundRename();
+            });
         }
-        if (soundOptionsDialog) {
-            soundOptionsDialog.addEventListener('click', (event) => {
-                if (event.target === soundOptionsDialog) {
-                    closeSoundOptionsModal();
+        if (soundListForm) {
+            soundListForm.addEventListener('submit', event => {
+                event.preventDefault();
+                handleSoundAddToList();
+            });
+        }
+        if (soundSimilarForm) {
+            soundSimilarForm.addEventListener('submit', event => {
+                event.preventDefault();
+            });
+        }
+        if (soundEventForm) {
+            soundEventForm.addEventListener('submit', event => {
+                event.preventDefault();
+                handleSoundEventSubmit();
+            });
+        }
+        if (soundEventTypeSelect) {
+            soundEventTypeSelect.addEventListener('change', () => {
+                updateSoundEventActionState();
+                setSoundEventStatus(formatSoundEventSummary());
+            });
+        }
+        if (soundEventUserInput) {
+            soundEventUserInput.addEventListener('change', () => {
+                updateSoundEventActionState();
+                setSoundEventStatus(formatSoundEventSummary());
+            });
+        }
+        if (soundRenameDialog) {
+            soundRenameDialog.addEventListener('click', (event) => {
+                if (event.target === soundRenameDialog) {
+                    closeSoundRenameModal();
+                }
+            });
+        }
+        if (soundListDialog) {
+            soundListDialog.addEventListener('click', (event) => {
+                if (event.target === soundListDialog) {
+                    closeSoundListModal();
+                }
+            });
+        }
+        if (soundSimilarDialog) {
+            soundSimilarDialog.addEventListener('click', (event) => {
+                if (event.target === soundSimilarDialog) {
+                    closeSoundSimilarModal();
+                }
+            });
+        }
+        if (soundEventDialog) {
+            soundEventDialog.addEventListener('click', (event) => {
+                if (event.target === soundEventDialog) {
+                    closeSoundEventModal();
                 }
             });
         }

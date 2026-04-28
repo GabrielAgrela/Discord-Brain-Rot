@@ -238,6 +238,42 @@ class ActionRepository(BaseRepository):
             tuple(params)
         )
         return row['count'] if row else 0
+
+    def get_distinct_usernames(
+        self,
+        guild_id: Optional[int | str] = None,
+        limit: int = 500,
+    ) -> List[str]:
+        """
+        Get distinct usernames from logged actions.
+
+        Args:
+            guild_id: Optional guild scope.
+            limit: Maximum usernames to return.
+
+        Returns:
+            Sorted list of usernames.
+        """
+        guild_filter = ""
+        params: list = []
+        if guild_id is not None:
+            guild_filter = "AND (guild_id = ? OR guild_id IS NULL)"
+            params.append(str(guild_id))
+        params.append(limit)
+
+        rows = self._execute(
+            f"""
+            SELECT DISTINCT username
+            FROM actions
+            WHERE username IS NOT NULL
+              AND TRIM(username) != ''
+              {guild_filter}
+            ORDER BY username COLLATE NOCASE ASC
+            LIMIT ?
+            """,
+            tuple(params),
+        )
+        return [row["username"] for row in rows]
     
     def get_users_who_favorited(self, sound_id: int, guild_id: Optional[int | str] = None) -> List[str]:
         """Get all users who have favorited a specific sound."""

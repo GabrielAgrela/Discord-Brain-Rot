@@ -26,8 +26,11 @@ WEB_QUEUE_MUTE_30_MINUTES = "mute_30_minutes"
 WEB_QUEUE_TOGGLE_MUTE = "toggle_mute"
 WEB_QUEUE_TTS = "tts"
 WEB_QUEUE_CONTROL_PLACEHOLDER = "__web_control__"
+WEB_PLAY_ACTION_REQUEST = "play_request"
+WEB_PLAY_ACTION_SIMILAR = "play_similar_sound"
 WEB_MUTE_DURATION_SECONDS = 1800
-WEB_TTS_MAX_LENGTH = 500
+WEB_TTS_MAX_LENGTH = 20000
+WEB_ALLOWED_PLAY_ACTIONS = {WEB_PLAY_ACTION_REQUEST, WEB_PLAY_ACTION_SIMILAR}
 WEB_QUEUE_CONTROL_ACTIONS = {
     WEB_QUEUE_SLAP,
     WEB_QUEUE_MUTE_30_MINUTES,
@@ -112,6 +115,7 @@ class WebPlaybackService:
             db_path=self.db_path,
             request_username=current_user.global_name,
             request_user_id=current_user.id,
+            play_action=payload.get("play_action"),
             env=self.env,
         )
 
@@ -201,6 +205,7 @@ def queue_playback_request(
     db_path: str,
     request_username: str,
     request_user_id: str,
+    play_action: Any = None,
     env: Mapping[str, str] | None = None,
 ) -> int:
     """
@@ -212,6 +217,7 @@ def queue_playback_request(
         db_path: Path to the SQLite database.
         request_username: Discord display name to attribute the request to.
         request_user_id: Discord user ID associated with the request.
+        play_action: Analytics action to record when the bot consumes the row.
         env: Optional environment mapping for tests.
 
     Returns:
@@ -227,6 +233,9 @@ def queue_playback_request(
         raise ValueError("Missing request_username")
     if not str(request_user_id).strip():
         raise ValueError("Missing request_user_id")
+    normalized_play_action = str(play_action or WEB_PLAY_ACTION_REQUEST).strip()
+    if normalized_play_action not in WEB_ALLOWED_PLAY_ACTIONS:
+        raise ValueError("Invalid play_action")
 
     guild_id = resolve_requested_guild_id(
         requested_guild_id=requested_guild_id,
@@ -245,9 +254,10 @@ def queue_playback_request(
                 sound_filename,
                 request_username,
                 request_user_id,
-                request_type
+                request_type,
+                play_action
             )
-            VALUES (?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
             (
                 guild_id,
@@ -255,6 +265,7 @@ def queue_playback_request(
                 str(request_username).strip(),
                 str(request_user_id).strip(),
                 WEB_QUEUE_PLAY_SOUND,
+                normalized_play_action,
             ),
         )
         conn.commit()
@@ -471,6 +482,7 @@ async def process_playback_queue_request(
         request_user_id,
         request_type,
         control_action,
+        play_action,
     ) = (
         _normalize_playback_queue_row(request_row)
     )
@@ -563,14 +575,14 @@ async def process_playback_queue_request(
                 if hasattr(action_logger, "insert"):
                     action_logger.insert(
                         request_username or playback_user,
-                        "play_request",
+                        play_action,
                         sound_data[0],
                         guild_id=guild_id,
                     )
                 else:
                     action_logger.insert_action(
                         request_username or playback_user,
-                        "play_request",
+                        play_action,
                         sound_data[0],
                         guild_id=guild_id,
                     )
@@ -720,12 +732,40 @@ def _ensure_playback_queue_identity_columns(cursor: sqlite3.Cursor) -> None:
         )
     if "control_action" not in existing_columns:
         cursor.execute("ALTER TABLE playback_queue ADD COLUMN control_action TEXT")
+    if "play_action" not in existing_columns:
+        cursor.execute("ALTER TABLE playback_queue ADD COLUMN play_action TEXT DEFAULT 'play_request'")
 
 
 def _normalize_playback_queue_row(
     request_row: tuple[Any, ...],
-) -> tuple[int, int, str, str | None, str | None, str, str | None]:
+) -> tuple[int, int, str, str | None, str | None, str, str | None, str]:
     """Normalize old and new playback queue rows into a common tuple shape."""
+    if len(request_row) >= 8:
+        (
+            request_id,
+            guild_id,
+            sound_filename,
+            request_username,
+            request_user_id,
+            request_type,
+            control_action,
+            play_action,
+        ) = request_row[:8]
+        normalized_request_type = str(request_type or WEB_QUEUE_PLAY_SOUND).strip()
+        normalized_play_action = str(play_action or WEB_PLAY_ACTION_REQUEST).strip()
+        if normalized_play_action not in WEB_ALLOWED_PLAY_ACTIONS:
+            normalized_play_action = WEB_PLAY_ACTION_REQUEST
+        return (
+            int(request_id),
+            int(guild_id),
+            str(sound_filename),
+            str(request_username).strip() if request_username is not None else None,
+            str(request_user_id).strip() if request_user_id is not None else None,
+            normalized_request_type or WEB_QUEUE_PLAY_SOUND,
+            str(control_action).strip() if control_action is not None else None,
+            normalized_play_action,
+        )
+
     if len(request_row) >= 7:
         (
             request_id,
@@ -745,6 +785,7 @@ def _normalize_playback_queue_row(
             str(request_user_id).strip() if request_user_id is not None else None,
             normalized_request_type or WEB_QUEUE_PLAY_SOUND,
             str(control_action).strip() if control_action is not None else None,
+            WEB_PLAY_ACTION_REQUEST,
         )
 
     if len(request_row) >= 5:
@@ -757,10 +798,20 @@ def _normalize_playback_queue_row(
             str(request_user_id).strip() if request_user_id is not None else None,
             WEB_QUEUE_PLAY_SOUND,
             None,
+            WEB_PLAY_ACTION_REQUEST,
         )
 
     request_id, guild_id, sound_filename = request_row[:3]
-    return int(request_id), int(guild_id), str(sound_filename), None, None, WEB_QUEUE_PLAY_SOUND, None
+    return (
+        int(request_id),
+        int(guild_id),
+        str(sound_filename),
+        None,
+        None,
+        WEB_QUEUE_PLAY_SOUND,
+        None,
+        WEB_PLAY_ACTION_REQUEST,
+    )
 
 
 async def _process_web_control_request(

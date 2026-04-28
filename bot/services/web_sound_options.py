@@ -13,8 +13,10 @@ from rapidfuzz import fuzz
 from bot.database import Database
 from bot.models.web import DiscordWebUser
 from bot.repositories.action import ActionRepository
+from bot.repositories.event import EventRepository
 from bot.repositories.list import ListRepository
 from bot.repositories.sound import SoundRepository
+from bot.repositories.voice_activity import VoiceActivityRepository
 
 
 class WebSoundOptionsService:
@@ -27,6 +29,8 @@ class WebSoundOptionsService:
         sound_repository: SoundRepository,
         list_repository: ListRepository,
         action_repository: ActionRepository,
+        event_repository: EventRepository,
+        voice_activity_repository: VoiceActivityRepository,
     ) -> None:
         """
         Initialize the service.
@@ -35,16 +39,21 @@ class WebSoundOptionsService:
             sound_repository: Repository for sound updates/lookups.
             list_repository: Repository for sound-list operations.
             action_repository: Repository for analytics action logging.
+            event_repository: Repository for user join/leave event sounds.
+            voice_activity_repository: Repository for tracked voice users.
         """
         self.sound_repository = sound_repository
         self.list_repository = list_repository
         self.action_repository = action_repository
+        self.event_repository = event_repository
+        self.voice_activity_repository = voice_activity_repository
 
     def get_options(
         self,
         sound_id: int,
         *,
         guild_id: int | str | None = None,
+        current_user: DiscordWebUser | None = None,
     ) -> dict[str, Any]:
         """
         Build modal data for a sound.
@@ -52,6 +61,7 @@ class WebSoundOptionsService:
         Args:
             sound_id: Sound database ID.
             guild_id: Optional selected guild scope.
+            current_user: Optional authenticated user to include in target options.
 
         Returns:
             Sound metadata, similar sounds, and list options.
@@ -63,6 +73,8 @@ class WebSoundOptionsService:
         return {
             "sound": self._format_sound(sound),
             "lists": self._get_list_options(guild_id),
+            "events": self._get_sound_events(sound.filename, guild_id),
+            "users": self._get_user_options(guild_id, current_user),
             "similar_sounds": self._get_similar_sounds(sound.filename, sound.id, guild_id),
         }
 
@@ -141,6 +153,44 @@ class WebSoundOptionsService:
         )
         return {"favorite": bool(favorite)}
 
+    def toggle_slap(
+        self,
+        sound_id: int,
+        current_user: DiscordWebUser,
+        *,
+        guild_id: int | str | None = None,
+        current_user_is_admin: bool = False,
+    ) -> dict[str, Any]:
+        """
+        Toggle a sound's slap flag and log the user's action.
+
+        Args:
+            sound_id: Sound database ID.
+            current_user: Authenticated Discord web user.
+            guild_id: Optional selected guild scope.
+            current_user_is_admin: Whether the web user can manage slap sounds.
+
+        Returns:
+            Slap state payload.
+        """
+        if not current_user_is_admin:
+            raise PermissionError("Only admins and moderators can manage slap sounds.")
+
+        sound = self._get_sound_or_raise(sound_id, guild_id)
+        slap = 0 if sound.slap else 1
+        self.sound_repository.update_sound_by_id(
+            sound.id,
+            slap=slap,
+            guild_id=guild_id,
+        )
+        self.action_repository.insert(
+            current_user.username,
+            "slap_sound",
+            sound.id,
+            guild_id=guild_id,
+        )
+        return {"slap": bool(slap)}
+
     def add_to_list(
         self,
         sound_id: int,
@@ -179,6 +229,67 @@ class WebSoundOptionsService:
             "message": "Sound added to list." if added else "Sound is already in that list.",
         }
 
+    def toggle_user_event(
+        self,
+        sound_id: int,
+        target_user: str,
+        event_type: str,
+        current_user: DiscordWebUser,
+        *,
+        guild_id: int | str | None = None,
+        current_user_is_admin: bool = False,
+    ) -> dict[str, Any]:
+        """
+        Toggle a sound as a join/leave event for a user.
+
+        Args:
+            sound_id: Sound database ID.
+            target_user: Discord username key used by the bot event system.
+            event_type: Event type, either ``join`` or ``leave``.
+            current_user: Authenticated Discord web user.
+            guild_id: Optional selected guild scope.
+            current_user_is_admin: Whether the web user can assign events for others.
+
+        Returns:
+            Toggle result payload.
+        """
+        sound = self._get_sound_or_raise(sound_id, guild_id)
+        normalized_event_type = str(event_type or "").strip().lower()
+        if normalized_event_type not in {"join", "leave"}:
+            raise ValueError("Choose join or leave.")
+
+        normalized_target = str(target_user or "").strip()
+        if not normalized_target:
+            normalized_target = current_user.username
+
+        if not self._is_self_target(current_user, normalized_target) and not current_user_is_admin:
+            raise ValueError("You can only assign events for yourself.")
+
+        sound_name = sound.filename.replace(".mp3", "")
+        added = self.event_repository.toggle(
+            normalized_target,
+            normalized_event_type,
+            sound_name,
+            guild_id=guild_id,
+        )
+        self.action_repository.insert(
+            current_user.username,
+            f"add_{normalized_event_type}_sound" if added else f"delete_{normalized_event_type}_event",
+            f"{normalized_target}:{sound_name}",
+            guild_id=guild_id,
+        )
+        return {
+            "added": added,
+            "event": normalized_event_type,
+            "target_user": normalized_target,
+            "sound_name": sound_name,
+            "message": (
+                f"Added {normalized_event_type} event."
+                if added
+                else f"Removed {normalized_event_type} event."
+            ),
+        }
+
     def _get_sound_or_raise(self, sound_id: int, guild_id: int | str | None) -> Any:
         """Return a sound or raise a web-safe validation error."""
         sound = self.sound_repository.get_by_id(sound_id, guild_id=guild_id)
@@ -198,6 +309,58 @@ class WebSoundOptionsService:
             }
             for row in self.list_repository.get_all(limit=200, guild_id=guild_id)
         ]
+
+    def _get_sound_events(
+        self,
+        filename: str,
+        guild_id: int | str | None,
+    ) -> list[dict[str, str]]:
+        """Return join/leave event assignments that already use a sound."""
+        return [
+            {"target_user": user_id, "event": event_type}
+            for user_id, event_type in self.event_repository.get_events_for_sound(
+                filename,
+                guild_id=guild_id,
+            )
+        ]
+
+    def _get_user_options(
+        self,
+        guild_id: int | str | None,
+        current_user: DiscordWebUser | None,
+    ) -> list[dict[str, str]]:
+        """Return known user choices for event assignment."""
+        usernames = set(self.event_repository.get_all_users_with_events(guild_id=guild_id))
+        usernames.update(self.action_repository.get_distinct_usernames(guild_id=guild_id))
+        usernames.update(self.voice_activity_repository.get_distinct_usernames(guild_id=guild_id))
+        if current_user and current_user.username:
+            usernames.add(current_user.username)
+
+        ordered_usernames = sorted(
+            {username.strip() for username in usernames if str(username).strip()},
+            key=str.casefold,
+        )
+        if current_user and current_user.username in ordered_usernames:
+            ordered_usernames.remove(current_user.username)
+            ordered_usernames.insert(0, current_user.username)
+
+        return [
+            {
+                "value": username,
+                "label": username,
+            }
+            for username in ordered_usernames
+        ]
+
+    @staticmethod
+    def _is_self_target(current_user: DiscordWebUser, target_user: str) -> bool:
+        """Return whether a requested event target refers to the current user."""
+        normalized_target = str(target_user or "").strip().casefold()
+        self_candidates = {
+            current_user.username.casefold(),
+            current_user.global_name.casefold(),
+        }
+        return normalized_target in {candidate for candidate in self_candidates if candidate}
 
     def _get_similar_sounds(
         self,
@@ -239,6 +402,7 @@ class WebSoundOptionsService:
             "sound_id": sound.id,
             "display_filename": sound.filename,
             "favorite": sound.favorite,
+            "slap": sound.slap,
         }
 
     @staticmethod

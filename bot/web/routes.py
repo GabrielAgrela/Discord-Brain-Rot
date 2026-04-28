@@ -29,8 +29,10 @@ from werkzeug.datastructures import FileStorage
 from config import TTS_PROFILES
 from bot.models.web import AnalyticsQuery, DiscordWebUser, PaginatedQuery
 from bot.repositories.action import ActionRepository
+from bot.repositories.event import EventRepository
 from bot.repositories.list import ListRepository
 from bot.repositories.sound import SoundRepository
+from bot.repositories.voice_activity import VoiceActivityRepository
 from bot.repositories.web_analytics import WebAnalyticsRepository
 from bot.repositories.web_content import WebContentRepository
 from bot.repositories.web_control_room import WebControlRoomRepository
@@ -211,6 +213,7 @@ def register_web_routes(app: Flask) -> None:
                 _get_web_sound_options_service().get_options(
                     sound_id,
                     guild_id=selected_guild_id,
+                    current_user=_get_current_discord_user(),
                 )
             ), 200
         except ValueError as exc:
@@ -275,6 +278,35 @@ def register_web_routes(app: Flask) -> None:
             logger.exception("Unexpected error toggling favorite")
             return jsonify({"error": "Internal server error"}), 500
 
+    @app.route("/api/sounds/<int:sound_id>/slap", methods=["POST"])
+    @_require_discord_login_api
+    def toggle_sound_slap(sound_id: int) -> Any:
+        """Toggle slap state from the web sound row context menu."""
+        data = request.get_json(silent=True) or {}
+        _remember_selected_guild_id(data.get("guild_id"))
+        current_user = _get_current_discord_user()
+        if current_user is None:
+            return jsonify({"error": "Discord login required"}), 401
+        try:
+            return jsonify(
+                _get_web_sound_options_service().toggle_slap(
+                    sound_id,
+                    current_user,
+                    guild_id=_get_selected_guild_id(data),
+                    current_user_is_admin=_current_web_user_is_admin(),
+                )
+            ), 200
+        except PermissionError as exc:
+            return jsonify({"error": str(exc)}), 403
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except sqlite3.Error:
+            logger.exception("Database error toggling slap")
+            return jsonify({"error": "Database error"}), 500
+        except Exception:
+            logger.exception("Unexpected error toggling slap")
+            return jsonify({"error": "Internal server error"}), 500
+
     @app.route("/api/sounds/<int:sound_id>/lists", methods=["POST"])
     @_require_discord_login_api
     def add_sound_to_list(sound_id: int) -> Any:
@@ -301,6 +333,35 @@ def register_web_routes(app: Flask) -> None:
             return jsonify({"error": "Database error"}), 500
         except Exception:
             logger.exception("Unexpected error adding sound to list")
+            return jsonify({"error": "Internal server error"}), 500
+
+    @app.route("/api/sounds/<int:sound_id>/events", methods=["POST"])
+    @_require_discord_login_api
+    def toggle_sound_event(sound_id: int) -> Any:
+        """Toggle a join/leave event sound from the web event modal."""
+        data = request.get_json(silent=True) or {}
+        _remember_selected_guild_id(data.get("guild_id"))
+        current_user = _get_current_discord_user()
+        if current_user is None:
+            return jsonify({"error": "Discord login required"}), 401
+        try:
+            return jsonify(
+                _get_web_sound_options_service().toggle_user_event(
+                    sound_id,
+                    str(data.get("target_user") or ""),
+                    str(data.get("event") or ""),
+                    current_user,
+                    guild_id=_get_selected_guild_id(data),
+                    current_user_is_admin=_current_web_user_is_admin(),
+                )
+            ), 200
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except sqlite3.Error:
+            logger.exception("Database error toggling event sound")
+            return jsonify({"error": "Database error"}), 500
+        except Exception:
+            logger.exception("Unexpected error toggling event sound")
             return jsonify({"error": "Internal server error"}), 500
 
     @app.route("/api/play_sound", methods=["POST"])
@@ -608,6 +669,8 @@ def _get_web_sound_options_service() -> WebSoundOptionsService:
         sound_repository=SoundRepository(db_path=db_path, use_shared=False),
         list_repository=ListRepository(db_path=db_path, use_shared=False),
         action_repository=ActionRepository(db_path=db_path, use_shared=False),
+        event_repository=EventRepository(db_path=db_path, use_shared=False),
+        voice_activity_repository=VoiceActivityRepository(db_path=db_path, use_shared=False),
     )
 
 

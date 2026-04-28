@@ -208,7 +208,9 @@ class WebContentRepository(BaseRepository[dict[str, Any]]):
             )
             SELECT
                 s.id AS sound_id,
-                s.Filename AS filename
+                s.Filename AS filename,
+                s.favorite AS favorite,
+                s.slap AS slap
             FROM sounds s
             LEFT JOIN LatestFavorite lf ON lf.sound_id = s.id
             {where_clause}
@@ -397,6 +399,8 @@ class WebContentRepository(BaseRepository[dict[str, Any]]):
             SELECT
                 s.id AS sound_id,
                 s.Filename AS filename,
+                s.favorite AS favorite,
+                s.slap AS slap,
                 s.timestamp AS timestamp
             FROM sounds s
             WHERE {' AND '.join(conditions)}

@@ -104,6 +104,16 @@ def _create_web_tables(db_path: Path) -> None:
         )
         cursor.execute(
             """
+            CREATE TABLE users (
+                id TEXT NOT NULL,
+                event TEXT NOT NULL,
+                sound TEXT NOT NULL,
+                guild_id TEXT
+            )
+            """
+        )
+        cursor.execute(
+            """
             CREATE TABLE voice_activity (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT NOT NULL,
@@ -288,6 +298,46 @@ def test_play_sound_endpoint_accepts_sound_id_payload(web_client):
     assert row == (359077662742020107, "jews did 911.mp3", "Discord User", "123")
 
 
+def test_play_sound_endpoint_accepts_similar_play_action(web_client):
+    client, db_path = web_client
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO guild_settings (guild_id) VALUES (?)",
+            ("359077662742020107",),
+        )
+        conn.execute(
+            """
+            INSERT INTO sounds (id, originalfilename, Filename, favorite, slap, is_elevenlabs, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (1, "alpha.mp3", "alpha.mp3", 0, 0, 0, "2026-04-01 12:00:00"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    _login_web_user(client, username="discord-user", global_name="Discord User")
+
+    response = client.post(
+        "/api/play_sound",
+        json={"sound_id": 1, "play_action": "play_similar_sound"},
+    )
+
+    assert response.status_code == 200
+
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute(
+            "SELECT sound_filename, request_type, play_action FROM playback_queue"
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert row == ("alpha.mp3", "play_sound", "play_similar_sound")
+
+
 def test_guild_selector_endpoint_returns_known_guilds(web_client):
     client, db_path = web_client
 
@@ -367,6 +417,8 @@ def test_web_table_endpoints_scope_to_selected_guild(web_client):
         {
             "sound_id": 2,
             "display_filename": "beta.mp3",
+            "favorite": True,
+            "slap": False,
             "timestamp": "2026-04-02 12:00:00",
         }
     ]
@@ -985,8 +1037,26 @@ def test_soundboard_page_renders_shared_redesign(web_client):
     assert "This message has already been enhanced. Edit it to enhance again." in html
     assert "webTtsMessage.addEventListener('input'" in html
     assert 'id="soundRowContextMenu"' in html
-    assert 'id="soundRowEditOption"' in html
-    assert 'class="sound-options-row" data-sound-id="1"' in html
+    assert 'id="soundRowRenameOption"' in html
+    assert 'id="soundRowAddToListOption"' in html
+    assert 'id="soundRowSimilarOption"' in html
+    assert 'id="soundRowEventOption"' in html
+    assert 'id="soundRowFavoriteOption"' in html
+    assert 'id="soundRowSlapOption"' in html
+    assert 'id="soundRenameDialog"' in html
+    assert 'id="soundListDialog"' in html
+    assert 'id="soundSimilarDialog"' in html
+    assert 'id="soundEventDialog"' in html
+    assert "play_similar_sound" in html
+    assert 'id="soundEventTypeSelect"' in html
+    assert 'id="soundEventUserInput"' in html
+    assert "Add Event" in html
+    assert "Remove Event" in html
+    assert "Existing events:" in html
+    assert 'class="favorite-button' not in html
+    assert 'class="sound-options-row" data-sound-id="1" data-favorite="true" data-slap="false"' in html
+    assert 'data-favorite="false"' in html
+    assert "Unmake slap" in html
     assert "tablesGrid.addEventListener('contextmenu', openSoundRowContextMenu)" in html
     assert "/api/tts/enhance" in html
     assert "window.prompt" not in html
@@ -1103,6 +1173,8 @@ def test_web_static_stylesheet_is_served(web_client):
     assert 'border-radius: 999px' in stylesheet
     assert 'html.theme-dark .heatmap-cell[data-level="5"]' in stylesheet
     assert "html.theme-dark .play-button" in stylesheet
+    assert "html.theme-dark .favorite-button" not in stylesheet
+    assert ".sound-action-cell" not in stylesheet
     assert "html.theme-dark .nav-brand-mark" in stylesheet
     assert "background: var(--error)" in stylesheet
     assert "animation: none" in stylesheet
@@ -1154,12 +1226,16 @@ def test_web_content_endpoints_censor_hateful_strings(web_client):
     assert favorites_response.get_json()["items"][0] == {
         "sound_id": 1,
         "display_filename": "******",
+        "favorite": True,
+        "slap": False,
     }
 
     assert all_sounds_response.status_code == 200
     assert all_sounds_response.get_json()["items"][0] == {
         "sound_id": 1,
         "display_filename": "******",
+        "favorite": True,
+        "slap": False,
         "timestamp": "2026-04-01 12:00:00",
     }
 
@@ -1212,12 +1288,16 @@ def test_web_content_endpoints_do_not_censor_logged_in_voice_user(web_client):
     assert favorites_response.get_json()["items"][0] == {
         "sound_id": 1,
         "display_filename": "jews did 911.mp3",
+        "favorite": True,
+        "slap": False,
     }
 
     assert all_sounds_response.status_code == 200
     assert all_sounds_response.get_json()["items"][0] == {
         "sound_id": 1,
         "display_filename": "jews did 911.mp3",
+        "favorite": True,
+        "slap": False,
         "timestamp": "2026-04-01 12:00:00",
     }
 
@@ -1321,6 +1401,8 @@ def test_web_table_endpoints_return_filter_options_and_apply_column_filters(web_
             {
                 "sound_id": 2,
                 "display_filename": "beta.mp3",
+                "favorite": True,
+                "slap": False,
             }
         ],
         "total_pages": 1,
@@ -1336,6 +1418,8 @@ def test_web_table_endpoints_return_filter_options_and_apply_column_filters(web_
             {
                 "sound_id": 3,
                 "display_filename": "gamma.mp3",
+                "favorite": False,
+                "slap": False,
                 "timestamp": "2026-04-03 12:00:00",
             }
         ],
@@ -1392,6 +1476,8 @@ def test_all_sounds_endpoint_returns_and_applies_sound_list_filter(web_client):
             {
                 "sound_id": 2,
                 "display_filename": "beta.mp3",
+                "favorite": False,
+                "slap": False,
                 "timestamp": "2026-04-02 12:00:00",
             }
         ],
@@ -1423,6 +1509,15 @@ def test_sound_options_endpoint_returns_lists_and_similar_sounds(web_client):
         conn.execute(
             "INSERT INTO sound_lists (id, list_name, creator, guild_id, created_at) VALUES (10, 'Bits', 'alice', '111', '2026-04-04 12:00:00')"
         )
+        conn.execute(
+            "INSERT INTO actions (username, action, target, timestamp, guild_id) VALUES ('bob', 'play_request', '1', '2026-04-04 12:00:00', '111')"
+        )
+        conn.execute(
+            "INSERT INTO voice_activity (username, channel_id, join_time, leave_time, guild_id) VALUES ('carol', '5', '2026-04-04 12:00:00', '2026-04-04 12:05:00', '111')"
+        )
+        conn.execute(
+            "INSERT INTO users (id, event, sound, guild_id) VALUES ('dave', 'join', 'alpha meme', '111')"
+        )
         conn.commit()
     finally:
         conn.close()
@@ -1435,9 +1530,17 @@ def test_sound_options_endpoint_returns_lists_and_similar_sounds(web_client):
         "sound_id": 1,
         "display_filename": "alpha meme.mp3",
         "favorite": False,
+        "slap": False,
     }
     assert payload["lists"] == [
         {"id": 10, "name": "Bits", "creator": "alice", "sound_count": 0, "label": "Bits (alice)"}
+    ]
+    assert payload["events"] == [{"target_user": "dave", "event": "join"}]
+    assert payload["users"] == [
+        {"value": "trusted-user", "label": "trusted-user"},
+        {"value": "bob", "label": "bob"},
+        {"value": "carol", "label": "carol"},
+        {"value": "dave", "label": "dave"},
     ]
     assert payload["similar_sounds"][0]["sound_id"] == 2
     assert all(item["sound_id"] != 3 for item in payload["similar_sounds"])
@@ -1485,6 +1588,58 @@ def test_sound_options_can_rename_and_toggle_favorite(web_client):
     ]
 
 
+def test_sound_options_can_toggle_slap_for_admin(web_client):
+    client, db_path = web_client
+    _login_web_user(client, username="web-user", admin_guild_ids=["111"])
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO sounds (id, originalfilename, Filename, guild_id, favorite, slap, is_elevenlabs, timestamp) VALUES (1, 'clip.mp3', 'clip.mp3', '111', 0, 0, 0, '2026-04-04 12:00:00')"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    add_response = client.post("/api/sounds/1/slap", json={"guild_id": "111"})
+    remove_response = client.post("/api/sounds/1/slap", json={"guild_id": "111"})
+
+    assert add_response.status_code == 200
+    assert add_response.get_json()["slap"] is True
+    assert remove_response.status_code == 200
+    assert remove_response.get_json()["slap"] is False
+    conn = sqlite3.connect(db_path)
+    try:
+        sound_row = conn.execute("SELECT slap FROM sounds WHERE id = 1").fetchone()
+        actions = conn.execute(
+            "SELECT username, action, target, guild_id FROM actions ORDER BY id"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert sound_row == (0,)
+    assert actions == [
+        ("web-user", "slap_sound", "1", "111"),
+        ("web-user", "slap_sound", "1", "111"),
+    ]
+
+
+def test_sound_options_rejects_slap_toggle_for_non_admin(web_client):
+    client, db_path = web_client
+    _login_web_user(client, username="web-user")
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO sounds (id, originalfilename, Filename, guild_id, favorite, slap, is_elevenlabs, timestamp) VALUES (1, 'clip.mp3', 'clip.mp3', '111', 0, 0, 0, '2026-04-04 12:00:00')"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    response = client.post("/api/sounds/1/slap", json={"guild_id": "111"})
+
+    assert response.status_code == 403
+    assert response.get_json()["error"] == "Only admins and moderators can manage slap sounds."
+
+
 def test_sound_options_can_add_sound_to_list(web_client):
     client, db_path = web_client
     _login_web_user(client, username="web-user")
@@ -1519,6 +1674,69 @@ def test_sound_options_can_add_sound_to_list(web_client):
         conn.close()
     assert list_item == (10, "clip.mp3")
     assert action == ("web-user", "add_sound_to_list", "Bits:clip.mp3", "111")
+
+
+def test_sound_options_can_toggle_self_event_sound(web_client):
+    client, db_path = web_client
+    _login_web_user(client, username="web-user")
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO sounds (id, originalfilename, Filename, guild_id, favorite, slap, is_elevenlabs, timestamp) VALUES (1, 'clip.mp3', 'clip.mp3', '111', 0, 0, 0, '2026-04-04 12:00:00')"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    add_response = client.post(
+        "/api/sounds/1/events",
+        json={"event": "join", "target_user": "web-user", "guild_id": "111"},
+    )
+    remove_response = client.post(
+        "/api/sounds/1/events",
+        json={"event": "join", "target_user": "web-user", "guild_id": "111"},
+    )
+
+    assert add_response.status_code == 200
+    assert add_response.get_json()["added"] is True
+    assert remove_response.status_code == 200
+    assert remove_response.get_json()["added"] is False
+    conn = sqlite3.connect(db_path)
+    try:
+        users = conn.execute(
+            "SELECT id, event, sound, guild_id FROM users ORDER BY id"
+        ).fetchall()
+        actions = conn.execute(
+            "SELECT username, action, target, guild_id FROM actions ORDER BY id"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert users == []
+    assert actions == [
+        ("web-user", "add_join_sound", "web-user:clip", "111"),
+        ("web-user", "delete_join_event", "web-user:clip", "111"),
+    ]
+
+
+def test_sound_options_rejects_event_for_other_user_without_admin(web_client):
+    client, db_path = web_client
+    _login_web_user(client, username="web-user")
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO sounds (id, originalfilename, Filename, guild_id, favorite, slap, is_elevenlabs, timestamp) VALUES (1, 'clip.mp3', 'clip.mp3', '111', 0, 0, 0, '2026-04-04 12:00:00')"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    response = client.post(
+        "/api/sounds/1/events",
+        json={"event": "leave", "target_user": "other-user", "guild_id": "111"},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"] == "You can only assign events for yourself."
 
 
 def test_favorites_endpoint_returns_and_applies_user_filter(web_client):
@@ -1561,6 +1779,8 @@ def test_favorites_endpoint_returns_and_applies_user_filter(web_client):
             {
                 "sound_id": 1,
                 "display_filename": "alpha.mp3",
+                "favorite": True,
+                "slap": False,
             }
         ],
         "total_pages": 1,
@@ -1635,6 +1855,8 @@ def test_favorites_endpoint_can_skip_filter_metadata(web_client):
             {
                 "sound_id": 1,
                 "display_filename": "alpha.mp3",
+                "favorite": True,
+                "slap": False,
             }
         ],
         "total_pages": 1,
@@ -1666,6 +1888,8 @@ def test_all_sounds_endpoint_can_skip_filter_metadata(web_client):
             {
                 "sound_id": 1,
                 "display_filename": "alpha.mp3",
+                "favorite": False,
+                "slap": False,
                 "timestamp": "2026-04-04 12:00:00",
             }
         ],

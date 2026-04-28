@@ -282,6 +282,42 @@ class VoiceActivityRepository(BaseRepository):
             for row in rows
         ]
 
+    def get_distinct_usernames(
+        self,
+        guild_id: Optional[int | str] = None,
+        limit: int = 500,
+    ) -> List[str]:
+        """
+        Get distinct usernames from tracked voice sessions.
+
+        Args:
+            guild_id: Optional guild scope.
+            limit: Maximum usernames to return.
+
+        Returns:
+            Sorted list of usernames.
+        """
+        guild_clause = ""
+        params: list = []
+        if guild_id is not None:
+            guild_clause = "AND (guild_id = ? OR guild_id IS NULL)"
+            params.append(str(guild_id))
+        params.append(limit)
+
+        rows = self._execute(
+            f"""
+            SELECT DISTINCT username
+            FROM voice_activity
+            WHERE username IS NOT NULL
+              AND TRIM(username) != ''
+              {guild_clause}
+            ORDER BY username COLLATE NOCASE ASC
+            LIMIT ?
+            """,
+            tuple(params),
+        )
+        return [row["username"] for row in rows]
+
     def get_top_channels_by_voice_time(
         self,
         days: int = 7,
