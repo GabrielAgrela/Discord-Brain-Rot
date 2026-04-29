@@ -531,6 +531,89 @@ class TestBackgroundService:
         assert payload["audio_pending_connection_count"] == 1
         assert payload["audio_active_progress_task_count"] == 3
 
+    @pytest.mark.asyncio
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    async def test_self_heal_watchdog_restarts_after_gateway_unready_threshold(
+        self, _mock_sound_repo, _mock_action_repo
+    ):
+        """Ensure prolonged gateway unready state requests a process restart."""
+        from bot.services.background import BackgroundService
+
+        bot = Mock()
+        bot.is_ready.return_value = False
+        bot.is_closed.return_value = False
+        service = BackgroundService(
+            bot=bot,
+            audio_service=Mock(),
+            sound_service=Mock(),
+            behavior=Mock(),
+        )
+        service._gateway_unready_restart_seconds = 60
+        service._gateway_unready_since = 100.0
+        service._request_self_restart = Mock()
+
+        with patch("bot.services.background.time.monotonic", return_value=161.0):
+            await service._run_bot_self_heal_watchdog_once()
+
+        service._request_self_restart.assert_called_once_with(
+            "Discord gateway has been unready for 61.0s"
+        )
+
+    @pytest.mark.asyncio
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    async def test_self_heal_watchdog_resets_timer_when_gateway_ready(
+        self, _mock_sound_repo, _mock_action_repo
+    ):
+        """Ensure a recovered gateway clears the self-heal timer."""
+        from bot.services.background import BackgroundService
+
+        bot = Mock()
+        bot.is_ready.return_value = True
+        bot.is_closed.return_value = False
+        service = BackgroundService(
+            bot=bot,
+            audio_service=Mock(),
+            sound_service=Mock(),
+            behavior=Mock(),
+        )
+        service._gateway_unready_since = 100.0
+        service._request_self_restart = Mock()
+
+        await service._run_bot_self_heal_watchdog_once()
+
+        assert service._gateway_unready_since is None
+        service._request_self_restart.assert_not_called()
+
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    def test_voice_recovery_failures_restart_after_limit(
+        self, _mock_sound_repo, _mock_action_repo
+    ):
+        """Ensure repeated unrecoverable voice cleanup failures trigger self-heal restart."""
+        from bot.services.background import BackgroundService
+
+        service = BackgroundService(
+            bot=Mock(),
+            audio_service=Mock(),
+            sound_service=Mock(),
+            behavior=Mock(),
+        )
+        service._voice_recovery_failure_limit = 2
+        service._request_self_restart = Mock()
+
+        service._record_voice_recovery_failure(
+            123, "Test Guild", RuntimeError("Cannot write to closing transport")
+        )
+        service._request_self_restart.assert_not_called()
+
+        service._record_voice_recovery_failure(
+            123, "Test Guild", RuntimeError("Cannot write to closing transport")
+        )
+
+        service._request_self_restart.assert_called_once()
+
     @patch("bot.services.background.ActionRepository")
     @patch("bot.services.background.SoundRepository")
     def test_weekly_wrapped_default_schedule_is_friday_18_utc(

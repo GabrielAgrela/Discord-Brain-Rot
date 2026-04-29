@@ -144,6 +144,7 @@ This README is based on the current codebase behavior (not historical README ass
 - Scraper start + completion image cards with compact run summary.
 - Controls-button normalizer loop (every minute): keeps one recent inline `⚙️` on eligible bot messages by adding if missing and removing extras with safe raw-component edits.
 - Keyword detection health check loop.
+- Self-heal watchdog: exits the bot process after prolonged Discord gateway loss or repeated unrecoverable voice cleanup failures so Docker restarts it cleanly.
 - Voice-activity auto-disconnect safety loop.
 - High-frequency performance telemetry loop (JSON logs with CPU, memory, process/runtime, network, disk, loop lag, and bot health metrics).
 - Web playback/control request bridge loop.
@@ -322,6 +323,9 @@ This README is based on the current codebase behavior (not historical README ass
 - `KEYWORD_SILENCE_FLUSH_SECONDS` (`0.35` default; pause after speech before Vosk final keyword detection is forced)
 - `VOICE_MAX_DAVE_PROTOCOL_VERSION` (default auto-detected from `davey` protocol version, currently `1`; set `0` only to force-disable DAVE negotiation)
 - `PERFORMANCE_MONITOR_TICK_SECONDS` (performance monitor interval in seconds, default `0.5`, minimum `0.1`)
+- `BOT_SELF_HEAL_RESTART_ENABLED` (`true` default; lets Docker restart the bot after unrecoverable gateway/voice health failures)
+- `BOT_GATEWAY_UNREADY_RESTART_SECONDS` (default `300`; restart threshold while Discord gateway remains unready)
+- `BOT_VOICE_RECOVERY_FAILURE_RESTARTS` (default `3`; restart threshold for repeated failed zombie voice cleanup)
 - `WEEKLY_WRAPPED_ENABLED` (`true` default; enables weekly digest scheduler)
 - `WEEKLY_WRAPPED_DAY_UTC` (0-6, Monday=0, default `4` for Friday)
 - `WEEKLY_WRAPPED_HOUR_UTC` (0-23, default `18`)

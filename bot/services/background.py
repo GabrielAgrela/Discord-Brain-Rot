@@ -61,6 +61,16 @@ class BackgroundService:
         self._rlstore_notify_hour_utc = self._env_int("RLSTORE_NOTIFY_HOUR_UTC", 19, 0, 23)
         self._rlstore_notify_minute_utc = self._env_int("RLSTORE_NOTIFY_MINUTE_UTC", 5, 0, 59)
         self._rlstore_notify_target = (os.getenv("RLSTORE_NOTIFY_TARGET_USERNAME", "sopustos") or "").strip()
+        self._self_heal_enabled = self._env_flag("BOT_SELF_HEAL_RESTART_ENABLED", True)
+        self._gateway_unready_restart_seconds = self._env_int(
+            "BOT_GATEWAY_UNREADY_RESTART_SECONDS", 300, 60, 3600
+        )
+        self._voice_recovery_failure_limit = self._env_int(
+            "BOT_VOICE_RECOVERY_FAILURE_RESTARTS", 3, 1, 20
+        )
+        self._gateway_unready_since: Optional[float] = None
+        self._voice_recovery_failures: Dict[int, int] = {}
+        self._restart_requested = False
 
     def start_tasks(self):
         """Schedule tasks to start when the bot is ready."""
@@ -96,6 +106,8 @@ class BackgroundService:
                 self.rlstore_notification_loop.start()
             if not self.favorite_watcher_loop.is_running():
                 self.favorite_watcher_loop.start()
+            if self._self_heal_enabled and not self.bot_self_heal_watchdog_loop.is_running():
+                self.bot_self_heal_watchdog_loop.start()
             
             asyncio.create_task(self._auto_join_channels())
             print("[BackgroundService] Background tasks started.")
@@ -161,6 +173,39 @@ class BackgroundService:
         except ValueError:
             return default
         return max(minimum, min(parsed, maximum))
+
+    def _request_self_restart(self, reason: str) -> None:
+        """Terminate the bot process so Docker restart policy can recover cleanly."""
+        if self._restart_requested:
+            return
+        self._restart_requested = True
+        logger.critical("[BackgroundService] Self-heal restart requested: %s", reason)
+        try:
+            for handler in logging.getLogger().handlers:
+                handler.flush()
+        except Exception:
+            pass
+        os._exit(70)
+
+    def _record_voice_recovery_failure(self, guild_id: int, guild_name: str, error: Exception) -> None:
+        """Track repeated voice recovery failures and restart after the configured limit."""
+        failures = self._voice_recovery_failures.get(guild_id, 0) + 1
+        self._voice_recovery_failures[guild_id] = failures
+        logger.warning(
+            "[BackgroundService] Voice recovery failure %s/%s in %s: %s",
+            failures,
+            self._voice_recovery_failure_limit,
+            guild_name,
+            error,
+        )
+        if self._self_heal_enabled and failures >= self._voice_recovery_failure_limit:
+            self._request_self_restart(
+                f"voice recovery failed {failures} times in {guild_name}: {error}"
+            )
+
+    def _clear_voice_recovery_failures(self, guild_id: int) -> None:
+        """Reset the voice recovery failure counter after successful recovery."""
+        self._voice_recovery_failures.pop(guild_id, None)
 
     @staticmethod
     def _read_proc_cpu_counters() -> Dict[str, Tuple[int, int]]:
@@ -1172,8 +1217,10 @@ class BackgroundService:
                             channel = self.audio_service.get_largest_voice_channel(guild)
                             if channel and len([m for m in channel.members if not m.bot]) > 0:
                                 await self.audio_service.ensure_voice_connected(channel)
+                                self._clear_voice_recovery_failures(guild.id)
                                 print(f"[BackgroundService] Health check: Reconnected to {channel.name} after zombie cleanup")
                         except Exception as e:
+                            self._record_voice_recovery_failure(guild.id, guild.name, e)
                             print(f"[BackgroundService] Error cleaning up zombie connection: {e}")
                         continue  # Skip normal checks for this guild since we just reconnected
                 
@@ -1197,6 +1244,42 @@ class BackgroundService:
                         await self.audio_service.start_keyword_detection(guild)
         except Exception as e:
             print(f"[BackgroundService] Error in keyword detection health check: {e}")
+
+    @tasks.loop(seconds=30)
+    async def bot_self_heal_watchdog_loop(self):
+        """Restart the process when the Discord client remains unusable too long."""
+        await self._run_bot_self_heal_watchdog_once()
+
+    async def _run_bot_self_heal_watchdog_once(self) -> None:
+        """Run one self-heal watchdog check."""
+        if not self._self_heal_enabled:
+            return
+
+        try:
+            now = time.monotonic()
+            is_ready = bool(self.bot.is_ready()) if hasattr(self.bot, "is_ready") else True
+            is_closed = bool(self.bot.is_closed()) if hasattr(self.bot, "is_closed") else False
+
+            if is_closed:
+                self._request_self_restart("Discord client is closed")
+                return
+
+            if is_ready:
+                self._gateway_unready_since = None
+                return
+
+            if self._gateway_unready_since is None:
+                self._gateway_unready_since = now
+                logger.warning("[BackgroundService] Discord gateway is not ready; starting self-heal timer")
+                return
+
+            unready_seconds = now - self._gateway_unready_since
+            if unready_seconds >= self._gateway_unready_restart_seconds:
+                self._request_self_restart(
+                    f"Discord gateway has been unready for {unready_seconds:.1f}s"
+                )
+        except Exception as e:
+            logger.error("[BackgroundService] Error in self-heal watchdog: %s", e, exc_info=True)
 
     @tasks.loop(seconds=60)
     async def update_bot_status_loop(self):

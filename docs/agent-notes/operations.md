@@ -17,6 +17,7 @@ Read this when changing deployment, Docker, dependencies, logging, verification 
 ## Docker Restart Rules
 
 - The bot runs in Docker, so Python changes do not take effect until the container restarts.
+- `BackgroundService` has a self-heal watchdog enabled by default. It calls `os._exit(70)` after prolonged Discord gateway unready state or repeated unrecoverable zombie voice cleanup failures; Docker `restart: always` brings the bot back up.
 - Normal production flow restarts the bot service:
 
 ```bash
