@@ -27,6 +27,7 @@ Read this when changing `WebPage.py`, `bot/web/`, web repositories/services, tem
 - Web TTS uses control action `tts`; `sound_filename` is JSON with `message` and `profile`. Bot-side dispatch routes Google profiles to `VoiceTransformationService.tts()` and ElevenLabs character profiles to `tts_EL()`.
 - Web play-button latency is dominated by the bot-side `check_playback_queue` polling loop in `PersonalGreeter.py`. Keep it driven by `config.PLAYBACK_QUEUE_INTERVAL` (default `0.25` seconds); avoid fixed sleeps after `process_playback_queue_request()` without a concrete Discord race or rate-limit reason.
 - Web playback can hit stale renamed DB rows where `sounds.Filename` is missing on disk but `sounds.originalfilename` still exists. Keep the fallback in `WebPlaybackService.process_playback_queue_request()`.
+- Web soundboard duration display has the same renamed-row issue: show `sounds.Filename` to users, but fall back to `sounds.originalfilename` when reading MP3 metadata from disk.
 
 ## Uploads
 

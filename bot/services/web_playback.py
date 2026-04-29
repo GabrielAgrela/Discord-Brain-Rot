@@ -557,9 +557,9 @@ async def process_playback_queue_request(
         ):
             logger(
                 f"[Playback Queue] Sound file not found at '{sound_path}'. "
-                f"Falling back to original file '{original_sound_path}'."
+                f"Using original file '{original_sound_path}' while preserving "
+                f"renamed sound '{sound_filename}' for bot UI."
             )
-            playback_filename = original_filename
         else:
             logger(
                 f"[Playback Queue] Error: Sound file not found at '{sound_path}'. "

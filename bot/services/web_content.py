@@ -223,18 +223,28 @@ class WebContentService:
         if not include_duration:
             return item
 
-        duration_seconds = self._read_sound_duration_seconds(row.get("filename"))
+        duration_seconds = self._read_sound_duration_seconds(
+            row.get("filename"),
+            fallback_filename=row.get("original_filename"),
+        )
         if duration_seconds is not None:
             item["display_duration"] = self._format_duration(duration_seconds)
         return item
 
-    def _read_sound_duration_seconds(self, filename: str | None) -> float | None:
+    def _read_sound_duration_seconds(
+        self,
+        filename: str | None,
+        *,
+        fallback_filename: str | None = None,
+    ) -> float | None:
         """Read an MP3 duration from disk when the file is available."""
-        if not filename or self.sounds_dir is None:
+        if self.sounds_dir is None:
             return None
 
-        sound_path = self.sounds_dir / Path(filename).name
-        if not sound_path.exists() or not sound_path.is_file():
+        sound_path = self._resolve_existing_sound_path(filename)
+        if sound_path is None and fallback_filename != filename:
+            sound_path = self._resolve_existing_sound_path(fallback_filename)
+        if sound_path is None:
             return None
 
         try:
@@ -244,6 +254,16 @@ class WebContentService:
             return None
 
         return duration if duration > 0 else None
+
+    def _resolve_existing_sound_path(self, filename: str | None) -> Path | None:
+        """Return a sound path when the filename exists under the sounds directory."""
+        if not filename:
+            return None
+
+        sound_path = self.sounds_dir / Path(filename).name
+        if sound_path.exists() and sound_path.is_file():
+            return sound_path
+        return None
 
     def _format_duration(self, seconds: float) -> str:
         """Format a sound duration as m:ss or h:mm:ss."""

@@ -211,6 +211,7 @@ class WebContentRepository(BaseRepository[dict[str, Any]]):
             SELECT
                 s.id AS sound_id,
                 s.Filename AS filename,
+                s.originalfilename AS original_filename,
                 s.favorite AS favorite,
                 s.slap AS slap
             FROM sounds s
@@ -403,6 +404,7 @@ class WebContentRepository(BaseRepository[dict[str, Any]]):
             SELECT
                 s.id AS sound_id,
                 s.Filename AS filename,
+                s.originalfilename AS original_filename,
                 s.favorite AS favorite,
                 s.slap AS slap,
                 s.timestamp AS timestamp

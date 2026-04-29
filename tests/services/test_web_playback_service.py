@@ -611,7 +611,7 @@ async def test_process_playback_queue_request_falls_back_to_original_filename(tm
     )
 
     assert result is True
-    behavior.play_audio.assert_awaited_once_with(channel, "original.mp3", "Discord User")
+    behavior.play_audio.assert_awaited_once_with(channel, "renamed.mp3", "Discord User")
     action_logger.insert.assert_called_once_with(
         "Discord User",
         "play_request",

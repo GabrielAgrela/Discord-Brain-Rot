@@ -1488,6 +1488,46 @@ def test_web_sound_tables_include_mp3_duration_when_file_exists(web_client, monk
     assert all_sounds_response.get_json()["items"][0]["display_duration"] == "1:12"
 
 
+def test_web_sound_tables_use_original_file_duration_after_rename(web_client, monkeypatch):
+    client, db_path = web_client
+    sounds_dir = Path(app.config["SOUNDS_DIR"])
+    (sounds_dir / "original.mp3").write_bytes(b"fake mp3")
+
+    class FakeAudioInfo:
+        length = 15.4
+
+    class FakeMp3:
+        info = FakeAudioInfo()
+
+        def __init__(self, path: str):
+            assert path.endswith("original.mp3")
+
+    monkeypatch.setattr("bot.services.web_content.MP3", FakeMp3)
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            INSERT INTO sounds (id, originalfilename, Filename, favorite, slap, is_elevenlabs, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (1, "original.mp3", "renamed.mp3", 1, 0, 0, "2026-04-01 12:00:00"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    favorites_response = client.get("/api/favorites")
+    all_sounds_response = client.get("/api/all_sounds")
+
+    assert favorites_response.status_code == 200
+    assert favorites_response.get_json()["items"][0]["display_filename"] == "renamed.mp3"
+    assert favorites_response.get_json()["items"][0]["display_duration"] == "0:15"
+    assert all_sounds_response.status_code == 200
+    assert all_sounds_response.get_json()["items"][0]["display_filename"] == "renamed.mp3"
+    assert all_sounds_response.get_json()["items"][0]["display_duration"] == "0:15"
+
+
 def test_soundboard_index_does_not_read_mp3_durations(web_client, monkeypatch):
     client, db_path = web_client
     sounds_dir = Path(app.config["SOUNDS_DIR"])
