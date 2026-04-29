@@ -47,6 +47,7 @@ from bot.services.backup import BackupService
 from bot.services.guild_settings import GuildSettingsService
 from bot.services.rl_store import RocketLeagueStoreService
 from bot.services.weekly_wrapped import WeeklyWrappedService
+from bot.services.favorite_watcher import FavoriteWatcherService
 
 
 
@@ -72,6 +73,7 @@ class BotBehavior:
         self._guild_settings_service = GuildSettingsService()
         self._rocket_league_store_service = RocketLeagueStoreService()
         self._weekly_wrapped_service = WeeklyWrappedService(bot, self._message_service)
+        self._favorite_watcher_service = FavoriteWatcherService(self._sound_service, behavior=self)
         
         # Start background tasks
         self._background_service.start_tasks()

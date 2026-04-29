@@ -182,6 +182,36 @@ class Database:
                 )
                 """
             )
+            self.conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS favorite_watchers (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    url TEXT NOT NULL,
+                    guild_id TEXT,
+                    added_by_user_id TEXT,
+                    added_by_username TEXT,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    last_checked_at DATETIME,
+                    UNIQUE(url, guild_id)
+                )
+                """
+            )
+            self.conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS favorite_watcher_videos (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    watcher_id INTEGER NOT NULL,
+                    video_id TEXT NOT NULL,
+                    video_url TEXT NOT NULL,
+                    first_seen_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    imported_at DATETIME,
+                    sound_filename TEXT,
+                    UNIQUE(watcher_id, video_id),
+                    FOREIGN KEY (watcher_id) REFERENCES favorite_watchers(id)
+                )
+                """
+            )
             keyword_count = self.conn.execute("SELECT COUNT(*) FROM keywords").fetchone()[0]
             if keyword_count == 0:
                 self.conn.executemany(
@@ -219,6 +249,11 @@ class Database:
             self.conn.execute("CREATE INDEX IF NOT EXISTS idx_users_guild_event ON users(guild_id, id, event)")
             self.conn.execute("CREATE INDEX IF NOT EXISTS idx_voice_activity_guild ON voice_activity(guild_id, join_time)")
             self.conn.execute("CREATE INDEX IF NOT EXISTS idx_sound_lists_guild ON sound_lists(guild_id, list_name)")
+            self.conn.execute("CREATE INDEX IF NOT EXISTS idx_favorite_watchers_enabled ON favorite_watchers(enabled)")
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_favorite_watcher_videos_watcher "
+                "ON favorite_watcher_videos(watcher_id)"
+            )
             self.conn.commit()
         except sqlite3.Error as e:
             print(f"[Database] Schema migration warning: {e}")

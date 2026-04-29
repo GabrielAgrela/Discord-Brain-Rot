@@ -129,11 +129,16 @@ This README is based on the current codebase behavior (not historical README ass
   - `/commands`
   - `/backup`
   - `/reboot` (owner allowlist or Discord Administrator permission only)
+- Sound watcher slash commands:
+  - `/favoritewatcher add url:<TikTok collection URL>` seeds the current collection as a baseline and imports only future additions.
+  - `/favoritewatcher list`
+  - `/favoritewatcher remove watcher_id:<id>`
 - Backup service creates compressed project backups with exclusions and now updates the ephemeral `/backup` response with live stage/progress status while archiving.
 
 ### Background Automations
 - Random periodic sound playback loop (feature-flagged per guild; disabled by default).
 - MyInstants scraping loop.
+- TikTok collection favorite watcher loop (every 10 seconds; imports only videos added after a watcher URL was configured and posts an image-card notification with a play button).
 - Weekly wrapped scheduler loop (UTC-based, default Friday 18:00, deduped per guild/week).
 - Daily `rlstore` notification loop (UTC-based, default 19:05, mentions the configured target user, posts the paginated image-card shop view to `#botrl` when that channel exists, otherwise falls back to the configured bot channel, and includes a non-unfurled `https://rlshop.gg` source URL).
 - Scraper start + completion image cards with compact run summary.
@@ -310,6 +315,7 @@ This README is based on the current codebase behavior (not historical README ass
 - `SOUND_INGEST_COMPRESS_ENABLED` (`true` default; applies dynamic compression before gain)
 - `SOUND_INGEST_COMPRESS_THRESHOLD_DBFS` (default `-14.0`; compressor threshold)
 - `SOUND_INGEST_COMPRESS_RATIO` (default `6.0`; compressor ratio)
+- `FAVORITE_WATCHER_SCAN_LIMIT` (default `50`; max TikTok collection entries checked per watcher poll)
 - `AUTOJOIN_DEFAULT` (`false` default for new guilds)
 - `PERIODIC_DEFAULT` (`false` default for new guilds)
 - `STT_DEFAULT` (`false` default for new guilds)

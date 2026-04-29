@@ -94,6 +94,8 @@ class BackgroundService:
                 self.weekly_wrapped_scheduler_loop.start()
             if self._rlstore_notify_enabled and not self.rlstore_notification_loop.is_running():
                 self.rlstore_notification_loop.start()
+            if not self.favorite_watcher_loop.is_running():
+                self.favorite_watcher_loop.start()
             
             asyncio.create_task(self._auto_join_channels())
             print("[BackgroundService] Background tasks started.")
@@ -1111,6 +1113,26 @@ class BackgroundService:
                 print(f"[BackgroundService] rlstore notification sent in {sent_count} guild(s)")
         except Exception as e:
             print(f"[BackgroundService] Error in rlstore notification scheduler: {e}")
+
+    @tasks.loop(seconds=10)
+    async def favorite_watcher_loop(self):
+        """Poll watched TikTok collections and import newly added videos."""
+        try:
+            favorite_watcher_service = getattr(self.behavior, "_favorite_watcher_service", None)
+            if favorite_watcher_service is None:
+                return
+            imported_count = await favorite_watcher_service.poll_once()
+            if imported_count:
+                logger.info(
+                    "[BackgroundService] Favorite watcher imported %s sound(s)",
+                    imported_count,
+                )
+        except Exception as e:
+            logger.error(
+                "[BackgroundService] Error in favorite watcher loop: %s",
+                e,
+                exc_info=True,
+            )
 
     @tasks.loop(seconds=30)
     async def keyword_detection_health_check(self):

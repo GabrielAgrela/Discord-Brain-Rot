@@ -12,6 +12,7 @@ Read this when changing uploads, sound ingest, playback, generated sound cards, 
 - Defaults are tuned for audible but controlled ingest: `SOUND_INGEST_TARGET_DBFS=-18.0`, `SOUND_INGEST_PEAK_CEILING_DBFS=-2.0`, `SOUND_INGEST_COMPRESS_ENABLED=true`, `SOUND_INGEST_COMPRESS_THRESHOLD_DBFS=-14.0`, `SOUND_INGEST_COMPRESS_RATIO=6.0`.
 - Keep normalization best-effort: log failures and continue saving so ffmpeg/pydub edge cases do not block uploads/imports.
 - TikTok/YouTube/Instagram downloads passing through `Downloads/` are normalized in `SoundDownloader.move_sounds`; keep env knobs consistent with `SoundService`.
+- TikTok collection favorite watchers use `FavoriteWatcherService` and `SoundService.import_sound_from_video()` to import directly into the guild-scoped sound library. Adding a watcher seeds current collection videos as already seen so only future additions import, then each successful future import posts a `DownloadedSoundView` image-card notification.
 
 ## Generated Sound Cards
 

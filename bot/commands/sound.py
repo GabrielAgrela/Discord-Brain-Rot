@@ -11,7 +11,7 @@ This cog handles all sound playback commands including:
 import asyncio
 import discord
 from discord.ext import commands
-from discord.commands import Option
+from discord.commands import Option, SlashCommandGroup
 import sqlite3
 
 from bot.database import Database
@@ -45,6 +45,11 @@ async def _get_sound_autocomplete(ctx: discord.AutocompleteContext):
 
 class SoundCog(commands.Cog):
     """Cog for sound playback commands."""
+
+    favoritewatcher = SlashCommandGroup(
+        "favoritewatcher",
+        "TikTok favorites collection watcher commands",
+    )
     
     def __init__(self, bot: discord.Bot, behavior):
         """
@@ -57,6 +62,12 @@ class SoundCog(commands.Cog):
         self.bot = bot
         self.behavior = behavior
         self.db = Database()
+
+    def _ensure_admin(self, ctx: discord.ApplicationContext) -> bool:
+        """Check if the invoker can manage guild-level sound imports."""
+        if not ctx.guild:
+            return False
+        return self.behavior.is_admin_or_mod(ctx.author)
     
     @commands.slash_command(name="toca", description="Write a name of something you want to hear")
     async def toca(
@@ -132,6 +143,82 @@ class SoundCog(commands.Cog):
         """Play Slice All."""
         await ctx.respond("Processing your request...", delete_after=0)
         await self.behavior.slice_all(ctx.user, guild=ctx.guild)
+
+    @favoritewatcher.command(name="add", description="Watch a TikTok collection for new sound imports")
+    async def favoritewatcher_add(
+        self,
+        ctx: discord.ApplicationContext,
+        url: Option(str, "TikTok collection URL", required=True),
+    ):
+        """Add a TikTok collection watcher for this guild."""
+        if not self._ensure_admin(ctx):
+            await ctx.respond("You don't have permission to change sound watchers.", ephemeral=True)
+            return
+
+        await ctx.defer(ephemeral=True)
+        try:
+            watcher_id, seeded_count = await self.behavior._favorite_watcher_service.add_watcher(
+                url=url,
+                guild_id=ctx.guild.id,
+                added_by_user_id=ctx.author.id,
+                added_by_username=ctx.author.name,
+            )
+        except sqlite3.IntegrityError:
+            await ctx.followup.send("That collection is already being watched for this server.", ephemeral=True)
+            return
+        except ValueError as exc:
+            await ctx.followup.send(str(exc), ephemeral=True)
+            return
+        except Exception as exc:
+            print(f"[SoundCog] Failed to add favorite watcher: {exc}")
+            await ctx.followup.send("Failed to add that watcher. Check the URL and try again.", ephemeral=True)
+            return
+
+        await ctx.followup.send(
+            (
+                f"Favorite watcher `{watcher_id}` added. "
+                f"Seeded {seeded_count} existing video(s), so only future additions will import."
+            ),
+            ephemeral=True,
+        )
+
+    @favoritewatcher.command(name="list", description="List watched TikTok collections")
+    async def favoritewatcher_list(self, ctx: discord.ApplicationContext):
+        """List active TikTok collection watchers for this guild."""
+        if not self._ensure_admin(ctx):
+            await ctx.respond("You don't have permission to view sound watchers.", ephemeral=True)
+            return
+
+        watchers = self.behavior._favorite_watcher_service.list_watchers(ctx.guild.id)
+        if not watchers:
+            await ctx.respond("No favorite watchers are configured for this server.", ephemeral=True)
+            return
+
+        lines = [
+            f"`{watcher['id']}` {watcher['url']} (last checked: {watcher['last_checked_at'] or 'never'})"
+            for watcher in watchers[:20]
+        ]
+        await ctx.respond("\n".join(lines), ephemeral=True)
+
+    @favoritewatcher.command(name="remove", description="Stop watching a TikTok collection")
+    async def favoritewatcher_remove(
+        self,
+        ctx: discord.ApplicationContext,
+        watcher_id: Option(int, "Watcher ID from /favoritewatcher list", required=True),
+    ):
+        """Disable a TikTok collection watcher for this guild."""
+        if not self._ensure_admin(ctx):
+            await ctx.respond("You don't have permission to change sound watchers.", ephemeral=True)
+            return
+
+        removed = self.behavior._favorite_watcher_service.remove_watcher(
+            watcher_id,
+            ctx.guild.id,
+        )
+        if not removed:
+            await ctx.respond("Watcher not found for this server.", ephemeral=True)
+            return
+        await ctx.respond(f"Favorite watcher `{watcher_id}` removed.", ephemeral=True)
 
 def setup(bot: discord.Bot, behavior=None):
     """

@@ -9,6 +9,9 @@ import uuid
 import time
 import sqlite3
 import math
+import shutil
+import tempfile
+from pathlib import Path
 from typing import Optional, List, Tuple, Any
 from bot.repositories import SoundRepository, ActionRepository, ListRepository
 from bot.database import Database  # Keep for get_sounds_by_similarity until migrated
@@ -436,6 +439,80 @@ class SoundService:
         except Exception as e:
             print(f"[SoundService] Error in save_sound_from_video: {e}")
             raise
+
+    async def import_sound_from_video(
+        self,
+        url: str,
+        custom_filename: Optional[str] = None,
+        time_limit: Optional[int] = None,
+        guild_id: Optional[int] = None,
+    ) -> str:
+        """
+        Download a video URL and insert its MP3 directly into the sound library.
+
+        Args:
+            url: TikTok/YouTube/Instagram video URL.
+            custom_filename: Optional preferred MP3 filename.
+            time_limit: Optional trim limit in seconds.
+            guild_id: Guild scope for the new sound record.
+
+        Returns:
+            Absolute path to the imported MP3 file.
+        """
+        async with self.upload_lock:
+            return await asyncio.to_thread(
+                self._import_sound_from_video_sync,
+                url,
+                custom_filename,
+                time_limit,
+                guild_id,
+            )
+
+    def _import_sound_from_video_sync(
+        self,
+        url: str,
+        custom_filename: Optional[str],
+        time_limit: Optional[int],
+        guild_id: Optional[int],
+    ) -> str:
+        """Synchronous implementation for video imports."""
+        with tempfile.TemporaryDirectory(prefix="video_import_", dir=os.path.dirname(self.sounds_dir)) as temp_dir:
+            downloaded_filename = self.manual_downloader.video_to_mp3(
+                url,
+                temp_dir,
+                custom_filename,
+                time_limit,
+            )
+            downloaded_path = Path(temp_dir) / downloaded_filename
+            if not downloaded_path.exists():
+                raise ValueError("Download completed but the MP3 file was not found.")
+
+            final_filename = self._build_unique_sound_filename(
+                self._sanitize_mp3_filename(downloaded_filename, "video_sound")
+            )
+            final_path = Path(self.sounds_dir) / final_filename
+            shutil.move(str(downloaded_path), final_path)
+
+        try:
+            MP3(str(final_path))
+        except Exception as exc:
+            final_path.unlink(missing_ok=True)
+            raise ValueError("Downloaded file is not a valid MP3.") from exc
+
+        asyncio.run(self._maybe_normalize_ingested_mp3(str(final_path)))
+        self.sound_repo.insert_sound(final_path.name, final_path.name, guild_id=guild_id)
+        self.db.invalidate_sound_cache()
+        return str(final_path)
+
+    def _build_unique_sound_filename(self, filename: str) -> str:
+        """Return a unique filename within the configured sound library."""
+        candidate = filename
+        base = candidate[:-4]
+        counter = 1
+        while os.path.exists(os.path.join(self.sounds_dir, candidate)):
+            candidate = f"{base} {counter}.mp3"
+            counter += 1
+        return candidate
 
     async def save_sound_from_url(
         self,
