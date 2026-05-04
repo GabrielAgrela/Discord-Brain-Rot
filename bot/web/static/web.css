@@ -892,7 +892,7 @@ html.theme-dark .web-control-button.sent {
 }
 
 .tables-grid {
-    grid-template-columns: minmax(0, 1.38fr) minmax(0, 0.94fr) minmax(0, 0.94fr);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .control-room {
@@ -2635,7 +2635,7 @@ html.theme-dark .sound-options-button {
 
 #actionsTable th:first-child,
 #actionsTable td:first-child {
-    width: 82px;
+    width: 5.25rem;
 }
 
 #actionsTable td:first-child {
@@ -2644,59 +2644,50 @@ html.theme-dark .sound-options-button {
 
 #actionsTable th:nth-child(2),
 #actionsTable td:nth-child(2) {
-    width: calc(100% - 234px);
+    width: calc(100% - 15.75rem);
 }
 
 #actionsTable th:nth-child(3),
 #actionsTable td:nth-child(3) {
-    width: 104px;
+    width: 7rem;
 }
 
 #actionsTable th:nth-child(4),
 #actionsTable td:nth-child(4) {
-    width: 48px;
+    width: 3.5rem;
+    text-align: center;
 }
 
 #favoritesTable th:first-child,
 #favoritesTable td:first-child {
-    width: calc(100% - 116px);
+    width: calc(100% - 7.5rem);
 }
 
 #favoritesTable th:nth-child(2),
-#favoritesTable td:nth-child(2) {
-    width: 58px;
-    text-align: right;
-    overflow: visible;
-}
-
+#favoritesTable td:nth-child(2),
 #favoritesTable th:last-child,
 #favoritesTable td:last-child {
-    width: 58px;
-    text-align: right;
+    width: 3.75rem;
+    text-align: center;
     overflow: visible;
 }
 
 #allSoundsTable th:first-child,
 #allSoundsTable td:first-child {
-    width: calc(100% - 198px);
+    width: calc(100% - 13rem);
 }
 
 #allSoundsTable th:nth-child(2),
 #allSoundsTable td:nth-child(2) {
-    width: 86px;
+    width: 5.5rem;
 }
 
 #allSoundsTable th:nth-child(3),
-#allSoundsTable td:nth-child(3) {
-    width: 56px;
-    text-align: right;
-    overflow: visible;
-}
-
+#allSoundsTable td:nth-child(3),
 #allSoundsTable th:last-child,
 #allSoundsTable td:last-child {
-    width: 56px;
-    text-align: right;
+    width: 3.75rem;
+    text-align: center;
     overflow: visible;
 }
 
@@ -3440,8 +3431,8 @@ body.page-soundboard .tables-grid > .card {
 
 @media (min-width: 1201px) {
     :root {
-        --table-header-height: 48px;
-        --table-row-height: 56px;
+        --table-header-height: 44px;
+        --table-row-height: 52px;
     }
 
     body.page-soundboard {
@@ -3487,8 +3478,36 @@ body.page-soundboard .tables-grid > .card {
         height: var(--soundboard-table-height);
     }
 
+    body.page-soundboard th {
+        padding-top: 0.52rem;
+        padding-bottom: 0.52rem;
+    }
+
+    body.page-soundboard td {
+        padding-top: 0.34rem;
+        padding-bottom: 0.34rem;
+    }
+
+    body.page-soundboard .play-button {
+        min-width: 2.45rem;
+        min-height: 2.12rem;
+        padding: 0.32rem 0.62rem;
+        border-radius: 12px;
+    }
+
+    body.page-soundboard .sound-options-button {
+        width: 2.12rem;
+        height: 2.12rem;
+        border-radius: 9px;
+    }
+
     body.page-soundboard #filtersActions {
         min-height: 2.62rem;
+    }
+
+    body.page-soundboard .library-controls {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 0.55rem;
     }
 
     body.page-soundboard .library-controls,

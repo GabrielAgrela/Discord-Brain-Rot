@@ -55,7 +55,8 @@ Read this when changing `WebPage.py`, `bot/web/`, web repositories/services, tem
 
 ## Soundboard Layout
 
-- After webpage UI changes, open the rendered page and inspect a screenshot before finalizing. Use a 1920x1080 desktop viewport by default; add a mobile viewport when the change affects responsive layout, sticky controls, tables, or touch interactions.
+- After webpage UI changes, open the rendered page and inspect screenshots before finalizing. Use only a 1920x1080 desktop browser-window check and a 1440x3120 mobile check unless the user asks for another size.
+- Treat the 1920x1080 desktop check as the full Windows browser window, not the page viewport. Leave enough vertical room for browser chrome and the Windows taskbar; headless screenshots that use the full 1080px as content height can miss bottom clipping.
 - Desktop layout should use the viewport as a maximum, not stretch tables to fill it. Keep rows at natural CSS height, `.table-container` as `flex: 0 1 auto` with a max-height, and `per_page` fixed to the safe value.
 - Keep desktop soundboard page size at 7 rows unless the card layout is redesigned.
 - Do not reintroduce click-time auto-shrink for `per_page`; it caused pagination to shrink after Next/Prev clicks.
@@ -73,7 +74,7 @@ Read this when changing `WebPage.py`, `bot/web/`, web repositories/services, tem
 - Keep `web_bot_status` in the stable guild discovery set so single-guild deployments can load the control room without explicit `guild_id`.
 - Web slap/mute controls belong inside the control-room panel, not the nav header.
 - Keep control-room metrics as a flat status strip, not boxed cards inside the rounded banner.
-- Verify desktop control-room/table rhythm around screenshot-like viewports such as `1580x960`; the 7-row tables rely on compact desktop header/row heights.
+- Verify desktop control-room/table rhythm in the 1920x1080 browser-window check; the 7-row tables rely on compact desktop header/row heights.
 - On mobile, the control room should be a compact two-row controller: status plus slap/mute buttons on row one, voice facts on row two.
 - Mobile play/slap/mute buttons need direct `touchend` handlers with duplicate-click suppression.
 - On mobile, nav intentionally scrolls away and the control-room panel is the sticky top element. Do not make both sticky.
