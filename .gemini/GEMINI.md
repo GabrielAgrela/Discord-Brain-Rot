@@ -75,7 +75,7 @@ Before finalizing any implemented change, include:
 
 ## Topic Notes
 
-Read the focused notes only when your task touches that area:
+When a task appears to touch one of these areas, read the matching focused note before making changes. These files are part of the repo instructions, not optional background context:
 
 - Web soundboard, OAuth, uploads, playback queue, web TTS, and Flask layering: `docs/agent-notes/web.md`
 - Sound ingest, generated sound cards, Discord audio playback, DAVE, Vosk, STS, and voice gotchas: `docs/agent-notes/audio.md`
