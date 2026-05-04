@@ -80,6 +80,7 @@ class WebContentService:
                 }
                 for row in rows
             ],
+            "total_count": total_count,
             "total_pages": self._calculate_total_pages(total_count, query.per_page),
             "filters": self._get_action_filters(query, include_filters, filter_keys),
         }
@@ -121,6 +122,7 @@ class WebContentService:
                 }
                 for row in rows
             ],
+            "total_count": total_count,
             "total_pages": self._calculate_total_pages(total_count, query.per_page),
             "filters": self._get_favorite_filters(query, include_filters, filter_keys),
         }
@@ -163,6 +165,7 @@ class WebContentService:
                 }
                 for row in rows
             ],
+            "total_count": total_count,
             "total_pages": self._calculate_total_pages(total_count, query.per_page),
             "filters": self._get_all_sound_filters(query, include_filters, filter_keys),
         }

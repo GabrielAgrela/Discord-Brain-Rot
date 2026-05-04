@@ -9,6 +9,7 @@
 - Do not touch unrelated dirty worktree files. The repo may already contain user edits.
 - Use the project logger from `bot/logger.py` for significant runtime operations.
 - `requirements.txt` is UTF-16 LE with BOM. Preserve that encoding if editing dependencies.
+- Treat reusable user corrections about agent workflow as repo knowledge: update the narrowest relevant `docs/agent-notes/` file, or this file if it must be always-loaded, before finalizing.
 
 ## Architecture
 

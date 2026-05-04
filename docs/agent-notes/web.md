@@ -55,6 +55,7 @@ Read this when changing `WebPage.py`, `bot/web/`, web repositories/services, tem
 
 ## Soundboard Layout
 
+- After webpage UI changes, open the rendered page and inspect a screenshot before finalizing. Use a 1920x1080 desktop viewport by default; add a mobile viewport when the change affects responsive layout, sticky controls, tables, or touch interactions.
 - Desktop layout should use the viewport as a maximum, not stretch tables to fill it. Keep rows at natural CSS height, `.table-container` as `flex: 0 1 auto` with a max-height, and `per_page` fixed to the safe value.
 - Keep desktop soundboard page size at 7 rows unless the card layout is redesigned.
 - Do not reintroduce click-time auto-shrink for `per_page`; it caused pagination to shrink after Next/Prev clicks.

@@ -1327,11 +1327,14 @@ def test_web_static_stylesheet_is_served(web_client):
     assert "background: var(--error)" in stylesheet
     assert "animation: none" in stylesheet
     assert "body.page-soundboard .library-controls" in stylesheet
-    assert "margin-bottom: 2.4rem" in stylesheet
-    assert "min-height: 4.4rem" in stylesheet
+    assert "margin-bottom: 0.45rem" in stylesheet
+    assert "min-height: 2.62rem" in stylesheet
+    assert ".sound-options-button" in stylesheet
+    assert ".result-meta" in stylesheet
     assert "top: calc(0.5rem + env(safe-area-inset-top, 0px))" in stylesheet
     assert ".control-room .card-kicker" in stylesheet
     assert ".play-button.sent" in stylesheet
+    assert ".play-button.warn" in stylesheet
     assert ".play-button.queued" not in stylesheet
 
 
@@ -1604,6 +1607,7 @@ def test_web_table_endpoints_return_filter_options_and_apply_column_filters(web_
                 "timestamp": "2026-04-04 12:00:00",
             }
         ],
+        "total_count": 1,
         "total_pages": 1,
         "filters": {
             "action": ["favorite_sound", "play_from_list", "play_request"],
@@ -1622,6 +1626,7 @@ def test_web_table_endpoints_return_filter_options_and_apply_column_filters(web_
                 "slap": False,
             }
         ],
+        "total_count": 1,
         "total_pages": 1,
         "filters": {
             "sound": ["alpha.mp3", "beta.mp3"],
@@ -1640,6 +1645,7 @@ def test_web_table_endpoints_return_filter_options_and_apply_column_filters(web_
                 "timestamp": "2026-04-03 12:00:00",
             }
         ],
+        "total_count": 1,
         "total_pages": 1,
         "filters": {
             "sound": ["alpha.mp3", "beta.mp3", "gamma.mp3"],
@@ -1698,6 +1704,7 @@ def test_all_sounds_endpoint_returns_and_applies_sound_list_filter(web_client):
                 "timestamp": "2026-04-02 12:00:00",
             }
         ],
+        "total_count": 1,
         "total_pages": 1,
         "filters": {
             "sound": ["alpha.mp3", "beta.mp3"],
@@ -2000,6 +2007,7 @@ def test_favorites_endpoint_returns_and_applies_user_filter(web_client):
                 "slap": False,
             }
         ],
+        "total_count": 1,
         "total_pages": 1,
         "filters": {
             "sound": ["alpha.mp3", "beta.mp3", "gamma.mp3"],
@@ -2036,6 +2044,7 @@ def test_actions_endpoint_can_skip_filter_metadata(web_client):
                 "timestamp": "2026-04-04 12:00:00",
             }
         ],
+        "total_count": 1,
         "total_pages": 1,
         "filters": {},
     }
@@ -2076,6 +2085,7 @@ def test_favorites_endpoint_can_skip_filter_metadata(web_client):
                 "slap": False,
             }
         ],
+        "total_count": 1,
         "total_pages": 1,
         "filters": {},
     }
@@ -2110,6 +2120,7 @@ def test_all_sounds_endpoint_can_skip_filter_metadata(web_client):
                 "timestamp": "2026-04-04 12:00:00",
             }
         ],
+        "total_count": 1,
         "total_pages": 1,
         "filters": {},
     }

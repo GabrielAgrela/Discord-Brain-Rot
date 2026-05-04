@@ -97,7 +97,7 @@ This README is based on the current codebase behavior (not historical README ass
   - recent activity feed
 
 ### Web Soundboard
-- `GET /` shows recent actions, favorites, and all sounds.
+- `GET /` shows the web soundboard with All Sounds as the primary library, plus recent actions and favorites.
 - Multi-guild web deployments expose a guild selector; soundboard tables, control-room status, play/control requests, and uploads include the selected `guild_id` instead of relying on implicit backend inference.
 - A web control-room panel shows live bot status: current sound/requester with a playback progress bar and elapsed/total time, voice channel, mute state, and quick upload/TTS/Slap/mute controls; clicking the voice channel opens the current user/avatar list.
 - Favorites and All Sounds rows show MP3 duration under the sound name when the file is available on disk.
@@ -107,7 +107,7 @@ This README is based on the current codebase behavior (not historical README ass
 - The profile moderation control shows an exclamation alert only while uploads are still unreviewed by a moderator.
 - Rejected web uploads stay in the moderation audit trail, but their linked sounds are hidden from soundboard tables and blocked from web and Discord playback.
 - Web upload moderation is restricted to users who match the bot admin/mod rule for the selected guild (`OWNER_USER_IDS`, Administrator, Manage Server, or Manage Channels). Existing web sessions may need to log out/in after this change so Discord grants the `guilds` OAuth scope.
-- Recent actions can be filtered by action/user, Favorites can be searched and filtered by favoriting user, and All Sounds can be filtered by sound list without losing server-side pagination.
+- Recent actions, Favorites, and All Sounds support search with visible result counts and clear buttons; Recent actions can also be filtered by action/user, Favorites by favoriting user, and All Sounds by sound list without losing server-side pagination.
 - The soundboard and analytics pages include a dark mode toggle beside the Discord login/profile control that persists in browser local storage.
 - Each web table lets you enter a target page directly from its pagination controls.
 - The web soundboard and analytics dashboard replace matched racist/hateful usernames and sound titles with `******` unless the logged-in Discord user has prior tracked voice activity.
@@ -116,7 +116,7 @@ This README is based on the current codebase behavior (not historical README ass
 - Unauthenticated web play/control buttons use a red locked state to prompt Discord login before sending bot actions.
 - Web sound playback now requires Discord login; web requests carry the authenticated Discord user so playback is logged as that user instead of a bot/system account.
 - Web play buttons use `sound_id` under the hood so censored labels still play the real sound correctly.
-- Web sound rows include a play button. Right-clicking a sound row opens rename, add-to-list, play-similar, set-event, favorite/unfavorite, and make/unmake slap actions; rename, add-to-list, play-similar, and set-event each use their own modal, and slap changes require a web admin/mod user.
+- Web sound rows include play and visible options buttons. The options button, right-click, or long-press opens rename, add-to-list, play-similar, set-event, favorite/unfavorite, and make/unmake slap actions; rename, add-to-list, play-similar, and set-event each use their own modal, and slap changes require a web admin/mod user.
 - The set-event modal shows existing join/leave assignments for the selected sound, uses a known-user dropdown, and labels the submit action as Add Event or Remove Event for the selected user/event pair.
 - Bot-side web playback polling defaults to `PLAYBACK_QUEUE_INTERVAL=0.25` seconds for low-latency play-button response.
 - If `DEFAULT_GUILD_ID` is unset, web playback now auto-resolves the guild only when exactly one known guild ID exists in stable bot data (`guild_settings`, `sounds`, `actions`, or `web_bot_status`); `playback_queue` is used only as a last-resort fallback when those tables are empty, and multi-guild callers must send `guild_id` explicitly.

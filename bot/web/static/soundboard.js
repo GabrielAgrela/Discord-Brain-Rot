@@ -30,6 +30,16 @@
             favorites: 'favoritesTableBody',
             all_sounds: 'allSoundsTableBody'
         };
+        const endpointResultMetaIds = {
+            actions: 'actionsResultMeta',
+            favorites: 'favoritesResultMeta',
+            all_sounds: 'allSoundsResultMeta'
+        };
+        const endpointLabels = {
+            actions: 'actions',
+            favorites: 'favorites',
+            all_sounds: 'sounds'
+        };
         const endpointStableItemsPerPageCeilings = {
             ...endpointMaxItemsPerPage
         };
@@ -169,7 +179,10 @@
             button.disabled = false;
             button.classList.toggle('login-required', !discordUser);
             button.textContent = discordUser ? '▶' : '🔒';
-            button.title = discordUser ? 'Play sound' : 'Login with Discord to play';
+            const readiness = getPlaybackReadinessLabel();
+            button.title = discordUser
+                ? (readiness ? `Play sound. ${readiness}` : 'Play sound')
+                : 'Login with Discord to play';
             button.setAttribute('aria-label', button.title);
         }
 
@@ -179,6 +192,17 @@
             playButton.setAttribute('data-sound-id', item.sound_id);
             applyPlayButtonState(playButton);
             return playButton;
+        }
+
+        function buildSoundOptionsButton(item) {
+            const optionsButton = document.createElement('button');
+            optionsButton.type = 'button';
+            optionsButton.className = 'sound-options-button';
+            optionsButton.dataset.soundId = item.sound_id;
+            optionsButton.textContent = '⋯';
+            optionsButton.title = 'Sound options';
+            optionsButton.setAttribute('aria-label', 'Show sound options');
+            return optionsButton;
         }
 
         function applyWebControlButtonState(button) {
@@ -424,6 +448,21 @@
 
             const muted = Boolean(mute.is_muted);
             updateWebControlMuteState(muted);
+            document.querySelectorAll('.play-button').forEach(applyPlayButtonState);
+        }
+
+        function getPlaybackReadinessLabel() {
+            const status = latestControlRoomStatus || {};
+            if (typeof status.online === 'undefined') {
+                return '';
+            }
+            if (!status.online) {
+                return 'Bot status is unavailable.';
+            }
+            if (!status.voice_connected) {
+                return 'Bot is not connected to voice.';
+            }
+            return `Ready in ${status.voice_channel_name || 'voice'}.`;
         }
 
         async function refreshControlRoomStatus() {
@@ -542,9 +581,60 @@
         function getEndpointColumnCount(endpoint) {
             return {
                 actions: 4,
-                favorites: 2,
-                all_sounds: 3
+                favorites: 3,
+                all_sounds: 4
             }[endpoint] || 1;
+        }
+
+        function getEndpointSearchInputId(endpoint) {
+            return {
+                actions: 'searchActions',
+                favorites: 'searchFavorites',
+                all_sounds: 'searchAllSounds'
+            }[endpoint] || '';
+        }
+
+        function getEndpointSearchQuery(endpoint) {
+            const inputId = getEndpointSearchInputId(endpoint);
+            const input = inputId ? document.getElementById(inputId) : null;
+            return input ? input.value.trim() : '';
+        }
+
+        function updateResultMeta(endpoint, data, page) {
+            const element = document.getElementById(endpointResultMetaIds[endpoint]);
+            if (!element) {
+                return;
+            }
+            const totalCount = Number(data?.total_count);
+            const items = Array.isArray(data?.items) ? data.items : [];
+            const searchQuery = getEndpointSearchQuery(endpoint);
+            const label = endpointLabels[endpoint] || 'items';
+            if (!Number.isFinite(totalCount)) {
+                element.textContent = searchQuery ? `Search: ${searchQuery}` : '';
+                return;
+            }
+            if (totalCount === 0) {
+                element.textContent = searchQuery ? `No ${label} found for "${searchQuery}".` : `No ${label} found.`;
+                return;
+            }
+            const pageStart = ((Math.max(1, page) - 1) * (endpointItemsPerPage[endpoint] || items.length)) + 1;
+            const pageEnd = Math.min(totalCount, pageStart + items.length - 1);
+            element.textContent = searchQuery
+                ? `${totalCount} ${label} match "${searchQuery}". Showing ${pageStart}-${pageEnd}.`
+                : `${totalCount} ${label}. Showing ${pageStart}-${pageEnd}.`;
+        }
+
+        function renderNoResultsRow(endpoint, tableBody) {
+            const row = document.createElement('tr');
+            row.className = 'empty-row';
+            const cell = document.createElement('td');
+            cell.colSpan = getEndpointColumnCount(endpoint);
+            cell.className = 'empty-state';
+            const searchQuery = getEndpointSearchQuery(endpoint);
+            const label = endpointLabels[endpoint] || 'items';
+            cell.textContent = searchQuery ? `No ${label} match "${searchQuery}".` : `No ${label} found.`;
+            row.appendChild(cell);
+            tableBody.appendChild(row);
         }
 
         function renderInitialTablePlaceholders(endpoint) {
@@ -830,8 +920,9 @@
 
                     const hasNewEntries = JSON.stringify(data.items) !== JSON.stringify(lastFetchedData[endpoint]);
                     updatePaginationControls(page, data.total_pages, totalPagesId, prevButtonId, nextButtonId, pageInputId);
+                    updateResultMeta(endpoint, data, page);
 
-                    if (hasNewEntries) {
+                    if (hasNewEntries || showLoading) {
                         lastFetchedData[endpoint] = data.items;
 
                         const renderFetchedData = () => {
@@ -840,6 +931,10 @@
                             }
 
                             tableBody.innerHTML = '';
+
+                            if (!data.items.length) {
+                                renderNoResultsRow(endpoint, tableBody);
+                            }
 
                             data.items.forEach((item, index) => {
                                 const row = document.createElement('tr');
@@ -881,6 +976,10 @@
                                     const playCell = document.createElement('td');
                                     playCell.appendChild(buildSoundPlayButton(item));
                                     row.appendChild(playCell);
+
+                                    const optionsCell = document.createElement('td');
+                                    optionsCell.appendChild(buildSoundOptionsButton(item));
+                                    row.appendChild(optionsCell);
                                 } else if (endpoint === 'all_sounds') {
                                     row.className = 'sound-options-row';
                                     row.dataset.soundId = item.sound_id;
@@ -901,6 +1000,10 @@
                                     const playCell = document.createElement('td');
                                     playCell.appendChild(buildSoundPlayButton(item));
                                     row.appendChild(playCell);
+
+                                    const optionsCell = document.createElement('td');
+                                    optionsCell.appendChild(buildSoundOptionsButton(item));
+                                    row.appendChild(optionsCell);
                                 }
 
                                 tableBody.appendChild(row);
@@ -1638,6 +1741,7 @@
             }
 
             event?.preventDefault?.();
+            event?.stopPropagation?.();
             clearSoundOptionsLongPress();
             contextMenuSoundId = soundId;
             contextMenuSoundIsFavorite = row.dataset.favorite === 'true';
@@ -1670,6 +1774,19 @@
             soundRowContextMenu.style.top = `${Math.max(8, top)}px`;
             soundRowContextMenu.classList.add('open');
             soundRowContextMenu.setAttribute('aria-hidden', 'false');
+        }
+
+        function handleSoundOptionsButtonActivation(event) {
+            const button = event.target.closest('.sound-options-button');
+            if (!button || !document.querySelector('.tables-grid')?.contains(button)) {
+                return;
+            }
+            const row = button.closest('.sound-options-row');
+            if (!row) {
+                return;
+            }
+            const rect = button.getBoundingClientRect();
+            openSoundRowContextMenuForRow(row, rect.left, rect.bottom + 6, event);
         }
 
         function handleSoundRowRenameOption() {
@@ -1814,12 +1931,15 @@
 
             try {
                 await postPlaySound(soundId);
-                button.textContent = '✓';
-                button.title = 'Sent';
-                button.classList.add('sent');
+                const readiness = getPlaybackReadinessLabel();
+                const isReady = !readiness || (latestControlRoomStatus?.online && latestControlRoomStatus?.voice_connected);
+                button.textContent = isReady ? '✓' : '!';
+                button.title = isReady ? 'Sent' : `Sent, but ${readiness}`;
+                button.classList.add(isReady ? 'sent' : 'warn');
                 setTimeout(() => {
                     applyPlayButtonState(button);
                     button.classList.remove('sent');
+                    button.classList.remove('warn');
                 }, 2000);
             } catch (error) {
                 console.error('Network error:', error);
@@ -1910,6 +2030,7 @@
         }
 
         const tablesGrid = document.querySelector('.tables-grid');
+        tablesGrid.addEventListener('click', handleSoundOptionsButtonActivation);
         tablesGrid.addEventListener('click', handlePlayButtonActivation);
         tablesGrid.addEventListener('touchend', handlePlayButtonActivation, { passive: false });
         tablesGrid.addEventListener('contextmenu', openSoundRowContextMenu);
@@ -2732,14 +2853,31 @@
             if (!searchInput) {
                 return;
             }
+            const clearButton = document.querySelector(`[data-search-target="${inputId}"]`);
             let debounceTimer;
+            const updateClearButton = () => {
+                clearButton?.classList.toggle('visible', Boolean(searchInput.value.trim()));
+            };
 
             searchInput.addEventListener('input', () => {
                 clearTimeout(debounceTimer);
+                updateClearButton();
                 debounceTimer = setTimeout(() => {
-                    fetchFunction(null, true);
+                    fetchFunction(null, true, true);
                 }, 350);
             });
+
+            clearButton?.addEventListener('click', () => {
+                if (!searchInput.value) {
+                    return;
+                }
+                searchInput.value = '';
+                updateClearButton();
+                searchInput.focus();
+                fetchFunction(null, true, true);
+            });
+
+            updateClearButton();
         }
 
         setupBackendSearch('searchActions', fetchActions);
@@ -2756,6 +2894,13 @@
         }, 2000);
 
         Object.keys(fetchersByEndpoint).forEach(applyTableGeometry);
+        Object.keys(fetchersByEndpoint).forEach(endpoint => {
+            updateResultMeta(endpoint, initialSoundboardData?.[endpoint] || {}, 1);
+            const tableBody = document.getElementById(endpointTableBodyIds[endpoint]);
+            if (tableBody && !tableBody.children.length) {
+                renderNoResultsRow(endpoint, tableBody);
+            }
+        });
         document.querySelectorAll('.play-button').forEach(applyPlayButtonState);
         document.querySelectorAll('.web-control-button').forEach(applyWebControlButtonState);
         refreshWebControlState();
