@@ -107,7 +107,7 @@
                                 data-filter-key="action" aria-label="Filter recent actions by action">
                                 <option value="" selected>All Action</option>
                                 {% for value in actions_data.get('filters', {}).get('action', []) %}
-                                <option value="{{ value }}">{{ action_labels.get(value, value) }}</option>
+                                <option value="{{ value }}">{{ action_labels.get(value, value|replace('_', ' ')) }}</option>
                                 {% endfor %}
                             </select>
                         </div>
@@ -146,7 +146,7 @@
                                 <td>
                                     <span class="action-badge {{ action_badge_class(action_value) }}"
                                         title="{{ action_value }}">
-                                        {{ action_labels.get(action_value, action_value) }}
+                                        {{ action_labels.get(action_value, action_value|replace('_', ' ')) }}
                                     </span>
                                 </td>
                                 <td class="filename" title="{{ filename_value }}">{{ filename_value|replace('.mp3', '')

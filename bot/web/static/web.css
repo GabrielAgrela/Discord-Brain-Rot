@@ -2561,9 +2561,10 @@ html.theme-dark .sound-options-button {
 }
 
 .action-badge {
-    display: inline-block;
+    display: -webkit-box;
     max-width: 72px;
     min-width: 0;
+    margin: 0 auto;
     box-sizing: border-box;
     padding: 0.32rem 0.44rem;
     border-radius: 999px;
@@ -2572,13 +2573,15 @@ html.theme-dark .sound-options-button {
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65);
     font-size: 0.52rem;
     font-weight: 700;
-    line-height: 1;
+    line-height: 1.05;
     letter-spacing: 0.05em;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
     overflow: hidden;
-    text-overflow: ellipsis;
-    text-align: left;
+    text-align: center;
     vertical-align: middle;
-    white-space: nowrap;
+    white-space: normal;
+    overflow-wrap: anywhere;
     text-transform: uppercase;
     color: var(--accent-deep);
 }

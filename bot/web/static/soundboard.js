@@ -737,7 +737,7 @@
                 'join': 'Joined',
                 'leave': 'Left'
             };
-            return actionMap[action] || action;
+            return actionMap[action] || action.replace(/_/g, ' ');
         }
 
         function buildSoundLabel(item) {

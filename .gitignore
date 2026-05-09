@@ -27,6 +27,8 @@ database copy.db
 .pytest_cache/
 .coverage
 htmlcov/
+.playwright-mcp/
+/*.png
 
 # Trailer (Remotion)
 trailer/node_modules/

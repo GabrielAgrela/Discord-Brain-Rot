@@ -1,0 +1,21 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["opencode-notificator"],
+  "mcp": {
+    "playwright": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@playwright/mcp",
+        "--output-dir",
+        ".playwright-mcp",
+        "--output-mode",
+        "file",
+        "--image-responses",
+        "omit"
+      ],
+      "enabled": true
+    }
+  }
+}
