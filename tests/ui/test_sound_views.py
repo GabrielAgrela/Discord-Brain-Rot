@@ -1,7 +1,7 @@
 """Tests for sound playback Discord views."""
 
 from bot.ui.buttons.sounds import SendControlsButton, ToggleControlsButton
-from bot.ui.views.sounds import SoundBeingPlayedView
+from bot.ui.views.sounds import SOUND_CONTROLS_AUTO_CLOSE_SECONDS, SoundBeingPlayedView
 import pytest
 
 
@@ -36,3 +36,8 @@ async def test_down_arrow_enabled_after_playback_finishes():
     toggle = next(item for item in view.children if isinstance(item, ToggleControlsButton))
     assert str(toggle.emoji) == "🔽"
     assert toggle.disabled is False
+
+
+def test_sound_controls_auto_close_delay_is_30_seconds():
+    """Ensure expanded sound controls stay open for the intended duration."""
+    assert SOUND_CONTROLS_AUTO_CLOSE_SECONDS == 30

@@ -3,6 +3,8 @@ import discord
 from discord.ui import View
 from bot.database import Database
 
+SOUND_CONTROLS_AUTO_CLOSE_SECONDS = 30
+
 class SoundBeingPlayedView(View):
     def __init__(self, bot_behavior, audio_file, user_id=None, include_add_to_list_select: bool = False, include_sts_select: bool = True, progress_label: str = "▶️ 0:01", show_controls: bool = False, is_tts: bool = False, original_message: str = "", sts_char: str = None, controls_toggle_disabled: bool = False):
         super().__init__(timeout=None)
@@ -29,7 +31,7 @@ class SoundBeingPlayedView(View):
         self.auto_close_task = asyncio.create_task(self._auto_close_coro())
 
     async def _auto_close_coro(self):
-        await asyncio.sleep(10)
+        await asyncio.sleep(SOUND_CONTROLS_AUTO_CLOSE_SECONDS)
         if self.show_controls:
             self.show_controls = False
             self._setup_items()
