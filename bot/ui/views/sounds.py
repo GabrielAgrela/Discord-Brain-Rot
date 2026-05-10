@@ -4,7 +4,7 @@ from discord.ui import View
 from bot.database import Database
 
 class SoundBeingPlayedView(View):
-    def __init__(self, bot_behavior, audio_file, user_id=None, include_add_to_list_select: bool = False, include_sts_select: bool = True, progress_label: str = "▶️ 0:01", show_controls: bool = False, is_tts: bool = False, original_message: str = "", sts_char: str = None):
+    def __init__(self, bot_behavior, audio_file, user_id=None, include_add_to_list_select: bool = False, include_sts_select: bool = True, progress_label: str = "▶️ 0:01", show_controls: bool = False, is_tts: bool = False, original_message: str = "", sts_char: str = None, controls_toggle_disabled: bool = False):
         super().__init__(timeout=None)
         self.bot_behavior = bot_behavior
         self.audio_file = audio_file
@@ -16,6 +16,7 @@ class SoundBeingPlayedView(View):
         self.is_tts = is_tts
         self.original_message = original_message
         self.sts_char = sts_char
+        self.controls_toggle_disabled = controls_toggle_disabled
         self.progress_button = None
         self.auto_close_task = None
         
@@ -71,7 +72,11 @@ class SoundBeingPlayedView(View):
         self.add_item(self.progress_button)
         
         toggle_emoji = "🔼" if self.show_controls else "🔽"
-        self.add_item(ToggleControlsButton(emoji=toggle_emoji, row=0))
+        self.add_item(ToggleControlsButton(
+            emoji=toggle_emoji,
+            row=0,
+            disabled=self.controls_toggle_disabled and not self.show_controls,
+        ))
         self.add_item(SendControlsButton(row=0)) # Always visible in Row 0 next to the eye ✅
         
         if self.show_controls:
@@ -128,6 +133,11 @@ class SoundBeingPlayedView(View):
             else:
                 self.progress_button.label = emoji
 
+    def set_controls_toggle_disabled(self, disabled: bool):
+        """Set whether the collapsed down-arrow controls button is disabled."""
+        self.controls_toggle_disabled = disabled
+        self._setup_items()
+
     async def on_error(self, error: Exception, item: discord.ui.Item, interaction: discord.Interaction):
         print(f"DEBUG: SoundBeingPlayedView ERROR: {error} | Item: {item}")
         import traceback
@@ -138,7 +148,7 @@ class SoundBeingPlayedView(View):
             await interaction.followup.send("An error occurred. 😭", ephemeral=True)
 
 class SoundBeingPlayedWithSuggestionsView(View):
-    def __init__(self, bot_behavior, audio_file, similar_sounds, user_id=None, include_add_to_list_select: bool = False, progress_label: str = "▶️ 0:01", show_controls: bool = False, is_tts: bool = False, original_message: str = "", sts_char: str = None):
+    def __init__(self, bot_behavior, audio_file, similar_sounds, user_id=None, include_add_to_list_select: bool = False, progress_label: str = "▶️ 0:01", show_controls: bool = False, is_tts: bool = False, original_message: str = "", sts_char: str = None, controls_toggle_disabled: bool = False):
         super().__init__(timeout=None)
         self.bot_behavior = bot_behavior
         self.audio_file = audio_file
@@ -150,6 +160,7 @@ class SoundBeingPlayedWithSuggestionsView(View):
         self.is_tts = is_tts
         self.original_message = original_message
         self.sts_char = sts_char
+        self.controls_toggle_disabled = controls_toggle_disabled
         self.progress_button = None
         
         self._setup_items()
@@ -181,7 +192,11 @@ class SoundBeingPlayedWithSuggestionsView(View):
         self.add_item(self.progress_button)
         
         toggle_emoji = "🔼" if self.show_controls else "🔽"
-        self.add_item(ToggleControlsButton(emoji=toggle_emoji, row=0))
+        self.add_item(ToggleControlsButton(
+            emoji=toggle_emoji,
+            row=0,
+            disabled=self.controls_toggle_disabled and not self.show_controls,
+        ))
         self.add_item(SendControlsButton(row=0)) # Always visible in Row 0 next to the eye ✅
         
         if self.show_controls:
@@ -232,3 +247,8 @@ class SoundBeingPlayedWithSuggestionsView(View):
                 self.progress_button.label = f"{emoji} {parts[1]}"
             else:
                 self.progress_button.label = emoji
+
+    def set_controls_toggle_disabled(self, disabled: bool):
+        """Set whether the collapsed down-arrow controls button is disabled."""
+        self.controls_toggle_disabled = disabled
+        self._setup_items()

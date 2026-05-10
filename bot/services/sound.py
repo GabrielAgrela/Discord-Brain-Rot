@@ -620,6 +620,7 @@ class SoundService:
             # Retrieve current label and toggle state to preserve it
             current_label = "▶️ 0:00"
             show_controls = False
+            controls_toggle_disabled = False
             guild_id = sound_message.guild.id if sound_message and sound_message.guild else None
             current_view = self.audio_service.get_current_view(guild_id) if guild_id else self.audio_service.current_view
             if current_view:
@@ -627,6 +628,8 @@ class SoundService:
                     current_label = current_view.progress_button.label
                 if hasattr(current_view, 'show_controls'):
                     show_controls = current_view.show_controls
+                if hasattr(current_view, 'controls_toggle_disabled'):
+                    controls_toggle_disabled = current_view.controls_toggle_disabled
 
             from bot.ui import SoundBeingPlayedWithSuggestionsView
             combined_view = SoundBeingPlayedWithSuggestionsView(
@@ -635,7 +638,8 @@ class SoundService:
                 similar_sounds_list, 
                 include_add_to_list_select=True,
                 progress_label=current_label,
-                show_controls=show_controls
+                show_controls=show_controls,
+                controls_toggle_disabled=controls_toggle_disabled,
             )
             
             await sound_message.edit(view=combined_view)
@@ -693,12 +697,15 @@ class SoundService:
             # Retrieve current label and toggle state to preserve it (Final state ✅)
             current_label = "▶️ 0:00"
             show_controls = False
+            controls_toggle_disabled = False
             current_view = self.audio_service.get_current_view(guild_id) if guild_id else self.audio_service.current_view
             if current_view:
                 if hasattr(current_view, 'progress_button'):
                     current_label = current_view.progress_button.label
                 if hasattr(current_view, 'show_controls'):
                     show_controls = current_view.show_controls
+                if hasattr(current_view, 'controls_toggle_disabled'):
+                    controls_toggle_disabled = current_view.controls_toggle_disabled
 
             view = SoundBeingPlayedWithSuggestionsView(
                 self.bot_behavior, 
@@ -706,7 +713,8 @@ class SoundService:
                 similar_sounds, 
                 include_add_to_list_select=True,
                 progress_label=current_label,
-                show_controls=show_controls
+                show_controls=show_controls,
+                controls_toggle_disabled=controls_toggle_disabled,
             )
             await sound_message.edit(view=view)
             

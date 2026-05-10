@@ -699,6 +699,12 @@ class AudioService:
         if self._active_guild_id == guild_id:
             self.current_similar_sounds = sounds
 
+    @staticmethod
+    def _set_view_controls_toggle_disabled(view: Optional[discord.ui.View], disabled: bool) -> None:
+        """Disable only the collapsed down-arrow controls toggle when supported."""
+        if view and hasattr(view, "set_controls_toggle_disabled"):
+            view.set_controls_toggle_disabled(disabled)
+
     def _format_duration(self, seconds: float) -> str:
         """Format seconds into mm:ss string."""
         if seconds < 0:
@@ -1215,6 +1221,7 @@ class AudioService:
                     try:
                         if hasattr(current_view, 'update_progress_emoji'):
                              current_view.update_progress_emoji('👋')
+                             self._set_view_controls_toggle_disabled(current_view, False)
                              await current_message.edit(view=current_view)
                     except:
                         pass
@@ -1393,6 +1400,7 @@ class AudioService:
                     if previous_view and hasattr(previous_view, 'update_progress_emoji'):
                          try:
                              previous_view.update_progress_emoji('⏭️')
+                             self._set_view_controls_toggle_disabled(previous_view, False)
                              await previous_sound_message.edit(view=previous_view)
                          except:
                              pass
@@ -1828,7 +1836,8 @@ class AudioService:
                             show_controls=False, # Start with controls hidden ✅
                             is_tts=is_tts,
                             original_message=original_message,
-                            sts_char=sts_char
+                            sts_char=sts_char,
+                            controls_toggle_disabled=True,
                         )
                         
                         if image_bytes:
@@ -2019,6 +2028,7 @@ class AudioService:
                 if current_view and hasattr(current_view, 'update_progress_label'):
                     try:
                         current_view.update_progress_label(final_text)
+                        self._set_view_controls_toggle_disabled(current_view, False)
                         await sound_message.edit(view=current_view)
                     except:
                         pass
