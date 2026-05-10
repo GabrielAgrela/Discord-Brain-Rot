@@ -84,14 +84,21 @@
     </nav>
 
     <main class="page-shell">
-        <div class="analytics-toolbar analytics-toolbar-standalone">
-            <div class="time-selector">
-                <button class="time-btn" data-days="1">24h</button>
-                <button class="time-btn active" data-days="7">7 days</button>
-                <button class="time-btn" data-days="30">30 days</button>
-                <button class="time-btn" data-days="0">All time</button>
+        <header class="page-heading">
+            <div class="page-heading-copy">
+                <p class="eyebrow">Signal Report</p>
+                <h1 class="page-title">Server noise, mapped.</h1>
+                <p class="page-intro">Track who is driving the soundboard, which clips keep resurfacing, and when the bot turns chat into a control-room incident.</p>
             </div>
-        </div>
+            <div class="analytics-toolbar analytics-toolbar-standalone" aria-label="Analytics time range">
+                <div class="time-selector">
+                    <button class="time-btn" data-days="1">24h</button>
+                    <button class="time-btn active" data-days="7">7 days</button>
+                    <button class="time-btn" data-days="30">30 days</button>
+                    <button class="time-btn" data-days="0">All time</button>
+                </div>
+            </div>
+        </header>
 
         <div class="stats-grid">
             <section class="stat-card">
