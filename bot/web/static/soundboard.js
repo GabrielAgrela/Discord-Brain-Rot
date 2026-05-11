@@ -345,27 +345,25 @@
             return String(name || '?').trim().slice(0, 1).toUpperCase() || '?';
         }
 
-        function renderVoiceMembersModal() {
-            const title = document.getElementById('voiceMembersModalTitle');
-            const list = document.getElementById('voiceMembersList');
-            if (!title || !list) return;
+        function renderVoiceMembersInto(titleEl, listEl) {
+            if (!titleEl || !listEl) return;
 
             const status = latestControlRoomStatus || {};
-            title.textContent = status.voice_connected
+            titleEl.textContent = status.voice_connected
                 ? (status.voice_channel_name || 'Voice')
                 : 'Disconnected';
 
             const members = Array.isArray(status.voice_members) ? status.voice_members : [];
             if (!status.voice_connected) {
-                list.innerHTML = '<p class="voice-members-empty">Bot is not connected to a voice channel.</p>';
+                listEl.innerHTML = '<p class="voice-members-empty">Bot is not connected to a voice channel.</p>';
                 return;
             }
             if (!members.length) {
-                list.innerHTML = '<p class="voice-members-empty">No users are in this voice channel.</p>';
+                listEl.innerHTML = '<p class="voice-members-empty">No users are in this voice channel.</p>';
                 return;
             }
 
-            list.replaceChildren(...members.map((member) => {
+            listEl.replaceChildren(...members.map((member) => {
                 const row = document.createElement('div');
                 row.className = 'voice-member-row';
 
@@ -389,9 +387,39 @@
             }));
         }
 
+        function renderVoiceMembersModal() {
+            renderVoiceMembersInto(
+                document.getElementById('voiceMembersModalTitle'),
+                document.getElementById('voiceMembersList')
+            );
+        }
+
+        function renderVoiceMembersDropdown() {
+            renderVoiceMembersInto(
+                document.getElementById('voiceMembersDropdownTitle'),
+                document.getElementById('voiceMembersDropdownList')
+            );
+        }
+
+        function openVoiceMembersDropdown() {
+            const dropdown = document.getElementById('voiceMembersDropdown');
+            if (!dropdown) return;
+            renderVoiceMembersDropdown();
+            dropdown.classList.add('open');
+            dropdown.setAttribute('aria-hidden', 'false');
+        }
+
+        function closeVoiceMembersDropdown() {
+            const dropdown = document.getElementById('voiceMembersDropdown');
+            if (!dropdown) return;
+            dropdown.classList.remove('open');
+            dropdown.setAttribute('aria-hidden', 'true');
+        }
+
         function openVoiceMembersModal() {
             const modal = document.getElementById('voiceMembersModal');
             if (!modal) return;
+            closeVoiceMembersDropdown();
             renderVoiceMembersModal();
             modal.classList.add('open');
             modal.setAttribute('aria-hidden', 'false');
@@ -1210,6 +1238,39 @@
 
         if (controlRoomVoiceButton) {
             controlRoomVoiceButton.addEventListener('click', openVoiceMembersModal);
+        }
+
+        const controlRoomVoiceMetric = document.getElementById('controlRoomVoiceMetric');
+        const voiceMembersDropdown = document.getElementById('voiceMembersDropdown');
+        let voiceDropdownHideTimer = null;
+
+        function showVoiceDropdown() {
+            if (voiceDropdownHideTimer) {
+                clearTimeout(voiceDropdownHideTimer);
+                voiceDropdownHideTimer = null;
+            }
+            const status = latestControlRoomStatus || {};
+            if (!status.voice_connected) {
+                return;
+            }
+            openVoiceMembersDropdown();
+        }
+
+        function hideVoiceDropdown() {
+            if (voiceDropdownHideTimer) {
+                clearTimeout(voiceDropdownHideTimer);
+            }
+            voiceDropdownHideTimer = window.setTimeout(() => {
+                voiceDropdownHideTimer = null;
+                closeVoiceMembersDropdown();
+            }, 180);
+        }
+
+        if (controlRoomVoiceMetric && voiceMembersDropdown) {
+            controlRoomVoiceMetric.addEventListener('mouseenter', showVoiceDropdown);
+            controlRoomVoiceMetric.addEventListener('mouseleave', hideVoiceDropdown);
+            voiceMembersDropdown.addEventListener('mouseenter', showVoiceDropdown);
+            voiceMembersDropdown.addEventListener('mouseleave', hideVoiceDropdown);
         }
 
         if (voiceMembersModal && voiceMembersModalClose) {

@@ -10,12 +10,19 @@
                 </div>
             </div>
             <div class="control-room-metrics">
-                <div class="control-room-metric">
+                <div class="control-room-metric" id="controlRoomVoiceMetric">
                     <span class="control-room-metric-label">Voice</span>
                     <button type="button" id="controlRoomVoiceButton" class="control-room-voice-button"
                         aria-haspopup="dialog" aria-label="Show voice channel members" disabled>
                         <strong id="controlRoomVoice">Disconnected</strong>
                     </button>
+                    <div id="voiceMembersDropdown" class="voice-members-dropdown" aria-hidden="true">
+                        <div class="voice-members-dropdown-header">
+                            <p class="card-kicker">Voice Channel</p>
+                            <h3 id="voiceMembersDropdownTitle" class="voice-members-dropdown-title">Disconnected</h3>
+                        </div>
+                        <div id="voiceMembersDropdownList" class="voice-members-dropdown-list"></div>
+                    </div>
                 </div>
                 <div class="control-room-metric control-room-metric--action">
                     <span class="control-room-metric-label">Upload</span>
