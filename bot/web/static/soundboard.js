@@ -763,9 +763,28 @@
                 'favorite_sound': 'Favorited',
                 'unfavorite_sound': 'Unfavorited',
                 'join': 'Joined',
-                'leave': 'Left'
+                'leave': 'Left',
+                'rlstore_daily_notification_sent': 'RL Store'
             };
             return actionMap[action] || action.replace(/_/g, ' ');
+        }
+
+        function fitActionBadges(scope = document) {
+            const badges = scope.querySelectorAll('.action-badge');
+            const baseRem = 0.52;
+            const minRem = 0.38;
+            const step = 0.02;
+            badges.forEach((badge) => {
+                badge.style.fontSize = '';
+                let size = baseRem;
+                badge.style.fontSize = size + 'rem';
+                while (size > minRem) {
+                    const overflows = badge.scrollWidth > badge.clientWidth + 1 || badge.scrollHeight > badge.clientHeight + 1;
+                    if (!overflows) break;
+                    size -= step;
+                    badge.style.fontSize = size + 'rem';
+                }
+            });
         }
 
         function buildSoundLabel(item) {
@@ -1038,6 +1057,7 @@
                             });
 
                             applyTableGeometry(endpoint);
+                            fitActionBadges(tableBody);
 
                             const pageSizeChanged = updateItemsPerPage(endpoint);
                             if (pageSizeChanged) {
@@ -2976,6 +2996,7 @@
         refreshWebControlState();
         refreshControlRoomStatus();
         loadUploadInbox();
+        fitActionBadges();
 
         window.addEventListener('resize', () => {
             let shouldRefetch = false;
@@ -2989,5 +3010,6 @@
                 fetchFavorites(null, true);
                 fetchAllSounds(null, true);
             }
+            fitActionBadges();
         });
 })();
