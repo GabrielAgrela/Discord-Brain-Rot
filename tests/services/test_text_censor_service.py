@@ -7,6 +7,15 @@ def test_censor_text_replaces_known_hateful_examples():
     assert service.censor_text("jews did 911") == "******"
     assert service.censor_text("i hate nig-ventura-27-07-2") == "******"
     assert service.censor_text("niggas young fly on the tra") == "******"
+    assert service.censor_text("negro") == "******"
+
+
+def test_censor_username_replaces_any_username():
+    service = TextCensorService()
+
+    assert service.censor_username("Trusted User") == "******"
+    assert service.censor_username("") == ""
+    assert service.censor_username(None) is None
 
 
 def test_censor_text_leaves_safe_text_unchanged():

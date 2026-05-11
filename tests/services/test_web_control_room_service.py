@@ -1,7 +1,9 @@
 import sqlite3
 from datetime import datetime
 
+from bot.models.web import DiscordWebUser
 from bot.repositories.web_control_room import WebControlRoomRepository
+from bot.services.text_censor import TextCensorService
 from bot.services.web_control_room import WebControlRoomService
 
 
@@ -50,18 +52,38 @@ def test_web_control_room_service_combines_runtime_and_mute(tmp_path):
         updated_at=datetime(2026, 4, 23, 12, 1, 0),
     )
 
-    service = WebControlRoomService(repository=repository, db_path=str(db_path))
+    service = WebControlRoomService(
+        repository=repository,
+        db_path=str(db_path),
+        text_censor_service=TextCensorService(),
+    )
     payload = service.get_status({})
 
     assert payload["guild_id"] == 123
     assert payload["status"]["voice_connected"] is True
     assert payload["status"]["voice_members"] == [
-        {"id": "1", "name": "Gabi", "avatar_url": "https://cdn.example/gabi.png"},
-        {"id": "2", "name": "Diogo", "avatar_url": ""},
+        {"id": "1", "name": "******", "avatar_url": "https://cdn.example/gabi.png"},
+        {"id": "2", "name": "******", "avatar_url": ""},
     ]
     assert payload["status"]["current_sound"] == "now.mp3"
+    assert payload["status"]["current_requester"] == "******"
     assert payload["status"]["current_duration_seconds"] == 12.5
     assert payload["status"]["current_elapsed_seconds"] == 4.0
     assert "queue" not in payload
     assert payload["mute"]["is_muted"] is True
     assert payload["mute"]["remaining_seconds"] == 90
+
+    logged_in_payload = service.get_status(
+        {},
+        current_user=DiscordWebUser(
+            id="123",
+            username="trusted-user",
+            global_name="Trusted User",
+            avatar="",
+        ),
+    )
+    assert logged_in_payload["status"]["voice_members"] == [
+        {"id": "1", "name": "Gabi", "avatar_url": "https://cdn.example/gabi.png"},
+        {"id": "2", "name": "Diogo", "avatar_url": ""},
+    ]
+    assert logged_in_payload["status"]["current_requester"] == "web-user"

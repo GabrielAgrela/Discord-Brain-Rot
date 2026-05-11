@@ -443,7 +443,7 @@ def test_web_table_endpoints_scope_to_selected_guild(web_client):
     assert actions_response.get_json()["items"] == [
         {
             "display_filename": "beta.mp3",
-            "display_username": "bob",
+            "display_username": "******",
             "action": "play_request",
             "timestamp": "2026-04-03 12:05:00",
         }
@@ -1355,7 +1355,7 @@ def test_web_content_endpoints_censor_hateful_strings(web_client):
             INSERT INTO actions (username, action, target, timestamp, guild_id)
             VALUES (?, ?, ?, ?, ?)
             """,
-            ("niggas young fly on the tra", "play_request", "1", "2026-04-01 12:01:00", "111"),
+            ("bob", "play_request", "1", "2026-04-01 12:01:00", "111"),
         )
         conn.commit()
     finally:
@@ -1602,7 +1602,7 @@ def test_web_table_endpoints_return_filter_options_and_apply_column_filters(web_
         "items": [
             {
                 "display_filename": "alpha.mp3",
-                "display_username": "alice",
+                "display_username": "******",
                 "action": "play_request",
                 "timestamp": "2026-04-04 12:00:00",
             }
@@ -1734,6 +1734,9 @@ def test_sound_options_endpoint_returns_lists_and_similar_sounds(web_client):
             "INSERT INTO sound_lists (id, list_name, creator, guild_id, created_at) VALUES (10, 'Bits', 'alice', '111', '2026-04-04 12:00:00')"
         )
         conn.execute(
+            "INSERT INTO sound_list_items (list_id, sound_filename, added_at) VALUES (10, 'alpha meme.mp3', '2026-04-04 12:03:00')"
+        )
+        conn.execute(
             "INSERT INTO actions (username, action, target, timestamp, guild_id) VALUES ('bob', 'play_request', '1', '2026-04-04 12:00:00', '111')"
         )
         conn.execute(
@@ -1757,7 +1760,14 @@ def test_sound_options_endpoint_returns_lists_and_similar_sounds(web_client):
         "slap": False,
     }
     assert payload["lists"] == [
-        {"id": 10, "name": "Bits", "creator": "alice", "sound_count": 0, "label": "Bits (alice)"}
+        {
+            "id": 10,
+            "name": "Bits",
+            "creator": "alice",
+            "sound_count": 1,
+            "label": "Bits (alice)",
+            "contains_sound": True,
+        }
     ]
     assert payload["events"] == [{"target_user": "dave", "event": "join"}]
     assert payload["users"] == [
@@ -2039,7 +2049,7 @@ def test_actions_endpoint_can_skip_filter_metadata(web_client):
         "items": [
             {
                 "display_filename": "alpha.mp3",
-                "display_username": "alice",
+                "display_username": "******",
                 "action": "play_request",
                 "timestamp": "2026-04-04 12:00:00",
             }
@@ -2182,7 +2192,7 @@ def test_analytics_endpoints_censor_hateful_strings(web_client):
             INSERT INTO actions (username, action, target, timestamp, guild_id)
             VALUES (?, ?, ?, ?, ?)
             """,
-            ("jews did 911", "play_request", "1", "2026-04-01 12:01:00", "111"),
+            ("alice", "play_request", "1", "2026-04-01 12:01:00", "111"),
         )
         conn.commit()
     finally:

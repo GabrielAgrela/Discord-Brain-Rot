@@ -1461,7 +1461,11 @@
                     soundListTitle.textContent = bareName || 'Add to list';
                 }
                 renderSoundLists(payload.lists || []);
-                setSoundListStatus('Choose which list should include this sound.');
+                setSoundListStatus(
+                    soundListSelect?.value
+                        ? 'This sound is already in the selected list.'
+                        : 'Choose which list should include this sound.'
+                );
             } catch (error) {
                 console.error('Sound list options failed:', error);
                 setSoundListStatus(error.message || 'Network error while loading lists.', 'error');
@@ -1475,10 +1479,15 @@
             placeholder.value = '';
             placeholder.textContent = lists.length ? 'Choose a list' : 'No lists available';
             soundListSelect.appendChild(placeholder);
+            let selectedExistingList = false;
             lists.forEach(list => {
                 const option = document.createElement('option');
                 option.value = list.id;
                 option.textContent = list.label || list.name;
+                if (list.contains_sound && !selectedExistingList) {
+                    option.selected = true;
+                    selectedExistingList = true;
+                }
                 soundListSelect.appendChild(option);
             });
         }

@@ -105,7 +105,12 @@ def register_playback_routes(app: Flask) -> None:
         """Return live bot status for the web control room."""
         _remember_selected_guild_id(request.args.get("guild_id"))
         try:
-            return jsonify(_get_web_control_room_service().get_status(request.args)), 200
+            return jsonify(
+                _get_web_control_room_service().get_status(
+                    request.args,
+                    current_user=_get_current_discord_user(),
+                )
+            ), 200
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
         except sqlite3.Error:

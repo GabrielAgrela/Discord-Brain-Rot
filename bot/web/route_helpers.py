@@ -235,6 +235,7 @@ def _get_web_control_room_service() -> WebControlRoomService:
     return WebControlRoomService(
         repository=WebControlRoomRepository(db_path=db_path, use_shared=False),
         db_path=db_path,
+        text_censor_service=current_app.extensions["web_text_censor_service"],
     )
 
 

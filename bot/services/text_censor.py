@@ -33,6 +33,7 @@ class TextCensorService:
             re.IGNORECASE,
         ),
         re.compile(r"\bnig[\W_]+[a-z0-9][\w-]*", re.IGNORECASE),
+        re.compile(r"\bn[e3]gr[o0](?:e?s)?\b", re.IGNORECASE),
     )
 
     _NORMALIZED_SUBSTRINGS = (
@@ -68,6 +69,22 @@ class TextCensorService:
         if self._matches_hateful_content(candidate):
             return self.CENSORED_TEXT
         return text
+
+    def censor_username(self, username: str | None) -> str | None:
+        """
+        Return a placeholder for any username shown on web surfaces.
+
+        Args:
+            username: Candidate username to mask.
+
+        Returns:
+            The shared placeholder when a username exists, otherwise None.
+        """
+        if username is None:
+            return None
+        if not str(username).strip():
+            return username
+        return self.CENSORED_TEXT
 
     def _matches_hateful_content(self, text: str) -> bool:
         """Check whether a string should be censored."""

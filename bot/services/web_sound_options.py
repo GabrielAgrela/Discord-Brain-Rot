@@ -72,7 +72,7 @@ class WebSoundOptionsService:
         sound = self._get_sound_or_raise(sound_id, guild_id)
         return {
             "sound": self._format_sound(sound),
-            "lists": self._get_list_options(guild_id),
+            "lists": self._get_list_options(sound.filename, guild_id),
             "events": self._get_sound_events(sound.filename, guild_id),
             "users": self._get_user_options(guild_id, current_user),
             "similar_sounds": self._get_similar_sounds(sound.filename, sound.id, guild_id),
@@ -297,8 +297,19 @@ class WebSoundOptionsService:
             raise ValueError("Sound not found.")
         return sound
 
-    def _get_list_options(self, guild_id: int | str | None) -> list[dict[str, Any]]:
+    def _get_list_options(
+        self,
+        filename: str,
+        guild_id: int | str | None,
+    ) -> list[dict[str, Any]]:
         """Return sound-list options for the selected guild scope."""
+        containing_list_ids = {
+            row[0]
+            for row in self.list_repository.get_lists_containing_sound(
+                filename,
+                guild_id=guild_id,
+            )
+        }
         return [
             {
                 "id": row[0],
@@ -306,6 +317,7 @@ class WebSoundOptionsService:
                 "creator": row[2],
                 "sound_count": row[3] if len(row) > 3 else 0,
                 "label": f"{row[1]} ({row[2]})" if row[2] else row[1],
+                "contains_sound": row[0] in containing_list_ids,
             }
             for row in self.list_repository.get_all(limit=200, guild_id=guild_id)
         ]

@@ -8,7 +8,9 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
+from bot.models.web import DiscordWebUser
 from bot.repositories.web_control_room import WebControlRoomRepository
+from bot.services.text_censor import TextCensorService
 from bot.services.web_playback import get_web_control_state, resolve_requested_guild_id
 
 
@@ -21,6 +23,7 @@ class WebControlRoomService:
         self,
         repository: WebControlRoomRepository,
         db_path: str,
+        text_censor_service: TextCensorService,
         env: Mapping[str, str] | None = None,
     ) -> None:
         """
@@ -29,18 +32,25 @@ class WebControlRoomService:
         Args:
             repository: Repository for runtime status.
             db_path: SQLite database path.
+            text_censor_service: Service used to mask usernames for web output.
             env: Optional environment mapping for deterministic tests.
         """
         self.repository = repository
         self.db_path = db_path
+        self.text_censor_service = text_censor_service
         self.env = env
 
-    def get_status(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+    def get_status(
+        self,
+        payload: Mapping[str, Any],
+        current_user: DiscordWebUser | None = None,
+    ) -> dict[str, Any]:
         """
         Return the current control-room status payload.
 
         Args:
             payload: Request query arguments or mapping.
+            current_user: Optional authenticated Discord web user.
 
         Returns:
             JSON-serializable status payload.
@@ -70,11 +80,15 @@ class WebControlRoomService:
 
         return {
             "guild_id": guild_id,
-            "status": self._format_status(runtime_status),
+            "status": self._format_status(runtime_status, current_user=current_user),
             "mute": mute_state,
         }
 
-    def _format_status(self, status: dict[str, Any] | None) -> dict[str, Any]:
+    def _format_status(
+        self,
+        status: dict[str, Any] | None,
+        current_user: DiscordWebUser | None,
+    ) -> dict[str, Any]:
         """Normalize a runtime status row for API output."""
         if not status:
             return {
@@ -99,11 +113,17 @@ class WebControlRoomService:
             "voice_connected": bool(status.get("voice_connected")),
             "voice_channel_name": status.get("voice_channel_name"),
             "voice_member_count": int(status.get("voice_member_count") or 0),
-            "voice_members": self._decode_voice_members(status.get("voice_members")),
+            "voice_members": self._decode_voice_members(
+                status.get("voice_members"),
+                current_user=current_user,
+            ),
             "is_playing": bool(status.get("is_playing")),
             "is_paused": bool(status.get("is_paused")),
             "current_sound": status.get("current_sound"),
-            "current_requester": status.get("current_requester"),
+            "current_requester": self._censor_username(
+                status.get("current_requester"),
+                current_user=current_user,
+            ),
             "current_duration_seconds": self._coerce_optional_float(
                 status.get("current_duration_seconds")
             ),
@@ -122,7 +142,11 @@ class WebControlRoomService:
         except (TypeError, ValueError):
             return None
 
-    def _decode_voice_members(self, value: Any) -> list[dict[str, Any]]:
+    def _decode_voice_members(
+        self,
+        value: Any,
+        current_user: DiscordWebUser | None,
+    ) -> list[dict[str, Any]]:
         """Decode persisted voice member data for API output."""
         if not value:
             return []
@@ -140,8 +164,21 @@ class WebControlRoomService:
             formatted.append(
                 {
                     "id": str(member.get("id") or ""),
-                    "name": str(member.get("name") or "Unknown"),
+                    "name": self._censor_username(
+                        str(member.get("name") or "Unknown"),
+                        current_user=current_user,
+                    ),
                     "avatar_url": str(member.get("avatar_url") or ""),
                 }
             )
         return formatted
+
+    def _censor_username(
+        self,
+        value: str | None,
+        current_user: DiscordWebUser | None,
+    ) -> str | None:
+        """Mask usernames only for anonymous web responses."""
+        if current_user is not None:
+            return value
+        return self.text_censor_service.censor_username(value)

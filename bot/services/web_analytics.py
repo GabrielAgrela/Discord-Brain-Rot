@@ -63,13 +63,12 @@ class WebAnalyticsService:
             API response payload.
         """
         rows = self.repository.get_top_users(query)
-        should_censor = self._should_censor(current_user)
         return {
             "users": [
                 {
-                    "display_username": self._censor_text(
+                    "display_username": self._censor_username(
                         row["username"],
-                        should_censor=should_censor,
+                        current_user=current_user,
                     ),
                     "count": row["count"],
                 }
@@ -152,9 +151,9 @@ class WebAnalyticsService:
         return {
             "activities": [
                 {
-                    "display_username": self._censor_text(
+                    "display_username": self._censor_username(
                         row["username"],
-                        should_censor=should_censor,
+                        current_user=current_user,
                     ),
                     "action": row["action"],
                     "timestamp": row["timestamp"],
@@ -174,6 +173,16 @@ class WebAnalyticsService:
         if not should_censor:
             return value
         return self.text_censor_service.censor_text(value)
+
+    def _censor_username(
+        self,
+        value: str | None,
+        current_user: DiscordWebUser | None,
+    ) -> str | None:
+        """Mask usernames only for anonymous web responses."""
+        if current_user is not None:
+            return value
+        return self.text_censor_service.censor_username(value)
 
     def _should_censor(self, current_user: DiscordWebUser | None) -> bool:
         """Return whether web labels should be censored for this request."""

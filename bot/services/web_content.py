@@ -71,9 +71,9 @@ class WebContentService:
                         row["filename"] or row["target"],
                         should_censor=should_censor,
                     ),
-                    "display_username": self._censor_text(
+                    "display_username": self._censor_username(
                         row["username"],
-                        should_censor=should_censor,
+                        current_user=current_user,
                     ),
                     "action": row["action"],
                     "timestamp": row["timestamp"],
@@ -208,6 +208,16 @@ class WebContentService:
         if not should_censor:
             return value
         return self.text_censor_service.censor_text(value)
+
+    def _censor_username(
+        self,
+        value: str | None,
+        current_user: DiscordWebUser | None,
+    ) -> str | None:
+        """Mask usernames only for anonymous web responses."""
+        if current_user is not None:
+            return value
+        return self.text_censor_service.censor_username(value)
 
     def _format_sound_item(
         self,
