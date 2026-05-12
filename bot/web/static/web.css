@@ -3444,6 +3444,87 @@ html.theme-dark .voice-members-dropdown {
     padding-right: 0.2rem;
 }
 
+.sound-hover-card {
+    position: fixed;
+    z-index: 65;
+    display: none;
+    width: min(18rem, calc(100vw - 1.5rem));
+    padding: 0.85rem;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border-strong);
+    background: linear-gradient(180deg, #fffaf2 0%, #f0e1cd 100%);
+    box-shadow: 0 18px 42px rgba(23, 18, 13, 0.22);
+    pointer-events: none;
+    opacity: 0;
+    transform: translateY(-6px);
+    transition:
+        opacity 0.18s ease,
+        transform 0.18s ease;
+}
+
+html.theme-dark .sound-hover-card {
+    background: linear-gradient(180deg, #1f2521 0%, #121614 100%);
+}
+
+.sound-hover-card.open {
+    display: block;
+    pointer-events: auto;
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.sound-hover-card-header {
+    margin-bottom: 0.65rem;
+}
+
+.sound-hover-card-title {
+    margin: 0.1rem 0 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 1.05rem;
+    line-height: 1.1;
+}
+
+.sound-hover-card-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+}
+
+.sound-hover-card-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.8rem;
+    min-height: 2.35rem;
+    padding: 0.5rem 0.55rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.38);
+}
+
+html.theme-dark .sound-hover-card-row {
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.sound-hover-card-label {
+    color: var(--ink-muted);
+    font-size: 0.72rem;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.sound-hover-card-value {
+    min-width: 0;
+    overflow: hidden;
+    text-align: right;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.88rem;
+}
+
 .section-reveal {
     animation: riseIn 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
 }

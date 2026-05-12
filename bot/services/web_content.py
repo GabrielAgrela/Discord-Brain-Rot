@@ -233,6 +233,21 @@ class WebContentService:
                 should_censor=should_censor,
             ),
         }
+        if row.get("uploaded_by_username"):
+            item["uploaded_by"] = (
+                self.text_censor_service.censor_username(row.get("uploaded_by_username"))
+                if should_censor
+                else row.get("uploaded_by_username")
+            )
+        if row.get("uploaded_at"):
+            item["uploaded_at"] = row.get("uploaded_at")
+        if not row.get("uploaded_at"):
+            timestamp = row.get("timestamp")
+            before_at = timestamp if str(timestamp or "").startswith("2023-10-30") else None
+            if before_at is None and not timestamp:
+                before_at = row.get("first_seen_at")
+            if before_at:
+                item["upload_before_at"] = before_at
         if not include_duration:
             return item
 

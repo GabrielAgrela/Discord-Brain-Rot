@@ -1180,6 +1180,8 @@ def test_soundboard_page_renders_shared_redesign(web_client):
     assert "This message has already been enhanced. Edit it to enhance again." in script
     assert "webTtsMessage.addEventListener('input'" in script
     assert 'id="soundRowContextMenu"' in html
+    assert 'id="soundHoverCard"' in html
+    assert 'title="gamma.mp3&#10;Added: Apr 03, 2026 by unknown"' in html
     assert 'id="soundRowRenameOption"' in html
     assert 'id="soundRowAddToListOption"' in html
     assert 'id="soundRowSimilarOption"' in html
@@ -1201,6 +1203,8 @@ def test_soundboard_page_renders_shared_redesign(web_client):
     assert 'data-favorite="false"' in html
     assert "Unmake slap" in script
     assert "tablesGrid.addEventListener('contextmenu', openSoundRowContextMenu)" in script
+    assert "showSoundHoverCard" in script
+    assert "closeSoundHoverCard();" in script
     assert "openSoundRowContextMenuForRow(row, clientX, clientY, event)" in script
     assert "tablesGrid.addEventListener('touchstart', handleSoundOptionsPressStart" in script
     assert "/api/tts/enhance" in script
@@ -1558,6 +1562,102 @@ def test_soundboard_index_does_not_read_mp3_durations(web_client, monkeypatch):
 
     assert response.status_code == 200
     assert "alpha" in response.get_data(as_text=True)
+
+
+def test_web_sound_rows_include_upload_hover_metadata(web_client):
+    client, db_path = web_client
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            INSERT INTO sounds (id, originalfilename, Filename, favorite, slap, is_elevenlabs, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (1, "alpha.mp3", "alpha.mp3", 1, 0, 0, "2026-04-01 12:00:00"),
+        )
+        conn.execute(
+            """
+            INSERT INTO actions (username, action, target, timestamp, guild_id)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            ("alice", "upload_sound", "alpha.mp3", "2026-04-01 12:00:00", "111"),
+        )
+        conn.execute(
+            """
+            INSERT INTO voice_activity (username, channel_id, join_time, leave_time, guild_id)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            ("trusted-user", "222", "2026-04-01 11:00:00", None, "111"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    _login_web_user(client, username="trusted-user", global_name="Trusted User")
+
+    favorites_response = client.get("/api/favorites")
+    all_sounds_response = client.get("/api/all_sounds")
+    html_response = client.get("/")
+
+    assert favorites_response.status_code == 200
+    assert favorites_response.get_json()["items"][0]["uploaded_by"] == "alice"
+    assert favorites_response.get_json()["items"][0]["uploaded_at"] == "2026-04-01 12:00:00"
+    assert all_sounds_response.status_code == 200
+    assert all_sounds_response.get_json()["items"][0]["uploaded_by"] == "alice"
+    assert html_response.status_code == 200
+    assert 'title="alpha.mp3&#10;Added: Apr 01, 2026 by alice"' in html_response.get_data(as_text=True)
+
+
+def test_web_sound_hover_uses_first_seen_date_when_upload_time_is_missing(web_client):
+    client, db_path = web_client
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            INSERT INTO sounds (id, originalfilename, Filename, favorite, slap, is_elevenlabs, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (1, "legacy.mp3", "legacy.mp3", 1, 0, 0, None),
+        )
+        conn.execute(
+            """
+            INSERT INTO actions (username, action, target, timestamp, guild_id)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            ("alice", "play_request", "1", "2026-03-01 08:00:00", "111"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert 'title="legacy.mp3&#10;Added: Mar 01, 2026 by unknown"' in response.get_data(as_text=True)
+
+
+def test_web_sound_hover_uses_discord_legacy_before_date(web_client):
+    client, db_path = web_client
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            INSERT INTO sounds (id, originalfilename, Filename, favorite, slap, is_elevenlabs, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (1, "legacy.mp3", "legacy.mp3", 1, 0, 0, "2023-10-30 11:04:46"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert 'title="legacy.mp3&#10;Added: Before Oct 30, 2023 by unknown"' in response.get_data(as_text=True)
 
 
 def test_web_table_endpoints_return_filter_options_and_apply_column_filters(web_client):

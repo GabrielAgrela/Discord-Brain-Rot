@@ -242,6 +242,14 @@ class Database:
             )
             self.conn.execute("CREATE INDEX IF NOT EXISTS idx_actions_action ON actions(action)")
             self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_actions_upload_lookup "
+                "ON actions(action, target, guild_id, timestamp DESC, id DESC)"
+            )
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_actions_target_seen "
+                "ON actions(target, guild_id, timestamp)"
+            )
+            self.conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_actions_username_nocase "
                 "ON actions(username COLLATE NOCASE)"
             )

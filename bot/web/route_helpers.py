@@ -412,6 +412,7 @@ def _prepare_initial_payload(
         display_item = dict(item)
         if display_item.get("timestamp"):
             display_item["display_time_ago"] = _format_time_ago(display_item["timestamp"])
+        display_item["display_added_text"] = _format_sound_added_text(display_item)
         items.append(display_item)
 
     filters = payload.get("filters", {})
@@ -445,6 +446,21 @@ def _format_time_ago(timestamp: str) -> str:
     if diff_days < 30:
         return f"{diff_days}d"
     return parsed_timestamp.strftime("%x")
+
+
+def _format_sound_added_text(item: dict[str, Any]) -> str:
+    """Format sound added text to match Discord sound cards."""
+    timestamp = item.get("uploaded_at") or item.get("upload_before_at") or item.get("timestamp")
+    text = str(timestamp or "").strip()
+    if not text:
+        return "Unknown"
+    if text.startswith("2023-10-30"):
+        return "Before Oct 30, 2023"
+
+    parsed_timestamp = _parse_web_timestamp(text)
+    if parsed_timestamp is None:
+        return text[:10]
+    return parsed_timestamp.strftime("%b %d, %Y")
 
 
 def _parse_web_timestamp(timestamp: str) -> datetime | None:

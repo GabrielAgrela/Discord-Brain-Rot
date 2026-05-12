@@ -207,18 +207,56 @@ class WebContentRepository(BaseRepository[dict[str, Any]]):
                 FROM actions
                 WHERE action = 'favorite_sound'
                 GROUP BY CAST(target AS INTEGER)
+            ),
+            PageSounds AS (
+                SELECT
+                    s.id AS sound_id,
+                    s.Filename AS filename,
+                    s.originalfilename AS original_filename,
+                    s.favorite AS favorite,
+                    s.slap AS slap,
+                    s.timestamp AS timestamp,
+                    s.guild_id AS guild_id,
+                    lf.last_favorited AS last_favorited
+                FROM sounds s
+                LEFT JOIN LatestFavorite lf ON lf.sound_id = s.id
+                {where_clause}
+                ORDER BY lf.last_favorited DESC, s.id DESC
+                LIMIT ? OFFSET ?
             )
             SELECT
-                s.id AS sound_id,
-                s.Filename AS filename,
-                s.originalfilename AS original_filename,
-                s.favorite AS favorite,
-                s.slap AS slap
-            FROM sounds s
-            LEFT JOIN LatestFavorite lf ON lf.sound_id = s.id
-            {where_clause}
-            ORDER BY lf.last_favorited DESC, s.id DESC
-            LIMIT ? OFFSET ?
+                ps.sound_id AS sound_id,
+                ps.filename AS filename,
+                ps.original_filename AS original_filename,
+                ps.favorite AS favorite,
+                ps.slap AS slap,
+                ps.timestamp AS timestamp,
+                (
+                    SELECT a.username
+                    FROM actions a
+                    WHERE a.action = 'upload_sound'
+                      AND a.target IN (ps.filename, ps.original_filename)
+                      AND (a.guild_id = ps.guild_id OR a.guild_id IS NULL OR ps.guild_id IS NULL)
+                    ORDER BY a.timestamp DESC, a.id DESC
+                    LIMIT 1
+                ) AS uploaded_by_username,
+                (
+                    SELECT a.timestamp
+                    FROM actions a
+                    WHERE a.action = 'upload_sound'
+                      AND a.target IN (ps.filename, ps.original_filename)
+                      AND (a.guild_id = ps.guild_id OR a.guild_id IS NULL OR ps.guild_id IS NULL)
+                    ORDER BY a.timestamp DESC, a.id DESC
+                    LIMIT 1
+                ) AS uploaded_at,
+                (
+                    SELECT MIN(a.timestamp)
+                    FROM actions a
+                    WHERE a.target IN (CAST(ps.sound_id AS TEXT), ps.filename, ps.original_filename)
+                      AND (a.guild_id = ps.guild_id OR a.guild_id IS NULL OR ps.guild_id IS NULL)
+                ) AS first_seen_at
+            FROM PageSounds ps
+            ORDER BY ps.last_favorited DESC, ps.sound_id DESC
             """,
             (*params, query.per_page, query.offset),
         )
@@ -401,17 +439,53 @@ class WebContentRepository(BaseRepository[dict[str, Any]]):
 
         rows = self._execute(
             f"""
+            WITH PageSounds AS (
+                SELECT
+                    s.id AS sound_id,
+                    s.Filename AS filename,
+                    s.originalfilename AS original_filename,
+                    s.favorite AS favorite,
+                    s.slap AS slap,
+                    s.timestamp AS timestamp,
+                    s.guild_id AS guild_id
+                FROM sounds s
+                WHERE {' AND '.join(conditions)}
+                ORDER BY s.timestamp DESC, s.id DESC
+                LIMIT ? OFFSET ?
+            )
             SELECT
-                s.id AS sound_id,
-                s.Filename AS filename,
-                s.originalfilename AS original_filename,
-                s.favorite AS favorite,
-                s.slap AS slap,
-                s.timestamp AS timestamp
-            FROM sounds s
-            WHERE {' AND '.join(conditions)}
-            ORDER BY s.timestamp DESC, s.id DESC
-            LIMIT ? OFFSET ?
+                ps.sound_id AS sound_id,
+                ps.filename AS filename,
+                ps.original_filename AS original_filename,
+                ps.favorite AS favorite,
+                ps.slap AS slap,
+                ps.timestamp AS timestamp,
+                (
+                    SELECT a.username
+                    FROM actions a
+                    WHERE a.action = 'upload_sound'
+                      AND a.target IN (ps.filename, ps.original_filename)
+                      AND (a.guild_id = ps.guild_id OR a.guild_id IS NULL OR ps.guild_id IS NULL)
+                    ORDER BY a.timestamp DESC, a.id DESC
+                    LIMIT 1
+                ) AS uploaded_by_username,
+                (
+                    SELECT a.timestamp
+                    FROM actions a
+                    WHERE a.action = 'upload_sound'
+                      AND a.target IN (ps.filename, ps.original_filename)
+                      AND (a.guild_id = ps.guild_id OR a.guild_id IS NULL OR ps.guild_id IS NULL)
+                    ORDER BY a.timestamp DESC, a.id DESC
+                    LIMIT 1
+                ) AS uploaded_at,
+                (
+                    SELECT MIN(a.timestamp)
+                    FROM actions a
+                    WHERE a.target IN (CAST(ps.sound_id AS TEXT), ps.filename, ps.original_filename)
+                      AND (a.guild_id = ps.guild_id OR a.guild_id IS NULL OR ps.guild_id IS NULL)
+                ) AS first_seen_at
+            FROM PageSounds ps
+            ORDER BY ps.timestamp DESC, ps.sound_id DESC
             """,
             (*params, query.per_page, query.offset),
         )

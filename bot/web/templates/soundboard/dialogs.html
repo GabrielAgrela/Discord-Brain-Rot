@@ -6,6 +6,22 @@
         <button type="button" id="soundRowFavoriteOption" role="menuitem">Favorite</button>
         <button type="button" id="soundRowSlapOption" role="menuitem">Make slap</button>
     </div>
+    <div id="soundHoverCard" class="sound-hover-card" aria-hidden="true">
+        <div class="sound-hover-card-header">
+            <p class="card-kicker">Sound Upload</p>
+            <h3 id="soundHoverCardTitle" class="sound-hover-card-title">Unknown sound</h3>
+        </div>
+        <div class="sound-hover-card-list">
+            <div class="sound-hover-card-row">
+                <span class="sound-hover-card-label">Added</span>
+                <strong id="soundHoverCardUploadedAt" class="sound-hover-card-value">Unknown</strong>
+            </div>
+            <div class="sound-hover-card-row">
+                <span class="sound-hover-card-label">By</span>
+                <strong id="soundHoverCardUploadedBy" class="sound-hover-card-value">unknown</strong>
+            </div>
+        </div>
+    </div>
 
     <dialog id="webUploadDialog" class="web-upload-dialog" aria-labelledby="webUploadTitle">
         <form id="webUploadForm" class="web-upload-modal-form">

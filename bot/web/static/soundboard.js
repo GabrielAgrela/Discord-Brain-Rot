@@ -806,6 +806,47 @@
             return wrapper;
         }
 
+        function buildSoundHoverTitle(item) {
+            const lines = [item.display_filename || ''];
+            const uploadedAt = getSoundAddedText(item);
+            const uploadedBy = item.uploaded_by || 'unknown';
+            lines.push(`Added: ${uploadedAt} by ${uploadedBy}`);
+            return lines.filter(Boolean).join('\n');
+        }
+
+        function formatSoundAddedDate(timestamp) {
+            const text = String(timestamp || '').trim();
+            if (!text) return '';
+            if (text.startsWith('2023-10-30')) {
+                return 'Before Oct 30, 2023';
+            }
+            const date = parseServerTimestamp(text);
+            if (Number.isNaN(date.getTime())) {
+                return text.slice(0, 10);
+            }
+            return date.toLocaleDateString('en-US', {
+                month: 'short',
+                day: '2-digit',
+                year: 'numeric'
+            });
+        }
+
+        function getSoundAddedText(item) {
+            const uploadedAt = formatSoundAddedDate(item.uploaded_at);
+            if (uploadedAt) {
+                return uploadedAt;
+            }
+            const earliestKnown = formatSoundAddedDate(item.upload_before_at || item.timestamp);
+            return earliestKnown || 'Unknown';
+        }
+
+        function applySoundHoverMetadata(cell, item) {
+            cell.classList.add('sound-hover-target');
+            cell.title = buildSoundHoverTitle(item);
+            cell.dataset.uploadedAt = getSoundAddedText(item);
+            cell.dataset.uploadedBy = item.uploaded_by || 'unknown';
+        }
+
         function buildFilterQuery(endpoint) {
             const params = new URLSearchParams();
             const filters = filterState[endpoint] || {};
@@ -1016,7 +1057,7 @@
 
                                     const filenameCell = document.createElement('td');
                                     filenameCell.className = 'filename';
-                                    filenameCell.title = item.display_filename || '';
+                                    applySoundHoverMetadata(filenameCell, item);
                                     filenameCell.appendChild(buildSoundLabel(item));
                                     row.appendChild(filenameCell);
 
@@ -1035,7 +1076,7 @@
 
                                     const filenameCell = document.createElement('td');
                                     filenameCell.className = 'filename';
-                                    filenameCell.title = item.display_filename || '';
+                                    applySoundHoverMetadata(filenameCell, item);
                                     filenameCell.appendChild(buildSoundLabel(item));
                                     row.appendChild(filenameCell);
 
@@ -1291,6 +1332,95 @@
             controlRoomVoiceMetric.addEventListener('mouseleave', hideVoiceDropdown);
             voiceMembersDropdown.addEventListener('mouseenter', showVoiceDropdown);
             voiceMembersDropdown.addEventListener('mouseleave', hideVoiceDropdown);
+        }
+
+        const soundHoverCard = document.getElementById('soundHoverCard');
+        const soundHoverCardTitle = document.getElementById('soundHoverCardTitle');
+        const soundHoverCardUploadedAt = document.getElementById('soundHoverCardUploadedAt');
+        const soundHoverCardUploadedBy = document.getElementById('soundHoverCardUploadedBy');
+        const soundHoverTablesGrid = document.querySelector('.tables-grid');
+        let soundHoverHideTimer = null;
+
+        function positionSoundHoverCard(target) {
+            if (!soundHoverCard || !target) return;
+            const targetRect = target.getBoundingClientRect();
+            const cardRect = soundHoverCard.getBoundingClientRect();
+            const gap = 8;
+            const left = Math.min(
+                window.innerWidth - cardRect.width - gap,
+                Math.max(gap, targetRect.left)
+            );
+            const top = targetRect.bottom + cardRect.height + gap > window.innerHeight
+                ? Math.max(gap, targetRect.top - cardRect.height - gap)
+                : targetRect.bottom + gap;
+            soundHoverCard.style.left = `${left}px`;
+            soundHoverCard.style.top = `${top}px`;
+        }
+
+        function showSoundHoverCard(target) {
+            if (soundHoverHideTimer) {
+                clearTimeout(soundHoverHideTimer);
+                soundHoverHideTimer = null;
+            }
+            if (!soundHoverCard || !target) return;
+            if (soundHoverCardTitle) {
+                soundHoverCardTitle.textContent = target.querySelector('.sound-title')?.textContent || target.textContent.trim() || 'Unknown sound';
+            }
+            if (soundHoverCardUploadedAt) {
+                soundHoverCardUploadedAt.textContent = target.dataset.uploadedAt || 'Unknown';
+            }
+            if (soundHoverCardUploadedBy) {
+                soundHoverCardUploadedBy.textContent = target.dataset.uploadedBy || 'unknown';
+            }
+            soundHoverCard.classList.add('open');
+            soundHoverCard.setAttribute('aria-hidden', 'false');
+            positionSoundHoverCard(target);
+        }
+
+        function hideSoundHoverCard() {
+            if (soundHoverHideTimer) {
+                clearTimeout(soundHoverHideTimer);
+            }
+            soundHoverHideTimer = window.setTimeout(() => {
+                soundHoverHideTimer = null;
+                if (!soundHoverCard) return;
+                soundHoverCard.classList.remove('open');
+                soundHoverCard.setAttribute('aria-hidden', 'true');
+            }, 180);
+        }
+
+        function closeSoundHoverCard() {
+            if (soundHoverHideTimer) {
+                clearTimeout(soundHoverHideTimer);
+                soundHoverHideTimer = null;
+            }
+            if (!soundHoverCard) return;
+            soundHoverCard.classList.remove('open');
+            soundHoverCard.setAttribute('aria-hidden', 'true');
+        }
+
+        if (soundHoverTablesGrid && soundHoverCard) {
+            soundHoverTablesGrid.addEventListener('mouseover', (event) => {
+                const target = event.target.closest('.sound-hover-target');
+                if (target && soundHoverTablesGrid.contains(target)) {
+                    showSoundHoverCard(target);
+                }
+            });
+            soundHoverTablesGrid.addEventListener('mouseout', (event) => {
+                const target = event.target.closest('.sound-hover-target');
+                if (target && !target.contains(event.relatedTarget)) {
+                    hideSoundHoverCard();
+                }
+            });
+            soundHoverCard.addEventListener('mouseenter', () => {
+                if (soundHoverHideTimer) {
+                    clearTimeout(soundHoverHideTimer);
+                    soundHoverHideTimer = null;
+                }
+            });
+            soundHoverCard.addEventListener('mouseleave', hideSoundHoverCard);
+            window.addEventListener('scroll', closeSoundHoverCard, { passive: true });
+            window.addEventListener('resize', closeSoundHoverCard);
         }
 
         if (voiceMembersModal && voiceMembersModalClose) {
@@ -1832,6 +1962,7 @@
 
             event?.preventDefault?.();
             event?.stopPropagation?.();
+            closeSoundHoverCard();
             clearSoundOptionsLongPress();
             contextMenuSoundId = soundId;
             contextMenuSoundIsFavorite = row.dataset.favorite === 'true';

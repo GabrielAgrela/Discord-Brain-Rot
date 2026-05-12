@@ -43,8 +43,10 @@
                         <tbody id="allSoundsTableBody">
                             {% for item in all_sounds_data.get('items', []) %}
                             {% set filename_value = item.get('display_filename') or '' %}
+                            {% set added_when = item.get('display_added_text') or 'Unknown' %}
+                            {% set uploaded_by = item.get('uploaded_by') or 'unknown' %}
                             <tr class="sound-options-row" data-sound-id="{{ item.get('sound_id') }}" data-favorite="{{ 'true' if item.get('favorite') else 'false' }}" data-slap="{{ 'true' if item.get('slap') else 'false' }}">
-                                <td class="filename" title="{{ filename_value }}">
+                                <td class="filename sound-hover-target" title="{{ filename_value }}&#10;Added: {{ added_when }} by {{ uploaded_by }}" data-uploaded-at="{{ added_when }}" data-uploaded-by="{{ uploaded_by }}">
                                     <span class="sound-title">{{ filename_value|replace('.mp3', '') }}</span>
                                     {% if item.get('display_duration') %}
                                     <span class="sound-duration">{{ item.get('display_duration') }}</span>
@@ -217,8 +219,10 @@
                         <tbody id="favoritesTableBody">
                             {% for item in favorites_data.get('items', []) %}
                             {% set filename_value = item.get('display_filename') or '' %}
+                            {% set added_when = item.get('display_added_text') or 'Unknown' %}
+                            {% set uploaded_by = item.get('uploaded_by') or 'unknown' %}
                             <tr class="sound-options-row" data-sound-id="{{ item.get('sound_id') }}" data-favorite="true" data-slap="{{ 'true' if item.get('slap') else 'false' }}">
-                                <td class="filename" title="{{ filename_value }}">
+                                <td class="filename sound-hover-target" title="{{ filename_value }}&#10;Added: {{ added_when }} by {{ uploaded_by }}" data-uploaded-at="{{ added_when }}" data-uploaded-by="{{ uploaded_by }}">
                                     <span class="sound-title">{{ filename_value|replace('.mp3', '') }}</span>
                                     {% if item.get('display_duration') %}
                                     <span class="sound-duration">{{ item.get('display_duration') }}</span>
