@@ -1383,6 +1383,7 @@ def test_web_content_endpoints_censor_hateful_strings(web_client):
         "display_filename": "******",
         "favorite": True,
         "slap": False,
+        "timestamp": "2026-04-01 12:00:00",
     }
 
     assert all_sounds_response.status_code == 200
@@ -1445,6 +1446,7 @@ def test_web_content_endpoints_do_not_censor_logged_in_voice_user(web_client):
         "display_filename": "jews did 911.mp3",
         "favorite": True,
         "slap": False,
+        "timestamp": "2026-04-01 12:00:00",
     }
 
     assert all_sounds_response.status_code == 200
@@ -1724,6 +1726,7 @@ def test_web_table_endpoints_return_filter_options_and_apply_column_filters(web_
                 "display_filename": "beta.mp3",
                 "favorite": True,
                 "slap": False,
+                "timestamp": "2026-04-02 12:00:00",
             }
         ],
         "total_count": 1,
@@ -2115,6 +2118,7 @@ def test_favorites_endpoint_returns_and_applies_user_filter(web_client):
                 "display_filename": "alpha.mp3",
                 "favorite": True,
                 "slap": False,
+                "timestamp": "2026-04-01 12:00:00",
             }
         ],
         "total_count": 1,
@@ -2193,6 +2197,7 @@ def test_favorites_endpoint_can_skip_filter_metadata(web_client):
                 "display_filename": "alpha.mp3",
                 "favorite": True,
                 "slap": False,
+                "timestamp": "2026-04-04 12:00:00",
             }
         ],
         "total_count": 1,

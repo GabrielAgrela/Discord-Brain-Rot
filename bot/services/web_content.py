@@ -119,6 +119,7 @@ class WebContentService:
                     ),
                     "favorite": bool(row.get("favorite")),
                     "slap": bool(row.get("slap")),
+                    "timestamp": row["timestamp"],
                 }
                 for row in rows
             ],
