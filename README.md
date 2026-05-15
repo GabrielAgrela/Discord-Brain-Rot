@@ -51,9 +51,10 @@ This README is based on the current codebase behavior (not historical README ass
 - Reconnection grace period to avoid competing reconnects.
 - Voice DAVE compatibility patch for py-cord (identify payload, DAVE transitions, and MLS binary frame handling).
 - Voice DAVE receive decrypt support so recording sinks can feed Vosk instead of encrypted opus.
-- Auto-follow users when they switch channels.
+- Auto-follow users when they switch channels (never auto-follows into AFK channels).
 - Auto-disconnect when bot is alone (event-based + safety loop).
 - Auto-join is feature-flagged per guild (disabled by default for public hosting).
+- AFK auto-moves are treated as leave events from the previous channel: the bot plays the user's leave sound in the channel they left, then disconnects if empty. The bot never connects to or follows users into AFK channels.
 
 ### Real-Time Keyword Detection (Vosk)
 - Live keyword detection via Vosk + Discord voice sinks.

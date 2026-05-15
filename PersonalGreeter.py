@@ -289,6 +289,7 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
         return  # No relevant change
 
     # Handle AFK channel joins
+    afk_redirect_leave = False
     if event == "join" and channel and channel == channel.guild.afk_channel:
         if before.channel:
             # Treat moving to AFK as leaving the previous channel
@@ -297,13 +298,15 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
             )
             event = "leave"
             channel = before.channel
+            afk_redirect_leave = True
         else:
             # Ignore when directly joining the AFK channel
             print(f"Ignoring join event for {member_str} in AFK channel {channel}")
             return
     
     # Check if bot should disconnect when someone leaves
-    if event == "leave" and before.channel:
+    # For AFK redirects, skip immediate disconnect so the leave event can play
+    if event == "leave" and before.channel and not afk_redirect_leave:
         # Check if the bot is in the channel the user left
         voice_client = before.channel.guild.voice_client
         if voice_client and voice_client.channel == before.channel:
@@ -322,8 +325,8 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
     # Log the voice state update
     print(f"Voice state update: {member_str} {event} channel ► {channel}")
     
-    #Follow users to new channel when they move
-    if event == "join" and after.channel:
+    # Follow users to new channel when they move (never auto-follow to AFK)
+    if event == "join" and after.channel and after.channel != after.channel.guild.afk_channel:
         voice_client = after.channel.guild.voice_client
         # If bot is connected but not in the channel the user joined
         if voice_client and voice_client.channel != after.channel:
@@ -355,7 +358,7 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
     async def debounced_play():
         try:
             await asyncio.sleep(VOICE_DEBOUNCE_SECONDS)
-            await play_audio_for_event(member, member_str, event, channel)
+            await play_audio_for_event(member, member_str, event, channel, afk_redirect=afk_redirect_leave)
         except asyncio.CancelledError:
             print(f"[Debounce] Event cancelled for {member_str} (rapid channel switch)")
         finally:
@@ -364,19 +367,59 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
     
     _voice_event_debounce[member_id] = asyncio.create_task(debounced_play())
 
-async def play_audio_for_event(member, member_str, event, channel):
+async def play_audio_for_event(member, member_str, event, channel, afk_redirect=False):
+    """Play event sounds for voice state changes.
+
+    Args:
+        member: The Discord member who triggered the event.
+        member_str: String representation of the member (name#discriminator).
+        event: "join" or "leave".
+        channel: The voice channel to play the event in.
+        afk_redirect: If True, this is an AFK auto-move treated as leave.
+            Skips the empty-channel check and disconnects after playback
+            if the bot is alone in the channel.
+    """
     try:
-        # Use robust connection handling from AudioService
-        voice_client = await behavior.ensure_voice_connected(channel)
-        
-        if not voice_client:
-            print(f"[EventSound] Failed to join {channel.name} for {event} sound: Connection failed according to ensure_voice_connected")
-            return
-        
+        # Fetch user events BEFORE connecting to avoid no-op connections
         user_events = db.get_user_events(member_str, event, guild_id=member.guild.id)
-        if user_events:
-            if await behavior.is_channel_empty(channel):
+
+        if not user_events:
+            # No custom event sounds defined for this user
+            if event == "join":
+                # Connect and play default join sound
+                voice_client = await behavior.ensure_voice_connected(channel)
+                if not voice_client:
+                    print(f"[EventSound] Failed to join {channel.name} for default join sound")
+                    return
+                await behavior.play_audio(channel, "gay-echo.mp3", "admin")
+                # Log action for default join sound
+                similar_sounds = db.get_sounds_by_similarity("gay-echo.mp3", 1, guild_id=member.guild.id)
+                if similar_sounds:
+                    sound_row = similar_sounds[0][0]
+                    if isinstance(sound_row, sqlite3.Row):
+                        sound_id = sound_row['id']
+                    elif isinstance(sound_row, dict):
+                        sound_id = sound_row['id']
+                    else:
+                        sound_id = sound_row[0]
+                    db.insert_action(member_str, event, sound_id, guild_id=member.guild.id)
+                else:
+                    db.insert_action(member_str, event, "gay-echo.mp3", guild_id=member.guild.id)
+            elif event == "leave":
+                # No custom leave sound; just log the action without connecting
+                db.insert_action(member_str, event, "-", guild_id=member.guild.id)
+        else:
+            # Custom event sounds exist
+            # For AFK redirects, allow playback even if the channel is now empty
+            if not afk_redirect and await behavior.is_channel_empty(channel):
+                print(f"[EventSound] Channel {channel.name} is empty, skipping {event} sound for {member_str}")
                 return
+
+            voice_client = await behavior.ensure_voice_connected(channel)
+            if not voice_client:
+                print(f"[EventSound] Failed to join {channel.name} for {event} sound: Connection failed")
+                return
+
             sound_name = random.choice(user_events)[2]
             behavior.last_channel[member_str] = channel
             if channel:
@@ -406,28 +449,21 @@ async def play_audio_for_event(member, member_str, event, channel):
                         db.insert_action(member_str, event, sound_id, guild_id=member.guild.id)
                     else:
                         print(f"Sound {sound_name} not found for user event")
-                    
-        elif event == "join":
-            await behavior.play_audio(channel, "gay-echo.mp3", "admin")
-            # Log action for default join sound
-            similar_sounds = db.get_sounds_by_similarity("gay-echo.mp3", 1, guild_id=member.guild.id)
-            if similar_sounds:
-                sound_row = similar_sounds[0][0]
-                # Safe access
-                if isinstance(sound_row, sqlite3.Row):
-                    sound_id = sound_row['id']
-                elif isinstance(sound_row, dict):
-                    sound_id = sound_row['id']
-                else:
-                    sound_id = sound_row[0]
-                db.insert_action(member_str, event, sound_id, guild_id=member.guild.id)
-            else:
-                 # Fallback if gay-echo not found in DB but exists on disk?
-                 db.insert_action(member_str, event, "gay-echo.mp3", guild_id=member.guild.id)
 
-        elif event == "leave":
-            db.insert_action(member_str, event, "-", guild_id=member.guild.id)
-            await behavior.is_channel_empty(channel)
+        # After AFK redirect event handling, disconnect if the bot is alone
+        if afk_redirect and channel:
+            voice_client = channel.guild.voice_client
+            if voice_client and voice_client.channel == channel:
+                non_bot_members = [m for m in channel.members if not m.bot]
+                if len(non_bot_members) == 0:
+                    print(f"[AutoDisconnect] AFK redirect: no non-bot members left in {channel.name}, disconnecting...")
+                    try:
+                        await behavior._audio_service.stop_keyword_detection(channel.guild)
+                        await voice_client.disconnect()
+                        print(f"[AutoDisconnect] AFK redirect: disconnected from {channel.name}")
+                    except Exception as e:
+                        print(f"[AutoDisconnect] AFK redirect: Error disconnecting: {e}")
+
     except Exception as e:
         print(f"An error occurred in play_audio_for_event: {e}")
 

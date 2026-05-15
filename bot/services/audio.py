@@ -978,7 +978,12 @@ class AudioService:
         """Ensure the bot is connected to the specified voice channel.
         
         Uses per-guild locks to prevent race conditions from rapid channel switches.
+        Returns None if the target channel is the guild AFK channel.
         """
+        if self.is_afk_channel(channel):
+            print(f"[AudioService] Refusing to connect to AFK channel: {channel.name}")
+            return None
+
         guild_id = channel.guild.id
         lock = self._get_connection_lock(guild_id)
         
@@ -1164,18 +1169,24 @@ class AudioService:
 
     def get_largest_voice_channel(self, guild: discord.Guild) -> Optional[discord.VoiceChannel]:
         """Find the voice channel with the most members in the given guild."""
-        channels = [c for c in guild.voice_channels if not c.name.lower().startswith('afk')]
+        channels = [c for c in guild.voice_channels if not self.is_afk_channel(c)]
         if not channels:
             return None
         return max(channels, key=lambda c: len(c.members))
 
     def get_user_voice_channel(self, guild: discord.Guild, user_name: str) -> Optional[discord.VoiceChannel]:
-        """Find the voice channel where a specific user is currently connected."""
+        """Find the voice channel where a specific user is currently connected.
+
+        Skips AFK channels so web/user-targeted playback does not follow
+        a user into an AFK channel.
+        """
         # Use member object if possible, or search by name
         # Discord removed discriminators, so we check for name only or name#discriminator (legacy)
         search_name = user_name.split('#')[0]
         
         for channel in guild.voice_channels:
+            if self.is_afk_channel(channel):
+                continue
             for member in channel.members:
                 if member.name == search_name or str(member) == user_name:
                     return channel
@@ -1186,6 +1197,30 @@ class AudioService:
         for vc in self.bot.voice_clients:
             if vc.is_playing():
                 return True
+        return False
+
+    @staticmethod
+    def is_afk_channel(channel: Optional[discord.VoiceChannel]) -> bool:
+        """Check if a voice channel is the guild's AFK channel.
+
+        Uses guild.afk_channel comparison by ID as the primary check.
+        Falls back to a conservative name-based check (starts with 'afk')
+        for guilds where afk_channel is not configured but a similarly-named
+        channel exists.
+
+        Args:
+            channel: The voice channel to check, or None.
+
+        Returns:
+            True if the channel is the guild's AFK channel or its name starts with 'afk'.
+        """
+        if channel is None:
+            return False
+        guild = getattr(channel, 'guild', None)
+        if guild and guild.afk_channel and guild.afk_channel.id == channel.id:
+            return True
+        if channel.name.lower().startswith('afk'):
+            return True
         return False
 
     def is_channel_empty(self, channel: discord.VoiceChannel) -> bool:

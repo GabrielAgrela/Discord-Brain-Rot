@@ -654,3 +654,134 @@ class TestAudioService:
         audio_service._stop_voice_client_and_wait.assert_awaited_once_with(voice_client)
         audio_service._wait_for_audio_player_thread.assert_not_awaited()
         voice_client.play.assert_called_once()
+
+    # ------------------------------------------------------------------ #
+    # AFK channel detection guards
+    # ------------------------------------------------------------------ #
+
+    def test_is_afk_channel_identifies_guild_afk(self):
+        """Test that is_afk_channel returns True for the guild's configured AFK channel."""
+        from bot.services.audio import AudioService
+
+        guild = Mock()
+        guild.afk_channel = Mock()
+        guild.afk_channel.id = 1
+        guild.afk_channel.name = "AFK Channel"
+        # The channel being checked is the same object as guild.afk_channel
+        assert AudioService.is_afk_channel(guild.afk_channel) is True
+
+    def test_is_afk_channel_returns_false_for_normal_channel(self):
+        """Test that is_afk_channel returns False for a non-AFK voice channel."""
+        from bot.services.audio import AudioService
+
+        guild = Mock()
+        guild.afk_channel = None
+        channel = Mock()
+        channel.guild = guild
+        channel.name = "general"
+
+        assert AudioService.is_afk_channel(channel) is False
+
+    def test_is_afk_channel_fallback_on_name_prefix(self):
+        """Test that is_afk_channel also catches channels whose name starts with 'afk'."""
+        from bot.services.audio import AudioService
+
+        guild = Mock()
+        guild.afk_channel = None
+        channel = Mock()
+        channel.guild = guild
+        channel.name = "afk-zone"
+
+        assert AudioService.is_afk_channel(channel) is True
+
+    def test_is_afk_channel_returns_false_for_none(self):
+        """Test that is_afk_channel returns False when None is passed."""
+        from bot.services.audio import AudioService
+
+        assert AudioService.is_afk_channel(None) is False
+
+    @pytest.mark.asyncio
+    async def test_ensure_voice_connected_refuses_afk_channel(self, audio_service):
+        """Test that ensure_voice_connected returns None for AFK channels."""
+        guild = Mock()
+        guild.id = 777
+        afk_channel = Mock()
+        afk_channel.guild = guild
+        afk_channel.name = "AFK"
+        guild.afk_channel = afk_channel
+
+        result = await audio_service.ensure_voice_connected(afk_channel)
+
+        assert result is None
+
+    def test_get_largest_voice_channel_excludes_afk(self, audio_service):
+        """Test that get_largest_voice_channel ignores AFK channels even when populated."""
+        guild = Mock()
+        afk_channel = Mock()
+        afk_channel.name = "AFK"
+        afk_channel.members = [Mock(), Mock()]
+        afk_channel.guild = guild
+        guild.afk_channel = afk_channel
+
+        general = Mock()
+        general.name = "general"
+        general.members = [Mock()]
+        general.guild = guild
+
+        lobby = Mock()
+        lobby.name = "lobby"
+        lobby.members = [Mock(), Mock(), Mock()]
+        lobby.guild = guild
+
+        guild.voice_channels = [afk_channel, general, lobby]
+
+        result = audio_service.get_largest_voice_channel(guild)
+
+        # afk_channel has 2 members but should be excluded; lobby has 3
+        assert result == lobby
+
+    def test_get_user_voice_channel_skips_afk(self, audio_service):
+        """Test that get_user_voice_channel does not return AFK channels."""
+        guild = Mock()
+        user = Mock()
+        user.name = "testuser"
+
+        afk_channel = Mock()
+        afk_channel.name = "AFK"
+        afk_channel.members = [user]
+        afk_channel.guild = guild
+        guild.afk_channel = afk_channel
+
+        general = Mock()
+        general.name = "general"
+        general.members = []
+        general.guild = guild
+
+        guild.voice_channels = [afk_channel, general]
+
+        result = audio_service.get_user_voice_channel(guild, "testuser")
+
+        assert result is None
+
+    def test_get_user_voice_channel_finds_user_in_non_afk(self, audio_service):
+        """Test that get_user_voice_channel still finds users in non-AFK channels."""
+        guild = Mock()
+        user = Mock()
+        user.name = "testuser"
+
+        afk_channel = Mock()
+        afk_channel.name = "AFK"
+        afk_channel.members = []
+        afk_channel.guild = guild
+        guild.afk_channel = afk_channel
+
+        general = Mock()
+        general.name = "general"
+        general.members = [user]
+        general.guild = guild
+
+        guild.voice_channels = [afk_channel, general]
+
+        result = audio_service.get_user_voice_channel(guild, "testuser")
+
+        assert result == general

@@ -77,3 +77,12 @@ Read this when changing uploads, sound ingest, playback, generated sound cards, 
 ## STS Playback
 
 - STS generated audio should call `AudioService.play_audio(..., is_tts=True, allow_tts_interrupt=True)`. Without `allow_tts_interrupt=True`, transformed clips can be dropped as "Another TTS is already running" while the source/previous sound is still playing.
+
+## AFK Channel Handling
+
+- `AudioService.is_afk_channel(channel)` is the canonical check: compares `channel.guild.afk_channel.id` first, then falls back to `channel.name.lower().startswith('afk')`.
+- `ensure_voice_connected` refuses AFK channels by returning `None` immediately with a log message. This is the last-resort defense.
+- `get_largest_voice_channel` and `get_user_voice_channel` both skip AFK channels via `is_afk_channel`.
+- In `PersonalGreeter.on_voice_state_update`, a user auto-moved to the guild AFK channel is treated as a **leave** event from their previous channel. The immediate auto-disconnect is skipped for AFK redirects so the leave sound can play in the now-empty previous channel.
+- `play_audio_for_event` accepts `afk_redirect=False`. When `True`: (1) the `is_channel_empty` skip is bypassed, and (2) the bot disconnects after the event if it is alone in the previous channel.
+- Leave events without a custom sound no longer connect to voice at all; they just log the analytics action.
