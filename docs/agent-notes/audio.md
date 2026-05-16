@@ -131,6 +131,18 @@ Read this when changing uploads, sound ingest, playback, generated sound cards, 
 - Performance metrics are logged at INFO level with the prefix `EL_TTS perf` showing model/format/latency/time-to-first-chunk/total/file-size.
 - Sending `output_format` as a query parameter is required for the streaming endpoint; the URL builder (`_build_el_tts_url`) uses `urllib.parse.urlencode`.
 
+### Live FIFO Streaming (EL_TTS_LIVE_PLAYBACK_ENABLED)
+
+- When enabled (default `true`), `save_as_mp3_EL` creates a POSIX FIFO and starts `AudioService.play_tts_live_stream()` as a background task **before** writing MP3 chunks.
+- The FIFO is opened with `O_RDWR` (non-blocking open under Linux). The pipe buffer is bumped to ~256 KB via `fcntl(fd, F_SETPIPE_SZ, 262144)`.
+- Live playback eligibility requires ALL of: `el_tts_live_playback_enabled`, `el_tts_streaming_enabled`, `boost_volume == 0`, `loudnorm_mode == "off"`, and a voice channel available.
+- `play_tts_live_stream()` on `AudioService` (lines ~1456+) uses `discord.FFmpegPCMAudio` directly with the FIFO path — `FFmpegOpusAudio.from_probe` cannot be used because the FIFO is not a seekable file.
+- Sound card (TTS embed) is sent in a background task after playback starts, with no DB stats (no play count/duration) since the DB row is created later.
+- If FIFO setup or live playback fails, the fallback saves the full MP3 to disk and calls the normal `play_audio()` path.
+- `FFmpegPCMAudio` startup uses a basic volume-only filter (`volume=1.0,adelay=100:all=1`) for reliability; no ear protection filters are applied.
+- The FIFO and its temp directory are cleaned up in the chunk-writing code path after the write completes; failures during cleanup are logged as debug warnings.
+- `VoiceTransformationService.play_tts_live_stream()` is a pass-through wrapper to `AudioService.play_tts_live_stream()`, providing the same interface required by the legacy `TTS` class via `self.behavior`.
+
 ## AFK Channel Handling
 
 - `AudioService.is_afk_channel(channel)` is the canonical check: compares `channel.guild.afk_channel.id` first, then falls back to `channel.name.lower().startswith('afk')`.

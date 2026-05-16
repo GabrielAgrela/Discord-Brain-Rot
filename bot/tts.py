@@ -52,6 +52,7 @@ class TTS:
 
         # --- ElevenLabs TTS optimization knobs ---
         self.el_tts_streaming_enabled = os.getenv("EL_TTS_STREAMING_ENABLED", "true").strip().lower() in ("true", "1", "yes")
+        self.el_tts_live_playback_enabled = os.getenv("EL_TTS_LIVE_PLAYBACK_ENABLED", "true").strip().lower() in ("true", "1", "yes")
         raw_latency = os.getenv("EL_TTS_OPTIMIZE_STREAMING_LATENCY", "3")
         self.el_tts_optimize_streaming_latency = self._parse_optimize_latency(raw_latency)
         self.el_tts_model_id = os.getenv("EL_TTS_MODEL_ID", "eleven_v3")
@@ -613,6 +614,11 @@ class TTS:
             await cooldown_message.delete()
             return
 
+        # Resolve channel early for live-stream eligibility check
+        live_channel = None
+        if self.el_tts_live_playback_enabled:
+            live_channel = self._get_default_voice_channel(guild_id=guild_id)
+
         text = text[:1000]
         url = self._build_el_tts_url()
         headers = {
@@ -644,6 +650,18 @@ class TTS:
             async with session.post(url, json=data, headers=headers) as response:
                 http_status = response.status
                 if response.status == 200:
+                    # ---- Track whether live streaming was started ----
+                    live_playback_started = False
+
+                    # ---- Determine whether live-streaming can be used ----
+                    should_live = (
+                        self.el_tts_live_playback_enabled
+                        and self.el_tts_streaming_enabled
+                        and boost_volume == 0
+                        and self.loudnorm_mode == "off"
+                        and live_channel is not None
+                    )
+
                     if boost_volume == 0 and not self.el_tts_streaming_enabled:
                         # Non-streaming, no boost: read all, write directly (skip pydub decode/re-encode)
                         audio_data = await response.read()
@@ -653,13 +671,153 @@ class TTS:
                             f.write(audio_data)
                         file_size = os.path.getsize(path)
                     elif boost_volume == 0 and self.el_tts_streaming_enabled:
-                        # Streaming, no boost: write chunks directly to file
+                        # Streaming, no boost: write chunks directly to file,
+                        # optionally live-stream to a FIFO for concurrent playback.
                         os.makedirs(os.path.dirname(path), exist_ok=True)
+
+                        # --- Live streaming setup (FIFO) ---
+                        fifo_path: Optional[str] = None
+                        live_fifo_fd: Optional[int] = None
+                        live_ready_event: Optional[asyncio.Event] = None
+
+                        if should_live:
+                            try:
+                                fifo_dir = tempfile.mkdtemp(prefix="el_tts_live_")
+                                fifo_path = os.path.join(fifo_dir, "stream.mp3")
+                                os.mkfifo(fifo_path)
+
+                                live_ready_event = asyncio.Event()
+                                live_task = asyncio.create_task(
+                                    self.behavior.play_tts_live_stream(
+                                        fifo_path=fifo_path,
+                                        audio_file=filename,
+                                        channel=live_channel,
+                                        user=requester_name,
+                                        original_message=text,
+                                        send_controls=send_controls,
+                                        loading_message=loading_message,
+                                        requester_avatar_url=requester_avatar_url,
+                                        sts_thumbnail_url=sts_thumbnail_url,
+                                        ready_event=live_ready_event,
+                                    )
+                                )
+
+                                # Wait for FFmpeg to open the FIFO read end
+                                # (i.e. voice_client.play was called).  Use a
+                                # generous timeout for voice connection.
+                                try:
+                                    await asyncio.wait_for(
+                                        live_ready_event.wait(), timeout=15.0
+                                    )
+                                except asyncio.TimeoutError:
+                                    logger.warning(
+                                        "EL_TTS live playback setup timed out"
+                                    )
+                                    live_task.cancel()
+                                    try:
+                                        await live_task
+                                    except Exception:
+                                        pass
+                                    raise RuntimeError("live timeout")
+
+                                # Check the task result — play_tts_live_stream
+                                # may have returned False.
+                                if live_task.done() and not live_task.result():
+                                    logger.warning(
+                                        "EL_TTS live playback returned False"
+                                    )
+                                    raise RuntimeError("live failed")
+
+                                # Open the FIFO write end with O_RDWR so the
+                                # open never blocks (Linux FIFO semantics).
+                                live_fifo_fd = os.open(
+                                    fifo_path, os.O_RDWR
+                                )
+                                # Bump pipe buffer to ~256 KB so short
+                                # connection races do not stall the event loop.
+                                try:
+                                    import fcntl
+                                    fcntl.fcntl(
+                                        live_fifo_fd, 1031, 262144
+                                    )  # F_SETPIPE_SZ
+                                except (ImportError, OSError):
+                                    pass
+                                live_playback_started = True
+                                logger.info(
+                                    "EL_TTS live playback ready fifo=%s",
+                                    fifo_path,
+                                )
+                            except Exception as e:
+                                logger.warning(
+                                    "EL_TTS live setup failed, falling back "
+                                    "to save-then-play: %s", e,
+                                )
+                                # Cancel live task if still running
+                                try:
+                                    live_task.cancel()
+                                    await live_task
+                                except Exception:
+                                    pass
+                                # Cleanup FIFO resources
+                                if live_fifo_fd is not None:
+                                    try:
+                                        os.close(live_fifo_fd)
+                                    except Exception:
+                                        pass
+                                    live_fifo_fd = None
+                                if fifo_path is not None:
+                                    try:
+                                        os.unlink(fifo_path)
+                                        os.rmdir(
+                                            os.path.dirname(fifo_path)
+                                        )
+                                    except Exception:
+                                        pass
+                                fifo_path = None
+                                live_playback_started = False
+
+                        # --- Chunk loop: write to file (+ FIFO if live) ---
                         with open(path, "wb") as f:
-                            async for chunk in response.content.iter_chunked(8192):
+                            async for chunk in response.content.iter_chunked(
+                                8192
+                            ):
                                 if first_chunk_time is None:
                                     first_chunk_time = time.time()
                                 f.write(chunk)
+                                # Feed the FIFO writer (non-blocking: O_RDWR
+                                # open + pipe buffer)
+                                if live_fifo_fd is not None:
+                                    try:
+                                        os.write(live_fifo_fd, chunk)
+                                    except (BrokenPipeError, OSError) as e:
+                                        logger.debug(
+                                            "EL_TTS FIFO write error, "
+                                            "disabling live: %s", e,
+                                        )
+                                        try:
+                                            os.close(live_fifo_fd)
+                                        except Exception:
+                                            pass
+                                        live_fifo_fd = None
+
+                        # --- Close FIFO write end ---
+                        if live_fifo_fd is not None:
+                            try:
+                                os.close(live_fifo_fd)
+                            except Exception:
+                                pass
+                            live_fifo_fd = None
+
+                        # --- Cleanup FIFO file ---
+                        if fifo_path is not None:
+                            try:
+                                os.unlink(fifo_path)
+                                os.rmdir(os.path.dirname(fifo_path))
+                            except Exception as e:
+                                logger.debug(
+                                    "EL_TTS FIFO cleanup: %s", e,
+                                )
+
                         file_size = os.path.getsize(path)
                     else:
                         # Boost is non-zero: use pydub path (decode, apply gain, re-encode)
@@ -691,20 +849,29 @@ class TTS:
                         len(text), file_size,
                     )
 
-                    channel = self._get_default_voice_channel(guild_id=guild_id)
-                    if channel is None:
-                        await self.behavior.send_error_message("No available voice channel for TTS playback.")
-                        return
-                    await self.behavior.play_audio(
-                        channel, filename, requester_name, is_tts=True,
-                        original_message=text,
-                        send_controls=send_controls,
-                        loading_message=loading_message,
-                        requester_avatar_url=requester_avatar_url,
-                        sts_thumbnail_url=sts_thumbnail_url
-                    )
+                    # Playback: if live-stream was started, it is already
+                    # playing.  Otherwise fall back to save-then-play.
+                    if not live_playback_started:
+                        channel = self._get_default_voice_channel(guild_id=guild_id)
+                        if channel is None:
+                            await self.behavior.send_error_message(
+                                "No available voice channel for TTS playback."
+                            )
+                            return
+                        await self.behavior.play_audio(
+                            channel, filename, requester_name, is_tts=True,
+                            original_message=text,
+                            send_controls=send_controls,
+                            loading_message=loading_message,
+                            requester_avatar_url=requester_avatar_url,
+                            sts_thumbnail_url=sts_thumbnail_url
+                        )
                     self.update_last_request_time(guild_id=guild_id)
-                    logger.info("Audio stream saved and played successfully. path=%s size=%s", path, file_size)
+                    logger.info(
+                        "Audio stream saved and played successfully. "
+                        "path=%s size=%s live=%s",
+                        path, file_size, live_playback_started,
+                    )
                 else:
                     error_body = await response.text()
                     error_msg = f"ElevenLabs API Error: status={http_status} body={error_body}"

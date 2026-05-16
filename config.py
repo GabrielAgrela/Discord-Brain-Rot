@@ -72,7 +72,7 @@ TTS_PROFILES = {
     "ventura": {
         "display": "Ventura (PT-PT)",
         "flag": ":flag_pt:",
-        "thumbnail": "https://upload.wikimedia.org/wikipedia/commons/thumb/d/d2/Andr%C3%A9_Ventura_%28Agencia_LUSA%2C_Entrevista_Presidenciais_2021%29%2C_cropped.png/250px-Andr%C3%A9_Ventura_%28Agencia_LUSA%2C_Entrevista_Presidenciais_2021%29%2C_cropped.png",
+        "thumbnail": "https://static.publicocdn.com/files/presidenciais2021/img/p2021-c2--xl.png",
         "provider": "elevenlabs",
         "voice": "pt",
     },

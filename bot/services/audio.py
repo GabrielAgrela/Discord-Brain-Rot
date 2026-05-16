@@ -1453,6 +1453,245 @@ class AudioService:
         non_bot_members = [m for m in channel.members if not m.bot]
         return len(non_bot_members) == 0
 
+    async def play_tts_live_stream(
+        self,
+        fifo_path: str,
+        audio_file: str,
+        channel,
+        user,
+        *,
+        original_message: str = "",
+        send_controls: bool = False,
+        loading_message: 'discord.Message' = None,
+        requester_avatar_url: str = None,
+        sts_thumbnail_url: str = None,
+        ready_event: 'asyncio.Event' = None,
+    ) -> bool:
+        """Play a live-streaming TTS from a POSIX FIFO (named pipe).
+
+        Unlike :meth:`play_audio` which reads a complete file, this method
+        streams audio from a FIFO that is being written concurrently by the
+        TTS generation code.  Because the file is incomplete we cannot use
+        ``from_probe()`` — instead we use raw ``FFmpegPCMAudio`` directly.
+
+        The caller should create the FIFO, start this method as a background
+        task, then wait for *ready_event* before feeding MP3 bytes into the
+        FIFO write end.
+
+        Args:
+            fifo_path: Absolute path to an existing FIFO (created via
+                ``os.mkfifo``).
+            audio_file: Display filename for the sound card / tracking (may
+                not exist on disk yet).
+            channel: Discord voice channel to play into.
+            user: Requester name or Discord member.
+            original_message: TTS text displayed as a quote on the sound card.
+            send_controls: Whether to include inline gear controls
+                (not supported for live TTS — passed for interface
+                compatibility only).
+            loading_message: Ephemeral "generating…" message to delete when
+                the sound card is sent.
+            requester_avatar_url: Avatar URL for the sound card.
+            sts_thumbnail_url: STS source thumbnail URL.
+            ready_event: Set when ``voice_client.play()`` has been called
+                and FFmpeg is actively reading from the FIFO.
+
+        Returns:
+            ``True`` if playback was started, ``False`` on failure.
+        """
+        guild_id = channel.guild.id
+        self._ensure_guild_playback_state(guild_id)
+        self._set_active_guild(guild_id)
+
+        play_start_time = time.time()
+        play_id = f"live-tts-{guild_id}-{int(play_start_time * 1000)}"
+
+        if self.mute_service.is_muted:
+            print("[AudioService] Muted; skipping live TTS playback")
+            return False
+
+        try:
+            voice_client = await self.ensure_voice_connected(channel)
+            if not voice_client:
+                print("[AudioService] No voice client for live TTS")
+                return False
+
+            # Check if currently playing
+            is_currently_playing = voice_client.is_playing() or (
+                hasattr(voice_client, "is_paused") and voice_client.is_paused()
+            )
+
+            if is_currently_playing:
+                await self._notify_tts_busy(
+                    channel=channel,
+                    user=user,
+                    original_message=original_message,
+                    audio_file=audio_file,
+                    loading_message=loading_message,
+                )
+                return False
+
+            # Wait for lingering player thread
+            lingering_player = getattr(voice_client, "_player", None)
+            if lingering_player is not None and lingering_player.is_alive():
+                await self._wait_for_audio_player_thread(
+                    lingering_player, timeout=2.0
+                )
+                await asyncio.sleep(0.05)
+
+            # Basic volume-only filter + small adelay for startup reliability.
+            # FFmpegOpusAudio.from_probe cannot be used because the FIFO is
+            # not a complete seekable file.
+            live_filters = 'volume=1.0,adelay=100:all=1'
+            ffmpeg_options = f'-filter:a "{live_filters}"'
+            ffmpeg_before_options = '-nostdin'
+
+            source = discord.FFmpegPCMAudio(
+                fifo_path,
+                executable=self.ffmpeg_path,
+                before_options=ffmpeg_before_options,
+                options=ffmpeg_options,
+            )
+
+            def after_playing(error):
+                try:
+                    if error:
+                        logger.warning(
+                            "[AudioService] Live TTS playback error: %s", error
+                        )
+                finally:
+                    guild_event = self._guild_playback_done.get(guild_id)
+                    if guild_event is not None:
+                        self.bot.loop.call_soon_threadsafe(guild_event.set)
+                    self.bot.loop.call_soon_threadsafe(self.playback_done.set)
+                    self.bot.loop.call_soon_threadsafe(
+                        self._mark_playback_finished,
+                        guild_id,
+                        play_id,
+                    )
+
+            voice_client.play(source, after=after_playing)
+            self._mark_playback_started(
+                guild_id,
+                audio_file,
+                user,
+                play_id,
+                duration_seconds=None,  # unknown for live stream
+            )
+
+            guild_event = self._guild_playback_done.get(guild_id)
+            if guild_event is not None:
+                guild_event.clear()
+            self.playback_done.clear()
+
+            # Signal the writer that FFmpeg is now reading the FIFO
+            if ready_event is not None:
+                ready_event.set()
+
+            print(
+                "[AudioService] [LIVE-TTS] Playback started "
+                f"play_id={play_id} guild_id={guild_id} file={audio_file} "
+                f"fifo={fifo_path}"
+            )
+
+            # Send/update a TTS sound card in background (no DB row yet)
+            async def send_card():
+                try:
+                    if loading_message:
+                        try:
+                            await loading_message.delete()
+                        except Exception:
+                            pass
+
+                    bot_channel = self.message_service.get_bot_channel(
+                        channel.guild
+                    )
+                    if not bot_channel:
+                        return
+
+                    resolved_avatar = requester_avatar_url
+                    if not resolved_avatar:
+                        if (
+                            hasattr(user, "display_avatar")
+                            and user.display_avatar
+                        ):
+                            resolved_avatar = str(
+                                user.display_avatar.url
+                            )
+                        elif (
+                            self.bot.user and self.bot.user.display_avatar
+                        ):
+                            resolved_avatar = str(
+                                self.bot.user.display_avatar.url
+                            )
+
+                    quote_text = (
+                        original_message if original_message else None
+                    )
+
+                    image_bytes = (
+                        await self.image_generator.generate_sound_card(
+                            sound_name=audio_file,
+                            requester=str(user),
+                            play_count=None,
+                            duration=None,
+                            download_date=None,
+                            lists=None,
+                            favorited_by=None,
+                            similarity=None,
+                            quote=quote_text,
+                            is_tts=True,
+                            sts_char=None,
+                            requester_avatar_url=resolved_avatar,
+                            sts_thumbnail_url=sts_thumbnail_url,
+                        )
+                    )
+
+                    if image_bytes:
+                        from bot.ui import SoundBeingPlayedView
+
+                        behavior_ref = (
+                            self._behavior
+                            if hasattr(self, "_behavior")
+                            else None
+                        )
+                        view = SoundBeingPlayedView(
+                            behavior_ref,
+                            audio_file,
+                            include_add_to_list_select=False,
+                            include_sts_select=True,
+                            progress_label="▶️ 🔘▬▬▬▬▬▬ 0:00",
+                            show_controls=False,
+                            is_tts=True,
+                            original_message=original_message,
+                            controls_toggle_disabled=True,
+                        )
+
+                        file = discord.File(
+                            io.BytesIO(image_bytes),
+                            filename="sound_card.png",
+                        )
+                        sound_message = await bot_channel.send(
+                            file=file, view=view
+                        )
+                        self._guild_current_sound_message[
+                            guild_id
+                        ] = sound_message
+                        self._guild_current_view[guild_id] = view
+                except Exception as e:
+                    logger.error(
+                        "[AudioService] Live TTS sound card error: %s", e
+                    )
+
+            asyncio.create_task(send_card())
+            return True
+
+        except Exception as e:
+            logger.error(
+                "[AudioService] Live TTS playback setup error: %s", e
+            )
+            return False
+
     async def play_slap(self, channel, audio_file, user):
         """Play a slap sound - stops current audio, plays immediately, no embed."""
         try:

@@ -131,6 +131,10 @@ class VoiceTransformationService:
         """Wrapper for AudioService.play_audio."""
         return await self.audio_service.play_audio(*args, **kwargs)
     
+    async def play_tts_live_stream(self, *args, **kwargs):
+        """Wrapper for AudioService.play_tts_live_stream."""
+        return await self.audio_service.play_tts_live_stream(*args, **kwargs)
+    
     async def send_message(self, *args, **kwargs):
         """Wrapper for MessageService.send_message."""
         return await self.message_service.send_message(*args, **kwargs)

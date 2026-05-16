@@ -389,6 +389,7 @@ This README is based on the current codebase behavior (not historical README ass
 
 #### ElevenLabs TTS Performance Options (since Ventura chat generates via this path)
 - `EL_TTS_STREAMING_ENABLED` (optional; use the streaming TTS endpoint for lower latency, default `true`)
+- `EL_TTS_LIVE_PLAYBACK_ENABLED` (optional; live playback from a FIFO pipe while the MP3 is still being downloaded, default `true`; only applies when streaming is enabled, no local loudnorm/boost, and a voice channel is available; falls back to save-then-play otherwise)
 - `EL_TTS_OPTIMIZE_STREAMING_LATENCY` (optional; streaming latency optimisation level `0`-`4`, default `3`; higher values reduce latency but may reduce quality; set empty to omit the parameter; **only applied for models that support it** — automatically omitted for `eleven_v3` which does not accept this parameter)
 - `EL_TTS_OUTPUT_FORMAT` (optional; output audio format, default `mp3_44100_128`; other ElevenLabs formats such as `mp3_44100_64` or `pcm_16000` are possible)
 - `EL_TTS_MODEL_ID` (optional; ElevenLabs TTS model, default `eleven_v3`)

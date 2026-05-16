@@ -325,6 +325,369 @@ class TestSaveAsMp3EL:
 
 
 # ============================================================================
+# Live streaming (FIFO) tests
+# ============================================================================
+
+class TestSaveAsMp3ELLive:
+    """
+    Test that save_as_mp3_EL uses the live FIFO streaming path when
+    eligible, and falls back to normal play_audio otherwise.
+    """
+
+    def _make_tts(self, **tts_kwargs):
+        """Create a TTS instance with minimal deps and mocked behavior."""
+        behavior = MagicMock()
+        behavior.send_message = AsyncMock()
+        behavior.play_audio = AsyncMock()
+        behavior.play_tts_live_stream = AsyncMock()
+        behavior.send_error_message = AsyncMock()
+        bot = MagicMock()
+        tts = TTS(behavior, bot, filename="test.mp3", cooldown_seconds=0)
+        for key, value in tts_kwargs.items():
+            setattr(tts, key, value)
+        tts.voice_id = tts_kwargs.get("voice_id", "test_voice_id")
+        return tts
+
+    @pytest.mark.asyncio
+    @patch("bot.tts.aiohttp.ClientSession")
+    @patch("bot.tts.Database")
+    @patch("bot.tts.os.path.getsize")
+    @patch("bot.tts.os.makedirs")
+    @patch("builtins.open", new_callable=MagicMock)
+    @patch("bot.tts.tempfile.mkdtemp")
+    @patch("bot.tts.os.mkfifo")
+    @patch("bot.tts.os.open")
+    @patch("bot.tts.os.close")
+    @patch("bot.tts.os.unlink")
+    @patch("bot.tts.os.rmdir")
+    async def test_live_path_calls_play_tts_live_stream(
+        self,
+        mock_rmdir,
+        mock_unlink,
+        mock_close,
+        mock_os_open,
+        mock_mkfifo,
+        mock_mkdtemp,
+        mock_open,
+        mock_makedirs,
+        mock_getsize,
+        mock_db,
+        mock_session_cls,
+    ):
+        """
+        When all live conditions are met, play_tts_live_stream should be
+        called and play_audio should NOT be called.
+        """
+        mock_getsize.return_value = 9999
+        mock_mkdtemp.return_value = "/tmp/el_tts_live_abc123"
+        mock_os_open.return_value = 42  # fake fd
+
+        resp = mock_response(
+            status=200,
+            content_chunks=[b"chunk1", b"chunk2"],
+        )
+        sess = mock_session(post_response=resp)
+        mock_session_cls.return_value = sess
+
+        fake_channel = MagicMock()
+        fake_channel.guild.id = 12345
+
+        tts = self._make_tts(
+            el_tts_live_playback_enabled=True,
+            el_tts_streaming_enabled=True,
+            el_tts_timeout_seconds=30,
+            loudnorm_mode="off",
+            voice_id="pt_voice",
+        )
+        tts._get_default_voice_channel = MagicMock(return_value=fake_channel)
+
+        # play_tts_live_stream mock: set ready_event and return True
+        async def _fake_play_live(**kwargs):
+            re = kwargs.get("ready_event")
+            if re is not None:
+                re.set()
+            return True
+
+        tts.behavior.play_tts_live_stream = _fake_play_live
+
+        await tts.save_as_mp3_EL("hello live", lang="pt")
+
+        mock_db().insert_sound.assert_called_once()
+        tts.behavior.play_audio.assert_not_called()
+
+    @patch("bot.tts.aiohttp.ClientSession")
+    @patch("bot.tts.Database")
+    @patch("bot.tts.os.path.getsize")
+    @patch("bot.tts.os.makedirs")
+    @patch("builtins.open", new_callable=MagicMock)
+    @patch("bot.tts.tempfile.mkdtemp")
+    @patch("bot.tts.os.mkfifo")
+    @patch("bot.tts.os.open")
+    @patch("bot.tts.os.close")
+    @patch("bot.tts.os.unlink")
+    @patch("bot.tts.os.rmdir")
+    async def test_live_disabled_falls_back(
+        self,
+        mock_rmdir,
+        mock_unlink,
+        mock_close,
+        mock_os_open,
+        mock_mkfifo,
+        mock_mkdtemp,
+        mock_open,
+        mock_makedirs,
+        mock_getsize,
+        mock_db,
+        mock_session_cls,
+    ):
+        """When EL_TTS_LIVE_PLAYBACK_ENABLED is False, use normal play_audio."""
+        mock_getsize.return_value = 9999
+
+        fake_channel = MagicMock()
+        fake_channel.guild.id = 12345
+
+        resp = mock_response(
+            status=200,
+            content_chunks=[b"chunk1", b"chunk2", b"chunk3"],
+        )
+        sess = mock_session(post_response=resp)
+        mock_session_cls.return_value = sess
+
+        tts = self._make_tts(
+            el_tts_live_playback_enabled=False,
+            el_tts_streaming_enabled=True,
+            el_tts_timeout_seconds=30,
+            loudnorm_mode="off",
+            voice_id="pt_voice",
+        )
+        tts._get_default_voice_channel = MagicMock(return_value=fake_channel)
+
+        await tts.save_as_mp3_EL("hello fallback", lang="pt")
+
+        tts.behavior.play_tts_live_stream.assert_not_called()
+        tts.behavior.play_audio.assert_called_once()
+
+    async def test_loudnorm_on_falls_back(
+        self,
+    ):
+        """When loudnorm is not 'off', live path is skipped."""
+        # Build mock session and response
+        resp = mock_response(
+            status=200,
+            content_chunks=[b"a", b"b"],
+        )
+        sess = mock_session(post_response=resp)
+
+        import bot.tts as tts_module
+        with \
+            patch.object(tts_module.aiohttp, 'ClientSession', return_value=sess), \
+            patch.object(tts_module.Database, 'insert_sound') as mock_db, \
+            patch.object(tts_module.os.path, 'getsize', return_value=9999) as mock_getsize, \
+            patch.object(tts_module.os, 'makedirs') as mock_makedirs, \
+            patch('builtins.open', new_callable=MagicMock) as mock_open:
+            
+            tts = self._make_tts(
+                el_tts_live_playback_enabled=True,
+                el_tts_streaming_enabled=True,
+                el_tts_timeout_seconds=30,
+                loudnorm_mode="single",
+                voice_id="pt_voice",
+            )
+            fake_channel = MagicMock()
+            fake_channel.guild.id = 12345
+            tts._get_default_voice_channel = MagicMock(return_value=fake_channel)
+            
+            await tts.save_as_mp3_EL("hello loudnorm", lang="pt")
+            
+            tts.behavior.play_tts_live_stream.assert_not_called()
+            tts.behavior.play_audio.assert_called_once()
+        mock_getsize.return_value = 9999
+        
+        fake_channel = MagicMock()
+        fake_channel.guild.id = 12345
+        
+        resp = mock_response(
+            status=200,
+            content_chunks=[b"a", b"b"],
+        )
+        sess = mock_session(post_response=resp)
+        
+        tts = self._make_tts(
+            el_tts_live_playback_enabled=True,
+            el_tts_streaming_enabled=True,
+            el_tts_timeout_seconds=30,
+            loudnorm_mode="single",
+            voice_id="pt_voice",
+        )
+        tts._get_default_voice_channel = MagicMock(return_value=fake_channel)
+        
+        await tts.save_as_mp3_EL("hello loudnorm", lang="pt")
+        
+        tts.behavior.play_tts_live_stream.assert_not_called()
+        tts.behavior.play_audio.assert_called_once()
+
+    @patch("bot.tts.aiohttp.ClientSession")
+    @patch("bot.tts.Database")
+    @patch("bot.tts.os.path.getsize")
+    @patch("bot.tts.os.makedirs")
+    @patch("builtins.open", new_callable=MagicMock)
+    @patch("bot.tts.tempfile.mkdtemp")
+    @patch("bot.tts.os.mkfifo")
+    @patch("bot.tts.os.open")
+    @patch("bot.tts.os.close")
+    @patch("bot.tts.os.unlink")
+    @patch("bot.tts.os.rmdir")
+    async def test_streaming_disabled_falls_back(
+        self,
+        mock_rmdir,
+        mock_unlink,
+        mock_close,
+        mock_os_open,
+        mock_mkfifo,
+        mock_mkdtemp,
+        mock_open,
+        mock_makedirs,
+        mock_getsize,
+        mock_db,
+        mock_session_cls,
+    ):
+        """When streaming is disabled, live path is skipped."""
+        mock_getsize.return_value = 9999
+
+        fake_channel = MagicMock()
+        fake_channel.guild.id = 12345
+
+        resp = mock_response(
+            status=200,
+            content_bytes=b"all at once data",
+        )
+        sess = mock_session(post_response=resp)
+        mock_session_cls.return_value = sess
+
+        tts = self._make_tts(
+            el_tts_live_playback_enabled=True,
+            el_tts_streaming_enabled=False,
+            el_tts_timeout_seconds=30,
+            loudnorm_mode="off",
+            voice_id="pt_voice",
+        )
+        tts._get_default_voice_channel = MagicMock(return_value=fake_channel)
+
+        await tts.save_as_mp3_EL("hello nonstreaming", lang="pt")
+
+        tts.behavior.play_tts_live_stream.assert_not_called()
+        tts.behavior.play_audio.assert_called_once()
+
+    @patch("bot.tts.aiohttp.ClientSession")
+    @patch("bot.tts.Database")
+    @patch("bot.tts.os.path.getsize")
+    @patch("bot.tts.os.makedirs")
+    @patch("builtins.open", new_callable=MagicMock)
+    @patch("bot.tts.tempfile.mkdtemp")
+    @patch("bot.tts.os.mkfifo")
+    @patch("bot.tts.os.open")
+    @patch("bot.tts.os.close")
+    @patch("bot.tts.os.unlink")
+    @patch("bot.tts.os.rmdir")
+    async def test_no_channel_falls_back(
+        self,
+        mock_rmdir,
+        mock_unlink,
+        mock_close,
+        mock_os_open,
+        mock_mkfifo,
+        mock_mkdtemp,
+        mock_open,
+        mock_makedirs,
+        mock_getsize,
+        mock_db,
+        mock_session_cls,
+    ):
+        """
+        When no voice channel is available (None returned by
+        _get_default_voice_channel), live is skipped.
+        """
+        mock_getsize.return_value = 9999
+
+        resp = mock_response(
+            status=200,
+            content_chunks=[b"chunk"],
+        )
+        sess = mock_session(post_response=resp)
+        mock_session_cls.return_value = sess
+
+        tts = self._make_tts(
+            el_tts_live_playback_enabled=True,
+            el_tts_streaming_enabled=True,
+            el_tts_timeout_seconds=30,
+            loudnorm_mode="off",
+            voice_id="pt_voice",
+        )
+        # Return None (no channel available)
+        tts._get_default_voice_channel = MagicMock(return_value=None)
+
+        await tts.save_as_mp3_EL("hello nochannel", lang="pt")
+
+        tts.behavior.play_tts_live_stream.assert_not_called()
+        # play_audio should not be called either (channel is None → error msg)
+        tts.behavior.play_audio.assert_not_called()
+        tts.behavior.send_error_message.assert_called_once()
+
+    @patch("bot.tts.aiohttp.ClientSession")
+    @patch("bot.tts.Database")
+    @patch("bot.tts.os.path.getsize")
+    @patch("bot.tts.os.makedirs")
+    @patch("builtins.open", new_callable=MagicMock)
+    @patch("bot.tts.tempfile.mkdtemp")
+    @patch("bot.tts.os.mkfifo")
+    @patch("bot.tts.os.open")
+    @patch("bot.tts.os.close")
+    @patch("bot.tts.os.unlink")
+    @patch("bot.tts.os.rmdir")
+    async def test_fifo_setup_failure_falls_back(
+        self,
+        mock_rmdir,
+        mock_unlink,
+        mock_close,
+        mock_os_open,
+        mock_mkfifo,
+        mock_mkdtemp,
+        mock_open,
+        mock_makedirs,
+        mock_getsize,
+        mock_db,
+        mock_session_cls,
+    ):
+        """When FIFO creation fails, fall back to normal play_audio."""
+        mock_getsize.return_value = 9999
+        mock_mkdtemp.side_effect = OSError("disk full")
+
+        fake_channel = MagicMock()
+        fake_channel.guild.id = 12345
+
+        resp = mock_response(
+            status=200,
+            content_chunks=[b"chunk"],
+        )
+        sess = mock_session(post_response=resp)
+        mock_session_cls.return_value = sess
+
+        tts = self._make_tts(
+            el_tts_live_playback_enabled=True,
+            el_tts_streaming_enabled=True,
+            el_tts_timeout_seconds=30,
+            loudnorm_mode="off",
+            voice_id="pt_voice",
+        )
+        tts._get_default_voice_channel = MagicMock(return_value=fake_channel)
+
+        await tts.save_as_mp3_EL("hello fifofail", lang="pt")
+
+        tts.behavior.play_tts_live_stream.assert_not_called()
+        tts.behavior.play_audio.assert_called_once()
+
+
+# ============================================================================
 # Environment variable defaults
 # ============================================================================
 
@@ -335,6 +698,7 @@ def test_el_tts_env_defaults():
     tts = TTS(behavior, bot)
 
     assert tts.el_tts_streaming_enabled is True
+    assert tts.el_tts_live_playback_enabled is True
     assert tts.el_tts_optimize_streaming_latency == 3
     assert tts.el_tts_model_id == "eleven_v3"
     assert tts.el_tts_output_format == "mp3_44100_128"
