@@ -1,7 +1,9 @@
 import asyncio
+import logging
 import os
 import time
 import requests
+import urllib.parse
 from gtts import gTTS
 from dotenv import load_dotenv
 from pydub import AudioSegment
@@ -14,6 +16,8 @@ import aiohttp
 from datetime import datetime
 from typing import Optional
 from bot.database import Database
+
+logger = logging.getLogger(__name__)
 
 class TTS:
     def __init__(self, behavior, bot, filename="tts.mp3", cooldown_seconds=10):
@@ -45,6 +49,57 @@ class TTS:
             self.loudnorm_lra = float(os.getenv('TTS_LRA_TARGET', '11'))  # Loudness range target
         except Exception:
             self.loudnorm_lra = 11.0
+
+        # --- ElevenLabs TTS optimization knobs ---
+        self.el_tts_streaming_enabled = os.getenv("EL_TTS_STREAMING_ENABLED", "true").strip().lower() in ("true", "1", "yes")
+        raw_latency = os.getenv("EL_TTS_OPTIMIZE_STREAMING_LATENCY", "3")
+        self.el_tts_optimize_streaming_latency = self._parse_optimize_latency(raw_latency)
+        self.el_tts_model_id = os.getenv("EL_TTS_MODEL_ID", "eleven_v3")
+        self.el_tts_output_format = os.getenv("EL_TTS_OUTPUT_FORMAT", "mp3_44100_128")
+        try:
+            self.el_tts_timeout_seconds = int(os.getenv("EL_TTS_TIMEOUT_SECONDS", "30"))
+        except Exception:
+            self.el_tts_timeout_seconds = 30
+
+    @staticmethod
+    def _parse_optimize_latency(raw: Optional[str]) -> Optional[int]:
+        """Parse and validate the optimize_streaming_latency env value.
+
+        Returns ``None`` if the value is empty/blank/invalid, otherwise clamps
+        to the valid range 0-4 and logs a warning if clamping was needed.
+        """
+        if not raw or not raw.strip():
+            return None
+        try:
+            val = int(raw.strip())
+        except (ValueError, TypeError):
+            logger.warning(
+                "Ignoring invalid EL_TTS_OPTIMIZE_STREAMING_LATENCY=%r; "
+                "must be an integer 0-4 or empty. Falling back to None.",
+                raw,
+            )
+            return None
+        if val < 0 or val > 4:
+            logger.warning(
+                "Clamping EL_TTS_OPTIMIZE_STREAMING_LATENCY=%d to valid "
+                "range 0-4. Using effective value None.",
+                val,
+            )
+            return None
+        return val
+
+    def _effective_el_tts_streaming_latency(self) -> Optional[int]:
+        """Return the latency param to send.
+
+        The ``eleven_v3`` model does **not** support
+        ``optimize_streaming_latency`` and returns a 400 error if it receives
+        the parameter.  Returns ``None`` for ``eleven_v3`` (case-insensitive)
+        and the configured value otherwise.
+        """
+        model = (self.el_tts_model_id or "").strip().lower()
+        if model == "eleven_v3":
+            return None
+        return self.el_tts_optimize_streaming_latency
 
     def _get_default_voice_channel(self, guild_id: Optional[int] = None):
         """Return the preferred voice channel for playback.
@@ -490,6 +545,49 @@ class TTS:
         finally:
             self._set_locked(False, guild_id=guild_id)
 
+    def _build_el_tts_url(self) -> str:
+        """Build the ElevenLabs TTS endpoint URL based on streaming configuration.
+
+        Returns:
+            Full URL string for the ElevenLabs TTS API.
+        """
+        base = f"https://api.elevenlabs.io/v1/text-to-speech/{self.voice_id}"
+        if self.el_tts_streaming_enabled:
+            base += "/stream"
+        params = {}
+        # output_format can be passed as query parameter to both streaming and
+        # non-streaming endpoints. The streaming endpoint also accepts an
+        # optional optimize_streaming_latency parameter (0-4, default 0).
+        params["output_format"] = self.el_tts_output_format
+        effective_latency = self._effective_el_tts_streaming_latency()
+        if effective_latency is not None:
+            params["optimize_streaming_latency"] = str(effective_latency)
+        return f"{base}?{urllib.parse.urlencode(params)}"
+
+    def _log_el_tts_perf(self, start: float, first_chunk_time: Optional[float],
+                         write_end: float, url: str, model_id: str,
+                         output_format: str, latency: Optional[int],
+                         text_len: int, file_size: Optional[int]):
+        """Log ElevenLabs TTS performance metrics at INFO level."""
+        total_s = write_end - start
+        if first_chunk_time is not None:
+            ttf_first_s = first_chunk_time - start
+            write_s = write_end - first_chunk_time
+            logger.info(
+                "EL_TTS perf | model=%s fmt=%s latency=%s text_len=%d "
+                "ttf_first=%.3fs write=%.3fs total=%.3fs file_size=%s",
+                model_id, output_format, latency, text_len,
+                ttf_first_s, write_s, total_s,
+                file_size if file_size is not None else "?"
+            )
+        else:
+            logger.info(
+                "EL_TTS perf | model=%s fmt=%s latency=%s text_len=%d "
+                "total=%.3fs file_size=%s",
+                model_id, output_format, latency, text_len,
+                total_s, file_size if file_size is not None else "?"
+            )
+
     async def save_as_mp3_EL(self, text, lang="pt", region="", send_controls=True,
                              loading_message=None, requester_avatar_url=None, sts_thumbnail_url=None,
                              requester_name="admin", guild_id: Optional[int] = None):
@@ -516,46 +614,82 @@ class TTS:
             return
 
         text = text[:1000]
-        url = f"https://api.elevenlabs.io/v1/text-to-speech/{self.voice_id}"
+        url = self._build_el_tts_url()
         headers = {
             "Accept": "audio/mpeg",
             "Content-Type": "application/json",
             "xi-api-key": self.api_key
         }
+        model_id = self.el_tts_model_id
         data = {
             "text": text,
-            "model_id": "eleven_v3",
-            "output_format": "mp3_44100_128",
+            "model_id": model_id,
             "voice_settings": {
                 "speed": 1,
                 "stability": 0.0,
                 "similarity_boost": 1.0,
-                "style":1,
+                "style": 1,
                 "use_speaker_boost": True
             },
             "use_enhanced": True
         }
 
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=data, headers=headers) as response:
-                if response.status == 200:
-                    audio_data = await response.read()
-                    audio = AudioSegment.from_mp3(io.BytesIO(audio_data))
-                    louder_audio = audio + boost_volume
-                    final_audio = louder_audio
+        perf_start = time.time()
+        path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", filename))
+        timeout = aiohttp.ClientTimeout(total=self.el_tts_timeout_seconds)
+        first_chunk_time: Optional[float] = None
+        http_status = None
 
-                    path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", filename))
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(url, json=data, headers=headers) as response:
+                http_status = response.status
+                if response.status == 200:
+                    if boost_volume == 0 and not self.el_tts_streaming_enabled:
+                        # Non-streaming, no boost: read all, write directly (skip pydub decode/re-encode)
+                        audio_data = await response.read()
+                        first_chunk_time = time.time()  # response fully received
+                        os.makedirs(os.path.dirname(path), exist_ok=True)
+                        with open(path, "wb") as f:
+                            f.write(audio_data)
+                        file_size = os.path.getsize(path)
+                    elif boost_volume == 0 and self.el_tts_streaming_enabled:
+                        # Streaming, no boost: write chunks directly to file
+                        os.makedirs(os.path.dirname(path), exist_ok=True)
+                        with open(path, "wb") as f:
+                            async for chunk in response.content.iter_chunked(8192):
+                                if first_chunk_time is None:
+                                    first_chunk_time = time.time()
+                                f.write(chunk)
+                        file_size = os.path.getsize(path)
+                    else:
+                        # Boost is non-zero: use pydub path (decode, apply gain, re-encode)
+                        audio_data = await response.read()
+                        first_chunk_time = time.time()
+                        audio = AudioSegment.from_mp3(io.BytesIO(audio_data))
+                        louder_audio = audio + boost_volume
+                        final_audio = louder_audio
+                        os.makedirs(os.path.dirname(path), exist_ok=True)
+                        final_audio.export(path, format="mp3")
+                        file_size = os.path.getsize(path)
+
+                    # Configurable loudness normalization
+                    self._apply_loudnorm_if_enabled(path)
+
+                    # Insert DB row only after successful file write
                     Database().insert_sound(
                         os.path.basename(filename),
                         os.path.basename(filename),
                         is_elevenlabs=1,
                         guild_id=guild_id,
                     )
-                    #self.db.add_entry(os.path.basename(self.filename))
 
-                    final_audio.export(path, format="mp3")
-                    # Configurable loudness normalization
-                    self._apply_loudnorm_if_enabled(path)
+                    perf_end = time.time()
+                    self._log_el_tts_perf(
+                        perf_start, first_chunk_time, perf_end,
+                        url, model_id, self.el_tts_output_format,
+                        self._effective_el_tts_streaming_latency(),
+                        len(text), file_size,
+                    )
 
                     channel = self._get_default_voice_channel(guild_id=guild_id)
                     if channel is None:
@@ -570,8 +704,9 @@ class TTS:
                         sts_thumbnail_url=sts_thumbnail_url
                     )
                     self.update_last_request_time(guild_id=guild_id)
-                    print("Audio stream saved and played successfully.")
+                    logger.info("Audio stream saved and played successfully. path=%s size=%s", path, file_size)
                 else:
-                    error_msg = f"ElevenLabs API Error: {await response.text()}"
-                    print(error_msg)
+                    error_body = await response.text()
+                    error_msg = f"ElevenLabs API Error: status={http_status} body={error_body}"
+                    logger.error(error_msg)
                     raise Exception(error_msg)

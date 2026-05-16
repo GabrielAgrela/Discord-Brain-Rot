@@ -320,15 +320,45 @@ class TestGroqWhisperService:
         from bot.services.voice_command import GROQ_WHISPER_MODEL
         assert GROQ_WHISPER_MODEL == "whisper-large-v3"
 
-    def test_default_model_on_service(self, service):
-        """Service instance uses the default model."""
+    def test_default_model_and_language_on_service(self, service):
+        """Service instance uses the default model and Portuguese language hint."""
         assert service.model == "whisper-large-v3"
+        assert service.language == "pt", (
+            "Default language should be 'pt' to prevent Whisper translating "
+            "Portuguese utterances to English"
+        )
 
-    def test_default_prompt_is_set(self):
-        """A default GROQ_WHISPER_PROMPT exists for mixed-language guidance."""
+    def test_default_prompt_is_empty(self):
+        """Default prompt is empty to avoid Whisper prompt hallucinations."""
         from bot.services.voice_command import GROQ_WHISPER_PROMPT
-        assert GROQ_WHISPER_PROMPT
-        assert "Portuguese" in GROQ_WHISPER_PROMPT
+        assert GROQ_WHISPER_PROMPT == ""
+
+    @pytest.mark.asyncio
+    async def test_transcribe_sends_temperature_by_default(self, service):
+        """By default, temperature ``0`` is sent for deterministic transcription."""
+        form_add_field_calls: list[tuple] = []
+
+        original_add_field = aiohttp.FormData.add_field
+
+        def tracking_add_field(self, *args, **kwargs):
+            form_add_field_calls.append((args, kwargs))
+            return original_add_field(self, *args, **kwargs)
+
+        with patch("bot.services.voice_command.aiohttp.FormData.add_field", tracking_add_field):
+            with patch("bot.services.voice_command.aiohttp.ClientSession.post") as mock_post:
+                mock_resp = AsyncMock()
+                mock_resp.status = 200
+                mock_resp.json = AsyncMock(return_value={"text": "test"})
+                mock_post.return_value.__aenter__ = AsyncMock(return_value=mock_resp)
+
+                await service.transcribe(b"fake-wav-data")
+
+        temperature_fields = [
+            call for call in form_add_field_calls
+            if call[0][0] == "temperature"
+        ]
+        assert len(temperature_fields) == 1
+        assert temperature_fields[0][0][1] == "0"
 
     @pytest.mark.asyncio
     async def test_transcribe_sends_prompt_when_configured(self, service):
@@ -387,8 +417,35 @@ class TestGroqWhisperService:
         assert len(prompt_fields) == 0
 
     @pytest.mark.asyncio
+    async def test_transcribe_sends_language_by_default(self, service):
+        """By default, language ``pt`` is sent as a FormData field."""
+        form_add_field_calls: list[tuple] = []
+
+        original_add_field = aiohttp.FormData.add_field
+
+        def tracking_add_field(self, *args, **kwargs):
+            form_add_field_calls.append((args, kwargs))
+            return original_add_field(self, *args, **kwargs)
+
+        with patch("bot.services.voice_command.aiohttp.FormData.add_field", tracking_add_field):
+            with patch("bot.services.voice_command.aiohttp.ClientSession.post") as mock_post:
+                mock_resp = AsyncMock()
+                mock_resp.status = 200
+                mock_resp.json = AsyncMock(return_value={"text": "test"})
+                mock_post.return_value.__aenter__ = AsyncMock(return_value=mock_resp)
+
+                await service.transcribe(b"fake-wav-data")
+
+        lang_fields = [
+            call for call in form_add_field_calls
+            if call[0][0] == "language"
+        ]
+        assert len(lang_fields) == 1
+        assert lang_fields[0][0][1] == "pt"
+
+    @pytest.mark.asyncio
     async def test_transcribe_sends_language_when_configured(self, service):
-        """When ``service.language`` is set, it is included as a FormData field."""
+        """When ``service.language`` is explicitly set, it is included as a FormData field."""
         service.language = "pt"
         form_add_field_calls: list[tuple] = []
 
@@ -413,6 +470,33 @@ class TestGroqWhisperService:
         ]
         assert len(lang_fields) == 1
         assert lang_fields[0][0][1] == "pt"
+
+    @pytest.mark.asyncio
+    async def test_transcribe_skips_language_when_empty(self, service):
+        """When ``service.language`` is explicitly emptied, no language field is sent."""
+        service.language = ""
+        form_add_field_calls: list[tuple] = []
+
+        original_add_field = aiohttp.FormData.add_field
+
+        def tracking_add_field(self, *args, **kwargs):
+            form_add_field_calls.append((args, kwargs))
+            return original_add_field(self, *args, **kwargs)
+
+        with patch("bot.services.voice_command.aiohttp.FormData.add_field", tracking_add_field):
+            with patch("bot.services.voice_command.aiohttp.ClientSession.post") as mock_post:
+                mock_resp = AsyncMock()
+                mock_resp.status = 200
+                mock_resp.json = AsyncMock(return_value={"text": "test"})
+                mock_post.return_value.__aenter__ = AsyncMock(return_value=mock_resp)
+
+                await service.transcribe(b"fake-wav-data")
+
+        lang_fields = [
+            call for call in form_add_field_calls
+            if call[0][0] == "language"
+        ]
+        assert len(lang_fields) == 0
 
 
 # ====================================================================

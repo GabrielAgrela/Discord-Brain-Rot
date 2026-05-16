@@ -52,18 +52,20 @@ GROQ_API_KEY: str = os.environ.get("GROQ_API_KEY", "")
 
 GROQ_WHISPER_MODEL: str = os.getenv("GROQ_WHISPER_MODEL", "whisper-large-v3")
 
-# Optional prompt to guide Groq Whisper for mixed-language speech (e.g. English
-# preamble + Portuguese command).  Sent as the ``prompt`` field when non-empty.
+# Optional prompt sent to Groq Whisper.  Keep the default empty: Whisper can
+# hallucinate prompt text or generic Portuguese filler on short/noisy clips.
 GROQ_WHISPER_PROMPT: str = os.getenv(
     "GROQ_WHISPER_PROMPT",
-    "Mixed Portuguese and English Discord voice command. "
-    "Preserve the wake word Ventura, command words such as play/toca, "
-    "and sound names exactly.",
+    "",
 )
 
-# Optional language hint sent to Groq Whisper.  Leave empty (default) for auto-
-# detect since users mix Portuguese and English.
-GROQ_WHISPER_LANGUAGE: str = os.getenv("GROQ_WHISPER_LANGUAGE", "")
+GROQ_WHISPER_TEMPERATURE: str = os.getenv("GROQ_WHISPER_TEMPERATURE", "0")
+
+# Language hint sent to Groq Whisper.  Default is ``"pt"`` (Portuguese) so that
+# Whisper transcribes Portuguese utterances instead of auto-detecting and
+# potentially translating to English.  Set to empty string to restore auto-
+# detect for strongly mixed-language deployments.
+GROQ_WHISPER_LANGUAGE: str = os.getenv("GROQ_WHISPER_LANGUAGE", "pt")
 
 _whisper_timeout = 20
 try:
@@ -124,6 +126,7 @@ class GroqWhisperService:
         self.api_key: str = GROQ_API_KEY
         self.model: str = GROQ_WHISPER_MODEL
         self.prompt: str = GROQ_WHISPER_PROMPT
+        self.temperature: str = GROQ_WHISPER_TEMPERATURE
         self.language: str = GROQ_WHISPER_LANGUAGE
         self.timeout_seconds: int = GROQ_WHISPER_TIMEOUT
 
@@ -160,6 +163,8 @@ class GroqWhisperService:
         data.add_field("file", wav_bytes, filename="voice.wav", content_type="audio/wav")
         data.add_field("model", self.model)
         data.add_field("response_format", "json")
+        if self.temperature:
+            data.add_field("temperature", self.temperature)
         if self.prompt:
             data.add_field("prompt", self.prompt)
         if self.language:
@@ -246,11 +251,14 @@ OPENROUTER_API_URL: str = os.getenv(
     "OPENROUTER_API_URL",
     "https://openrouter.ai/api/v1/chat/completions",
 )
-VENTURA_CHAT_MODEL: str = os.getenv("VENTURA_CHAT_MODEL", "qwen/qwen3-coder-next")
+VENTURA_CHAT_MODEL: str = os.getenv("VENTURA_CHAT_MODEL", "qwen/qwen3-coder-flash")
 VENTURA_CHAT_TIMEOUT_SECONDS: int = max(1, int(os.getenv("VENTURA_CHAT_TIMEOUT_SECONDS", "20")))
 VENTURA_CHAT_MAX_TOKENS: int = max(50, int(os.getenv("VENTURA_CHAT_MAX_TOKENS", "250")))
 VENTURA_CHAT_TEMPERATURE: float = max(
     0.0, min(2.0, float(os.getenv("VENTURA_CHAT_TEMPERATURE", "0.7")))
+)
+VENTURA_SYSTEM_EXTRA: str = os.getenv(
+    "VENTURA_SYSTEM_EXTRA",
 )
 
 
@@ -337,13 +345,14 @@ class VenturaChatService:
     ) -> dict:
         """Build the OpenRouter chat-completions payload."""
         system_instruction = (
-            "You are André Ventura, a fictional parody character. "
+            "You are Gen Z brainrot André Ventura, a fictional parody character who doesn't like minorities but uses genz lingo and acts like a genz. "
             "You are an angry, abrasive Portuguese political figure who rants about everything. "
             "You speak European Portuguese (PT-PT) only. "
             "Use square-bracket ElevenLabs performance tags such as [shouts], [angry], "
-            "[sarcastic], [laughs], [grumbling], [sighs], [scoffs] to express emotions. "
-            "Keep responses short (1-3 sentences, max 900 characters). "
-            "Do NOT use slurs, hate speech, or attacks on protected groups. "
+            "dont use *asterisks* to mark emphasis. "
+            "[sarcastic], [laughs], [grumbling], [sighs], [scoffs], etc to express emotions. "
+            "Keep responses short (1-2 sentences, max 200 characters). "
+            f"{VENTURA_SYSTEM_EXTRA}\n"
             "Roast ideas, bureaucracy, politicians, opponents, or the situation instead. "
             "Be brainrot but not cliche. Be creative, angry, and entertaining. "
             "Return ONLY the spoken text with tags, no explanations."

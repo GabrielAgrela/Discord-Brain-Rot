@@ -345,8 +345,9 @@ This README is based on the current codebase behavior (not historical README ass
 - `KEYWORD_SILENCE_FLUSH_SECONDS` (`0.35` default; pause after speech before Vosk final keyword detection is forced)
 - `GROQ_API_KEY` (required for voice commands; enables Groq Whisper transcription of wake-word audio)
 - `GROQ_WHISPER_MODEL` (optional; Groq Whisper model name, default `whisper-large-v3` — more accurate; override to `whisper-large-v3-turbo` if speed is preferred)
-- `GROQ_WHISPER_PROMPT` (optional; prompt sent to guide Whisper transcription for mixed-language speech, default: "Mixed Portuguese and English Discord voice command...")
-- `GROQ_WHISPER_LANGUAGE` (optional; force a specific language for Whisper transcription, default empty / auto-detect)
+- `GROQ_WHISPER_PROMPT` (optional; prompt sent to guide Whisper transcription, default empty to reduce short/noisy-clip prompt hallucinations)
+- `GROQ_WHISPER_TEMPERATURE` (optional; transcription temperature, default `0` for deterministic output)
+- `GROQ_WHISPER_LANGUAGE` (optional; language hint for Whisper transcription, default `pt` — prevents Whisper from translating Portuguese utterances to English; set to empty string to restore auto-detect for strongly mixed-language deployments)
 - `GROQ_WHISPER_TIMEOUT_SECONDS` (optional; Groq API timeout, default `20`)
 - `GROQ_WHISPER_DEBUG_SAVE_AUDIO` (optional; set `false` to disable saving WAV files sent to Groq Whisper for debugging, default `true`)
 - `GROQ_WHISPER_DEBUG_AUDIO_DIR` (optional; directory for saved debug WAVs; default `Debug/groq_whisper/` under the project root; absolute paths are used as-is)
@@ -385,6 +386,13 @@ This README is based on the current codebase behavior (not historical README ass
 - `EL_voice_id_pt`
 - `EL_voice_id_en`
 - `EL_voice_id_costa`
+
+#### ElevenLabs TTS Performance Options (since Ventura chat generates via this path)
+- `EL_TTS_STREAMING_ENABLED` (optional; use the streaming TTS endpoint for lower latency, default `true`)
+- `EL_TTS_OPTIMIZE_STREAMING_LATENCY` (optional; streaming latency optimisation level `0`-`4`, default `3`; higher values reduce latency but may reduce quality; set empty to omit the parameter; **only applied for models that support it** — automatically omitted for `eleven_v3` which does not accept this parameter)
+- `EL_TTS_OUTPUT_FORMAT` (optional; output audio format, default `mp3_44100_128`; other ElevenLabs formats such as `mp3_44100_64` or `pcm_16000` are possible)
+- `EL_TTS_MODEL_ID` (optional; ElevenLabs TTS model, default `eleven_v3`)
+- `EL_TTS_TIMEOUT_SECONDS` (optional; HTTP timeout for ElevenLabs TTS API calls, default `30`)
 
 ### Optional TTS Loudness Tuning
 - `TTS_LUFS_TARGET`

@@ -78,8 +78,9 @@ Read this when changing uploads, sound ingest, playback, generated sound cards, 
    4. Wraps PCM as WAV via `pcm_to_wav()` from `bot/services/voice_command.py`.
    5. Sends the WAV to `GroqWhisperService.transcribe()` which POSTs to `https://api.groq.com/openai/v1/audio/transcriptions` with model `whisper-large-v3` (accuracy-optimised; override with `GROQ_WHISPER_MODEL` for speed).
       - The done/acknowledgment prompt is **no longer played before transcription**. It is now played after parse, only when a play command is detected (see step 8).
-      - An optional `prompt` field (`GROQ_WHISPER_PROMPT`) guides mixed-language transcription (default: English preamble + Portuguese command guidance).
-      - An optional `language` field (`GROQ_WHISPER_LANGUAGE`) may be set for single-language hints; empty by default (auto-detect) because users mix English and Portuguese.
+      - An optional `prompt` field (`GROQ_WHISPER_PROMPT`) can guide transcription, but the default is empty because verbose prompts caused Groq Whisper to hallucinate prompt text or generic Portuguese filler on short/noisy captures.
+      - A `temperature` field (`GROQ_WHISPER_TEMPERATURE`, default `0`) is sent for deterministic transcription.
+      - A `language` field (`GROQ_WHISPER_LANGUAGE`) is sent; default `"pt"` so Whisper transcribes Portuguese rather than auto-detecting and potentially translating to English. Set env `GROQ_WHISPER_LANGUAGE=` (empty) to restore auto-detect for strongly mixed-language deployments.
    6. Parses the transcript via `parse_voice_command()` using the combined `voice_command_transcript_wake_words`. The parser:
       - Finds the **last** wake word in the transcript (not only at the start), so English preamble before "Ventura" is ignored.
       - Supports both English (`play`) and Portuguese (`toca`, `tocar`, `mete`, `meter`, `põe`, `poe`, `reproduz`, `reproduzir`) command verbs — all normalised to `"play"`.
@@ -118,6 +119,17 @@ Read this when changing uploads, sound ingest, playback, generated sound cards, 
 ## STS Playback
 
 - STS generated audio should call `AudioService.play_audio(..., is_tts=True, allow_tts_interrupt=True)`. Without `allow_tts_interrupt=True`, transformed clips can be dropped as "Another TTS is already running" while the source/previous sound is still playing.
+
+## ElevenLabs TTS Optimization
+
+- `save_as_mp3_EL` in `bot/tts.py` uses the streaming endpoint (`/stream`) by default (`EL_TTS_STREAMING_ENABLED=true`) with latency optimisation level 3 (`EL_TTS_OPTIMIZE_STREAMING_LATENCY=3`).
+- **Critical**: The `eleven_v3` model does **not** support the `optimize_streaming_latency` query parameter. Sending it returns a 400 `unsupported_model` error. The code automatically omits this parameter when `el_tts_model_id` is `eleven_v3` (case-insensitive) via `_effective_el_tts_streaming_latency()`. If you switch to a model that supports latency optimisation (e.g. `eleven_turbo_v2`), the parameter is included normally.
+- When streaming: MP3 bytes are written chunk-by-chunk directly to the target file (no pydub decode/re-encode).
+- When non-streaming: all bytes are read at once and written directly (no pydub round-trip).
+- The pydub decode/re-encode path is only used when `boost_volume != 0` (not currently used by any `save_as_mp3_EL` caller; all `boost_volume` values in the method are `0`).
+- DB insert happens after the file write succeeds, avoiding orphan rows on write failure.
+- Performance metrics are logged at INFO level with the prefix `EL_TTS perf` showing model/format/latency/time-to-first-chunk/total/file-size.
+- Sending `output_format` as a query parameter is required for the streaming endpoint; the URL builder (`_build_el_tts_url`) uses `urllib.parse.urlencode`.
 
 ## AFK Channel Handling
 
