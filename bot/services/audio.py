@@ -9,6 +9,7 @@ import wave
 import json
 import audioop
 import queue
+import random
 import re
 from datetime import datetime
 import traceback
@@ -111,7 +112,95 @@ class AudioService:
         # Dependency on other services that will be added later
         self.sound_service = None
         self.voice_transformation_service = None
-        
+
+        # Voice command (wake word -> Groq Whisper -> play) configuration
+        self.voice_command_enabled = (
+            os.getenv("VOICE_COMMAND_ENABLED", "true").strip().lower()
+            not in {"0", "false", "off", "no"}
+        )
+        # Default wake word is "ventura" (in-vocabulary for the bundled Portuguese
+        # Vosk model vosk-model-small-pt-0.3).  The env var remains available to
+        # override with a custom word or comma-separated list for Groq transcript
+        # parsing.  Prior default was "bot" (OOV — required VOICE_COMMAND_WAKE_ALIASES).
+        self.voice_command_wake_words = [
+            w.strip().lower()
+            for w in os.getenv("VOICE_COMMAND_WAKE_WORDS", "ventura").split(",")
+            if w.strip()
+        ]
+        self.voice_command_capture_seconds = max(1, min(15, int(os.getenv("VOICE_COMMAND_CAPTURE_SECONDS", "6"))))
+        self.voice_command_cooldown_seconds = max(1, int(os.getenv("VOICE_COMMAND_COOLDOWN_SECONDS", "5")))
+        # Seconds of silence after the beep before considering the user done speaking.
+        self.voice_command_silence_seconds = max(
+            0.5, min(5.0, float(os.getenv("VOICE_COMMAND_SILENCE_SECONDS", "1.0")))
+        )
+        self._voice_command_service = None
+        # Per-user cooldown tracking: key = f"{guild_id}:{user_id}" -> timestamp
+        self._voice_command_cooldowns: Dict[str, float] = {}
+
+        # Voice command prompt clips (direct PCM from Sounds/, no DB lookup)
+        self.voice_command_beep_enabled = (
+            os.getenv("VOICE_COMMAND_BEEP_ENABLED", "true").strip().lower()
+            not in {"0", "false", "off", "no"}
+        )
+        # Prompt filename pools for start/done acknowledgment.
+        # Each env var supports comma-separated filenames for random selection.
+        # A single filename continues to work for backward compatibility.
+        raw_start = os.getenv(
+            "VOICE_COMMAND_START_SOUND",
+            ",".join([
+                "16-05-26-19-52-51-637928-Sim.mp3",
+                "16-05-26-20-11-24-672100-Diz.mp3",
+                "16-05-26-20-12-44-779160-whispers O que que queres.mp3",
+                "16-05-26-20-13-18-557980-Frustrated sharp Foda-se q.mp3",
+            ]),
+        )
+        self.voice_command_start_sounds = [
+            s.strip() for s in raw_start.split(",") if s.strip()
+        ]
+        if not self.voice_command_start_sounds:
+            self.voice_command_start_sounds = ["16-05-26-19-52-51-637928-Sim.mp3"]
+
+        raw_done = os.getenv(
+            "VOICE_COMMAND_DONE_SOUND",
+            ",".join([
+                "16-05-26-19-54-41-416014-Ok fica bem.mp3",
+                "16-05-26-20-14-36-595803-Sim senhor.mp3",
+                "16-05-26-20-15-00-686598-Ok já toco essa merda.mp3",
+                "16-05-26-20-15-34-525805-shouts aggressive Ok já ag.mp3",
+            ]),
+        )
+        self.voice_command_done_sounds = [
+            s.strip() for s in raw_done.split(",") if s.strip()
+        ]
+        if not self.voice_command_done_sounds:
+            self.voice_command_done_sounds = ["16-05-26-19-54-41-416014-Ok fica bem.mp3"]
+
+        # Cache: key=(filepath, mtime) -> PCM bytes for prompt clips
+        self._voice_command_prompt_pcm_cache: Dict[tuple, bytes] = {}
+
+        # Vosk wake aliases: words injected directly into the Vosk grammar.
+        # Default is "ventura" — it is in the bundled Portuguese model vocabulary,
+        # so it works natively without phonetic approximations.  The env var
+        # remains available for alternate/custom models or backward-compat aliases.
+        # Prior default was "bote,bota,boto" (Portuguese phonetic aliases for OOV "bot").
+        self.voice_command_vosk_wake_words = [
+            w.strip().lower()
+            for w in os.getenv("VOICE_COMMAND_WAKE_ALIASES", "ventura").split(",")
+            if w.strip()
+        ]
+        # Combined deduplicated list for stripping wake words from Groq transcripts.
+        self.voice_command_transcript_wake_words = list(set(
+            self.voice_command_wake_words + self.voice_command_vosk_wake_words
+        ))
+        # Confidence threshold for voice-command wake word detection in Vosk.
+        # The default "ventura" is directly in the model vocabulary, so a higher
+        # threshold (0.85) is appropriate to reduce false positives while remaining
+        # less brittle than the strict 0.95 used for normal keywords.
+        # Prior default was 0.75 for inexact phonetic aliases.
+        self.voice_command_wake_confidence_threshold = max(
+            0.0, min(1.0, float(os.getenv("VOICE_COMMAND_WAKE_CONFIDENCE_THRESHOLD", "0.85")))
+        )
+
         # Image generator for sound cards
         self.image_generator = ImageGeneratorService()
         self.progress_display_delay_seconds = 2.0
@@ -173,6 +262,16 @@ class AudioService:
             1.0,
             float(os.getenv("SOUND_EARRAPE_COMPRESS_RATIO", "12.0")),
         )
+
+    @property
+    def voice_command_start_sound(self) -> str:
+        """Return a random filename from the start prompt pool (backward-compat)."""
+        return random.choice(self.voice_command_start_sounds)
+
+    @property
+    def voice_command_done_sound(self) -> str:
+        """Return a random filename from the done prompt pool (backward-compat)."""
+        return random.choice(self.voice_command_done_sounds)
 
     def _log_perf(self, operation: str, start_time: float, extra: str = ""):
         """Log performance metrics for an operation."""
@@ -897,10 +996,128 @@ class AudioService:
     def set_voice_transformation_service(self, vt_service):
         self.voice_transformation_service = vt_service
 
+    def _get_voice_command_service(self):
+        """Return the lazily-initialised Groq Whisper service."""
+        if self._voice_command_service is None:
+            from bot.services.voice_command import GroqWhisperService
+            self._voice_command_service = GroqWhisperService()
+        return self._voice_command_service
+
     def set_behavior(self, behavior):
         """Set reference to BotBehavior for passing to views."""
         self._behavior = behavior
         self.bot.behavior = behavior
+
+    def _load_prompt_pcm(self, filename: str) -> Optional[bytes]:
+        """Load an MP3 prompt from ``Sounds/``, decode to PCM, and cache.
+
+        Decodes to 48 kHz stereo 16-bit PCM using pydub, then caches by
+        ``(filepath, mtime)`` so file edits reload but normal playback uses
+        cached bytes.  No DB lookup.
+
+        Args:
+            filename: Basename of the MP3 file under ``Sounds/``.
+
+        Returns:
+            Raw PCM bytes (48 kHz stereo 16-bit), or ``None`` if the file is
+            missing or decoding fails.
+        """
+        try:
+            # Sanitise to basename only — no path traversal
+            filename = os.path.basename(filename)
+            sounds_dir = os.path.abspath(
+                os.path.join(os.path.dirname(__file__), "..", "..", "Sounds")
+            )
+            filepath = os.path.join(sounds_dir, filename)
+
+            if not os.path.isfile(filepath):
+                print(f"[AudioService] Prompt sound not found: {filepath}")
+                return None
+
+            mtime = os.path.getmtime(filepath)
+            cache_key = (filepath, mtime)
+
+            cached = self._voice_command_prompt_pcm_cache.get(cache_key)
+            if cached is not None:
+                return cached
+
+            from pydub import AudioSegment
+
+            segment = AudioSegment.from_file(filepath, format="mp3")
+            segment = segment.set_frame_rate(48000).set_channels(2).set_sample_width(2)
+            pcm = segment.raw_data
+
+            self._voice_command_prompt_pcm_cache[cache_key] = pcm
+            return pcm
+        except Exception as e:
+            print(f"[AudioService] Failed to load prompt PCM '{filename}': {e}")
+            return None
+
+    async def _play_voice_command_prompt(
+        self, channel, filename: str, *, wait: bool = True
+    ) -> bool:
+        """Play a voice-command prompt clip from ``Sounds/`` (no FFmpeg, no DB).
+
+        Uses cached in-memory PCM via ``discord.PCMAudio``.  Silently skipped
+        when prompts are disabled, the voice client is disconnected / busy, or
+        the prompt file is missing.
+
+        Args:
+            channel: Discord voice channel to play into.
+            filename: Prompt clip basename under ``Sounds/``.
+            wait: When ``True``, await completion of playback (with a timeout)
+                  before returning.
+
+        Returns:
+            ``True`` when the prompt was actually played, ``False`` when skipped.
+        """
+        try:
+            if not self.voice_command_beep_enabled:
+                return False
+
+            voice_client = channel.guild.voice_client
+            if not voice_client or not voice_client.is_connected():
+                return False
+
+            # Never interrupt existing audio playback
+            if voice_client.is_playing():
+                return False
+            if hasattr(voice_client, "is_paused") and voice_client.is_paused():
+                return False
+
+            pcm = self._load_prompt_pcm(filename)
+            if pcm is None:
+                return False
+
+            source = discord.PCMAudio(io.BytesIO(pcm))
+
+            if wait:
+                event = asyncio.Event()
+
+                def _done(error):
+                    if error:
+                        print(f"[AudioService] Prompt playback error: {error}")
+                    self.bot.loop.call_soon_threadsafe(event.set)
+
+                voice_client.play(source, after=_done)
+                # Timeout: PCM duration + 2 s safety, minimum 3 s.
+                # 48 kHz × 2 ch × 2 bytes = 192 000 bytes/s
+                duration_s = len(pcm) / 192000
+                timeout = max(3.0, duration_s + 2.0)
+                try:
+                    await asyncio.wait_for(event.wait(), timeout=timeout)
+                except asyncio.TimeoutError:
+                    print(
+                        f"[AudioService] Prompt playback timed out "
+                        f"after {timeout:.1f}s for '{filename}'"
+                    )
+            else:
+                voice_client.play(source)
+
+            return True
+        except Exception as e:
+            print(f"[AudioService] Failed to play voice command prompt '{filename}': {e}")
+            return False
 
     def _cancel_progress_update_task(self, guild_id: Optional[int] = None) -> None:
         """Cancel the active progress update task, optionally scoped to guild."""
@@ -1347,7 +1564,8 @@ class AudioService:
                         requester_avatar_url: str = None,
                         sts_thumbnail_url: str = None,
                         loading_message: 'discord.Message' = None,
-                        allow_tts_interrupt: bool = False):
+                        allow_tts_interrupt: bool = False,
+                        request_note: Optional[str] = None):
         """Play an audio file in the specified voice channel."""
         play_start_time = time.time()
         guild_id = channel.guild.id
@@ -1842,6 +2060,7 @@ class AudioService:
                             quote=quote_text, is_tts=is_tts, sts_char=sts_char,
                             requester_avatar_url=resolved_avatar_url,
                             sts_thumbnail_url=sts_thumbnail_url,
+                            request_note=request_note,
                         )
                         self._log_perf("Image Generation", img_start_time)
                         # print(f"[AudioService] [DEBUG] Image generation finished in {time.time() - handle_ui_start:.4f}s")
@@ -1898,6 +2117,8 @@ class AudioService:
                                 bar = "▬" * filled + "🔘" + "▬" * (bar_length - filled)
                                 embed.description = f"▶️ {bar} {self._format_duration(progress_offset)} / {self._format_duration(duration)}"
                             embed.title = f"🔊 {audio_file.replace('.mp3', '')} 🔊"
+                            if request_note:
+                                embed.description = (embed.description or "") + f"\n🎙️ {request_note}"
                             embed.set_footer(text=f"Requested by {user}")
                             if loading_message:
                                 try:
@@ -2173,6 +2394,18 @@ class KeywordDetectionSink(sinks.Sink):
         self.audio_service = audio_service
         self.guild = guild
         self.loop = loop
+
+        # Voice command config from AudioService (must be set before refresh_keywords)
+        self.voice_command_enabled = getattr(audio_service, 'voice_command_enabled', True)
+        self.voice_command_wake_words = getattr(audio_service, 'voice_command_wake_words', ['ventura'])
+        self.voice_command_vosk_wake_words = getattr(audio_service, 'voice_command_vosk_wake_words', [])
+        self.voice_command_wake_confidence_threshold = getattr(audio_service, 'voice_command_wake_confidence_threshold', 0.85)
+        # Combined deduplicated transcript wake words (human + vosk aliases)
+        vosk_aliases = self.voice_command_vosk_wake_words or []
+        self.voice_command_transcript_wake_words = list(set(
+            self.voice_command_wake_words + vosk_aliases
+        ))
+
         self.recognizers = {} # user_id -> vosk.KaldiRecognizer
         self.resample_states = {} # user_id -> audioop state
         self.last_audio_time = {} # user_id -> timestamp
@@ -2199,6 +2432,15 @@ class KeywordDetectionSink(sinks.Sink):
         self.buffer_last_update: Dict[int, float] = {}  # user_id -> timestamp
         self.buffer_lock = threading.Lock()
         
+        # Active voice-command post-prompt captures: user_id -> capture dict.
+        # Set up by _record_voice_command_after_beep, fed by write().
+        self._active_captures: Dict[int, dict] = {}
+        
+        # How long to wait for the user to stop speaking after the beep.
+        self.voice_command_silence_seconds = getattr(
+            audio_service, 'voice_command_silence_seconds', 1.0
+        )
+        
         # Log directory for per-user transcripts
         self.log_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Data", "vosk_logs"))
         os.makedirs(self.log_dir, exist_ok=True)
@@ -2207,12 +2449,45 @@ class KeywordDetectionSink(sinks.Sink):
         self.worker_thread.start()
 
     def refresh_keywords(self):
-        """Reload keywords from the database repository."""
+        """Reload keywords from the database repository and inject reserved wake words."""
         try:
             self.keywords = self.audio_service.keyword_repo.get_as_dict()
+
+            # Inject Vosk wake aliases into the keyword map.  These are
+            # in-vocabulary words for the bundled Portuguese Vosk model
+            # (default "ventura").  Human-facing wake words
+            # (VOICE_COMMAND_WAKE_WORDS) are only injected as a fallback
+            # when the aliases list is empty, for env customization.
+            if self.voice_command_enabled:
+                vosk_words = getattr(self, 'voice_command_vosk_wake_words', None) or []
+                if vosk_words:
+                    for ww in vosk_words:
+                        existing = self.keywords.get(ww)
+                        self.keywords[ww] = "voice_command"
+                        if existing and existing != "voice_command":
+                            print(
+                                f"[KeywordDetectionSink] Vosk wake alias '{ww}' "
+                                f"overrode DB keyword action '{existing}'"
+                            )
+                else:
+                    # Fallback: use human wake words when no Vosk aliases configured.
+                    for ww in self.voice_command_wake_words:
+                        existing = self.keywords.get(ww)
+                        self.keywords[ww] = "voice_command"
+                        if existing and existing != "voice_command":
+                            print(
+                                f"[KeywordDetectionSink] Voice-command wake word '{ww}' "
+                                f"overrode DB keyword action '{existing}'"
+                            )
+
             # Reset recognizers so they are recreated with the new grammar list
             self.recognizers = {}
-            print(f"[KeywordDetectionSink] Refreshed {len(self.keywords)} keywords")
+            vosk_log_words = getattr(self, 'voice_command_vosk_wake_words', None) or []
+            print(
+                f"[KeywordDetectionSink] Refreshed {len(self.keywords)} keywords "
+                f"(human wake words: {self.voice_command_wake_words}, "
+                f"vosk aliases: {vosk_log_words})"
+            )
         except Exception as e:
             print(f"[KeywordDetectionSink] Error refreshing keywords: {e}")
 
@@ -2252,7 +2527,7 @@ class KeywordDetectionSink(sinks.Sink):
         self.last_audio_time[user_id] = receive_time
         self.buffer_last_update[user_id] = receive_time
         
-        # Store audio in per-user timestamped buffer
+        # Store audio in per-user timestamped buffer + feed active captures.
         with self.buffer_lock:
             if user_id not in self.user_audio_buffers:
                 self.user_audio_buffers[user_id] = []
@@ -2264,6 +2539,13 @@ class KeywordDetectionSink(sinks.Sink):
             self.user_audio_buffers[user_id] = [
                 (ts, audio) for ts, audio in self.user_audio_buffers[user_id] if ts >= cutoff
             ]
+            
+            # Feed active voice-command post-beep captures (only the triggering user).
+            if user_id in self._active_captures:
+                cap = self._active_captures[user_id]
+                cap["chunks"].append(data)
+                cap["total_bytes"] = cap.get("total_bytes", 0) + len(data)
+                cap["last_audio_time"] = time.time()
 
         # Buffer audio per-user to reduce queue pressure
         if user_id not in self.audio_buffers:
@@ -2453,6 +2735,32 @@ class KeywordDetectionSink(sinks.Sink):
                     active_usernames.append(username)
         return active_usernames
 
+    def get_user_buffer_content(self, user_id: int, seconds: float) -> bytes:
+        """Get the last N seconds of raw PCM audio for a single user.
+
+        Args:
+            user_id: Discord user ID.
+            seconds: How many seconds of audio to retrieve (capped at 30).
+
+        Returns:
+            Concatenated raw PCM bytes (48 kHz, 2-channel, 16-bit), or empty.
+        """
+        seconds = min(seconds, 30.0)
+        now = time.time()
+        cutoff = now - seconds
+
+        with self.buffer_lock:
+            chunks = self.user_audio_buffers.get(user_id)
+            if not chunks:
+                return bytes()
+            relevant = [(ts, audio) for ts, audio in chunks if ts >= cutoff]
+            if not relevant:
+                return bytes()
+            result = bytearray()
+            for _ts, audio in relevant:
+                result.extend(audio)
+            return bytes(result)
+
     def _flush_user(self, user_id):
         """Force finalize and cleanup a user's recognizer."""
         if user_id not in self.recognizers:
@@ -2480,16 +2788,20 @@ class KeywordDetectionSink(sinks.Sink):
             
             # Use _check_keywords with the result object to get confidence-based detection
             # FinalResult() includes word-level confidence when SetWords(True) is enabled
-            keyword, action = self._check_keywords(text, result)
+            keyword, action, _word_info = self._check_keywords(text, result)
             if keyword:
                 print(f"[{timestamp}] [KeywordDetection] Detected keyword '{keyword}' from user {username}!")
                 if not self.audio_service.bot.loop.is_closed():
                     asyncio.run_coroutine_threadsafe(self.trigger_action(user_id, keyword, action), self.audio_service.bot.loop)
 
     def _check_keywords(self, text: str, result_obj: dict = None) -> tuple:
-        """Check if any keyword is in the text. Returns (keyword, action) or (None, None).
-        
-        Uses confidence scores when available to filter out misrecognitions.
+        """Check if any keyword is in the text.
+
+        Returns:
+            Three-element tuple ``(keyword, action, word_info)``.
+            *keyword* and *action* are ``None`` when no keyword matches.
+            *word_info* is the Vosk word dict (with ``start``, ``end``, ``conf``)
+            for the matched keyword, or ``None`` when unavailable.
         """
         import re
         
@@ -2502,22 +2814,27 @@ class KeywordDetectionSink(sinks.Sink):
                 if word not in self.keywords:
                     continue
                 
-                # Single confidence threshold for all keywords
-                required_conf = 0.95
+                # Use a lower confidence threshold for voice-command aliases
+                # (phonetic approximations) while keeping the strict 0.95
+                # for normal keywords (exact-expected words like "diogo").
+                if self.keywords.get(word) == "voice_command":
+                    required_conf = getattr(self, 'voice_command_wake_confidence_threshold', 0.85)
+                else:
+                    required_conf = 0.95
                 if conf >= required_conf:
                     print(f"[KeywordDetection] Confirmed keyword '{word}' (confidence: {conf:.3f})")
-                    return word, self.keywords[word]
+                    return word, self.keywords[word], word_info
                 else:
                     print(f"[KeywordDetection] Rejected keyword '{word}' - confidence {conf:.3f} < {required_conf}")
             
-            return None, None
+            return None, None, None
 
         # Fallback: no confidence info available, do simple text match
         for keyword, action in self.keywords.items():
             if re.search(rf"\b{re.escape(keyword.lower())}\b", text.lower()):
                 print(f"[KeywordDetection] Detected keyword '{keyword}' (no confidence info)")
-                return keyword, action
-        return None, None
+                return keyword, action, None
+        return None, None, None
 
     def detect_keyword(self, pcm_data, user_id, is_silence=False):
         member = self.guild.get_member(user_id)
@@ -2567,7 +2884,7 @@ class KeywordDetectionSink(sinks.Sink):
                     self._log_to_file(username, text)
                     
                     # Check keywords in final result (most accurate)
-                    keyword, action = self._check_keywords(text, result)
+                    keyword, action, _word_info = self._check_keywords(text, result)
                     if keyword:
                         print(f"[{timestamp}] [KeywordDetection] Detected keyword '{keyword}' from user {username}")
                         if user_id in self.recognizers: del self.recognizers[user_id]
@@ -2638,3 +2955,203 @@ class KeywordDetectionSink(sinks.Sink):
                 )
             else:
                 print(f"[KeywordDetection] No sounds found in list '{list_name}'")
+
+        elif action == "voice_command":
+            if not self.voice_command_enabled:
+                return
+            await self._handle_voice_command(user_id, requester_name, channel)
+
+    async def _record_voice_command_after_beep(
+        self,
+        user_id: int,
+        requester_name: str,
+        *,
+        max_seconds: float,
+        silence_seconds: float,
+    ) -> bytes:
+        """Record fresh post-prompt PCM for a single user until silence or timeout.
+
+        Sets up an active capture entry so that :meth:`write` feeds incoming
+        audio chunks for *user_id* into it.  Polls the capture's last-audio
+        timestamp in a loop; after *silence_seconds* of silence (once at least
+        one chunk has arrived) or *max_seconds* wall-clock elapsed, returns the
+        concatenated PCM.  Cleans up capture state in a ``finally`` block.
+
+        Args:
+            user_id: Discord user ID being recorded.
+            requester_name: Display name for logging.
+            max_seconds: Absolute upper bound on recording duration.
+            silence_seconds: How long to wait without new audio before
+                considering the command complete.
+
+        Returns:
+            Raw PCM bytes (48 kHz stereo 16-bit), or empty bytes if no audio
+            was captured before timeout.
+        """
+        capture = {
+            "chunks": [],
+            "last_audio_time": time.time(),
+            "total_bytes": 0,
+        }
+
+        with self.buffer_lock:
+            self._active_captures[user_id] = capture
+
+        try:
+            start_time = time.time()
+            print(
+                f"[VoiceCommand] Recording post-beep command from "
+                f"{requester_name} ..."
+            )
+
+            while True:
+                elapsed = time.time() - start_time
+                if elapsed >= max_seconds:
+                    print(
+                        f"[VoiceCommand] Max duration ({max_seconds}s) "
+                        f"reached for {requester_name}"
+                    )
+                    break
+
+                now_audio = time.time()
+                with self.buffer_lock:
+                    cap = self._active_captures.get(user_id)
+                    if cap is None:
+                        break
+                    has_audio = cap["total_bytes"] > 0
+                    silence = now_audio - cap["last_audio_time"]
+
+                if has_audio and silence >= silence_seconds:
+                    print(
+                        f"[VoiceCommand] Silence ({silence:.2f}s) after "
+                        f"{cap['total_bytes']} bytes from {requester_name}"
+                    )
+                    break
+
+                await asyncio.sleep(0.1)
+
+            # Assemble captured PCM.
+            with self.buffer_lock:
+                cap = self._active_captures.get(user_id)
+                if cap and cap["chunks"]:
+                    result = bytearray()
+                    for chunk in cap["chunks"]:
+                        result.extend(chunk)
+                    # Cap to max_seconds as a hard safety limit.
+                    max_bytes = int(max_seconds * 192000)
+                    max_bytes = (max_bytes // 4) * 4
+                    if len(result) > max_bytes:
+                        result = result[:max_bytes]
+                        result = result[:len(result) // 4 * 4]
+                    duration = len(result) / 192000
+                    print(
+                        f"[VoiceCommand] Captured {len(result)} bytes "
+                        f"({duration:.2f}s) from {requester_name}"
+                    )
+                    return bytes(result)
+
+            print(f"[VoiceCommand] No post-beep audio captured from {requester_name}")
+            return bytes()
+
+        finally:
+            with self.buffer_lock:
+                self._active_captures.pop(user_id, None)
+
+    async def _handle_voice_command(
+        self,
+        user_id: int,
+        requester_name: str,
+        channel,
+    ) -> None:
+        """Transcribe user audio via Groq and execute ``play`` commands.
+
+        Flow: rate limit → play start prompt → record fresh post-prompt PCM
+        until user stops talking → play done prompt → transcribe via Groq
+        Whisper → parse → play.
+        """
+        guild_id = self.guild.id
+
+        # ---- rate limit ---------------------------------------------------
+        cooldown_key = f"{guild_id}:{user_id}"
+        now = time.time()
+        cooldowns: dict = getattr(self.audio_service, "_voice_command_cooldowns", {})
+        cooldown_seconds = getattr(self.audio_service, "voice_command_cooldown_seconds", 5)
+        last_time = cooldowns.get(cooldown_key, 0.0)
+        if now - last_time < cooldown_seconds:
+            print(
+                f"[VoiceCommand] Rate-limited {requester_name} "
+                f"(remaining {cooldown_seconds - (now - last_time):.1f}s)"
+            )
+            return
+        cooldowns[cooldown_key] = now
+
+        # ---- play start prompt (waits for completion before recording) ----
+        start_sound = getattr(
+            self.audio_service, "voice_command_start_sound",
+            "16-05-26-19-52-51-637928-Sim.mp3",
+        )
+        await self.audio_service._play_voice_command_prompt(
+            channel, start_sound, wait=True,
+        )
+
+        # ---- record fresh post-prompt audio until silence -----------------
+        capture_seconds = getattr(self.audio_service, "voice_command_capture_seconds", 6)
+        silence_seconds = getattr(self, "voice_command_silence_seconds", 1.0)
+        pcm_data = await self._record_voice_command_after_beep(
+            user_id,
+            requester_name,
+            max_seconds=capture_seconds,
+            silence_seconds=silence_seconds,
+        )
+        if not pcm_data:
+            print(f"[VoiceCommand] No post-prompt audio for {requester_name}; skipping")
+            return
+
+        # ---- play done prompt (after capture, before transcribe) ----------
+        done_sound = getattr(
+            self.audio_service, "voice_command_done_sound",
+            "16-05-26-19-54-41-416014-Ok fica bem.mp3",
+        )
+        await self.audio_service._play_voice_command_prompt(
+            channel, done_sound, wait=True,
+        )
+
+        # ---- PCM -> WAV ---------------------------------------------------
+        from bot.services.voice_command import pcm_to_wav
+        wav_bytes = pcm_to_wav(pcm_data)
+
+        # ---- transcribe via Groq ------------------------------------------
+        voice_service = self.audio_service._get_voice_command_service()
+        if not voice_service.is_available:
+            print("[VoiceCommand] Groq Whisper not available (GROQ_API_KEY missing)")
+            return
+
+        print(f"[VoiceCommand] Transcribing {len(pcm_data)} bytes from {requester_name} ...")
+        transcript = await voice_service.transcribe(wav_bytes)
+        if not transcript:
+            print(f"[VoiceCommand] No transcript returned for {requester_name}")
+            return
+
+        print(f"[VoiceCommand] Transcript from {requester_name}: \"{transcript}\"")
+
+        # ---- parse command ------------------------------------------------
+        from bot.services.voice_command import parse_voice_command
+        # Use the combined transcript wake words (human + vosk aliases) so
+        # that "bote play air horn" or "bot play air horn" both parse.
+        transcript_wake_words = getattr(
+            self, 'voice_command_transcript_wake_words',
+            self.voice_command_wake_words
+        )
+        cmd = parse_voice_command(transcript, transcript_wake_words)
+        if cmd is None:
+            print(f"[VoiceCommand] No recognised command in transcript from {requester_name}")
+            return
+
+        command, argument = cmd
+        if command == "play":
+            sound_service = self.audio_service.sound_service
+            if sound_service is None:
+                print("[VoiceCommand] SoundService not available; cannot play")
+                return
+            print(f"[VoiceCommand] Executing play request for '{argument}' by {requester_name}")
+            await sound_service.play_request(argument, requester_name, guild=self.guild, request_note=f"play {argument}", allow_rejected_exact_fallback=True)

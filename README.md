@@ -45,6 +45,19 @@ This README is based on the current codebase behavior (not historical README ass
 - Ingest-time loudness normalization for direct MP3 uploads and URL-ingested MP3s (compression + peak-safe gain; target `-18 dBFS` by default).
 - Periodic MyInstants scraping (background task).
 
+### Voice Commands (Wake Word + Groq Whisper)
+- When Vosk detects the configured wake word, the bot plays a **start prompt clip** from `Sounds/` (no DB lookup), then **records fresh per-user PCM audio after the prompt** (not a rolling buffer). Recording stops when the user stops talking (silence timeout) or a max duration is reached. After capture, a **done prompt clip** is played. The captured audio is wrapped as WAV and sent to Groq Whisper (`whisper-large-v3`) for transcription. This avoids sending pre-wake conversation/silence.
+- **Default wake word**: `ventura` — directly in-vocabulary for the bundled Portuguese Vosk model (`vosk-model-small-pt-0.3`). The same default is used for both the human-facing wake word and the Vosk grammar injection, so no phonetic aliases are needed by default.
+- **Historical note**: The prior default was `bot`, which was out of vocabulary. It required Portuguese phonetic aliases (`bote,bota,boto`) configured via `VOICE_COMMAND_WAKE_ALIASES`. The two-layer env override mechanism remains for custom models or backward compatibility.
+- **Mixed-language support**: The wake word may appear **anywhere** in the transcript (not only at the start), so English preamble such as "What the fuck was that? Ventura, play das páginas." is handled correctly. Both English (`play`) and Portuguese (`toca`, `tocar`, `mete`, `meter`, `põe`, `poe`, `reproduz`, `reproduzir`) command verbs are recognised and normalised to `"play"`.
+- Supported voice commands:
+   - `<wake word/alias> play/toca/mete/põe/reproduz <sound name>` — fuzzy-matches and plays the requested sound, like `/toca` but with an important difference: if the exact name match is blacklisted/rejected, voice commands **skip it and fall back** to the nearest non-blacklisted fuzzy match (since voice has no autocomplete). E.g., "ventura play air horn" would play "air horn.mp3"; saying "ventura play despacito" when `despacito.mp3` is rejected would play the closest non-rejected match such as `despacito cars.mp3` instead.
+- Pre-decoded prompt MP3 clips from `Sounds/` (no FFmpeg, no DB lookup) are played as wake acknowledgement (start prompt) and capture-complete indication (done prompt) without interrupting current audio playback. Both prompts randomly select from a configurable pool of filenames (single or comma-separated).
+- Voice-command-initiated playback includes a "Heard: play <sound>" note on the generated sound card image (and in the embed fallback).
+- Requires `GROQ_API_KEY` environment variable. Disabled when the key is absent.
+ - Configurable capture duration, silence timeout, cooldown, model, wake words, Vosk aliases, confidence threshold, prompt clips, and prompt enable/disable via environment variables.
+- Debug save of the exact WAV bytes sent to Groq is enabled by default (``GROQ_WHISPER_DEBUG_SAVE_AUDIO=true``). Files land in ``Debug/groq_whisper/`` with timestamped names plus a ``latest.wav`` overwrite for quick inspection. Set ``GROQ_WHISPER_DEBUG_SAVE_AUDIO=false`` to disable. With the fresh post-prompt capture, debug WAV files contain only the command speech (e.g., "play despacito"), not several pre-wake seconds.
+
 ### Voice Connection Resilience
 - `ensure_voice_connected` with per-guild locks and retry logic.
 - Zombie voice client detection/recovery (websocket/socket/latency checks).
@@ -56,14 +69,19 @@ This README is based on the current codebase behavior (not historical README ass
 - Auto-join is feature-flagged per guild (disabled by default for public hosting).
 - AFK auto-moves are treated as leave events from the previous channel: the bot plays the user's leave sound in the channel they left, then disconnects if empty. The bot never connects to or follows users into AFK channels.
 
-### Real-Time Keyword Detection (Vosk)
+### Real-Time Keyword Detection (Vosk) + Voice Commands
 - Live keyword detection via Vosk + Discord voice sinks.
 - Keywords are stored in the `keywords` table and managed with `/keyword`.
 - Supported keyword actions:
   - `slap`
   - `list:<list_name>`
+- **Voice commands** are built on top of keyword detection: the `VOICE_COMMAND_WAKE_ALIASES` (default `ventura`) are injected into the Vosk grammar.
+  - The human-facing wake word (`VOICE_COMMAND_WAKE_WORDS`, default `ventura`) is also used for transcript parsing. Since the default is in-vocabulary, both values default to `ventura` and work identically.
+  - When a wake word is detected, recent audio from the speaking user is sent to **Groq Whisper** (`whisper-large-v3`) for transcription.
+  - If the transcript contains a recognised command verb (`play`, `toca`, `tocar`, `mete`, `meter`, `põe`, `poe`, `reproduz`, `reproduzir`), the same fuzzy-matching playback path as `/toca` is executed via `SoundService.play_request`.
+  - Voice commands are rate-limited per user (default 5 s cooldown) and require `GROQ_API_KEY` to be set.
 - Guild-level STT is controlled by `/settings feature stt_enabled`.
-- Grammar + confidence filtering improves trigger precision for configured words like `diogo` or `hugo`.
+- Grammar + confidence filtering improves trigger precision: normal keywords use 0.95 confidence threshold, voice-command wake words use a configurable threshold (`VOICE_COMMAND_WAKE_CONFIDENCE_THRESHOLD`, default 0.85).
 - Worker and health checks restart stalled keyword detection.
 
 ### TTS, STS, and Voice Isolation
@@ -284,7 +302,7 @@ This README is based on the current codebase behavior (not historical README ass
 - `DISCORD_OAUTH_REDIRECT_URI` (recommended public callback URL for Discord OAuth; falls back to Flask external URL generation if unset)
 - `PLAYBACK_QUEUE_INTERVAL` (internal web request bridge polling interval in seconds, default `0.25`)
 - `OPENROUTER_API_KEY` (optional; enables the web TTS Enhance button)
-- `WEB_TTS_ENHANCER_MODEL` (optional; OpenRouter model for web TTS enhancement, default `x-ai/grok-4.1-fast`)
+- `WEB_TTS_ENHANCER_MODEL` (optional; OpenRouter model for web TTS enhancement, default `qwen/qwen3-coder-next`)
 - `OPENROUTER_API_URL` (optional; OpenRouter-compatible chat completions endpoint)
 - `OWNER_USER_IDS` (comma-separated Discord user IDs allowed to run admin-only commands)
 - `AUDIO_LATENCY_MODE` (`low_latency` default, or `balanced` / `high_quality`)
@@ -322,6 +340,27 @@ This README is based on the current codebase behavior (not historical README ass
 - `PERIODIC_DEFAULT` (`false` default for new guilds)
 - `STT_DEFAULT` (`false` default for new guilds)
 - `KEYWORD_SILENCE_FLUSH_SECONDS` (`0.35` default; pause after speech before Vosk final keyword detection is forced)
+- `GROQ_API_KEY` (required for voice commands; enables Groq Whisper transcription of wake-word audio)
+- `GROQ_WHISPER_MODEL` (optional; Groq Whisper model name, default `whisper-large-v3` — more accurate; override to `whisper-large-v3-turbo` if speed is preferred)
+- `GROQ_WHISPER_PROMPT` (optional; prompt sent to guide Whisper transcription for mixed-language speech, default: "Mixed Portuguese and English Discord voice command...")
+- `GROQ_WHISPER_LANGUAGE` (optional; force a specific language for Whisper transcription, default empty / auto-detect)
+- `GROQ_WHISPER_TIMEOUT_SECONDS` (optional; Groq API timeout, default `20`)
+- `GROQ_WHISPER_DEBUG_SAVE_AUDIO` (optional; set `false` to disable saving WAV files sent to Groq Whisper for debugging, default `true`)
+- `GROQ_WHISPER_DEBUG_AUDIO_DIR` (optional; directory for saved debug WAVs; default `Debug/groq_whisper/` under the project root; absolute paths are used as-is)
+- `GROQ_WHISPER_DEBUG_AUDIO_KEEP` (optional; max number of timestamped debug WAVs to retain, default `25`; `latest.wav` is not counted)
+- `VOICE_COMMAND_ENABLED` (optional; set `false` to disable wake-word voice commands while keeping STT enabled, default `true`)
+- `VOICE_COMMAND_WAKE_WORDS` (optional; comma-separated wake words for voice commands, default `ventura`)
+ - `VOICE_COMMAND_CAPTURE_SECONDS` (optional; max duration of post-prompt command recording sent to Whisper, default `6`, max `15`)
+- `VOICE_COMMAND_COOLDOWN_SECONDS` (optional; per-user rate limit between voice command transcriptions, default `5`)
+ - `VOICE_COMMAND_SILENCE_SECONDS` (optional; silence timeout after start prompt before voice command is considered complete, default `1.0`, range `0.5`-`5.0`)
+
+ - `VOICE_COMMAND_BEEP_ENABLED` (optional; set `false` to disable voice command prompt clips entirely, default `true`)
+
+ - `VOICE_COMMAND_START_SOUND` (optional; comma-separated prompt MP3 filenames under `Sounds/` — one is chosen at random when wake word is accepted. A single filename also works for backward compatibility. Default: `"16-05-26-19-52-51-637928-Sim.mp3,16-05-26-20-11-24-672100-Diz.mp3,16-05-26-20-12-44-779160-whispers O que que queres.mp3,16-05-26-20-13-18-557980-Frustrated sharp Foda-se q.mp3"`)
+
+ - `VOICE_COMMAND_DONE_SOUND` (optional; comma-separated prompt MP3 filenames under `Sounds/` — one is chosen at random after command audio capture completes. A single filename also works for backward compatibility. Default: `"16-05-26-19-54-41-416014-Ok fica bem.mp3,16-05-26-20-14-36-595803-Sim senhor.mp3,16-05-26-20-15-00-686598-Ok já toco essa merda.mp3,16-05-26-20-15-34-525805-shouts aggressive Ok já ag.mp3"`)
+- `VOICE_COMMAND_WAKE_ALIASES` (optional; comma-separated Vosk grammar words injected into the keyword map, default `ventura`; overrides `VOICE_COMMAND_WAKE_WORDS` for Vosk injection; falls back to wake words when empty, range `0.0`-`1.0`)
+- `VOICE_COMMAND_WAKE_CONFIDENCE_THRESHOLD` (optional; confidence threshold for voice-command wake detection, default `0.85`, range `0.0`-`1.0`; normal keywords still use `0.95`)
 - `VOICE_MAX_DAVE_PROTOCOL_VERSION` (default auto-detected from `davey` protocol version, currently `1`; set `0` only to force-disable DAVE negotiation)
 - `PERFORMANCE_MONITOR_TICK_SECONDS` (performance monitor interval in seconds, default `0.5`, minimum `0.1`)
 - `BOT_SELF_HEAL_RESTART_ENABLED` (`true` default; lets Docker restart the bot after unrecoverable gateway/voice health failures)

@@ -62,6 +62,40 @@ Read this when changing uploads, sound ingest, playback, generated sound cards, 
 - Startup auto-join is owned by `BackgroundService._auto_join_channels()`. Do not add a second `on_ready` auto-join in `PersonalGreeter.py`.
 - Final keyword latency is driven by `KeywordDetectionSink.silence_flush_seconds` / `KEYWORD_SILENCE_FLUSH_SECONDS` plus worker queue timeout. Partials are faster but less stable.
 
+## Voice Commands (Wake Word + Groq Whisper)
+
+- **Default wake word**: The default is `ventura`, which IS in the bundled Portuguese Vosk model vocabulary (`vosk-model-small-pt-0.3`). No OOV warnings, no phonetic aliases needed.
+- **Two-layer design**: human-facing wake words (`VOICE_COMMAND_WAKE_WORDS`, default `ventura`) are used for transcript parsing, while **Vosk wake aliases** (`VOICE_COMMAND_WAKE_ALIASES`, default `ventura`) are injected into the Vosk grammar. Both default to the same word, but can be configured independently for custom models.
+- **Historical OOV gotcha**: The prior default was the English token `bot`, which was **out of vocabulary** for `vosk-model-small-pt-0.3`. Injecting `bot` into Vosk grammar produced `Ignoring word missing in vocabulary` warnings and the word was never detected. To work around this, Portuguese phonetic aliases `bote,bota,boto` were used as the default aliases. This is no longer the default, but remains available via env overrides for custom models or backward compat.
+- `AudioService.__init__` parses both env vars and produces `voice_command_transcript_wake_words` (the union, deduplicated) for stripping wake words from Groq transcripts.
+- `VOICE_COMMAND_WAKE_CONFIDENCE_THRESHOLD` (default `0.85`, range `0.0`-`1.0`) controls confidence filtering for voice-command detection. The higher default (versus prior `0.75`) is appropriate since `ventura` is directly in vocabulary. Normal keywords (slap, list) still use `0.95`.
+- `refresh_keywords()` injects `voice_command_vosk_wake_words` when non-empty; falls back to `voice_command_wake_words` when aliases list is empty (backward compat).
+- All injection happens in-memory only — no DB migration or `/keyword add` is required. DB keywords that collide with a reserved wake word/alias are overridden with a log warning.
+ - When `action == "voice_command"` in `trigger_action`, `_handle_voice_command` is called:
+   1. Applies a per-user rate limit (configurable via `VOICE_COMMAND_COOLDOWN_SECONDS`, default 5 s).
+   2. **Plays a start prompt clip** by filename from `Sounds/` (no DB lookup) via `AudioService._play_voice_command_prompt(channel, start_sound, wait=True)`. The clip is decoded to 48 kHz stereo 16-bit PCM using pydub and cached by `(filepath, mtime)` in `_voice_command_prompt_pcm_cache`. Playback uses direct `discord.PCMAudio(io.BytesIO(pcm))` — no FFmpeg. Waits for completion before proceeding to recording. Silently skipped when prompts disabled, voice client busy/disconnected, or file missing.
+   3. **Fresh post-prompt command recording** via `_record_voice_command_after_beep()`. A capture entry is registered in `_active_captures[user_id]`, and the next incoming per-user PCM chunks (from `write()`) are appended to it. The method polls until the user stops speaking (configurable silence timeout via `VOICE_COMMAND_SILENCE_SECONDS`, default 1.0 s) or reaches the max duration (`VOICE_COMMAND_CAPTURE_SECONDS`, default 6 s). Only the triggering user's audio is captured — other users' audio is ignored. Capture state is cleaned up in a ``finally`` block.
+   4. **Plays a done prompt clip** (same mechanism as start, with `wait=True`) after capture completes, before transcription.
+   5. Wraps PCM as WAV via `pcm_to_wav()` from `bot/services/voice_command.py`.
+     6. Sends the WAV to `GroqWhisperService.transcribe()` which POSTs to `https://api.groq.com/openai/v1/audio/transcriptions` with model `whisper-large-v3` (accuracy-optimised; override with `GROQ_WHISPER_MODEL` for speed).
+        - An optional `prompt` field (`GROQ_WHISPER_PROMPT`) guides mixed-language transcription (default: English preamble + Portuguese command guidance).
+        - An optional `language` field (`GROQ_WHISPER_LANGUAGE`) may be set for single-language hints; empty by default (auto-detect) because users mix English and Portuguese.
+     7. Parses the transcript via `parse_voice_command()` using the combined `voice_command_transcript_wake_words`. The parser:
+       - Finds the **last** wake word in the transcript (not only at the start), so English preamble before "Ventura" is ignored.
+       - Supports both English (`play`) and Portuguese (`toca`, `tocar`, `mete`, `meter`, `põe`, `poe`, `reproduz`, `reproduzir`) command verbs — all normalised to `"play"`.
+       - Returns `("play", "<sound name>")` on match.
+    8. On match, delegates to `SoundService.play_request(sound_name, requester_name, guild=self.guild, request_note=f"play {sound_name}", allow_rejected_exact_fallback=True)` — the fuzzy-matching path used by `/toca`, augmented with:
+       - ``request_note`` — appears as a compact "Heard: play <sound>" pill on the generated sound card image (and in the embed fallback).
+       - ``allow_rejected_exact_fallback=True`` — when the exact name match is blacklisted (rejected), the service does NOT immediately reject; instead it falls through to fuzzy search to find a non-blacklisted close match. This is important because voice commands have no autocomplete, so saying "ventura play despacito" should play "despacito cars.mp3" if that is the closest non-rejected sound.
+ - The ``request_note`` and ``allow_rejected_exact_fallback`` parameters flow through: ``SoundService.play_request`` → ``AudioService.play_audio`` / fuzzy search fallback. For non-voice-command playbacks (default `/toca`) both parameters are omitted, so the original exact-match rejection behavior is preserved.
+ - Prompt filenames are configurable via `VOICE_COMMAND_START_SOUND` (default comma-separated pool of 4 files for random selection) and `VOICE_COMMAND_DONE_SOUND` (same). A single filename continues to work for backward compatibility. Set `VOICE_COMMAND_BEEP_ENABLED=false` to disable prompts. The old sine-wave beep frequency/duration/volume env vars are no longer used.
+ - Prompt PCM is decoded via pydub and cached in `AudioService._voice_command_prompt_pcm_cache` keyed by `(filepath, mtime)`.
+ - Requires `GROQ_API_KEY` in the environment. Disabled when the key is absent or `VOICE_COMMAND_ENABLED=false`.
+ - `KeywordDetectionSink.get_user_buffer_content()` returns per-user raw PCM (not mixed), capped at 30 s. This is distinct from the all-user mixed `get_buffer_content()` used for web/STS.
+ - **Fresh post-prompt capture**: `KeywordDetectionSink._record_voice_command_after_beep()` sets up an active capture entry in `_active_captures[user_id]`. Incoming PCM chunks for that user (from ``write()``) are appended to the capture under ``self.buffer_lock``. A polling loop detects silence once at least one chunk has arrived. The capture dict stores ``chunks``, ``last_audio_time``, and ``total_bytes``. Cleanup happens in a ``finally`` block.
+ - **Debug save**: `GroqWhisperService` saves a copy of every WAV sent to the API when `GROQ_WHISPER_DEBUG_SAVE_AUDIO=true` (default). Files go to `GROQ_WHISPER_DEBUG_AUDIO_DIR` (default `Debug/groq_whisper/` under the project root) as timestamped `groq-whisper-<ISO8601>.wav` plus an overwritten `latest.wav`. Retention (`GROQ_WHISPER_DEBUG_AUDIO_KEEP`, default 25) prunes only timestamped files; `latest.wav` is never pruned. Failures are logged as warnings and never block transcription. The save happens inside `GroqWhisperService.transcribe()`, after the API key check and before the HTTP POST.
+ - With fresh post-prompt capture, the saved debug WAV contains only the command speech after the start prompt (e.g., "play despacito"), not several pre-wake seconds.
+
 ## PCM And DAVE
 
 - When combining concurrent raw PCM chunks from Discord voice sinks, do not concatenate; use `audioop.add(mix_buffer, user_buffer, 2)` to preserve real-time duration.

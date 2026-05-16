@@ -31,7 +31,7 @@ class WebTtsEnhancerService:
             timeout_seconds: HTTP request timeout.
         """
         self.api_key = api_key if api_key is not None else os.getenv("OPENROUTER_API_KEY", "")
-        self.model = model or os.getenv("WEB_TTS_ENHANCER_MODEL", "x-ai/grok-4.1-fast")
+        self.model = model or os.getenv("WEB_TTS_ENHANCER_MODEL", "qwen/qwen3-coder-next")
         self.api_url = api_url or os.getenv(
             "OPENROUTER_API_URL",
             "https://openrouter.ai/api/v1/chat/completions",

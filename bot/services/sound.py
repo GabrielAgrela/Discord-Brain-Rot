@@ -228,8 +228,14 @@ class SoundService:
         except Exception as e:
             print(f"[SoundService] Error playing random sound from list {list_name}: {e}")
 
-    async def play_request(self, sound_id_or_name: str, user: str, exact: bool = False, effects: Optional[dict] = None, guild: Optional[discord.Guild] = None):
-        """Play a specific sound requested by a user, with fuzzy matching support."""
+    async def play_request(self, sound_id_or_name: str, user: str, exact: bool = False, effects: Optional[dict] = None, guild: Optional[discord.Guild] = None, request_note: Optional[str] = None, allow_rejected_exact_fallback: bool = False):
+        """Play a specific sound requested by a user, with fuzzy matching support.
+
+        Args:
+            allow_rejected_exact_fallback: When True and the exact match is blacklisted,
+                fall through to fuzzy search instead of rejecting immediately.
+                Used by voice commands which have no autocomplete.
+        """
         if guild is None:
             print("[SoundService] No guild available for play_request")
             return False
@@ -240,18 +246,25 @@ class SoundService:
         exact_match = self.sound_repo.get_by_filename(sound_id_or_name, guild_id=guild_id)
         if exact_match:
             if getattr(exact_match, "blacklist", False) is True:
-                await self.message_service.send_error(f"Sound '{sound_id_or_name}' has been rejected.")
-                return False
-            filenames = [exact_match.filename]
+                if not allow_rejected_exact_fallback:
+                    await self.message_service.send_error(f"Sound '{sound_id_or_name}' has been rejected.")
+                    return False
+                # Voice command fallback: log and continue to fuzzy search
+                print(f"[SoundService] Exact match '{sound_id_or_name}' is rejected; trying fuzzy fallback")
+            else:
+                filenames = [exact_match.filename]
         elif exact:
             # User requested exact match only, but no exact match found
             # Fallback to direct file check if not in DB
             if not sound_id_or_name.endswith('.mp3'):
                 sound_id_or_name += '.mp3'
             filenames = [sound_id_or_name]
-        else:
-            # No exact match found, use fuzzy search
-            results = self.db.get_sounds_by_similarity(sound_id_or_name, 1, guild_id=guild_id)
+        
+        if not filenames:
+            # No exact match found (or exact blacklisted with fallback), use fuzzy search
+            # Use broader result set when doing fallback to find the best non-blacklisted match
+            num_results = 10 if allow_rejected_exact_fallback else 1
+            results = self.db.get_sounds_by_similarity(sound_id_or_name, num_results, guild_id=guild_id)
             for r in results:
                 sound_data = r[0]
                 # Robustly get filename from Row, dict, or tuple
@@ -280,7 +293,8 @@ class SoundService:
             await self.audio_service.play_audio(
                 channel, filename, user, 
                 original_message=clean_name,
-                effects=effects
+                effects=effects,
+                request_note=request_note,
             )
             
             # Insert action

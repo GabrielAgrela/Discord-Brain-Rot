@@ -100,6 +100,50 @@ class TestSoundService:
         )
 
     @pytest.mark.asyncio
+    async def test_play_request_forwards_request_note_to_play_audio(self, sound_service):
+        """request_note is forwarded from play_request to audio_service.play_audio."""
+        guild = Mock(id=321)
+        channel = Mock()
+        sound_service.audio_service.get_user_voice_channel.return_value = channel
+        sound_service.audio_service.get_largest_voice_channel.return_value = None
+        sound_service.sound_repo.get_by_filename = Mock(
+            return_value=SimpleNamespace(filename="test.mp3", blacklist=False)
+        )
+        sound_service.sound_repo.get_sound = Mock(return_value=(1, "test.mp3", "test.mp3", 0, 0, 0, 0))
+        sound_service.audio_service.play_audio = AsyncMock()
+        sound_service.action_repo.insert = Mock()
+
+        result = await sound_service.play_request(
+            "test", "user", guild=guild, request_note="play test"
+        )
+
+        assert result is True
+        sound_service.audio_service.play_audio.assert_awaited_once()
+        call_kwargs = sound_service.audio_service.play_audio.call_args.kwargs
+        assert call_kwargs.get("request_note") == "play test"
+
+    @pytest.mark.asyncio
+    async def test_play_request_without_request_note_omits_param(self, sound_service):
+        """When request_note is not provided, play_audio is called without it (or with None)."""
+        guild = Mock(id=321)
+        channel = Mock()
+        sound_service.audio_service.get_user_voice_channel.return_value = channel
+        sound_service.audio_service.get_largest_voice_channel.return_value = None
+        sound_service.sound_repo.get_by_filename = Mock(
+            return_value=SimpleNamespace(filename="test.mp3", blacklist=False)
+        )
+        sound_service.sound_repo.get_sound = Mock(return_value=(1, "test.mp3", "test.mp3", 0, 0, 0, 0))
+        sound_service.audio_service.play_audio = AsyncMock()
+        sound_service.action_repo.insert = Mock()
+
+        result = await sound_service.play_request("test", "user", guild=guild)
+
+        assert result is True
+        sound_service.audio_service.play_audio.assert_awaited_once()
+        call_kwargs = sound_service.audio_service.play_audio.call_args.kwargs
+        assert call_kwargs.get("request_note") is None
+
+    @pytest.mark.asyncio
     async def test_play_request_rejects_blacklisted_exact_match(self, sound_service):
         """Rejected sounds should not play through Discord slash commands."""
         guild = Mock(id=321)
@@ -118,6 +162,42 @@ class TestSoundService:
         )
         sound_service.audio_service.play_audio.assert_not_called()
         sound_service.action_repo.insert.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_play_request_voice_fallback_skips_blacklisted_exact_match(self, sound_service):
+        """Voice command fallback: exact match blacklisted, fuzzy returns non-blacklisted sound."""
+        guild = Mock(id=321)
+        channel = Mock()
+        sound_service.sound_repo.get_by_filename = Mock(
+            return_value=SimpleNamespace(filename="despacito.mp3", blacklist=True)
+        )
+        sound_service.message_service.send_error = AsyncMock()
+        sound_service.audio_service.play_audio = AsyncMock()
+        sound_service.audio_service.get_user_voice_channel.return_value = channel
+        sound_service.audio_service.get_largest_voice_channel.return_value = None
+        sound_service.action_repo.insert = Mock()
+
+        # Mock sound_repo.get_sound to return something for action recording
+        sound_service.sound_repo.get_sound = Mock(return_value=(42, "despacito cars.mp3", "despacito cars.mp3", 0, 0, 0, 0))
+
+        # Mock fuzzy search to return a non-blacklisted sound (data from cache is always dict)
+        # get_sounds_by_similarity returns list of (sound_data, score) tuples
+        sound_service.db.get_sounds_by_similarity = Mock(return_value=[
+            ({"Filename": "despacito cars.mp3", "blacklist": 0}, 85.0),
+        ])
+
+        result = await sound_service.play_request("despacito", "user", guild=guild, allow_rejected_exact_fallback=True)
+
+        assert result is True
+        # No rejection error should be sent
+        sound_service.message_service.send_error.assert_not_called()
+        # Fuzzy should be called with 10 results (broader fallback)
+        sound_service.db.get_sounds_by_similarity.assert_called_once_with("despacito", 10, guild_id=321)
+        # Should play the fallback sound
+        sound_service.audio_service.play_audio.assert_awaited_once()
+        call_args = sound_service.audio_service.play_audio.call_args
+        assert call_args[0][1] == "despacito cars.mp3"
+        sound_service.action_repo.insert.assert_called_once()
 
 
 class TestSoundServiceFilename:

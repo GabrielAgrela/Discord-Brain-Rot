@@ -30,7 +30,7 @@ def test_web_tts_enhancer_uses_openrouter_chat_completion(monkeypatch):
     assert result == "[excited] hello there!"
     assert captured["url"] == "https://openrouter.ai/api/v1/chat/completions"
     assert captured["headers"]["Authorization"] == "Bearer test-key"
-    assert captured["json"]["model"] == "x-ai/grok-4.1-fast"
+    assert captured["json"]["model"] == "qwen/qwen3-coder-next"
     assert captured["json"]["messages"][1]["content"] == "hello there!"
     assert captured["timeout"] == 3
 

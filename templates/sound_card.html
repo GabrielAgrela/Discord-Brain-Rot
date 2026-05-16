@@ -295,6 +295,43 @@
             font-weight: 600;
             margin-left: 12px;
         }
+
+        .request-note-pill {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            width: 100%;
+            background: rgba(var(--accent-rgb), 0.12);
+            border: 1px solid rgba(var(--accent-rgb), 0.35);
+            border-radius: 14px;
+            padding: 8px 12px;
+            margin-bottom: 12px;
+            color: #e0e0e0;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .request-note-pill .note-icon {
+            width: 18px;
+            height: 18px;
+            object-fit: contain;
+            flex-shrink: 0;
+            opacity: 0.7;
+        }
+
+        .request-note-pill .note-label {
+            color: rgba(var(--accent-rgb), 0.9);
+            font-weight: 600;
+            flex-shrink: 0;
+        }
+
+        .request-note-pill .note-text {
+            color: #f0f0f0;
+            font-weight: 400;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
     </style>
 </head>
 
@@ -314,6 +351,15 @@
             {% endif %}
             <span class="sound-name" style="font-size: {{title_font_size}}px">{{sound_name}}</span>
         </div>
+
+        {% if request_note %}
+        <!-- Voice command note row -->
+        <div class="request-note-pill">
+            <img src="data:image/svg+xml;base64,{{speaker_icon or icon_timer}}" class="note-icon">
+            <span class="note-label">{{"Voice" if speaker_icon else "Heard"}}:</span>
+            <span class="note-text">{{request_note}}</span>
+        </div>
+        {% endif %}
 
         {% if has_stats %}
         <!-- Row 2: Duration and Play Count -->

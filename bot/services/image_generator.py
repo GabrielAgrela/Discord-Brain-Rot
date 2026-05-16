@@ -505,6 +505,7 @@ class ImageGeneratorService:
         show_footer: bool = True,
         show_sound_icon: bool = True,
         accent_color: Optional[str] = None,
+        request_note: Optional[str] = None,
     ) -> Optional[bytes]:
         """
         Async wrapper for generating sound card image in a separate thread.
@@ -533,6 +534,7 @@ class ImageGeneratorService:
             show_footer,
             show_sound_icon,
             accent_color,
+            request_note,
         )
 
     async def generate_rl_store_card(self, card_data: Dict[str, Any]) -> Optional[bytes]:
@@ -565,6 +567,7 @@ class ImageGeneratorService:
         show_footer: bool = True,
         show_sound_icon: bool = True,
         accent_color: Optional[str] = None,
+        request_note: Optional[str] = None,
     ) -> Optional[bytes]:
         """
         Generate a sound card image (Synchronous implementation).
@@ -585,6 +588,7 @@ class ImageGeneratorService:
             show_footer: Whether to render the footer row
             show_sound_icon: Whether to render the leading sound/speaker icon
             accent_color: Optional hex color for card border (default Discord blurple)
+            request_note: Optional voice command note (e.g. "play despacito")
 
         Returns:
             PNG image bytes or None if generation failed
@@ -675,6 +679,7 @@ class ImageGeneratorService:
                 "notification_only": notification_only,
                 "accent_color": resolved_accent_color,
                 "accent_rgb": accent_rgb,
+                "request_note": request_note,
             }
 
             html_content = self._render_template(self._template_content, data)
@@ -684,6 +689,8 @@ class ImageGeneratorService:
                 canvas_height = 820
             if has_stats and show_footer:
                 canvas_height = 900
+            if request_note:
+                canvas_height += 60
 
             rendered = self._render_html_to_png(
                 html_content,

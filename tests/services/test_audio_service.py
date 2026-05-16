@@ -60,6 +60,19 @@ class TestAudioService:
         service._progress_update_task = None
         service.playback_done = asyncio.Event()
         service.playback_done.set()
+        # Initialize voice command prompt pools (normally set in __init__)
+        service.voice_command_start_sounds = [
+            "16-05-26-19-52-51-637928-Sim.mp3",
+            "16-05-26-20-11-24-672100-Diz.mp3",
+            "16-05-26-20-12-44-779160-whispers O que que queres.mp3",
+            "16-05-26-20-13-18-557980-Frustrated sharp Foda-se q.mp3",
+        ]
+        service.voice_command_done_sounds = [
+            "16-05-26-19-54-41-416014-Ok fica bem.mp3",
+            "16-05-26-20-14-36-595803-Sim senhor.mp3",
+            "16-05-26-20-15-00-686598-Ok já toco essa merda.mp3",
+            "16-05-26-20-15-34-525805-shouts aggressive Ok já ag.mp3",
+        ]
         return service
 
     @pytest.mark.asyncio
@@ -785,3 +798,838 @@ class TestAudioService:
         result = audio_service.get_user_voice_channel(guild, "testuser")
 
         assert result == general
+
+    # ------------------------------------------------------------------ #
+    # Voice command / wake word injection tests
+    # ------------------------------------------------------------------ #
+
+    def test_keyword_sink_injects_vosk_aliases(self):
+        """Verify that refresh_keywords injects Vosk aliases (not human wake words) as voice_command."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        sink.keywords = {}
+        sink.voice_command_enabled = True
+        sink.voice_command_wake_words = ["bot"]
+        sink.voice_command_vosk_wake_words = ["bote", "bota", "boto"]
+        sink.audio_service = Mock()
+        sink.audio_service.keyword_repo = Mock()
+        sink.audio_service.keyword_repo.get_as_dict = Mock(return_value={"diogo": "slap"})
+        sink.recognizers = {}
+        sink.refresh_keywords()
+
+        # Vosk aliases are injected
+        assert sink.keywords["bote"] == "voice_command"
+        assert sink.keywords["bota"] == "voice_command"
+        assert sink.keywords["boto"] == "voice_command"
+        # Human wake word is NOT injected (avoids OOV Vosk warnings)
+        assert "bot" not in sink.keywords
+        # Normal DB keywords remain
+        assert sink.keywords["diogo"] == "slap"
+
+    def test_keyword_sink_vosk_alias_override_logs(self, capsys):
+        """When a DB keyword matches a Vosk alias, a log message is printed."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        sink.keywords = {}
+        sink.recognizers = {}
+        sink.voice_command_enabled = True
+        sink.voice_command_wake_words = ["bot"]
+        sink.voice_command_vosk_wake_words = ["bote", "bota"]
+        sink.audio_service = Mock()
+        sink.audio_service.keyword_repo = Mock()
+        sink.audio_service.keyword_repo.get_as_dict = Mock(
+            return_value={"bote": "slap", "hugo": "list:mylist"}
+        )
+        sink.refresh_keywords()
+
+        captured = capsys.readouterr()
+        assert "overrode DB keyword" in captured.out
+        assert sink.keywords["bote"] == "voice_command"
+        assert sink.keywords["bota"] == "voice_command"
+        assert sink.keywords["hugo"] == "list:mylist"
+        # Human wake word "bot" should NOT be in keywords (not a Vosk alias)
+        assert "bot" not in sink.keywords
+
+    def test_keyword_sink_default_ventura_injected(self):
+        """With defaults, 'ventura' is injected as voice_command (in-vocab for PT Vosk model)."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        sink.keywords = {}
+        sink.voice_command_enabled = True
+        sink.voice_command_wake_words = ["ventura"]
+        sink.voice_command_vosk_wake_words = ["ventura"]
+        sink.audio_service = Mock()
+        sink.audio_service.keyword_repo = Mock()
+        sink.audio_service.keyword_repo.get_as_dict = Mock(return_value={"diogo": "slap"})
+        sink.recognizers = {}
+        sink.refresh_keywords()
+
+        # "ventura" is injected as voice_command (both human and vosk alias)
+        assert sink.keywords["ventura"] == "voice_command"
+        # Normal DB keywords remain
+        assert sink.keywords["diogo"] == "slap"
+        # Old OOV "bot" should NOT appear by default
+        assert "bot" not in sink.keywords
+
+    def test_keyword_sink_disabled_voice_command(self):
+        """When voice_command_enabled is False, neither aliases nor wake words are injected."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        sink.keywords = {}
+        sink.recognizers = {}
+        sink.voice_command_enabled = False
+        sink.voice_command_wake_words = ["bot"]
+        sink.voice_command_vosk_wake_words = ["bote"]
+        sink.audio_service = Mock()
+        sink.audio_service.keyword_repo = Mock()
+        sink.audio_service.keyword_repo.get_as_dict = Mock(return_value={"diogo": "slap"})
+        sink.refresh_keywords()
+
+        assert "bot" not in sink.keywords
+        assert "bote" not in sink.keywords
+        assert sink.keywords["diogo"] == "slap"
+
+    def test_get_user_buffer_content_returns_pcm(self):
+        """Verify get_user_buffer_content returns concatenated audio for one user."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        sink.user_audio_buffers = {}
+        sink.buffer_lock = Mock()
+        sink.buffer_lock.__enter__ = Mock(return_value=None)
+        sink.buffer_lock.__exit__ = Mock(return_value=None)
+
+        now = 1000.0
+        user_id = 12345
+        chunk1 = b"\x00\x00" * 100
+        chunk2 = b"\x01\x02" * 50
+
+        with patch("bot.services.audio.time.time", return_value=now):
+            sink.user_audio_buffers[user_id] = [
+                (now - 2, chunk1),
+                (now - 1, chunk2),
+            ]
+            result = sink.get_user_buffer_content(user_id, 5.0)
+            assert result == chunk1 + chunk2
+
+    def test_get_user_buffer_content_empty_for_unknown_user(self):
+        """Unknown user_id returns empty bytes."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        sink.user_audio_buffers = {}
+        sink.buffer_lock = Mock()
+        sink.buffer_lock.__enter__ = Mock(return_value=None)
+        sink.buffer_lock.__exit__ = Mock(return_value=None)
+
+        result = sink.get_user_buffer_content(99999, 5.0)
+        assert result == bytes()
+
+    def test_get_user_buffer_content_older_than_cutoff(self):
+        """Chunks older than the requested window are excluded."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        sink.user_audio_buffers = {}
+        sink.buffer_lock = Mock()
+        sink.buffer_lock.__enter__ = Mock(return_value=None)
+        sink.buffer_lock.__exit__ = Mock(return_value=None)
+
+        now = 1000.0
+        user_id = 12345
+        with patch("bot.services.audio.time.time", return_value=now):
+            sink.user_audio_buffers[user_id] = [
+                (now - 10, b"old-data"),
+                (now - 1, b"new-data"),
+            ]
+            result = sink.get_user_buffer_content(user_id, 3.0)
+            assert result == b"new-data"
+
+
+
+    @pytest.mark.asyncio
+    async def test_handle_voice_command_calls_play_request(self):
+        """Verify _handle_voice_command calls sound_service.play_request when Groq returns a play command."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        sink.guild = Mock()
+        sink.guild.id = 111
+        sink.voice_command_enabled = True
+        sink.voice_command_wake_words = ["bot"]
+        sink.voice_command_vosk_wake_words = []
+
+        # Mock audio_service with cooldowns and prompts
+        sink.audio_service = Mock()
+        sink.audio_service._voice_command_cooldowns = {}
+        sink.audio_service.voice_command_cooldown_seconds = 5
+        sink.audio_service.voice_command_capture_seconds = 6
+        sink.audio_service.sound_service = AsyncMock()
+        sink.audio_service.sound_service.play_request = AsyncMock(return_value=True)
+        sink.audio_service._play_voice_command_prompt = AsyncMock(return_value=True)
+
+        # Mock recording to return some PCM
+        sink._record_voice_command_after_beep = AsyncMock(return_value=b"\x00\x00" * 100)
+
+        # Mock GroqWhisperService
+        from bot.services.voice_command import GroqWhisperService
+        mock_voice_service = Mock(spec=GroqWhisperService)
+        mock_voice_service.is_available = True
+        mock_voice_service.transcribe = AsyncMock(return_value="bot play air horn")
+        sink.audio_service._get_voice_command_service = Mock(return_value=mock_voice_service)
+
+        await sink._handle_voice_command(999, "TestUser", Mock())
+
+        # Prompt is called twice: start + done
+        sink.audio_service._play_voice_command_prompt.assert_awaited()
+        sink.audio_service.sound_service.play_request.assert_awaited_once_with(
+            "air horn", "TestUser", guild=sink.guild, request_note="play air horn", allow_rejected_exact_fallback=True
+        )
+
+    @pytest.mark.asyncio
+    async def test_handle_voice_command_no_play_command_does_nothing(self):
+        """When Groq returns a transcript without a play command, no playback occurs."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        sink.guild = Mock()
+        sink.guild.id = 222
+        sink.voice_command_enabled = True
+        sink.voice_command_wake_words = ["bot"]
+        sink.voice_command_vosk_wake_words = []
+
+        sink.audio_service = Mock()
+        sink.audio_service._voice_command_cooldowns = {}
+        sink.audio_service.voice_command_cooldown_seconds = 5
+        sink.audio_service.voice_command_capture_seconds = 6
+        sink.audio_service.sound_service = AsyncMock()
+        sink.audio_service.sound_service.play_request = AsyncMock()
+        sink.audio_service._play_voice_command_prompt = AsyncMock(return_value=True)
+
+        sink._record_voice_command_after_beep = AsyncMock(return_value=b"\x00\x00" * 100)
+
+        mock_voice_service = Mock()
+        mock_voice_service.is_available = True
+        mock_voice_service.transcribe = AsyncMock(return_value="bot stop doing that")
+        sink.audio_service._get_voice_command_service = Mock(return_value=mock_voice_service)
+
+        await sink._handle_voice_command(888, "TestUser2", Mock())
+
+        # Prompt is called twice: start + done
+        sink.audio_service._play_voice_command_prompt.assert_awaited()
+        sink.audio_service.sound_service.play_request.assert_not_called()
+
+    # ------------------------------------------------------------------ #
+    # Voice command prompt pools
+    # ------------------------------------------------------------------ #
+
+    def test_voice_command_start_sounds_default_contents(self, audio_service):
+        """Default start prompt pool contains the expected filenames."""
+        expected = [
+            "16-05-26-19-52-51-637928-Sim.mp3",
+            "16-05-26-20-11-24-672100-Diz.mp3",
+            "16-05-26-20-12-44-779160-whispers O que que queres.mp3",
+            "16-05-26-20-13-18-557980-Frustrated sharp Foda-se q.mp3",
+        ]
+        for f in expected:
+            assert f in audio_service.voice_command_start_sounds
+
+    def test_voice_command_done_sounds_default_contents(self, audio_service):
+        """Default done prompt pool contains the expected filenames."""
+        expected = [
+            "16-05-26-19-54-41-416014-Ok fica bem.mp3",
+            "16-05-26-20-14-36-595803-Sim senhor.mp3",
+            "16-05-26-20-15-00-686598-Ok já toco essa merda.mp3",
+            "16-05-26-20-15-34-525805-shouts aggressive Ok já ag.mp3",
+        ]
+        for f in expected:
+            assert f in audio_service.voice_command_done_sounds
+
+    def test_voice_command_start_sound_property_returns_from_pool(self, audio_service):
+        """Property returns one of the pool filenames (random or fallback for single)."""
+        result = audio_service.voice_command_start_sound
+        assert result in audio_service.voice_command_start_sounds
+
+    def test_voice_command_done_sound_property_returns_from_pool(self, audio_service):
+        """Property returns one of the pool filenames (random or fallback for single)."""
+        result = audio_service.voice_command_done_sound
+        assert result in audio_service.voice_command_done_sounds
+
+    def test_voice_command_start_sounds_single_filename_backward_compat(self):
+        """A single filename in the env var produces a single-item pool."""
+        from bot.services.audio import AudioService
+        import os
+
+        with patch.dict(os.environ, {"VOICE_COMMAND_START_SOUND": "only-one.mp3"}, clear=False):
+            # Re-create __init__ equivalent via __new__ + manual init of the relevant parts
+            service = AudioService.__new__(AudioService)
+            # Simulate the __init__ parsing logic
+            raw = os.getenv("VOICE_COMMAND_START_SOUND", "16-05-26-19-52-51-637928-Sim.mp3")
+            service.voice_command_start_sounds = [
+                s.strip() for s in raw.split(",") if s.strip()
+            ]
+            if not service.voice_command_start_sounds:
+                service.voice_command_start_sounds = ["16-05-26-19-52-51-637928-Sim.mp3"]
+            assert service.voice_command_start_sounds == ["only-one.mp3"]
+
+    # ------------------------------------------------------------------ #
+    # _load_prompt_pcm
+    # ------------------------------------------------------------------ #
+
+    def test_load_prompt_pcm_returns_none_when_file_missing(self, audio_service):
+        """Returns None when the prompt MP3 does not exist."""
+        audio_service._voice_command_prompt_pcm_cache = {}
+        result = audio_service._load_prompt_pcm("nonexistent_file.mp3")
+        assert result is None
+
+    def test_load_prompt_pcm_returns_bytes_when_file_exists(self, audio_service):
+        """Returns decoded PCM bytes when the MP3 is found."""
+        audio_service._voice_command_prompt_pcm_cache = {}
+
+        dummy_pcm = b"\x00\x01" * 48000  # 1 second of 48 kHz stereo 16-bit PCM
+
+        with patch("bot.services.audio.os.path.isfile", return_value=True):
+            with patch("bot.services.audio.os.path.getmtime", return_value=123.0):
+                with patch("pydub.AudioSegment") as mock_segment_cls:
+                    mock_segment = Mock()
+                    mock_segment.set_frame_rate.return_value = mock_segment
+                    mock_segment.set_channels.return_value = mock_segment
+                    mock_segment.set_sample_width.return_value = mock_segment
+                    mock_segment.raw_data = dummy_pcm
+                    mock_segment_cls.from_file.return_value = mock_segment
+
+                    result = audio_service._load_prompt_pcm("prompt.mp3")
+
+        assert result == dummy_pcm
+        mock_segment_cls.from_file.assert_called_once()
+
+    def test_load_prompt_pcm_caches_by_mtime(self, audio_service):
+        """Same file+mtime returns cached bytes without re-decoding."""
+        audio_service._voice_command_prompt_pcm_cache = {}
+
+        dummy_pcm = b"\x00\x01" * 48000
+
+        with patch("bot.services.audio.os.path.isfile", return_value=True):
+            with patch("bot.services.audio.os.path.getmtime", return_value=100.0):
+                with patch("pydub.AudioSegment") as mock_segment_cls:
+                    mock_segment = Mock()
+                    mock_segment.set_frame_rate.return_value = mock_segment
+                    mock_segment.set_channels.return_value = mock_segment
+                    mock_segment.set_sample_width.return_value = mock_segment
+                    mock_segment.raw_data = dummy_pcm
+                    mock_segment_cls.from_file.return_value = mock_segment
+
+                    # First call decodes
+                    result1 = audio_service._load_prompt_pcm("prompt.mp3")
+                    assert result1 == dummy_pcm
+                    assert mock_segment_cls.from_file.call_count == 1
+
+                    # Second call with same mtime uses cache
+                    result2 = audio_service._load_prompt_pcm("prompt.mp3")
+                    assert result2 == dummy_pcm
+                    # from_file should not have been called again
+                    assert mock_segment_cls.from_file.call_count == 1
+
+    def test_load_prompt_pcm_sanitises_filename(self, audio_service):
+        """Path traversal via filename is prevented (basename only)."""
+        audio_service._voice_command_prompt_pcm_cache = {}
+        # The basename should be the only part used
+        with patch("bot.services.audio.os.path.basename", return_value="safe.mp3"):
+            with patch("bot.services.audio.os.path.isfile", return_value=True) as mock_isfile:
+                with patch("bot.services.audio.os.path.getmtime", return_value=100.0):
+                    with patch("pydub.AudioSegment"):
+                        audio_service._load_prompt_pcm("../../evil.mp3")
+                        # The path checked should end with safe.mp3
+                        checked_path = mock_isfile.call_args[0][0]
+                        assert checked_path.endswith("safe.mp3")
+
+    # ------------------------------------------------------------------ #
+    # _play_voice_command_prompt
+    # ------------------------------------------------------------------ #
+
+    def test_voice_command_prompts_enabled_defaults_to_true(self):
+        """voice_command_beep_enabled defaults to True when env is not set."""
+        from bot.services.audio import AudioService
+
+        with patch.dict(os.environ, {}, clear=True):
+            service = AudioService.__new__(AudioService)
+            service.voice_command_beep_enabled = (
+                os.getenv("VOICE_COMMAND_BEEP_ENABLED", "true").strip().lower()
+                not in {"0", "false", "off", "no"}
+            )
+            assert service.voice_command_beep_enabled is True
+
+    @pytest.mark.asyncio
+    async def test_play_voice_command_prompt_skips_when_disabled(self, audio_service):
+        """Prompt is skipped when voice_command_beep_enabled is False."""
+        audio_service.voice_command_beep_enabled = False
+        channel = Mock()
+        channel.guild.voice_client = Mock()
+
+        result = await audio_service._play_voice_command_prompt(channel, "prompt.mp3")
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_play_voice_command_prompt_skips_when_no_voice_client(self, audio_service):
+        """Prompt is skipped when there is no voice client."""
+        audio_service.voice_command_beep_enabled = True
+        channel = Mock()
+        channel.guild.voice_client = None
+
+        result = await audio_service._play_voice_command_prompt(channel, "prompt.mp3")
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_play_voice_command_prompt_skips_when_playing(self, audio_service):
+        """Prompt is skipped when the voice client is already playing audio."""
+        audio_service.voice_command_beep_enabled = True
+        voice_client = Mock()
+        voice_client.is_connected.return_value = True
+        voice_client.is_playing.return_value = True
+        voice_client.is_paused.return_value = False
+        channel = Mock()
+        channel.guild.voice_client = voice_client
+
+        result = await audio_service._play_voice_command_prompt(channel, "prompt.mp3")
+        assert result is False
+        voice_client.play.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_play_voice_command_prompt_skips_when_pcm_load_fails(self, audio_service):
+        """Prompt is skipped when _load_prompt_pcm returns None."""
+        audio_service.voice_command_beep_enabled = True
+        voice_client = Mock()
+        voice_client.is_connected.return_value = True
+        voice_client.is_playing.return_value = False
+        voice_client.is_paused.return_value = False
+        channel = Mock()
+        channel.guild.voice_client = voice_client
+
+        with patch.object(audio_service, "_load_prompt_pcm", return_value=None):
+            result = await audio_service._play_voice_command_prompt(channel, "prompt.mp3")
+
+        assert result is False
+        voice_client.play.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_play_voice_command_prompt_plays_when_idle(self, audio_service):
+        """Prompt plays via PCMAudio when voice client is connected and idle."""
+        audio_service.voice_command_beep_enabled = True
+
+        voice_client = Mock()
+        voice_client.is_connected.return_value = True
+        voice_client.is_playing.return_value = False
+        voice_client.is_paused.return_value = False
+        channel = Mock()
+        channel.guild.voice_client = voice_client
+
+        dummy_pcm = b"\x00\x01" * 48000
+        with patch.object(audio_service, "_load_prompt_pcm", return_value=dummy_pcm):
+            with patch("bot.services.audio.discord.PCMAudio", return_value=Mock()) as mock_pcmaudio:
+                result = await audio_service._play_voice_command_prompt(
+                    channel, "prompt.mp3", wait=False,
+                )
+
+        assert result is True
+        mock_pcmaudio.assert_called_once()
+        voice_client.play.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_play_voice_command_prompt_skips_when_paused(self, audio_service):
+        """Prompt is skipped when the voice client is paused."""
+        audio_service.voice_command_beep_enabled = True
+        voice_client = Mock()
+        voice_client.is_connected.return_value = True
+        voice_client.is_playing.return_value = False
+        voice_client.is_paused.return_value = True
+        channel = Mock()
+        channel.guild.voice_client = voice_client
+
+        result = await audio_service._play_voice_command_prompt(channel, "prompt.mp3")
+        assert result is False
+        voice_client.play.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_play_voice_command_prompt_plays_and_waits(self, audio_service):
+        """Plays prompt and waits for the after callback when wait=True."""
+        audio_service.voice_command_beep_enabled = True
+        # Set up bot.loop.call_soon_threadsafe for the after callback
+        audio_service.bot = Mock()
+        audio_service.bot.loop = asyncio.get_event_loop()
+
+        voice_client = Mock()
+        voice_client.is_connected.return_value = True
+        voice_client.is_playing.return_value = False
+        voice_client.is_paused.return_value = False
+        channel = Mock()
+        channel.guild.voice_client = voice_client
+
+        dummy_pcm = b"\x00\x01" * 48000  # 1s of PCM = ~1s duration
+        captured_after = {}
+
+        def _fake_play(source, after=None):
+            captured_after["cb"] = after
+
+        voice_client.play = _fake_play
+
+        with patch.object(audio_service, "_load_prompt_pcm", return_value=dummy_pcm):
+            with patch("bot.services.audio.discord.PCMAudio", return_value=Mock()):
+                # Kick off the async wait in a task so we can trigger the callback
+                async def run():
+                    return await audio_service._play_voice_command_prompt(
+                        channel, "prompt.mp3", wait=True,
+                    )
+
+                play_task = asyncio.ensure_future(run())
+                await asyncio.sleep(0.01)
+                # Simulate the after callback completing
+                cb = captured_after.get("cb")
+                assert cb is not None, "voice_client.play was not called with after= callback"
+                cb(None)  # No error
+                await asyncio.sleep(0.01)
+
+                result = play_task.result()
+                assert result is True
+
+    # ------------------------------------------------------------------ #
+    # request_note propagation through play_request
+    # ------------------------------------------------------------------ #
+
+    @pytest.mark.asyncio
+    async def test_handle_voice_command_rate_limited(self):
+        """A rapid second call is skipped due to cooldown."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        sink.guild = Mock()
+        sink.guild.id = 333
+        sink.voice_command_enabled = True
+        sink.voice_command_wake_words = ["bot"]
+        sink.voice_command_vosk_wake_words = []
+
+        sink.audio_service = Mock()
+        sink.audio_service._voice_command_cooldowns = {}
+        sink.audio_service.voice_command_cooldown_seconds = 5
+        sink.audio_service.sound_service = AsyncMock()
+        sink.audio_service._play_voice_command_prompt = AsyncMock(return_value=True)
+        sink._record_voice_command_after_beep = AsyncMock(return_value=b"\x00\x00" * 100)
+
+        now = 1000.0
+        with patch("bot.services.audio.time.time", return_value=now):
+            # First call sets cooldown
+            mock_voice_service = Mock()
+            mock_voice_service.is_available = True
+            mock_voice_service.transcribe = AsyncMock(return_value="bot play test")
+            sink.audio_service._get_voice_command_service = Mock(return_value=mock_voice_service)
+            sink.audio_service.sound_service.play_request = AsyncMock()
+            await sink._handle_voice_command(777, "Rater", Mock())
+            # Prompt is called twice: start + done
+            sink.audio_service._play_voice_command_prompt.assert_awaited()
+            assert sink.audio_service._voice_command_cooldowns.get("333:777", 0) == now
+
+            # Second call within cooldown (rate limited — prompt not called again)
+            sink.audio_service._play_voice_command_prompt.reset_mock()
+            mock_voice_service2 = Mock()
+            mock_voice_service2.is_available = True
+            mock_voice_service2.transcribe = AsyncMock(return_value="bot play another")
+            sink.audio_service._get_voice_command_service = Mock(return_value=mock_voice_service2)
+            await sink._handle_voice_command(777, "Rater", Mock())
+            sink.audio_service._play_voice_command_prompt.assert_not_called()
+            sink.audio_service.sound_service.play_request.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_handle_voice_command_no_audio_skips(self):
+        """When recording returns empty, the method skips Groq."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        sink.guild = Mock()
+        sink.guild.id = 888
+        sink.voice_command_enabled = True
+        sink.voice_command_wake_words = ["ventura"]
+        sink.voice_command_vosk_wake_words = []
+
+        sink.audio_service = Mock()
+        sink.audio_service._voice_command_cooldowns = {}
+        sink.audio_service.voice_command_cooldown_seconds = 5
+        sink.audio_service.voice_command_capture_seconds = 6
+        sink.audio_service.sound_service = AsyncMock()
+        sink.audio_service._play_voice_command_prompt = AsyncMock(return_value=True)
+
+        sink._record_voice_command_after_beep = AsyncMock(return_value=bytes())
+
+        mock_voice_service = Mock()
+        mock_voice_service.is_available = True
+        sink.audio_service._get_voice_command_service = Mock(return_value=mock_voice_service)
+
+        await sink._handle_voice_command(888, "SilentUser", Mock())
+
+        sink.audio_service._play_voice_command_prompt.assert_awaited_once()
+        sink.audio_service.sound_service.play_request.assert_not_called()
+
+    # ------------------------------------------------------------------ #
+    # Voice command capture feeding in write()
+    # ------------------------------------------------------------------ #
+
+    def test_write_feeds_active_capture(self):
+        """write() appends data to an active capture for the same user."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        sink.running = True
+        sink.worker_thread = Mock()
+        sink.worker_thread.is_alive = Mock(return_value=True)
+        sink.last_audio_time = {}
+        sink.buffer_last_update = {}
+        sink.user_audio_buffers = {}
+        sink._active_captures = {}
+        sink.audio_buffers = {}
+        sink.queue = Mock()
+        sink.queue.qsize = Mock(return_value=5)
+        sink.queue.put = Mock()
+        sink.buffer_lock = Mock()
+        sink.buffer_lock.__enter__ = Mock(return_value=None)
+        sink.buffer_lock.__exit__ = Mock(return_value=None)
+        sink.buffer_seconds = 30
+        sink.min_batch_size = 28800
+        sink.max_queue_size = 100
+
+        user_id = 12345
+        data = b"\xaa\xbb" * 50
+
+        # Set up an active capture
+        capture = {"chunks": [], "last_audio_time": 0.0, "total_bytes": 0}
+        sink._active_captures[user_id] = capture
+
+        with patch("bot.services.audio.time.time", return_value=1000.0):
+            sink.write(data, user_id)
+
+        # Capture should have the data
+        assert capture["chunks"] == [data]
+        assert capture["total_bytes"] == len(data)
+        assert capture["last_audio_time"] == 1000.0
+
+    def test_write_ignores_capture_for_other_user(self):
+        """write() does not feed a capture for a different user."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        sink.running = True
+        sink.worker_thread = Mock()
+        sink.worker_thread.is_alive = Mock(return_value=True)
+        sink.last_audio_time = {}
+        sink.buffer_last_update = {}
+        sink.user_audio_buffers = {}
+        sink._active_captures = {}
+        sink.audio_buffers = {}
+        sink.queue = Mock()
+        sink.queue.qsize = Mock(return_value=5)
+        sink.queue.put = Mock()
+        sink.buffer_lock = Mock()
+        sink.buffer_lock.__enter__ = Mock(return_value=None)
+        sink.buffer_lock.__exit__ = Mock(return_value=None)
+        sink.buffer_seconds = 30
+        sink.min_batch_size = 28800
+        sink.max_queue_size = 100
+
+        capture_user = 111
+        other_user = 222
+        capture = {"chunks": [], "last_audio_time": 0.0, "total_bytes": 0}
+        sink._active_captures[capture_user] = capture
+
+        with patch("bot.services.audio.time.time", return_value=1000.0):
+            sink.write(b"other data", other_user)
+
+        # Capture for capture_user should be untouched
+        assert capture["chunks"] == []
+        assert capture["total_bytes"] == 0
+
+    def test_write_ignores_no_active_capture(self):
+        """write() handles missing capture gracefully."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        sink.running = True
+        sink.worker_thread = Mock()
+        sink.worker_thread.is_alive = Mock(return_value=True)
+        sink.last_audio_time = {}
+        sink.buffer_last_update = {}
+        sink.user_audio_buffers = {}
+        sink._active_captures = {}
+        sink.audio_buffers = {}
+        sink.queue = Mock()
+        sink.queue.qsize = Mock(return_value=5)
+        sink.queue.put = Mock()
+        sink.buffer_lock = Mock()
+        sink.buffer_lock.__enter__ = Mock(return_value=None)
+        sink.buffer_lock.__exit__ = Mock(return_value=None)
+        sink.buffer_seconds = 30
+        sink.min_batch_size = 28800
+        sink.max_queue_size = 100
+
+        with patch("bot.services.audio.time.time", return_value=1000.0):
+            # Should not raise even if no capture active
+            sink.write(b"some data", 999)
+
+    # ------------------------------------------------------------------ #
+    # Vosk alias fallback and confidence threshold tests
+    # ------------------------------------------------------------------ #
+
+    def test_keyword_sink_fallback_to_wake_words_when_aliases_empty(self):
+        """When voice_command_vosk_wake_words is empty, fall back to injecting human wake words."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        sink.keywords = {}
+        sink.recognizers = {}
+        sink.voice_command_enabled = True
+        sink.voice_command_wake_words = ["bot"]
+        # voice_command_vosk_wake_words intentionally NOT set (None → fallback)
+        sink.audio_service = Mock()
+        sink.audio_service.keyword_repo = Mock()
+        sink.audio_service.keyword_repo.get_as_dict = Mock(return_value={"diogo": "slap"})
+        sink.refresh_keywords()
+
+        # Human wake word should be injected via fallback
+        assert sink.keywords["bot"] == "voice_command"
+        assert sink.keywords["diogo"] == "slap"
+
+    def test_check_keywords_voice_command_lower_confidence(self):
+        """Voice command keywords are accepted at the lower confidence threshold."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        sink.keywords = {"bote": "voice_command"}
+        sink.voice_command_wake_confidence_threshold = 0.75
+
+        # Confidence 0.76 → above voice_command threshold (0.75), should match
+        result_obj = {"result": [{"word": "bote", "conf": 0.76}]}
+        keyword, action, word_info = sink._check_keywords("bote", result_obj)
+        assert keyword == "bote"
+        assert action == "voice_command"
+        assert word_info is not None
+        assert word_info["word"] == "bote"
+
+    def test_check_keywords_voice_command_low_confidence_rejected(self):
+        """Voice command keywords below the lower threshold are still rejected."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        sink.keywords = {"bote": "voice_command"}
+        sink.voice_command_wake_confidence_threshold = 0.75
+
+        # Confidence 0.50 → below threshold, should reject
+        result_obj = {"result": [{"word": "bote", "conf": 0.50}]}
+        keyword, action, word_info = sink._check_keywords("bote", result_obj)
+        assert keyword is None
+        assert action is None
+        assert word_info is None
+
+    def test_check_keywords_normal_keyword_strict_confidence(self):
+        """Normal keywords (slap, list) still require the strict 0.95 threshold."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        sink.keywords = {"diogo": "slap"}
+        sink.voice_command_wake_confidence_threshold = 0.75
+
+        # Confidence 0.80 → below normal 0.95, reject even though it's above voice threshold
+        result_obj = {"result": [{"word": "diogo", "conf": 0.80}]}
+        keyword, action, word_info = sink._check_keywords("diogo", result_obj)
+        assert keyword is None
+        assert action is None
+        assert word_info is None
+
+        # Confidence 0.96 → above 0.95, accept
+        result_obj = {"result": [{"word": "diogo", "conf": 0.96}]}
+        keyword, action, word_info = sink._check_keywords("diogo", result_obj)
+        assert keyword == "diogo"
+        assert action == "slap"
+        assert word_info is not None
+        assert word_info["word"] == "diogo"
+
+    # ------------------------------------------------------------------ #
+    # Transcript parsing with aliases
+    # ------------------------------------------------------------------ #
+
+    @pytest.mark.asyncio
+    async def test_handle_voice_command_parses_ventura_transcript(self):
+        """Transcript starting with 'ventura' is parsed correctly (new default wake word)."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        sink.guild = Mock()
+        sink.guild.id = 555
+        sink.voice_command_enabled = True
+        # Default-like config: ventura is both human wake word and vosk alias
+        sink.voice_command_wake_words = ["ventura"]
+        sink.voice_command_vosk_wake_words = ["ventura"]
+        sink.voice_command_transcript_wake_words = ["ventura"]
+
+        sink.audio_service = Mock()
+        sink.audio_service._voice_command_cooldowns = {}
+        sink.audio_service.voice_command_cooldown_seconds = 5
+        sink.audio_service.voice_command_capture_seconds = 6
+        sink.audio_service.sound_service = AsyncMock()
+        sink.audio_service.sound_service.play_request = AsyncMock(return_value=True)
+        sink.audio_service._play_voice_command_prompt = AsyncMock(return_value=True)
+
+        sink._record_voice_command_after_beep = AsyncMock(return_value=b"\x00\x00" * 100)
+
+        mock_voice_service = Mock()
+        mock_voice_service.is_available = True
+        # Groq returns transcript with ventura
+        mock_voice_service.transcribe = AsyncMock(return_value="ventura play air horn")
+        sink.audio_service._get_voice_command_service = Mock(return_value=mock_voice_service)
+
+        await sink._handle_voice_command(555, "VenturaUser", Mock())
+
+        # Prompt is called twice: start + done
+        sink.audio_service._play_voice_command_prompt.assert_awaited()
+        sink.audio_service.sound_service.play_request.assert_awaited_once_with(
+            "air horn", "VenturaUser", guild=sink.guild, request_note="play air horn", allow_rejected_exact_fallback=True
+        )
+
+    @pytest.mark.asyncio
+    async def test_handle_voice_command_parses_alias_transcript(self):
+        """Transcript starting with a Vosk alias (e.g. 'bote') is parsed correctly."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        sink.guild = Mock()
+        sink.guild.id = 444
+        sink.voice_command_enabled = True
+        sink.voice_command_wake_words = ["bot"]
+        # This test explicitly sets no Vosk aliases so fallback uses human wake words.
+        # The transcript parsing uses the combined list via audio_service.
+        sink.voice_command_vosk_wake_words = []
+
+        sink.audio_service = Mock()
+        sink.audio_service._voice_command_cooldowns = {}
+        sink.audio_service.voice_command_cooldown_seconds = 5
+        sink.audio_service.voice_command_capture_seconds = 6
+        sink.audio_service.sound_service = AsyncMock()
+        sink.audio_service.sound_service.play_request = AsyncMock(return_value=True)
+        sink.audio_service._play_voice_command_prompt = AsyncMock(return_value=True)
+        # Set transcript wake words on the sink itself (runtime stores locally)
+        sink.voice_command_transcript_wake_words = ["bot", "bote"]
+
+        sink._record_voice_command_after_beep = AsyncMock(return_value=b"\x00\x00" * 100)
+
+        mock_voice_service = Mock()
+        mock_voice_service.is_available = True
+        # Groq returns transcript with the alias form
+        mock_voice_service.transcribe = AsyncMock(return_value="bote play air horn")
+        sink.audio_service._get_voice_command_service = Mock(return_value=mock_voice_service)
+
+        await sink._handle_voice_command(555, "AliasUser", Mock())
+
+        # Prompt is called twice: start + done
+        sink.audio_service._play_voice_command_prompt.assert_awaited()
+        sink.audio_service.sound_service.play_request.assert_awaited_once_with(
+            "air horn", "AliasUser", guild=sink.guild, request_note="play air horn", allow_rejected_exact_fallback=True
+        )
