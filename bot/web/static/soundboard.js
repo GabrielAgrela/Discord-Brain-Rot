@@ -1,4 +1,49 @@
 (() => {
+        // ── Motion Helpers ──────────────────────────────────────────
+        const motion = {
+            reduced: false,
+            mediaQuery: null,
+            init() {
+                this.mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+                this.reduced = this.mediaQuery.matches;
+                this.mediaQuery.addEventListener('change', (e) => { this.reduced = e.matches; });
+            },
+            burst(element, className = 'interaction-burst') {
+                if (this.reduced || !element) return;
+                const burst = document.createElement('span');
+                burst.className = className;
+                burst.setAttribute('aria-hidden', 'true');
+                burst.style.cssText = 'position:absolute;inset:0;border-radius:inherit;pointer-events:none;z-index:-1;';
+                const rect = element.getBoundingClientRect();
+                const size = Math.max(rect.width, rect.height) * 1.5;
+                const cx = (event?.clientX ?? rect.left + rect.width / 2) - rect.left;
+                const cy = (event?.clientY ?? rect.top + rect.height / 2) - rect.top;
+                burst.style.background = `radial-gradient(circle at ${cx}px ${cy}px, rgba(255,255,255,0.3), transparent ${size * 0.5}px)`;
+                burst.style.animation = 'buttonFlash 0.35s ease-out forwards';
+                element.style.position = 'relative';
+                element.style.overflow = 'hidden';
+                element.appendChild(burst);
+                burst.addEventListener('animationend', () => burst.remove(), { once: true });
+            }
+        };
+        motion.init();
+
+        // Pointer tracking for ambient reactive glow
+        let pointerFrameId = null;
+        function updatePointerPosition(clientX, clientY) {
+            if (motion.reduced) return;
+            if (pointerFrameId) cancelAnimationFrame(pointerFrameId);
+            pointerFrameId = requestAnimationFrame(() => {
+                pointerFrameId = null;
+                const xPct = (clientX / window.innerWidth) * 100;
+                const yPct = (clientY / window.innerHeight) * 100;
+                document.documentElement.style.setProperty('--pointer-x', `${xPct}%`);
+                document.documentElement.style.setProperty('--pointer-y', `${yPct}%`);
+            });
+        }
+
+        document.addEventListener('pointermove', (e) => updatePointerPosition(e.clientX, e.clientY), { passive: true });
+
         const soundboardConfigElement = document.getElementById('soundboard-config');
         const soundboardConfig = soundboardConfigElement ? JSON.parse(soundboardConfigElement.textContent || '{}') : {};
         const discordUser = soundboardConfig.discord_user || null;
@@ -14,6 +59,7 @@
         let webControlStateRequestInFlight = false;
         let controlRoomRequestInFlight = false;
         let latestControlRoomStatus = {};
+        let previousNowPlayingText = '';
         let currentPageActions = 1;
         let currentPageFavorites = 1;
         let currentPageAllSounds = 1;
@@ -446,12 +492,21 @@
                 dot.classList.toggle('playing', isPlaying);
                 dot.classList.toggle('idle', !isPlaying);
                 dot.classList.toggle('offline', !status.online);
+                const controlRoom = dot.closest('.control-room');
+                if (controlRoom) {
+                    controlRoom.classList.toggle('dot-playing', isPlaying);
+                    controlRoom.classList.toggle('dot-offline', !status.online);
+                }
             }
 
-            setControlRoomText(
-                'controlRoomNowPlaying',
-                isPlaying ? currentSound : (status.online ? 'Idle' : 'Bot status unavailable')
-            );
+            const nowPlayingLabel = isPlaying ? currentSound : (status.online ? 'Idle' : 'Bot status unavailable');
+            setControlRoomText('controlRoomNowPlaying', nowPlayingLabel);
+            const nowPlayingEl = document.getElementById('controlRoomNowPlaying');
+            if (nowPlayingEl && nowPlayingLabel !== previousNowPlayingText) {
+                nowPlayingEl.classList.add('status-flip');
+                window.setTimeout(() => nowPlayingEl.classList.remove('status-flip'), 600);
+                previousNowPlayingText = nowPlayingLabel;
+            }
             if (isPlaying) {
                 renderControlRoomProgress(status, requester);
             } else {
@@ -1027,6 +1082,8 @@
 
                             data.items.forEach((item, index) => {
                                 const row = document.createElement('tr');
+                                row.classList.add('row-reveal');
+                                row.style.animationDelay = `${Math.min(index * 0.04, 0.4)}s`;
 
                                 if (endpoint === 'actions') {
                                     if (item.sound_id) {
@@ -2010,6 +2067,7 @@
             if (!button || !document.querySelector('.tables-grid')?.contains(button)) {
                 return;
             }
+            motion.burst(button, event);
             const row = button.closest('.sound-options-row');
             if (!row) {
                 return;
@@ -2105,6 +2163,7 @@
             if (!button || !soundSimilarList?.contains(button)) {
                 return;
             }
+            motion.burst(button, event);
             const soundId = button.dataset.soundId;
             if (!soundId || button.disabled) return;
             if (!discordUser) {
@@ -2136,6 +2195,7 @@
             if (!button || !document.querySelector('.tables-grid')?.contains(button)) {
                 return;
             }
+            motion.burst(button, event);
 
             if (Date.now() < suppressNextPlayActivationUntil) {
                 event.preventDefault();
@@ -2189,6 +2249,7 @@
             if (!button) {
                 return;
             }
+            motion.burst(button, event);
 
             if (event.type === 'touchend') {
                 event.preventDefault();
@@ -2272,6 +2333,16 @@
         tablesGrid.addEventListener('touchcancel', clearSoundOptionsLongPress);
         document.addEventListener('click', handleWebControlActivation);
         document.addEventListener('touchend', handleWebControlActivation, { passive: false });
+
+        // Interaction burst for pagination and upload buttons
+        document.addEventListener('click', (e) => {
+            const pageBtn = e.target.closest('.pagination button:not(:disabled)');
+            if (pageBtn) motion.burst(pageBtn, e);
+        });
+        document.addEventListener('click', (e) => {
+            const uploadBtn = e.target.closest('.web-upload-control-button:not(:disabled)');
+            if (uploadBtn) motion.burst(uploadBtn, e);
+        });
 
         const webUploadForm = document.getElementById('webUploadForm');
         const webUploadDialog = document.getElementById('webUploadDialog');

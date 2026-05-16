@@ -1212,6 +1212,7 @@ def test_soundboard_page_renders_shared_redesign(web_client):
     assert "tablesGrid.addEventListener('touchstart', handleSoundOptionsPressStart" in script
     assert "/api/tts/enhance" in script
     assert "window.prompt" not in script
+    assert 'class="control-room-equalizer"' in html
     assert 'id="controlRoomUpdated"' not in html
     assert '<span>Guild</span>' not in html
     assert 'id="webUploadOpenButton"' in html
@@ -1244,6 +1245,7 @@ def test_soundboard_page_renders_shared_redesign(web_client):
     assert 'aria-label="Filter favorites by user"' in html
     assert 'aria-label="Search all sounds"' in html
     assert 'aria-label="Filter all sounds by list"' in html
+    assert 'class="soundboard-ambient"' in html
     assert 'for="actions-action-filter">Action</label>' not in html
     assert 'for="actions-user-filter">User</label>' not in html
     assert 'for="favorites-user-filter">User</label>' not in html
@@ -1267,6 +1269,13 @@ def test_soundboard_page_renders_shared_redesign(web_client):
     assert "isButtonCooldown" not in script
     assert "fetchFunction();" not in script
     assert "pendingInitialRenderEndpoints" in script
+    assert "previousNowPlayingText" in script
+    assert "status-flip" in script
+    assert "row-reveal" in script
+    assert "motion.init" in script
+    assert "updatePointerPosition" in script
+    assert "motion.burst" in script
+    assert "prefers-reduced-motion" in script
     assert "🔒" in script
     assert "Login with Discord to use bot controls" in html
     assert "Play sound" in script
@@ -1320,7 +1329,7 @@ def test_web_static_stylesheet_is_served(web_client):
     assert "body.page-soundboard .tables-grid > .card" in stylesheet
     assert "border: 1px solid var(--ink)" in stylesheet
     assert ".play-button.login-required" in stylesheet
-    assert "tableLoadingSweep" in stylesheet
+    assert "tableLoadingWave" in stylesheet
     assert ".table-container.is-loading" in stylesheet
     assert ".theme-toggle" in stylesheet
     assert "html.theme-dark" in stylesheet
@@ -1332,7 +1341,20 @@ def test_web_static_stylesheet_is_served(web_client):
     assert "html.theme-dark .nav-brand-mark" in stylesheet
     assert "html.theme-dark .auth-inbox-button" in stylesheet
     assert "background: var(--error)" in stylesheet
-    assert "animation: none" in stylesheet
+    assert "cardEntrance" in stylesheet
+    assert "nowPlayingSpark" in stylesheet
+    assert "rowReveal" in stylesheet
+    assert "sentRing" in stylesheet
+    assert "errorShake" in stylesheet
+    assert "eqBar" in stylesheet
+    assert "navGlint" in stylesheet
+    assert "ambientScan" in stylesheet
+    assert "dialogEnter" in stylesheet
+    assert "buttonFlash" in stylesheet
+    assert "queueEnter" in stylesheet
+    assert "progressShimmer" in stylesheet
+    assert "dotPulse" in stylesheet
+    assert "backdropEnter" in stylesheet
     assert "body.page-soundboard .library-controls" in stylesheet
     assert "margin-bottom: 0.45rem" in stylesheet
     assert "min-height: 2.62rem" in stylesheet
