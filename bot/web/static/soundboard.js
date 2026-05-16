@@ -3,12 +3,60 @@
         const motion = {
             reduced: false,
             mediaQuery: null,
+            pointerQuery: null,
+            pointerActive: false,
+            pointerFrameId: null,
+
             init() {
                 this.mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
                 this.reduced = this.mediaQuery.matches;
-                this.mediaQuery.addEventListener('change', (e) => { this.reduced = e.matches; });
+                this.mediaQuery.addEventListener('change', (e) => {
+                    this.reduced = e.matches;
+                    this._syncPointerState();
+                });
+
+                this.pointerQuery = window.matchMedia('(hover: hover) and (pointer: fine)');
+                this.pointerQuery.addEventListener('change', () => this._syncPointerState());
             },
-            burst(element, className = 'interaction-burst') {
+
+            _syncPointerState() {
+                const shouldTrack = !this.reduced && this.pointerQuery && this.pointerQuery.matches;
+                if (shouldTrack === this.pointerActive) return;
+                this.pointerActive = shouldTrack;
+                if (!shouldTrack) {
+                    if (this.pointerFrameId) {
+                        cancelAnimationFrame(this.pointerFrameId);
+                        this.pointerFrameId = null;
+                    }
+                    document.documentElement.style.removeProperty('--pointer-x');
+                    document.documentElement.style.removeProperty('--pointer-y');
+                }
+            },
+
+            _updatePointerPosition(clientX, clientY) {
+                if (!this.pointerActive) return;
+                if (this.pointerFrameId) cancelAnimationFrame(this.pointerFrameId);
+                this.pointerFrameId = requestAnimationFrame(() => {
+                    this.pointerFrameId = null;
+                    const xPct = (clientX / window.innerWidth) * 100;
+                    const yPct = (clientY / window.innerHeight) * 100;
+                    document.documentElement.style.setProperty('--pointer-x', `${xPct}%`);
+                    document.documentElement.style.setProperty('--pointer-y', `${yPct}%`);
+                });
+            },
+
+            _handlePointerMove(e) {
+                this._updatePointerPosition(e.clientX, e.clientY);
+            },
+
+            _handleVisibilityChange() {
+                if (document.hidden && this.pointerFrameId) {
+                    cancelAnimationFrame(this.pointerFrameId);
+                    this.pointerFrameId = null;
+                }
+            },
+
+            burst(element, event = null, className = 'interaction-burst') {
                 if (this.reduced || !element) return;
                 const burst = document.createElement('span');
                 burst.className = className;
@@ -28,21 +76,27 @@
         };
         motion.init();
 
-        // Pointer tracking for ambient reactive glow
-        let pointerFrameId = null;
-        function updatePointerPosition(clientX, clientY) {
-            if (motion.reduced) return;
-            if (pointerFrameId) cancelAnimationFrame(pointerFrameId);
-            pointerFrameId = requestAnimationFrame(() => {
-                pointerFrameId = null;
-                const xPct = (clientX / window.innerWidth) * 100;
-                const yPct = (clientY / window.innerHeight) * 100;
-                document.documentElement.style.setProperty('--pointer-x', `${xPct}%`);
-                document.documentElement.style.setProperty('--pointer-y', `${yPct}%`);
+        // ── Deferred motion start (after first paint) ───────────────
+        function startMotion() {
+            document.addEventListener('pointermove', (e) => motion._handlePointerMove(e), { passive: true });
+            document.addEventListener('visibilitychange', () => motion._handleVisibilityChange());
+            motion._syncPointerState();
+            document.documentElement.classList.add('motion-ready');
+        }
+
+        function deferMotion() {
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    startMotion();
+                });
             });
         }
 
-        document.addEventListener('pointermove', (e) => updatePointerPosition(e.clientX, e.clientY), { passive: true });
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', deferMotion);
+        } else {
+            deferMotion();
+        }
 
         const soundboardConfigElement = document.getElementById('soundboard-config');
         const soundboardConfig = soundboardConfigElement ? JSON.parse(soundboardConfigElement.textContent || '{}') : {};
