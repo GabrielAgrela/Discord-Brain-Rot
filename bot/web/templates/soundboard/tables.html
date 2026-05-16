@@ -144,7 +144,7 @@
                             {% set action_value = item.get('action') or '' %}
                             {% set filename_value = item.get('display_filename') or '-' %}
                             {% set username_value = item.get('display_username') or '' %}
-                            <tr>
+                            <tr{% if item.get('sound_id') %} class="sound-options-row" data-sound-id="{{ item.get('sound_id') }}" data-favorite="{{ 'true' if item.get('favorite') else 'false' }}" data-slap="{{ 'true' if item.get('slap') else 'false' }}"{% endif %}>
                                 <td>
                                     <span class="action-badge {{ action_badge_class(action_value) }}"
                                         title="{{ action_value }}">

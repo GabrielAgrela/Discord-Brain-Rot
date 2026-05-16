@@ -47,6 +47,9 @@ class WebContentRepository(BaseRepository[dict[str, Any]]):
             f"""
             SELECT
                 s.Filename AS filename,
+                s.id AS sound_id,
+                s.favorite AS favorite,
+                s.slap AS slap,
                 a.username AS username,
                 a.action AS action,
                 a.target AS target,

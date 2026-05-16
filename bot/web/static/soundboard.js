@@ -172,7 +172,8 @@
             if (diffMins < 60) return `${diffMins}m`;
             if (diffHours < 24) return `${diffHours}h`;
             if (diffDays < 30) return `${diffDays}d`;
-            return date.toLocaleDateString();
+            const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            return `${months[date.getMonth()]} ${date.getDate()}`;
         }
 
         function applyPlayButtonState(button) {
@@ -1028,6 +1029,13 @@
                                 const row = document.createElement('tr');
 
                                 if (endpoint === 'actions') {
+                                    if (item.sound_id) {
+                                        row.className = 'sound-options-row';
+                                        row.dataset.soundId = item.sound_id;
+                                        row.dataset.favorite = item.favorite ? 'true' : 'false';
+                                        row.dataset.slap = item.slap ? 'true' : 'false';
+                                    }
+
                                     const actionCell = document.createElement('td');
                                     const badge = document.createElement('span');
                                     badge.className = `action-badge ${getActionClass(item.action)}`;
@@ -2067,6 +2075,7 @@
                 await postSoundOption(`/api/sounds/${encodeURIComponent(soundId)}/favorite`);
                 fetchFavorites(null, true, true);
                 fetchAllSounds(null, false, true);
+                fetchActions(null, false, true);
             } catch (error) {
                 console.error('Favorite failed:', error);
             }
@@ -2085,6 +2094,7 @@
                 await postSoundOption(`/api/sounds/${encodeURIComponent(soundId)}/slap`);
                 fetchFavorites(null, true, true);
                 fetchAllSounds(null, false, true);
+                fetchActions(null, false, true);
             } catch (error) {
                 console.error('Slap toggle failed:', error);
             }

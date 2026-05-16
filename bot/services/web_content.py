@@ -77,6 +77,15 @@ class WebContentService:
                     ),
                     "action": row["action"],
                     "timestamp": row["timestamp"],
+                    **(
+                        {
+                            "sound_id": row["sound_id"],
+                            "favorite": bool(row["favorite"]),
+                            "slap": bool(row["slap"]),
+                        }
+                        if row.get("sound_id") is not None
+                        else {}
+                    ),
                 }
                 for row in rows
             ],

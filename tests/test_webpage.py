@@ -446,6 +446,9 @@ def test_web_table_endpoints_scope_to_selected_guild(web_client):
             "display_username": "******",
             "action": "play_request",
             "timestamp": "2026-04-03 12:05:00",
+            "sound_id": 2,
+            "favorite": True,
+            "slap": False,
         }
     ]
     assert all_sounds_response.status_code == 200
@@ -1375,6 +1378,9 @@ def test_web_content_endpoints_censor_hateful_strings(web_client):
         "display_username": "******",
         "action": "play_request",
         "timestamp": "2026-04-01 12:01:00",
+        "sound_id": 1,
+        "favorite": True,
+        "slap": False,
     }
 
     assert favorites_response.status_code == 200
@@ -1438,6 +1444,9 @@ def test_web_content_endpoints_do_not_censor_logged_in_voice_user(web_client):
         "display_username": "niggas young fly on the tra",
         "action": "play_request",
         "timestamp": "2026-04-01 12:01:00",
+        "sound_id": 1,
+        "favorite": True,
+        "slap": False,
     }
 
     assert favorites_response.status_code == 200
@@ -1707,6 +1716,9 @@ def test_web_table_endpoints_return_filter_options_and_apply_column_filters(web_
                 "display_username": "******",
                 "action": "play_request",
                 "timestamp": "2026-04-04 12:00:00",
+                "sound_id": 1,
+                "favorite": True,
+                "slap": False,
             }
         ],
         "total_count": 1,

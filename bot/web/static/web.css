@@ -2718,7 +2718,7 @@ html.theme-dark .sound-options-button {
 
 #actionsTable th:nth-child(4),
 #actionsTable td:nth-child(4) {
-    width: 3.5rem;
+    width: 4.5rem;
     text-align: center;
 }
 
@@ -4177,8 +4177,8 @@ body.page-soundboard .tables-grid > .card {
 
     #actionsTable th:nth-child(4),
     #actionsTable td:nth-child(4) {
-        width: 42px;
-        max-width: 42px;
+        width: 52px;
+        max-width: 52px;
     }
 
     #favoritesTable th:first-child,

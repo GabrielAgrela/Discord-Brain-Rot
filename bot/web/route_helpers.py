@@ -445,7 +445,7 @@ def _format_time_ago(timestamp: str) -> str:
         return f"{diff_hours}h"
     if diff_days < 30:
         return f"{diff_days}d"
-    return parsed_timestamp.strftime("%x")
+    return parsed_timestamp.strftime("%b %d")
 
 
 def _format_sound_added_text(item: dict[str, Any]) -> str:
