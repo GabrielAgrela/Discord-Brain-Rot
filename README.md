@@ -45,17 +45,20 @@ This README is based on the current codebase behavior (not historical README ass
 - Ingest-time loudness normalization for direct MP3 uploads and URL-ingested MP3s (compression + peak-safe gain; target `-18 dBFS` by default).
 - Periodic MyInstants scraping (background task).
 
-### Voice Commands (Wake Word + Groq Whisper)
-- When Vosk detects the configured wake word, the bot plays a **start prompt clip** from `Sounds/` (no DB lookup), then **records fresh per-user PCM audio after the prompt** (not a rolling buffer). Recording stops when the user stops talking (silence timeout) or a max duration is reached. After capture, a **done prompt clip** is played. The captured audio is wrapped as WAV and sent to Groq Whisper (`whisper-large-v3`) for transcription. This avoids sending pre-wake conversation/silence.
+### Voice Commands (Wake Word + Groq Whisper + Ventura Chat)
+- When Vosk detects the configured wake word, the bot plays a **start prompt clip** from `Sounds/` (no DB lookup), then **records fresh per-user PCM audio after the prompt** (not a rolling buffer). Recording stops when the user stops talking (silence timeout) or a max duration is reached. The captured audio is wrapped as WAV and sent to Groq Whisper (`whisper-large-v3`) for transcription. This avoids sending pre-wake conversation/silence.
+- **Two-way branching** after transcription:
+   1. **Play command** (e.g. "ventura play air horn"): the bot plays a **done prompt clip** (acknowledgment), then fuzzy-matches and plays the requested sound, like `/toca`.
+   2. **No command** (e.g. "ventura, you are useless"): the bot routes the transcript to **OpenRouter** (Qwen Coder model) which generates an angry André Ventura parody reply in European Portuguese with ElevenLabs square-bracket performance tags. The reply is sent to **ElevenLabs Ventura TTS** and played back.
 - **Default wake word**: `ventura` — directly in-vocabulary for the bundled Portuguese Vosk model (`vosk-model-small-pt-0.3`). The same default is used for both the human-facing wake word and the Vosk grammar injection, so no phonetic aliases are needed by default.
 - **Historical note**: The prior default was `bot`, which was out of vocabulary. It required Portuguese phonetic aliases (`bote,bota,boto`) configured via `VOICE_COMMAND_WAKE_ALIASES`. The two-layer env override mechanism remains for custom models or backward compatibility.
 - **Mixed-language support**: The wake word may appear **anywhere** in the transcript (not only at the start), so English preamble such as "What the fuck was that? Ventura, play das páginas." is handled correctly. Both English (`play`) and Portuguese (`toca`, `tocar`, `mete`, `meter`, `põe`, `poe`, `reproduz`, `reproduzir`) command verbs are recognised and normalised to `"play"`.
 - Supported voice commands:
-   - `<wake word/alias> play/toca/mete/põe/reproduz <sound name>` — fuzzy-matches and plays the requested sound, like `/toca` but with an important difference: if the exact name match is blacklisted/rejected, voice commands **skip it and fall back** to the nearest non-blacklisted fuzzy match (since voice has no autocomplete). E.g., "ventura play air horn" would play "air horn.mp3"; saying "ventura play despacito" when `despacito.mp3` is rejected would play the closest non-rejected match such as `despacito cars.mp3` instead.
-- Pre-decoded prompt MP3 clips from `Sounds/` (no FFmpeg, no DB lookup) are played as wake acknowledgement (start prompt) and capture-complete indication (done prompt) without interrupting current audio playback. Both prompts randomly select from a configurable pool of filenames (single or comma-separated).
+   - `<wake word/alias> play/toca/mete/põe/reproduz <sound name>` — fuzzy-matches and plays the requested sound, like `/toca` but with an important difference: if the exact name match is blacklisted/rejected, voice commands **skip it and fall back** to the nearest non-blacklisted fuzzy match (since voice has no autocomplete).
+- Pre-decoded prompt MP3 clips from `Sounds/` (no FFmpeg, no DB lookup) are played as wake acknowledgement (start prompt) and capture-complete indication (done prompt, play path only) without interrupting current audio playback. Both prompts randomly select from a configurable pool of filenames (single or comma-separated). The done prompt is only played **after** Groq transcription when a play command is detected.
 - Voice-command-initiated playback includes a "Heard: play <sound>" note on the generated sound card image (and in the embed fallback).
-- Requires `GROQ_API_KEY` environment variable. Disabled when the key is absent.
- - Configurable capture duration, silence timeout, cooldown, model, wake words, Vosk aliases, confidence threshold, prompt clips, and prompt enable/disable via environment variables.
+- Requires `GROQ_API_KEY` for transcription. Additionally requires `OPENROUTER_API_KEY` for the non-play Ventura chat branch (OpenRouter Qwen Coder model, default `qwen/qwen3-coder-next`) and `EL_key`/`EL_voice_id_pt` for ElevenLabs Ventura TTS playback.
+- Configurable capture duration, silence timeout, cooldown, model, wake words, Vosk aliases, confidence threshold, prompt clips, and prompt enable/disable via environment variables.
 - Debug save of the exact WAV bytes sent to Groq is enabled by default (``GROQ_WHISPER_DEBUG_SAVE_AUDIO=true``). Files land in ``Debug/groq_whisper/`` with timestamped names plus a ``latest.wav`` overwrite for quick inspection. Set ``GROQ_WHISPER_DEBUG_SAVE_AUDIO=false`` to disable. With the fresh post-prompt capture, debug WAV files contain only the command speech (e.g., "play despacito"), not several pre-wake seconds.
 
 ### Voice Connection Resilience
@@ -361,6 +364,11 @@ This README is based on the current codebase behavior (not historical README ass
  - `VOICE_COMMAND_DONE_SOUND` (optional; comma-separated prompt MP3 filenames under `Sounds/` — one is chosen at random after command audio capture completes. A single filename also works for backward compatibility. Default: `"16-05-26-19-54-41-416014-Ok fica bem.mp3,16-05-26-20-14-36-595803-Sim senhor.mp3,16-05-26-20-15-00-686598-Ok já toco essa merda.mp3,16-05-26-20-15-34-525805-shouts aggressive Ok já ag.mp3"`)
 - `VOICE_COMMAND_WAKE_ALIASES` (optional; comma-separated Vosk grammar words injected into the keyword map, default `ventura`; overrides `VOICE_COMMAND_WAKE_WORDS` for Vosk injection; falls back to wake words when empty, range `0.0`-`1.0`)
 - `VOICE_COMMAND_WAKE_CONFIDENCE_THRESHOLD` (optional; confidence threshold for voice-command wake detection, default `0.85`, range `0.0`-`1.0`; normal keywords still use `0.95`)
+- `OPENROUTER_API_KEY` (required for non-play Ventura voice command chat branch; enables OpenRouter Qwen Coder model)
+- `VENTURA_CHAT_MODEL` (optional; OpenRouter model for Ventura chat replies, default `qwen/qwen3-coder-next`)
+- `VENTURA_CHAT_TIMEOUT_SECONDS` (optional; Ventura Chat API timeout, default `20`)
+- `VENTURA_CHAT_MAX_TOKENS` (optional; max tokens for Ventura reply, default `250`)
+- `VENTURA_CHAT_TEMPERATURE` (optional; model temperature for Ventura chat, default `0.7`, range `0.0`-`2.0`)
 - `VOICE_MAX_DAVE_PROTOCOL_VERSION` (default auto-detected from `davey` protocol version, currently `1`; set `0` only to force-disable DAVE negotiation)
 - `PERFORMANCE_MONITOR_TICK_SECONDS` (performance monitor interval in seconds, default `0.5`, minimum `0.1`)
 - `BOT_SELF_HEAL_RESTART_ENABLED` (`true` default; lets Docker restart the bot after unrecoverable gateway/voice health failures)

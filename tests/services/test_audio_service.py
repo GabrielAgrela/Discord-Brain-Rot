@@ -971,6 +971,10 @@ class TestAudioService:
         sink.audio_service.sound_service = AsyncMock()
         sink.audio_service.sound_service.play_request = AsyncMock(return_value=True)
         sink.audio_service._play_voice_command_prompt = AsyncMock(return_value=True)
+        # Mock ventura chat service (not called for play path, but must exist)
+        mock_ventura = Mock()
+        mock_ventura.is_available = False
+        sink.audio_service._get_ventura_chat_service = Mock(return_value=mock_ventura)
 
         # Mock recording to return some PCM
         sink._record_voice_command_after_beep = AsyncMock(return_value=b"\x00\x00" * 100)
@@ -984,20 +988,23 @@ class TestAudioService:
 
         await sink._handle_voice_command(999, "TestUser", Mock())
 
-        # Prompt is called twice: start + done
-        sink.audio_service._play_voice_command_prompt.assert_awaited()
+        # Prompt is called twice: start + done (done now played after parse)
+        assert sink.audio_service._play_voice_command_prompt.await_count == 2
         sink.audio_service.sound_service.play_request.assert_awaited_once_with(
             "air horn", "TestUser", guild=sink.guild, request_note="play air horn", allow_rejected_exact_fallback=True
         )
+        # Ventura chat should not be called for play path
+        sink.audio_service._get_ventura_chat_service.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_handle_voice_command_no_play_command_does_nothing(self):
-        """When Groq returns a transcript without a play command, no playback occurs."""
+    async def test_handle_voice_command_routes_to_ventura_chat(self):
+        """When Groq returns a transcript without a play command, Ventura Chat + TTS is used."""
         from bot.services.audio import KeywordDetectionSink
 
         sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
         sink.guild = Mock()
         sink.guild.id = 222
+        sink.guild.get_member = Mock(return_value=None)
         sink.voice_command_enabled = True
         sink.voice_command_wake_words = ["bot"]
         sink.voice_command_vosk_wake_words = []
@@ -1010,6 +1017,16 @@ class TestAudioService:
         sink.audio_service.sound_service.play_request = AsyncMock()
         sink.audio_service._play_voice_command_prompt = AsyncMock(return_value=True)
 
+        # Mock Ventura chat service returning a reply
+        mock_ventura = Mock()
+        mock_ventura.is_available = True
+        mock_ventura.reply = AsyncMock(return_value="[shouts] Isto é uma vergonha!")
+        sink.audio_service._get_ventura_chat_service = Mock(return_value=mock_ventura)
+
+        # Mock VT service for ElevenLabs TTS
+        sink.audio_service.voice_transformation_service = AsyncMock()
+        sink.audio_service.voice_transformation_service.tts_EL = AsyncMock()
+
         sink._record_voice_command_after_beep = AsyncMock(return_value=b"\x00\x00" * 100)
 
         mock_voice_service = Mock()
@@ -1019,9 +1036,65 @@ class TestAudioService:
 
         await sink._handle_voice_command(888, "TestUser2", Mock())
 
-        # Prompt is called twice: start + done
-        sink.audio_service._play_voice_command_prompt.assert_awaited()
+        # Prompt is called exactly once (start only; no done prompt for non-play)
+        assert sink.audio_service._play_voice_command_prompt.await_count == 1
+        sound_service = sink.audio_service.sound_service
+        sound_service.play_request.assert_not_called()
+
+        # Ventura chat was invoked
+        mock_ventura.reply.assert_awaited_once()
+        # TTS was invoked with Ventura's reply and lang="pt"
+        vt = sink.audio_service.voice_transformation_service
+        vt.tts_EL.assert_awaited_once()
+        call_args = vt.tts_EL.await_args
+        assert call_args is not None
+        assert call_args.kwargs.get("lang") == "pt"
+        assert call_args.args[1] == "[shouts] Isto é uma vergonha!"
+
+    @pytest.mark.asyncio
+    async def test_handle_voice_command_non_play_skips_when_openrouter_unavailable(self):
+        """When OpenRouter is not configured, non-play transcript skips Ventura chat silently."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        sink.guild = Mock()
+        sink.guild.id = 333
+        sink.voice_command_enabled = True
+        sink.voice_command_wake_words = ["bot"]
+        sink.voice_command_vosk_wake_words = []
+
+        sink.audio_service = Mock()
+        sink.audio_service._voice_command_cooldowns = {}
+        sink.audio_service.voice_command_cooldown_seconds = 5
+        sink.audio_service.voice_command_capture_seconds = 6
+        sink.audio_service.sound_service = AsyncMock()
+        sink.audio_service.sound_service.play_request = AsyncMock()
+        sink.audio_service._play_voice_command_prompt = AsyncMock(return_value=True)
+
+        # Ventura chat service reports unavailable (no key)
+        mock_ventura = Mock()
+        mock_ventura.is_available = False
+        sink.audio_service._get_ventura_chat_service = Mock(return_value=mock_ventura)
+        # VT service not needed since Ventura chat is skipped
+        sink.audio_service.voice_transformation_service = AsyncMock()
+
+        sink._record_voice_command_after_beep = AsyncMock(return_value=b"\x00\x00" * 100)
+
+        mock_voice_service = Mock()
+        mock_voice_service.is_available = True
+        mock_voice_service.transcribe = AsyncMock(return_value="bot hello there")
+        sink.audio_service._get_voice_command_service = Mock(return_value=mock_voice_service)
+
+        await sink._handle_voice_command(777, "TestUser3", Mock())
+
+        # Only start prompt played, no done prompt
+        assert sink.audio_service._play_voice_command_prompt.await_count == 1
         sink.audio_service.sound_service.play_request.assert_not_called()
+        # Ventura chat was not called (unavailable)
+        mock_ventura.reply.assert_not_called()
+        # TTS was not called
+        vt = sink.audio_service.voice_transformation_service
+        vt.tts_EL.assert_not_called()
 
     # ------------------------------------------------------------------ #
     # Voice command prompt pools

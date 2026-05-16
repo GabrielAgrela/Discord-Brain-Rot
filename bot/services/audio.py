@@ -134,6 +134,7 @@ class AudioService:
             0.5, min(5.0, float(os.getenv("VOICE_COMMAND_SILENCE_SECONDS", "1.0")))
         )
         self._voice_command_service = None
+        self._ventura_chat_service = None
         # Per-user cooldown tracking: key = f"{guild_id}:{user_id}" -> timestamp
         self._voice_command_cooldowns: Dict[str, float] = {}
 
@@ -1002,6 +1003,13 @@ class AudioService:
             from bot.services.voice_command import GroqWhisperService
             self._voice_command_service = GroqWhisperService()
         return self._voice_command_service
+
+    def _get_ventura_chat_service(self):
+        """Return the lazily-initialised Ventura Chat service."""
+        if self._ventura_chat_service is None:
+            from bot.services.voice_command import VenturaChatService
+            self._ventura_chat_service = VenturaChatService()
+        return self._ventura_chat_service
 
     def set_behavior(self, behavior):
         """Set reference to BotBehavior for passing to views."""
@@ -3063,11 +3071,13 @@ class KeywordDetectionSink(sinks.Sink):
         requester_name: str,
         channel,
     ) -> None:
-        """Transcribe user audio via Groq and execute ``play`` commands.
+        """Transcribe user audio via Groq and execute ``play`` or Ventura chat.
 
         Flow: rate limit → play start prompt → record fresh post-prompt PCM
-        until user stops talking → play done prompt → transcribe via Groq
-        Whisper → parse → play.
+        until user stops talking → transcribe via Groq Whisper → parse.
+          - If ``play`` command: play done prompt → SoundService.play_request.
+          - Otherwise: VenturaChat (OpenRouter Qwen) → ElevenLabs Ventura
+            TTS → play via VoiceTransformationService.tts_EL.
         """
         guild_id = self.guild.id
 
@@ -3107,15 +3117,6 @@ class KeywordDetectionSink(sinks.Sink):
             print(f"[VoiceCommand] No post-prompt audio for {requester_name}; skipping")
             return
 
-        # ---- play done prompt (after capture, before transcribe) ----------
-        done_sound = getattr(
-            self.audio_service, "voice_command_done_sound",
-            "16-05-26-19-54-41-416014-Ok fica bem.mp3",
-        )
-        await self.audio_service._play_voice_command_prompt(
-            channel, done_sound, wait=True,
-        )
-
         # ---- PCM -> WAV ---------------------------------------------------
         from bot.services.voice_command import pcm_to_wav
         wav_bytes = pcm_to_wav(pcm_data)
@@ -3143,15 +3144,66 @@ class KeywordDetectionSink(sinks.Sink):
             self.voice_command_wake_words
         )
         cmd = parse_voice_command(transcript, transcript_wake_words)
-        if cmd is None:
-            print(f"[VoiceCommand] No recognised command in transcript from {requester_name}")
+
+        if cmd is not None:
+            command, argument = cmd
+            if command == "play":
+                # ---- play done prompt (after parse, before playback) ------
+                done_sound = getattr(
+                    self.audio_service, "voice_command_done_sound",
+                    "16-05-26-19-54-41-416014-Ok fica bem.mp3",
+                )
+                await self.audio_service._play_voice_command_prompt(
+                    channel, done_sound, wait=True,
+                )
+
+                sound_service = self.audio_service.sound_service
+                if sound_service is None:
+                    print("[VoiceCommand] SoundService not available; cannot play")
+                    return
+                print(f"[VoiceCommand] Executing play request for '{argument}' by {requester_name}")
+                await sound_service.play_request(
+                    argument, requester_name, guild=self.guild,
+                    request_note=f"play {argument}",
+                    allow_rejected_exact_fallback=True,
+                )
+                return
+
+        # ---- Non-play: Ventura Chat + ElevenLabs TTS --------------------
+        print(f"[VoiceCommand] No recognised command in transcript from {requester_name}; routing to Ventura chat")
+
+        ventura_service = self.audio_service._get_ventura_chat_service()
+        if not ventura_service.is_available:
+            print("[VoiceCommand] VenturaChat not available (OPENROUTER_API_KEY missing); skipping")
             return
 
-        command, argument = cmd
-        if command == "play":
-            sound_service = self.audio_service.sound_service
-            if sound_service is None:
-                print("[VoiceCommand] SoundService not available; cannot play")
-                return
-            print(f"[VoiceCommand] Executing play request for '{argument}' by {requester_name}")
-            await sound_service.play_request(argument, requester_name, guild=self.guild, request_note=f"play {argument}", allow_rejected_exact_fallback=True)
+        reply = await ventura_service.reply(transcript, requester_name=requester_name)
+        if not reply:
+            print("[VoiceCommand] No Ventura reply generated; skipping")
+            return
+
+        print(f"[VoiceCommand] Ventura reply for {requester_name}: \"{reply}\"")
+
+        vt_service = self.audio_service.voice_transformation_service
+        if vt_service is None:
+            print("[VoiceCommand] VoiceTransformationService not available; cannot play Ventura TTS")
+            return
+
+        # Build a user-like object for tts_EL API
+        import types
+        member = self.guild.get_member(user_id)
+        user_obj = types.SimpleNamespace(
+            name=requester_name,
+            display_name=requester_name,
+            guild=self.guild,
+        )
+        avatar_url = str(member.display_avatar.url) if member and member.display_avatar else None
+        from config import TTS_PROFILES
+        ventura_profile = TTS_PROFILES.get("ventura", {})
+        sts_thumbnail = ventura_profile.get("thumbnail")
+
+        await vt_service.tts_EL(
+            user_obj, reply, lang="pt", send_controls=True,
+            requester_avatar_url=avatar_url,
+            sts_thumbnail_url=sts_thumbnail,
+        )

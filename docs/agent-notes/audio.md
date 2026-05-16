@@ -75,18 +75,25 @@ Read this when changing uploads, sound ingest, playback, generated sound cards, 
    1. Applies a per-user rate limit (configurable via `VOICE_COMMAND_COOLDOWN_SECONDS`, default 5 s).
    2. **Plays a start prompt clip** by filename from `Sounds/` (no DB lookup) via `AudioService._play_voice_command_prompt(channel, start_sound, wait=True)`. The clip is decoded to 48 kHz stereo 16-bit PCM using pydub and cached by `(filepath, mtime)` in `_voice_command_prompt_pcm_cache`. Playback uses direct `discord.PCMAudio(io.BytesIO(pcm))` — no FFmpeg. Waits for completion before proceeding to recording. Silently skipped when prompts disabled, voice client busy/disconnected, or file missing.
    3. **Fresh post-prompt command recording** via `_record_voice_command_after_beep()`. A capture entry is registered in `_active_captures[user_id]`, and the next incoming per-user PCM chunks (from `write()`) are appended to it. The method polls until the user stops speaking (configurable silence timeout via `VOICE_COMMAND_SILENCE_SECONDS`, default 1.0 s) or reaches the max duration (`VOICE_COMMAND_CAPTURE_SECONDS`, default 6 s). Only the triggering user's audio is captured — other users' audio is ignored. Capture state is cleaned up in a ``finally`` block.
-   4. **Plays a done prompt clip** (same mechanism as start, with `wait=True`) after capture completes, before transcription.
-   5. Wraps PCM as WAV via `pcm_to_wav()` from `bot/services/voice_command.py`.
-     6. Sends the WAV to `GroqWhisperService.transcribe()` which POSTs to `https://api.groq.com/openai/v1/audio/transcriptions` with model `whisper-large-v3` (accuracy-optimised; override with `GROQ_WHISPER_MODEL` for speed).
-        - An optional `prompt` field (`GROQ_WHISPER_PROMPT`) guides mixed-language transcription (default: English preamble + Portuguese command guidance).
-        - An optional `language` field (`GROQ_WHISPER_LANGUAGE`) may be set for single-language hints; empty by default (auto-detect) because users mix English and Portuguese.
-     7. Parses the transcript via `parse_voice_command()` using the combined `voice_command_transcript_wake_words`. The parser:
-       - Finds the **last** wake word in the transcript (not only at the start), so English preamble before "Ventura" is ignored.
-       - Supports both English (`play`) and Portuguese (`toca`, `tocar`, `mete`, `meter`, `põe`, `poe`, `reproduz`, `reproduzir`) command verbs — all normalised to `"play"`.
-       - Returns `("play", "<sound name>")` on match.
-    8. On match, delegates to `SoundService.play_request(sound_name, requester_name, guild=self.guild, request_note=f"play {sound_name}", allow_rejected_exact_fallback=True)` — the fuzzy-matching path used by `/toca`, augmented with:
-       - ``request_note`` — appears as a compact "Heard: play <sound>" pill on the generated sound card image (and in the embed fallback).
-       - ``allow_rejected_exact_fallback=True`` — when the exact name match is blacklisted (rejected), the service does NOT immediately reject; instead it falls through to fuzzy search to find a non-blacklisted close match. This is important because voice commands have no autocomplete, so saying "ventura play despacito" should play "despacito cars.mp3" if that is the closest non-rejected sound.
+   4. Wraps PCM as WAV via `pcm_to_wav()` from `bot/services/voice_command.py`.
+   5. Sends the WAV to `GroqWhisperService.transcribe()` which POSTs to `https://api.groq.com/openai/v1/audio/transcriptions` with model `whisper-large-v3` (accuracy-optimised; override with `GROQ_WHISPER_MODEL` for speed).
+      - The done/acknowledgment prompt is **no longer played before transcription**. It is now played after parse, only when a play command is detected (see step 8).
+      - An optional `prompt` field (`GROQ_WHISPER_PROMPT`) guides mixed-language transcription (default: English preamble + Portuguese command guidance).
+      - An optional `language` field (`GROQ_WHISPER_LANGUAGE`) may be set for single-language hints; empty by default (auto-detect) because users mix English and Portuguese.
+   6. Parses the transcript via `parse_voice_command()` using the combined `voice_command_transcript_wake_words`. The parser:
+      - Finds the **last** wake word in the transcript (not only at the start), so English preamble before "Ventura" is ignored.
+      - Supports both English (`play`) and Portuguese (`toca`, `tocar`, `mete`, `meter`, `põe`, `poe`, `reproduz`, `reproduzir`) command verbs — all normalised to `"play"`.
+      - Returns `("play", "<sound name>")` on match, or `None`.
+   7. **If** the parser returns `("play", "<sound name>")`:
+      - **Plays a done prompt clip** (same mechanism as start, with `wait=True`) as acknowledgment.
+      - Delegates to `SoundService.play_request(sound_name, requester_name, guild=self.guild, request_note=f"play {sound_name}", allow_rejected_exact_fallback=True)` — the fuzzy-matching path used by `/toca`, augmented with:
+        - ``request_note`` — appears as a compact "Heard: play <sound>" pill on the generated sound card image (and in the embed fallback).
+        - ``allow_rejected_exact_fallback=True`` — when the exact name match is blacklisted (rejected), the service does NOT immediately reject; instead it falls through to fuzzy search to find a non-blacklisted close match. This is important because voice commands have no autocomplete, so saying "ventura play despacito" should play "despacito cars.mp3" if that is the closest non-rejected sound.
+   8. **Else** (no recognised play command):
+      - **No done prompt** is played.
+      - The transcript is sent to `VenturaChatService.reply()` (OpenRouter Qwen Coder model) which returns short European Portuguese text with ElevenLabs square-bracket performance tags.
+      - The reply is piped through `VoiceTransformationService.tts_EL(lang="pt")` for ElevenLabs Ventura TTS and played in the user's voice channel.
+      - Requires `OPENROUTER_API_KEY` for the chat model and `EL_key`/`EL_voice_id_pt` for TTS playback. When the API key is missing or the reply is empty, the command is silently skipped.
  - The ``request_note`` and ``allow_rejected_exact_fallback`` parameters flow through: ``SoundService.play_request`` → ``AudioService.play_audio`` / fuzzy search fallback. For non-voice-command playbacks (default `/toca`) both parameters are omitted, so the original exact-match rejection behavior is preserved.
  - Prompt filenames are configurable via `VOICE_COMMAND_START_SOUND` (default comma-separated pool of 4 files for random selection) and `VOICE_COMMAND_DONE_SOUND` (same). A single filename continues to work for backward compatibility. Set `VOICE_COMMAND_BEEP_ENABLED=false` to disable prompts. The old sine-wave beep frequency/duration/volume env vars are no longer used.
  - Prompt PCM is decoded via pydub and cached in `AudioService._voice_command_prompt_pcm_cache` keyed by `(filepath, mtime)`.

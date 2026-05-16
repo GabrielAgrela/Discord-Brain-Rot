@@ -1,14 +1,17 @@
 """
-Voice command service using Groq Whisper for transcription.
+Voice command and Ventura chat services using Groq Whisper + OpenRouter.
 
 When Vosk detects the configured wake word (default "ventura", which is
 in-vocabulary for the bundled Portuguese Vosk model vosk-model-small-pt-0.3),
 a start prompt clip is played from ``Sounds/`` (no DB lookup), then *fresh*
 post-prompt PCM audio for that user is recorded until silence or max duration.
-After capture, a done prompt clip is played.  The captured audio is sent to
-Groq Whisper for transcription.  If the transcript matches a recognised
-command verb (e.g. ``play``, ``toca``), the sound is played via
-SoundService.play_request.
+The captured audio is sent to Groq Whisper for transcription.  If the
+transcript matches a recognised command verb (e.g. ``play``, ``toca``), a
+done prompt clip is played and the sound is played via SoundService.play_request.
+If no command verb is recognised, the transcript is routed to
+``VenturaChatService`` which sends it to an OpenRouter model (default
+``qwen/qwen3-coder-next``) for a Ventura parody reply in European Portuguese.
+The reply is then sent to ElevenLabs Ventura TTS and played back.
 
 The transcript parser searches for the wake word **anywhere** in the returned
 text (not only at the start), so English preamble such as
@@ -232,6 +235,142 @@ class GroqWhisperService:
             logger.warning(
                 "[GroqWhisper] Failed to prune debug audio: %s", exc, exc_info=True
             )
+
+
+# ---------------------------------------------------------------------------
+# OpenRouter Ventura Chat client
+# ---------------------------------------------------------------------------
+
+OPENROUTER_API_KEY: str = os.environ.get("OPENROUTER_API_KEY", "")
+OPENROUTER_API_URL: str = os.getenv(
+    "OPENROUTER_API_URL",
+    "https://openrouter.ai/api/v1/chat/completions",
+)
+VENTURA_CHAT_MODEL: str = os.getenv("VENTURA_CHAT_MODEL", "qwen/qwen3-coder-next")
+VENTURA_CHAT_TIMEOUT_SECONDS: int = max(1, int(os.getenv("VENTURA_CHAT_TIMEOUT_SECONDS", "20")))
+VENTURA_CHAT_MAX_TOKENS: int = max(50, int(os.getenv("VENTURA_CHAT_MAX_TOKENS", "250")))
+VENTURA_CHAT_TEMPERATURE: float = max(
+    0.0, min(2.0, float(os.getenv("VENTURA_CHAT_TEMPERATURE", "0.7")))
+)
+
+
+class VenturaChatService:
+    """OpenRouter chat client that generates Ventura parody replies.
+
+    Sends the user transcript to an OpenRouter model and returns short
+    European Portuguese text with ElevenLabs square-bracket performance
+    tags, suitable for ``VoiceTransformationService.tts_EL(lang="pt")``.
+    """
+
+    def __init__(self) -> None:
+        self.api_key: str = OPENROUTER_API_KEY
+        self.model: str = VENTURA_CHAT_MODEL
+        self.api_url: str = OPENROUTER_API_URL
+        self.timeout_seconds: int = VENTURA_CHAT_TIMEOUT_SECONDS
+        self.max_tokens: int = VENTURA_CHAT_MAX_TOKENS
+        self.temperature: float = VENTURA_CHAT_TEMPERATURE
+
+    @property
+    def is_available(self) -> bool:
+        """Return ``True`` when an ``OPENROUTER_API_KEY`` is configured."""
+        return bool(self.api_key.strip())
+
+    async def reply(
+        self,
+        transcript: str,
+        requester_name: Optional[str] = None,
+    ) -> Optional[str]:
+        """Send *transcript* to OpenRouter and return a Ventura-style reply.
+
+        Args:
+            transcript: The user's spoken words from Groq Whisper.
+            requester_name: Display name for optional prompt context.
+
+        Returns:
+            Generated PT-PT ventura text with square-bracket tags, or
+            ``None`` when the API is unavailable / errors / empty response.
+        """
+        if not self.is_available:
+            logger.warning("[VenturaChat] OPENROUTER_API_KEY not set; skipping")
+            return None
+
+        payload = self._build_request_payload(transcript, requester_name)
+
+        try:
+            timeout = aiohttp.ClientTimeout(total=self.timeout_seconds)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(
+                    self.api_url,
+                    headers={
+                        "Authorization": f"Bearer {self.api_key.strip()}",
+                        "Content-Type": "application/json",
+                        "HTTP-Referer": "https://github.com/gabrielvicenteYT/Discord-Brain-Rot",
+                        "X-Title": "Discord Brain Rot Ventura Chat",
+                    },
+                    json=payload,
+                ) as resp:
+                    if resp.status >= 400:
+                        error_text = await resp.text()
+                        logger.error(
+                            "[VenturaChat] API error %s: %.200s",
+                            resp.status,
+                            error_text,
+                        )
+                        return None
+                    result = await resp.json()
+                    text = self._extract_response_text(result)
+                    return text if text else None
+        except asyncio.TimeoutError:
+            logger.error(
+                "[VenturaChat] Request timed out after %ss",
+                self.timeout_seconds,
+            )
+            return None
+        except Exception as exc:
+            logger.error("[VenturaChat] Request failed: %s", exc)
+            return None
+
+    def _build_request_payload(
+        self,
+        transcript: str,
+        requester_name: Optional[str] = None,
+    ) -> dict:
+        """Build the OpenRouter chat-completions payload."""
+        system_instruction = (
+            "You are André Ventura, a fictional parody character. "
+            "You are an angry, abrasive Portuguese political figure who rants about everything. "
+            "You speak European Portuguese (PT-PT) only. "
+            "Use square-bracket ElevenLabs performance tags such as [shouts], [angry], "
+            "[sarcastic], [laughs], [grumbling], [sighs], [scoffs] to express emotions. "
+            "Keep responses short (1-3 sentences, max 900 characters). "
+            "Do NOT use slurs, hate speech, or attacks on protected groups. "
+            "Roast ideas, bureaucracy, politicians, opponents, or the situation instead. "
+            "Be brainrot but not cliche. Be creative, angry, and entertaining. "
+            "Return ONLY the spoken text with tags, no explanations."
+        )
+        return {
+            "model": self.model,
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+            "messages": [
+                {"role": "system", "content": system_instruction},
+                {"role": "user", "content": transcript},
+            ],
+        }
+
+    @staticmethod
+    def _extract_response_text(payload: dict) -> str:
+        """Extract assistant text from an OpenRouter chat-completion response."""
+        choices = payload.get("choices")
+        if not isinstance(choices, list) or not choices:
+            return ""
+        first_choice = choices[0]
+        if not isinstance(first_choice, dict):
+            return ""
+        message = first_choice.get("message")
+        if isinstance(message, dict):
+            return str(message.get("content") or "").strip()
+        return str(first_choice.get("text") or "").strip()
 
 
 # ---------------------------------------------------------------------------
