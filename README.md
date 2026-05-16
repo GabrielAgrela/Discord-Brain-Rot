@@ -108,7 +108,7 @@ This README is based on the current codebase behavior (not historical README ass
 - The profile moderation control shows an exclamation alert only while uploads are still unreviewed by a moderator.
 - Rejected web uploads stay in the moderation audit trail, but their linked sounds are hidden from soundboard tables and blocked from web and Discord playback.
 - Web upload moderation is restricted to users who match the bot admin/mod rule for the selected guild (`OWNER_USER_IDS`, Administrator, Manage Server, or Manage Channels). Existing web sessions may need to log out/in after this change so Discord grants the `guilds` OAuth scope.
-- Recent actions, Favorites, and All Sounds support search with visible result counts and clear buttons; Recent actions can also be filtered by action/user, Favorites by favoriting user, and All Sounds by sound list without losing server-side pagination.
+- Recent actions, Favorites, and All Sounds support search with visible result counts and clear buttons; Recent actions can also be filtered by action/user, Favorites by favoriting user, and All Sounds by sound list or slap sounds without losing server-side pagination.
 - The soundboard and analytics pages include a dark mode toggle beside the Discord login/profile control that persists in browser local storage.
 - Each web table lets you enter a target page directly from its pagination controls.
 - The web soundboard and analytics dashboard replace matched racist/hateful usernames and sound titles with `******` unless the logged-in Discord user has prior tracked voice activity.

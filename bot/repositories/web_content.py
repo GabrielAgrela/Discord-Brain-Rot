@@ -12,6 +12,8 @@ import sqlite3
 from bot.models.web import PaginatedQuery
 from bot.repositories.base import BaseRepository
 
+SLAP_SOUND_LIST_FILTER_VALUE = "__slap_sounds__"
+
 
 class WebContentRepository(BaseRepository[dict[str, Any]]):
     """
@@ -427,18 +429,7 @@ class WebContentRepository(BaseRepository[dict[str, Any]]):
 
         list_filters = query.filters.get("list", [])
         if list_filters:
-            clause, clause_params = self._build_in_clause("sli.list_id", list_filters)
-            conditions.append(
-                f"""
-                EXISTS (
-                    SELECT 1
-                    FROM sound_list_items sli
-                    WHERE sli.sound_filename = s.Filename
-                      AND {clause}
-                )
-                """
-            )
-            params.extend(clause_params)
+            self._append_all_sounds_list_filter_condition(conditions, params, list_filters)
 
         rows = self._execute(
             f"""
@@ -527,18 +518,7 @@ class WebContentRepository(BaseRepository[dict[str, Any]]):
 
         list_filters = query.filters.get("list", [])
         if list_filters:
-            clause, clause_params = self._build_in_clause("sli.list_id", list_filters)
-            conditions.append(
-                f"""
-                EXISTS (
-                    SELECT 1
-                    FROM sound_list_items sli
-                    WHERE sli.sound_filename = s.Filename
-                      AND {clause}
-                )
-                """
-            )
-            params.extend(clause_params)
+            self._append_all_sounds_list_filter_condition(conditions, params, list_filters)
 
         row = self._execute_one(
             f"""
@@ -604,6 +584,9 @@ class WebContentRepository(BaseRepository[dict[str, Any]]):
 
     def _fetch_sound_list_filter_options(self, guild_id: int | str | None = None) -> list[dict[str, str]]:
         """Fetch sound-list options for the full sounds table filter."""
+        options: list[dict[str, str]] = [
+            {"value": SLAP_SOUND_LIST_FILTER_VALUE, "label": "Slap Sounds"},
+        ]
         rows = self._execute(
             f"""
             SELECT
@@ -621,11 +604,37 @@ class WebContentRepository(BaseRepository[dict[str, Any]]):
             """,
             self._guild_filter_params(guild_id),
         )
-        return [
+        options.extend(
             {"value": str(row["value"]), "label": str(row["label"])}
             for row in rows
             if row["value"] is not None and row["label"]
-        ]
+        )
+        return options
+
+    def _append_all_sounds_list_filter_condition(
+        self,
+        conditions: list[str],
+        params: list[object],
+        list_filters: Sequence[str],
+    ) -> None:
+        """Append WHERE clause parts for the all-sounds list filter including slap sentinel."""
+        slap_present = any(f == SLAP_SOUND_LIST_FILTER_VALUE for f in list_filters)
+        real_list_ids = [f for f in list_filters if f != SLAP_SOUND_LIST_FILTER_VALUE]
+
+        sub_conditions: list[str] = []
+
+        if slap_present:
+            sub_conditions.append("s.slap = 1")
+
+        if real_list_ids:
+            clause, clause_params = self._build_in_clause("sli.list_id", real_list_ids)
+            sub_conditions.append(
+                f"EXISTS (SELECT 1 FROM sound_list_items sli WHERE sli.sound_filename = s.Filename AND {clause})"
+            )
+            params.extend(clause_params)
+
+        if sub_conditions:
+            conditions.append(f"({' OR '.join(sub_conditions)})")
 
     def _build_action_conditions(self, query: PaginatedQuery) -> tuple[list[str], list[object]]:
         """Build the WHERE clause parts for action queries."""

@@ -1765,7 +1765,7 @@ def test_web_table_endpoints_return_filter_options_and_apply_column_filters(web_
         "filters": {
             "sound": ["alpha.mp3", "beta.mp3", "gamma.mp3"],
             "date": ["2026-04-03", "2026-04-02", "2026-04-01"],
-            "list": [],
+            "list": [{"value": "__slap_sounds__", "label": "Slap Sounds"}],
         },
     }
 
@@ -1825,11 +1825,43 @@ def test_all_sounds_endpoint_returns_and_applies_sound_list_filter(web_client):
             "sound": ["alpha.mp3", "beta.mp3"],
             "date": ["2026-04-02", "2026-04-01"],
             "list": [
+                {"value": "__slap_sounds__", "label": "Slap Sounds"},
                 {"value": "10", "label": "Airhorns (alice)"},
                 {"value": "11", "label": "Drops (bob)"},
             ],
         },
     }
+
+
+def test_all_sounds_endpoint_filters_by_slap_sounds(web_client):
+    client, db_path = web_client
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executemany(
+            """
+            INSERT INTO sounds (id, originalfilename, Filename, favorite, slap, is_elevenlabs, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (1, "normal.mp3", "normal.mp3", 0, 0, 0, "2026-04-01 12:00:00"),
+                (2, "slap1.mp3", "slap1.mp3", 0, 1, 0, "2026-04-02 12:00:00"),
+                (3, "slap2.mp3", "slap2.mp3", 0, 1, 0, "2026-04-03 12:00:00"),
+                (4, "elevenlabs_slap.mp3", "elevenlabs_slap.mp3", 0, 1, 1, "2026-04-04 12:00:00"),
+            ],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    response = client.get("/api/all_sounds?list=__slap_sounds__")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["total_count"] == 2
+    assert payload["total_pages"] == 1
+    filenames = {item["display_filename"] for item in payload["items"]}
+    assert filenames == {"slap1.mp3", "slap2.mp3"}
 
 
 def test_sound_options_endpoint_returns_lists_and_similar_sounds(web_client):
