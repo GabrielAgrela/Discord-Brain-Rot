@@ -103,11 +103,49 @@
         .row-footer {
             width: 100%;
             display: flex;
-            justify-content: flex-start;
+            justify-content: space-between;
             align-items: center;
             padding-top: 4px;
             border-top: 1px solid rgba(99, 102, 241, 0.2);
             min-height: 18px;
+            gap: 8px;
+        }
+
+        .footer-note-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            background: rgba(var(--accent-rgb), 0.12);
+            border: 1px solid rgba(var(--accent-rgb), 0.25);
+            border-radius: 10px;
+            padding: 2px 8px;
+            max-width: 240px;
+            overflow: hidden;
+            flex-shrink: 0;
+        }
+
+        .footer-note-icon {
+            width: 12px;
+            height: 12px;
+            object-fit: contain;
+            flex-shrink: 0;
+            opacity: 0.7;
+        }
+
+        .footer-note-label {
+            color: rgba(var(--accent-rgb), 0.9);
+            font-size: 11px;
+            font-weight: 600;
+            flex-shrink: 0;
+        }
+
+        .footer-note-text {
+            color: #d0d0d8;
+            font-size: 11px;
+            font-weight: 400;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         /* Icon Images */
@@ -296,42 +334,7 @@
             margin-left: 12px;
         }
 
-        .request-note-pill {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            width: 100%;
-            background: rgba(var(--accent-rgb), 0.12);
-            border: 1px solid rgba(var(--accent-rgb), 0.35);
-            border-radius: 14px;
-            padding: 8px 12px;
-            margin-bottom: 12px;
-            color: #e0e0e0;
-            font-size: 14px;
-            font-weight: 500;
-        }
 
-        .request-note-pill .note-icon {
-            width: 18px;
-            height: 18px;
-            object-fit: contain;
-            flex-shrink: 0;
-            opacity: 0.7;
-        }
-
-        .request-note-pill .note-label {
-            color: rgba(var(--accent-rgb), 0.9);
-            font-weight: 600;
-            flex-shrink: 0;
-        }
-
-        .request-note-pill .note-text {
-            color: #f0f0f0;
-            font-weight: 400;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
     </style>
 </head>
 
@@ -351,15 +354,6 @@
             {% endif %}
             <span class="sound-name" style="font-size: {{title_font_size}}px">{{sound_name}}</span>
         </div>
-
-        {% if request_note %}
-        <!-- Voice command note row -->
-        <div class="request-note-pill">
-            <img src="data:image/svg+xml;base64,{{speaker_icon or icon_timer}}" class="note-icon">
-            <span class="note-label">{{"Voice" if speaker_icon else "Heard"}}:</span>
-            <span class="note-text">{{request_note}}</span>
-        </div>
-        {% endif %}
 
         {% if has_stats %}
         <!-- Row 2: Duration and Play Count -->
@@ -409,10 +403,17 @@
         </div>
         {% endif %}
 
-        {% if show_footer %}
+        {% if show_footer or request_note %}
         <!-- Row 3: Footer -->
         <div class="row-footer">
             <span class="footer-text">{% if download_date %}Added: {{download_date}}{% endif %}</span>
+            {% if request_note %}
+            <span class="footer-note-pill">
+                <img src="data:image/svg+xml;base64,{{speaker_icon or icon_timer}}" class="footer-note-icon">
+                <span class="footer-note-label">TTS:</span>
+                <span class="footer-note-text">{{request_note}}</span>
+            </span>
+            {% endif %}
         </div>
         {% endif %}
     </div>

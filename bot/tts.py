@@ -19,6 +19,30 @@ from bot.database import Database
 
 logger = logging.getLogger(__name__)
 
+
+def _write_all_to_fd(fd: int, data: bytes) -> None:
+    """Write *data* entirely to *fd*, handling short writes.
+
+    Args:
+        fd: File descriptor (e.g. a FIFO write end).
+        data: Bytes to write.
+
+    Raises:
+        BrokenPipeError: If the write end is closed before all bytes
+            are written (or ``os.write`` returns 0).
+        OSError: On other I/O errors.
+    """
+    offset = 0
+    while offset < len(data):
+        n = os.write(fd, data[offset:])
+        if n == 0:
+            raise BrokenPipeError(
+                f"write to fd {fd} returned 0 after "
+                f"{offset}/{len(data)} bytes"
+            )
+        offset += n
+
+
 class TTS:
     def __init__(self, behavior, bot, filename="tts.mp3", cooldown_seconds=10):
         load_dotenv()
@@ -784,11 +808,15 @@ class TTS:
                                 if first_chunk_time is None:
                                     first_chunk_time = time.time()
                                 f.write(chunk)
-                                # Feed the FIFO writer (non-blocking: O_RDWR
-                                # open + pipe buffer)
+                                # Feed the FIFO writer via a thread so the event
+                                # loop stays free to serve Discord interactions
+                                # and keyword actions.
                                 if live_fifo_fd is not None:
                                     try:
-                                        os.write(live_fifo_fd, chunk)
+                                        await asyncio.to_thread(
+                                            _write_all_to_fd,
+                                            live_fifo_fd, chunk,
+                                        )
                                     except (BrokenPipeError, OSError) as e:
                                         logger.debug(
                                             "EL_TTS FIFO write error, "

@@ -689,9 +689,6 @@ class ImageGeneratorService:
                 canvas_height = 820
             if has_stats and show_footer:
                 canvas_height = 900
-            if request_note:
-                canvas_height += 60
-
             rendered = self._render_html_to_png(
                 html_content,
                 size=(900, canvas_height),

@@ -184,6 +184,114 @@ class TestImageGeneratorService:
         assert "color: #FFF7ED;" in captured["html"]
         assert captured["size"] == (1500, 760)
 
+    def test_generate_sound_card_sync_renders_request_note_in_footer(self):
+        """request_note appears as a TTS pill in the footer, not as a standalone row."""
+        from bot.services.image_generator import ImageGeneratorService
+
+        service = ImageGeneratorService()
+        rendered = _create_png_bytes(580, 180)
+        captured: dict[str, str] = {}
+
+        def _capture_render(html_content, size, selector):
+            captured["html"] = html_content
+            captured["size"] = size
+            return rendered
+
+        with patch.object(service, "_render_html_to_png", side_effect=_capture_render):
+            result = service._generate_sound_card_sync(
+                sound_name="test.mp3",
+                requester="tester",
+                duration="0:15",
+                play_count=42,
+                request_note="play jimmy neutron",
+                download_date="Aug 12, 2025",
+                show_footer=True,
+                show_sound_icon=True,
+            )
+
+        assert result is not None
+        html = captured["html"]
+
+        # Verify TTS: pill in footer, not Voice:/Heard: standalone row
+        assert "TTS:" in html, "Should use TTS label, not Voice or Heard"
+        assert "Voice:" not in html, "Should not contain old Voice label"
+        assert "Heard:" not in html, "Should not contain old Heard label"
+        assert "play jimmy neutron" in html, "Should contain the request note text"
+
+        # The request note should live inside the footer row
+        assert "footer-note-pill" in html, "Should use footer-note-pill class"
+        assert "footer-note-text" in html, "Should use footer-note-text class"
+
+        # Footer should appear with space-between layout
+        assert "justify-content: space-between" in html, "Footer should use space-between"
+
+        # Old standalone request-note-pill should be gone
+        assert "request-note-pill" not in html, "Old standalone pill class should not appear"
+
+        # Canvas height should NOT include the old +60 bump for request_note
+        # Stats + footer → 900; request_note should not inflate it further
+        assert captured["size"] == (900, 900), (
+            f"Expected canvas 900x900 (no +60 for request_note), got {captured['size']}"
+        )
+
+    def test_generate_sound_card_sync_renders_request_note_without_download_date(self):
+        """request_note should still appear in footer even when download_date is missing."""
+        from bot.services.image_generator import ImageGeneratorService
+
+        service = ImageGeneratorService()
+        rendered = _create_png_bytes(580, 180)
+        captured: dict[str, str] = {}
+
+        def _capture_render(html_content, size, selector):
+            captured["html"] = html_content
+            return rendered
+
+        with patch.object(service, "_render_html_to_png", side_effect=_capture_render):
+            result = service._generate_sound_card_sync(
+                sound_name="no-date.mp3",
+                requester="tester",
+                request_note="play something",
+                download_date=None,
+                show_footer=True,
+                show_sound_icon=True,
+            )
+
+        assert result is not None
+        html = captured["html"]
+        assert "TTS:" in html
+        assert "footer-note-pill" in html
+        assert "play something" in html
+        # Footer should still render (triggered by request_note even when footer is conceptually "on")
+        assert "row-footer" in html
+
+    def test_generate_sound_card_sync_renders_speaker_icon_with_request_note(self):
+        """The request note footer pill should reuse speaker_icon when in TTS/voice mode."""
+        from bot.services.image_generator import ImageGeneratorService
+
+        service = ImageGeneratorService()
+        rendered = _create_png_bytes(580, 180)
+        captured: dict[str, str] = {}
+
+        def _capture_render(html_content, size, selector):
+            captured["html"] = html_content
+            return rendered
+
+        with patch.object(service, "_render_html_to_png", side_effect=_capture_render):
+            result = service._generate_sound_card_sync(
+                sound_name="tts-sound",
+                requester="tester",
+                request_note="play despacito",
+                is_tts=True,
+                show_footer=True,
+            )
+
+        assert result is not None
+        html = captured["html"]
+        # voice icon (for TTS mode) should be in the footer-note-icon
+        assert "footer-note-icon" in html
+        assert "TTS:" in html
+        assert "play despacito" in html
+
     def test_estimate_rl_store_canvas_height_scales_by_row_count(self):
         """RL store canvas estimates should leave extra headroom for multi-line tile text."""
         from bot.services.image_generator import ImageGeneratorService

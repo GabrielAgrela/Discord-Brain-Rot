@@ -142,6 +142,9 @@ Read this when changing uploads, sound ingest, playback, generated sound cards, 
 - `FFmpegPCMAudio` startup uses a basic volume-only filter (`volume=1.0,adelay=100:all=1`) for reliability; no ear protection filters are applied.
 - The FIFO and its temp directory are cleaned up in the chunk-writing code path after the write completes; failures during cleanup are logged as debug warnings.
 - `VoiceTransformationService.play_tts_live_stream()` is a pass-through wrapper to `AudioService.play_tts_live_stream()`, providing the same interface required by the legacy `TTS` class via `self.behavior`.
+- **CRITICAL — never write to the FIFO directly in the async event loop.** The original implementation called `os.write(live_fifo_fd, chunk)` directly in the async chunk loop. When FFmpeg consumed slower than ElevenLabs produced, the pipe buffer filled up and `os.write` blocked the entire event-loop thread, preventing Discord heartbeat/button-defer/keyword-action dispatch for seconds.
+- The fix: run FIFO writes through `asyncio.to_thread(_write_all_to_fd, live_fifo_fd, chunk)` where `_write_all_to_fd` is a module-level helper in `bot/tts.py` that handles partial writes in a loop. This keeps the event loop free while the thread handles FIFO backpressure.
+- Same principle applies to any future synchronous I/O in an async hot path that can block.
 
 ## AFK Channel Handling
 
