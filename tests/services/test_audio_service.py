@@ -1141,8 +1141,10 @@ class TestAudioService:
         sound_service = sink.audio_service.sound_service
         sound_service.play_request.assert_not_called()
 
-        # Ventura chat was invoked
+        # Ventura chat was invoked with transcript, requester_name, and conversation_key
         mock_ventura.reply.assert_awaited_once()
+        reply_call_kwargs = mock_ventura.reply.await_args.kwargs
+        assert reply_call_kwargs.get("conversation_key") == "guild:222:user:888"
         # TTS was invoked with Ventura's reply and lang="pt"
         vt = sink.audio_service.voice_transformation_service
         vt.tts_EL.assert_awaited_once()

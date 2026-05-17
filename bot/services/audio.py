@@ -3467,7 +3467,12 @@ class KeywordDetectionSink(sinks.Sink):
             print("[VoiceCommand] VenturaChat not available (OPENROUTER_API_KEY missing); skipping")
             return
 
-        reply = await ventura_service.reply(transcript, requester_name=requester_name)
+        conversation_key = f"guild:{self.guild.id}:user:{user_id}"
+        reply = await ventura_service.reply(
+            transcript,
+            requester_name=requester_name,
+            conversation_key=conversation_key,
+        )
         if not reply:
             print("[VoiceCommand] No Ventura reply generated; skipping")
             return

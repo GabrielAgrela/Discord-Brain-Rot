@@ -59,7 +59,9 @@ This README is based on the current codebase behavior (not historical README ass
 - Voice-command-initiated playback includes a "Heard: play <sound>" note on the generated sound card image (and in the embed fallback).
 - Requires `GROQ_API_KEY` for transcription. Additionally requires `OPENROUTER_API_KEY` for the non-play Ventura chat branch (OpenRouter Qwen Coder model, default `qwen/qwen3-coder-next`) and `EL_key`/`EL_voice_id_pt` for ElevenLabs Ventura TTS playback.
 - Configurable capture duration, silence timeout, cooldown, model, wake words, Vosk aliases, confidence threshold, prompt clips, and prompt enable/disable via environment variables.
-- Debug save of the exact WAV bytes sent to Groq is enabled by default (``GROQ_WHISPER_DEBUG_SAVE_AUDIO=true``). Files land in ``Debug/groq_whisper/`` with timestamped names plus a ``latest.wav`` overwrite for quick inspection. Set ``GROQ_WHISPER_DEBUG_SAVE_AUDIO=false`` to disable. With the fresh post-prompt capture, debug WAV files contain only the command speech (e.g., "play despacito"), not several pre-wake seconds.
+ - Debug save of the exact WAV bytes sent to Groq is disabled by default. Set ``GROQ_WHISPER_DEBUG_SAVE_AUDIO=true`` to enable saving WAV files to ``Debug/groq_whisper/`` with timestamped names plus a ``latest.wav`` overwrite for quick inspection. With the fresh post-prompt capture, debug WAV files contain only the command speech (e.g., "play despacito"), not several pre-wake seconds.
+- Non-play Ventura chat keeps **up to the last 3 successful exchanges** per user/guild in memory as context, so follow-up queries ("you said X, but what about Y?") include prior conversation. Context is scoped by guild + user ID (``guild:{id}:user:{id}``). Only successful model replies are appended to history — API errors, timeouts, or empty responses are not stored.
+- Before each OpenRouter request, the bot logs the **full request payload** at INFO level with the ``[VenturaChat] Request payload`` prefix, including the system prompt, historical user/assistant messages, and the current user transcript — formatted as readable pretty-printed JSON (``ensure_ascii=False`` so Portuguese/accented text is legible). API keys, auth headers, and other secrets are never included in these log entries.
 
 ### Voice Connection Resilience
 - `ensure_voice_connected` with per-guild locks and retry logic.
@@ -350,7 +352,7 @@ This README is based on the current codebase behavior (not historical README ass
 - `GROQ_WHISPER_TEMPERATURE` (optional; transcription temperature, default `0` for deterministic output)
 - `GROQ_WHISPER_LANGUAGE` (optional; language hint for Whisper transcription, default `pt` — prevents Whisper from translating Portuguese utterances to English; set to empty string to restore auto-detect for strongly mixed-language deployments)
 - `GROQ_WHISPER_TIMEOUT_SECONDS` (optional; Groq API timeout, default `20`)
-- `GROQ_WHISPER_DEBUG_SAVE_AUDIO` (optional; set `false` to disable saving WAV files sent to Groq Whisper for debugging, default `true`)
+- `GROQ_WHISPER_DEBUG_SAVE_AUDIO` (optional; set `true` to enable saving WAV files sent to Groq Whisper for debugging, default `false`)
 - `GROQ_WHISPER_DEBUG_AUDIO_DIR` (optional; directory for saved debug WAVs; default `Debug/groq_whisper/` under the project root; absolute paths are used as-is)
 - `GROQ_WHISPER_DEBUG_AUDIO_KEEP` (optional; max number of timestamped debug WAVs to retain, default `25`; `latest.wav` is not counted)
 - `VOICE_COMMAND_ENABLED` (optional; set `false` to disable wake-word voice commands while keeping STT enabled, default `true`)

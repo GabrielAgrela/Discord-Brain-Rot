@@ -31,6 +31,7 @@ aliases ("bote", "bota", "boto") configured via VOICE_COMMAND_WAKE_ALIASES.
 
 import asyncio
 import io
+import json
 import logging
 import os
 import re
@@ -76,7 +77,7 @@ GROQ_WHISPER_TIMEOUT: int = max(1, _whisper_timeout)
 
 # Debug save: persist the exact WAV bytes sent to Groq for debugging.
 _GROQ_WHISPER_DEBUG_SAVE: bool = (
-    os.getenv("GROQ_WHISPER_DEBUG_SAVE_AUDIO", "true").strip().lower()
+    os.getenv("GROQ_WHISPER_DEBUG_SAVE_AUDIO", "false").strip().lower()
     not in {"0", "false", "off", "no"}
 )
 
@@ -268,7 +269,13 @@ class VenturaChatService:
     Sends the user transcript to an OpenRouter model and returns short
     European Portuguese text with ElevenLabs square-bracket performance
     tags, suitable for ``VoiceTransformationService.tts_EL(lang="pt")``.
+
+    Keeps an in-memory conversation history per ``conversation_key`` (up to
+    the last 3 user/assistant exchanges) so follow-up queries have context.
     """
+
+    # Maximum number of prior exchanges to include in the prompt.
+    _MAX_HISTORY_EXCHANGES: int = 3
 
     def __init__(self) -> None:
         self.api_key: str = OPENROUTER_API_KEY
@@ -277,6 +284,9 @@ class VenturaChatService:
         self.timeout_seconds: int = VENTURA_CHAT_TIMEOUT_SECONDS
         self.max_tokens: int = VENTURA_CHAT_MAX_TOKENS
         self.temperature: float = VENTURA_CHAT_TEMPERATURE
+
+        # Per-conversation history: key -> list of (user_text, assistant_text)
+        self._history: dict[str, list[tuple[str, str]]] = {}
 
     @property
     def is_available(self) -> bool:
@@ -287,12 +297,16 @@ class VenturaChatService:
         self,
         transcript: str,
         requester_name: Optional[str] = None,
+        conversation_key: Optional[str] = None,
     ) -> Optional[str]:
         """Send *transcript* to OpenRouter and return a Ventura-style reply.
 
         Args:
             transcript: The user's spoken words from Groq Whisper.
             requester_name: Display name for optional prompt context.
+            conversation_key: Stable key for conversation history lookup
+                (e.g. ``"guild:123:user:456"``). Falls back to
+                ``requester_name``, then ``"default"``.
 
         Returns:
             Generated PT-PT ventura text with square-bracket tags, or
@@ -302,7 +316,22 @@ class VenturaChatService:
             logger.warning("[VenturaChat] OPENROUTER_API_KEY not set; skipping")
             return None
 
-        payload = self._build_request_payload(transcript, requester_name)
+        effective_key = conversation_key or requester_name or "default"
+
+        payload = self._build_request_payload(transcript, requester_name, effective_key)
+
+        # Log the full request payload for debugging (no secrets — payload
+        # only contains model/temperature/max_tokens/messages; auth headers
+        # are set separately and never included in the log).
+        ctx_count = len(self._history.get(effective_key, []))
+        logger.info(
+            "[VenturaChat] Request payload — conversation_key=%s "
+            "context_exchanges=%d message_count=%d\n%s",
+            effective_key,
+            ctx_count,
+            len(payload.get("messages", [])),
+            json.dumps(payload, ensure_ascii=False, indent=2),
+        )
 
         try:
             timeout = aiohttp.ClientTimeout(total=self.timeout_seconds)
@@ -327,6 +356,8 @@ class VenturaChatService:
                         return None
                     result = await resp.json()
                     text = self._extract_response_text(result)
+                    if text:
+                        self._append_history(effective_key, transcript, text)
                     return text if text else None
         except asyncio.TimeoutError:
             logger.error(
@@ -338,12 +369,27 @@ class VenturaChatService:
             logger.error("[VenturaChat] Request failed: %s", exc)
             return None
 
+    def _append_history(
+        self,
+        key: str,
+        user_text: str,
+        assistant_text: str,
+    ) -> None:
+        """Store a successful exchange in the rolling conversation history."""
+        if key not in self._history:
+            self._history[key] = []
+        self._history[key].append((user_text, assistant_text))
+        # Trim to the last N exchanges.
+        if len(self._history[key]) > self._MAX_HISTORY_EXCHANGES:
+            self._history[key] = self._history[key][-self._MAX_HISTORY_EXCHANGES:]
+
     def _build_request_payload(
         self,
         transcript: str,
         requester_name: Optional[str] = None,
+        conversation_key: str = "default",
     ) -> dict:
-        """Build the OpenRouter chat-completions payload."""
+        """Build the OpenRouter chat-completions payload with conversation history."""
         system_instruction = (
             "You are Gen Z brainrot André Ventura, a fictional parody character who doesn't like minorities but uses genz lingo and acts like a genz. "
             "You are an angry, abrasive Portuguese political figure who rants about everything. "
@@ -357,14 +403,25 @@ class VenturaChatService:
             "Be brainrot but not cliche. Be creative, angry, and entertaining. "
             "Return ONLY the spoken text with tags, no explanations."
         )
+
+        messages: list[dict] = [
+            {"role": "system", "content": system_instruction},
+        ]
+
+        # Include up to the last N prior exchanges for context.
+        history = self._history.get(conversation_key, [])
+        for user_msg, assistant_msg in history:
+            messages.append({"role": "user", "content": user_msg})
+            messages.append({"role": "assistant", "content": assistant_msg})
+
+        # Current user transcript.
+        messages.append({"role": "user", "content": transcript})
+
         return {
             "model": self.model,
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
-            "messages": [
-                {"role": "system", "content": system_instruction},
-                {"role": "user", "content": transcript},
-            ],
+            "messages": messages,
         }
 
     @staticmethod

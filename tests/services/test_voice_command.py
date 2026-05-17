@@ -4,6 +4,7 @@ Tests for bot/services/voice_command.py – Groq Whisper helpers and parsing.
 
 import asyncio
 import io
+import json
 import os
 import sys
 import wave
@@ -605,3 +606,264 @@ class TestGroqWhisperServiceDebugSave:
 
         # Restore permissions for cleanup
         tmp_path.chmod(stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO)
+
+    def test_debug_save_defaults_to_false_when_env_unset(self, monkeypatch):
+        """When GROQ_WHISPER_DEBUG_SAVE_AUDIO is unset, debug_save_enabled is False."""
+        monkeypatch.delenv("GROQ_WHISPER_DEBUG_SAVE_AUDIO", raising=False)
+        import importlib
+        from bot.services import voice_command
+
+        importlib.reload(voice_command)
+        srv = voice_command.GroqWhisperService()
+        assert srv.debug_save_enabled is False
+
+
+# ====================================================================
+#  VenturaChatService (unit, no real network)
+# ====================================================================
+
+class TestVenturaChatService:
+    """Tests for the OpenRouter Ventura chat client with mocked HTTP."""
+
+    @pytest.fixture
+    def service(self):
+        from bot.services.voice_command import VenturaChatService
+
+        srv = VenturaChatService()
+        srv.api_key = "test-openrouter-key"
+        return srv
+
+    # ------------------------------------------------------------------
+    # Payload construction with history
+    # ------------------------------------------------------------------
+
+    def test_payload_includes_system_and_current_transcript_only_when_no_history(self, service):
+        """Payload contains system + current user transcript when there is no history."""
+        payload = service._build_request_payload("hello ventura", None, "test-key")
+        messages = payload["messages"]
+        assert len(messages) == 2
+        assert messages[0]["role"] == "system"
+        assert messages[1]["role"] == "user"
+        assert messages[1]["content"] == "hello ventura"
+
+    def test_payload_includes_prior_exchanges(self, service):
+        """Prior exchanges appear as user/assistant pairs before the current transcript."""
+        service._history["test-key"] = [
+            ("first user", "first assistant"),
+            ("second user", "second assistant"),
+        ]
+        payload = service._build_request_payload("third user", None, "test-key")
+        messages = payload["messages"]
+        # system + 2 pairs + current = 6
+        assert len(messages) == 6
+        assert messages[0]["role"] == "system"
+        assert messages[1] == {"role": "user", "content": "first user"}
+        assert messages[2] == {"role": "assistant", "content": "first assistant"}
+        assert messages[3] == {"role": "user", "content": "second user"}
+        assert messages[4] == {"role": "assistant", "content": "second assistant"}
+        assert messages[5] == {"role": "user", "content": "third user"}
+
+    def test_payload_appends_current_transcript_after_history(self, service):
+        """Current user transcript is appended after historical exchanges."""
+        service._history["test-key"] = [
+            ("previous user", "previous assistant"),
+        ]
+        payload = service._build_request_payload("current query", None, "test-key")
+        messages = payload["messages"]
+        assert messages[-1] == {"role": "user", "content": "current query"}
+
+    def test_history_capped_at_three_exchanges(self, service):
+        """Only the last 3 exchanges are included in the payload."""
+        for i in range(5):
+            service._append_history("test-key", f"user {i}", f"assistant {i}")
+        # History should now have the last 3: (user 2, asst 2), (user 3, asst 3), (user 4, asst 4)
+        assert len(service._history["test-key"]) == 3
+        assert service._history["test-key"][0] == ("user 2", "assistant 2")
+        assert service._history["test-key"][1] == ("user 3", "assistant 3")
+        assert service._history["test-key"][2] == ("user 4", "assistant 4")
+
+    def test_payload_respects_cap(self, service):
+        """Payload includes at most 3 prior exchanges."""
+        for i in range(4):
+            service._append_history("test-key", f"old user {i}", f"old assistant {i}")
+        payload = service._build_request_payload("current", None, "test-key")
+        messages = payload["messages"]
+        # system + 3 pairs + current = 8
+        assert len(messages) == 8
+        # First pair should be old user 1, old assistant 1 (skipping the very first exchange)
+        assert messages[1]["content"] == "old user 1"
+        assert messages[2]["content"] == "old assistant 1"
+        assert messages[3]["content"] == "old user 2"
+        assert messages[4]["content"] == "old assistant 2"
+        assert messages[5]["content"] == "old user 3"
+        assert messages[6]["content"] == "old assistant 3"
+        assert messages[7]["content"] == "current"
+
+    # ------------------------------------------------------------------
+    # _append_history behaviour
+    # ------------------------------------------------------------------
+
+    def test_append_history_creates_key(self, service):
+        """_append_history creates the key when it doesn't exist."""
+        service._append_history("new-key", "user text", "assistant text")
+        assert "new-key" in service._history
+        assert service._history["new-key"] == [("user text", "assistant text")]
+
+    def test_append_history_appends_to_existing(self, service):
+        """_append_history appends to an existing key."""
+        service._history["test-key"] = [("first", "reply1")]
+        service._append_history("test-key", "second", "reply2")
+        assert service._history["test-key"] == [("first", "reply1"), ("second", "reply2")]
+
+    def test_append_history_trims_to_max(self, service):
+        """_append_history trims to _MAX_HISTORY_EXCHANGES when over capacity."""
+        for i in range(5):
+            service._append_history("test-key", f"user {i}", f"assistant {i}")
+        assert len(service._history["test-key"]) == 3
+        assert service._history["test-key"][0] == ("user 2", "assistant 2")
+
+    # ------------------------------------------------------------------
+    # reply() integration with mocked HTTP
+    # ------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_reply_success_appends_history(self, service):
+        """A successful reply appends to conversation history."""
+        with patch("bot.services.voice_command.aiohttp.ClientSession.post") as mock_post:
+            mock_resp = AsyncMock()
+            mock_resp.status = 200
+            mock_resp.json = AsyncMock(return_value={
+                "choices": [{"message": {"content": "[shouts] Isto é uma vergonha!"}}]
+            })
+            mock_post.return_value.__aenter__ = AsyncMock(return_value=mock_resp)
+
+            result = await service.reply("hello ventura", requester_name="TestUser", conversation_key="test-key")
+            assert result == "[shouts] Isto é uma vergonha!"
+            assert "test-key" in service._history
+            assert service._history["test-key"] == [("hello ventura", "[shouts] Isto é uma vergonha!")]
+
+    @pytest.mark.asyncio
+    async def test_reply_api_error_does_not_append(self, service):
+        """An API error does not append to conversation history."""
+        with patch("bot.services.voice_command.aiohttp.ClientSession.post") as mock_post:
+            mock_resp = AsyncMock()
+            mock_resp.status = 401
+            mock_resp.text = AsyncMock(return_value="unauthorized")
+            mock_post.return_value.__aenter__ = AsyncMock(return_value=mock_resp)
+
+            result = await service.reply("hello ventura", requester_name="TestUser", conversation_key="test-key")
+            assert result is None
+            assert "test-key" not in service._history
+
+    @pytest.mark.asyncio
+    async def test_reply_empty_response_does_not_append(self, service):
+        """An empty response does not append to conversation history."""
+        with patch("bot.services.voice_command.aiohttp.ClientSession.post") as mock_post:
+            mock_resp = AsyncMock()
+            mock_resp.status = 200
+            mock_resp.json = AsyncMock(return_value={
+                "choices": [{"message": {"content": "   "}}]
+            })
+            mock_post.return_value.__aenter__ = AsyncMock(return_value=mock_resp)
+
+            result = await service.reply("hello ventura", requester_name="TestUser", conversation_key="test-key")
+            assert result is None
+            assert "test-key" not in service._history
+
+    @pytest.mark.asyncio
+    async def test_reply_timeout_does_not_append(self, service):
+        """A timeout does not append to conversation history."""
+        with patch("bot.services.voice_command.aiohttp.ClientSession.post") as mock_post:
+            mock_post.side_effect = asyncio.TimeoutError()
+
+            result = await service.reply("hello ventura", requester_name="TestUser", conversation_key="test-key")
+            assert result is None
+            assert "test-key" not in service._history
+
+    @pytest.mark.asyncio
+    async def test_reply_empty_api_key(self):
+        """When API key is empty, reply returns None without network call."""
+        from bot.services.voice_command import VenturaChatService
+
+        srv = VenturaChatService()
+        srv.api_key = ""
+        assert srv.is_available is False
+
+        result = await srv.reply("hello", requester_name="TestUser", conversation_key="test-key")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_reply_logs_full_payload(self, service):
+        """reply logs the full OpenRouter payload JSON at INFO level,
+        including messages content, prior history, and no auth secrets."""
+        # Seed some history to verify it appears in the log.
+        service._history["test-key"] = [
+            ("prior user text", "prior assistant reply"),
+        ]
+        with patch("bot.services.voice_command.aiohttp.ClientSession.post") as mock_post:
+            mock_resp = AsyncMock()
+            mock_resp.status = 200
+            mock_resp.json = AsyncMock(return_value={
+                "choices": [{"message": {"content": "OK"}}]
+            })
+            mock_post.return_value.__aenter__ = AsyncMock(return_value=mock_resp)
+
+            with patch("bot.services.voice_command.logger.info") as mock_logger_info:
+                result = await service.reply(
+                    "current transcript", requester_name="TestUser",
+                    conversation_key="test-key",
+                )
+                assert result == "OK"
+                # logger.info should be called exactly once
+                mock_logger_info.assert_called_once()
+                call_pos_args = mock_logger_info.call_args[0]
+                assert "[VenturaChat] Request payload" in call_pos_args[0]
+                # The last argument is the JSON payload string.
+                payload_json = call_pos_args[-1]
+                assert isinstance(payload_json, str)
+                # Verify it can be parsed back to a dict.
+                payload = json.loads(payload_json)
+                assert "messages" in payload
+                assert "model" in payload
+                # Verify messages contain the system prompt.
+                messages = payload["messages"]
+                assert messages[0]["role"] == "system"
+                # Verify prior history is included.
+                assert messages[1] == {"role": "user", "content": "prior user text"}
+                assert messages[2] == {"role": "assistant", "content": "prior assistant reply"}
+                # Verify current transcript is included.
+                assert messages[3] == {"role": "user", "content": "current transcript"}
+                # Ensure no API key or Authorization header leaks into log.
+                payload_str = json.dumps(payload_json)
+                assert "OPENROUTER_API_KEY" not in payload_str
+                assert "Authorization" not in payload_str
+                assert "Bearer" not in payload_str
+                assert "test-openrouter-key" not in payload_str
+                # Verify metadata is also in the log format string.
+                log_fmt = call_pos_args[0]
+                assert "conversation_key" in log_fmt
+                assert "context_exchanges" in log_fmt
+
+    # ------------------------------------------------------------------
+    # conversation_key fallback behaviour
+    # ------------------------------------------------------------------
+
+    def test_build_payload_default_key_when_no_key_given(self, service):
+        """_build_request_payload uses 'default' as the fallback key."""
+        payload = service._build_request_payload("hello", None)
+        # No history for 'default', so only system + current
+        assert len(payload["messages"]) == 2
+
+    def test_build_payload_uses_key_to_lookup_history(self, service):
+        """_build_request_payload uses conversation_key to look up history."""
+        service._history["guild:1:user:42"] = [("prev", "resp")]
+        payload = service._build_request_payload("now", None, conversation_key="guild:1:user:42")
+        assert len(payload["messages"]) == 4  # system + pair + current
+
+    def test_different_keys_have_independent_histories(self, service):
+        """Two different conversation keys maintain separate histories."""
+        service._append_history("key-a", "user a1", "asst a1")
+        service._append_history("key-b", "user b1", "asst b1")
+        assert len(service._history["key-a"]) == 1
+        assert len(service._history["key-b"]) == 1
+        assert service._history["key-a"] != service._history["key-b"]
