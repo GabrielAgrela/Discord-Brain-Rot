@@ -146,6 +146,20 @@ Read this when changing uploads, sound ingest, playback, generated sound cards, 
 - The fix: run FIFO writes through `asyncio.to_thread(_write_all_to_fd, live_fifo_fd, chunk)` where `_write_all_to_fd` is a module-level helper in `bot/tts.py` that handles partial writes in a loop. This keeps the event loop free while the thread handles FIFO backpressure.
 - Same principle applies to any future synchronous I/O in an async hot path that can block.
 
+### Live FIFO Interruption (play_slap / play_audio skip)
+
+- When `play_slap()` or `play_audio()` interrupt an active live TTS stream, the FIFO writer in `save_as_mp3_EL` must stop quickly so the per-guild TTS lock is released for subsequent replies.
+- Without a mechanism, the writer can block forever on a full FIFO buffer because `os.O_RDWR` keeps a read end open (so no `SIGPIPE`/`BrokenPipeError`).
+- The fix uses a per-guild `threading.Event` stored in `AudioService._guild_live_tts_interrupt_events`:
+  1. `save_as_mp3_EL` creates a `threading.Event` and passes it to `play_tts_live_stream(interrupt_event=...)`.
+  2. The FIFO is opened with `os.O_RDWR | os.O_NONBLOCK` so `os.write` raises `BlockingIOError` (not hang) when the pipe buffer is full.
+  3. `_write_all_to_fd` accepts the event parameter: on `BlockingIOError` it sleeps 10ms and retries while the event is not set; raises `BrokenPipeError` immediately if the event is set.
+  4. The chunk loop in `save_as_mp3_EL` also checks `interrupt_event.is_set()` before each chunk and breaks early if set.
+  5. `play_slap` / `play_audio` call `AudioService._interrupt_live_tts_stream(guild_id, reason="...")` **before** `_stop_voice_client_and_wait`, which sets the event.
+  6. `play_tts_live_stream`'s `after_playing` callback also sets the event (catching natural FFmpeg exit).
+  7. When interrupted, `save_as_mp3_EL` cleans up: closes the FIFO fd, unlinks the FIFO, removes the partial output file, logs, and returns immediately **without** DB insert or `play_audio` fallback.
+- `VoiceTransformationService.play_tts_live_stream()` passes through `**kwargs` so the new `interrupt_event` parameter flows automatically.
+
 ## AFK Channel Handling
 
 - `AudioService.is_afk_channel(channel)` is the canonical check: compares `channel.guild.afk_channel.id` first, then falls back to `channel.name.lower().startswith('afk')`.

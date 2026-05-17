@@ -2540,7 +2540,7 @@
                     },
                     body: JSON.stringify({
                         action: 'tts',
-                        message: message.slice(0, 500),
+                        message: message,
                         profile,
                         guild_id: getSelectedGuildId() || undefined
                     })
@@ -2603,7 +2603,7 @@
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
-                        message: message.slice(0, 500)
+                        message: message
                     })
                 });
                 const payload = await response.json().catch(() => ({}));
@@ -2616,7 +2616,7 @@
                     return;
                 }
                 if (webTtsMessage && payload.message) {
-                    webTtsMessage.value = payload.message.slice(0, 500);
+                    webTtsMessage.value = payload.message;
                     ttsEnhancedMessageValue = webTtsMessage.value.trim();
                     webTtsMessage.focus();
                 }

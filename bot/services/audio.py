@@ -93,6 +93,11 @@ class AudioService:
         self._connection_timestamps: Dict[int, float] = {}  # Track when a connection was fully established
         self.RECONNECTION_GRACE_PERIOD = 15.0  # Seconds to wait before health checks intervene
         
+        # Per-guild live TTS stream interrupt events (threading.Event).
+        # Set by play_slap / play_audio when they need to unblock a FIFO
+        # writer that is blocked on a full pipe buffer.
+        self._guild_live_tts_interrupt_events: Dict[int, threading.Event] = {}
+
         # Initialize Vosk model for local STT
         try:
             # Silence internal Vosk logs to avoid spamming the console
@@ -297,6 +302,7 @@ class AudioService:
             self._guild_current_duration_seconds = {}
             self._play_request_timestamps = {}
             self._play_pending_count = {}
+            self._guild_live_tts_interrupt_events = {}
         if guild_id not in self._guild_last_played_time:
             self._guild_last_played_time[guild_id] = None
             self._guild_current_sound_message[guild_id] = None
@@ -762,6 +768,25 @@ class AudioService:
         if guild_id not in self._play_pending_count:
             return
         self._play_pending_count[guild_id] = max(0, self._play_pending_count[guild_id] - 1)
+
+    def _interrupt_live_tts_stream(self, guild_id: int, reason: str = "") -> None:
+        """Interrupt any active live TTS stream for a guild.
+
+        Sets the per-guild ``threading.Event`` so that a blocked FIFO
+        writer in ``save_as_mp3_EL`` can unblock and release the
+        per-guild TTS lock.
+
+        Args:
+            guild_id: The Discord guild whose live stream to interrupt.
+            reason: Short description (e.g. ``"slap"``) for logging.
+        """
+        event = self._guild_live_tts_interrupt_events.get(guild_id)
+        if event is not None:
+            print(
+                "[AudioService] Interrupting live TTS stream "
+                f"guild_id={guild_id} reason={reason}"
+            )
+            event.set()
 
     def _is_stt_enabled_for_guild(self, guild: discord.Guild) -> bool:
         """Return whether STT is enabled for the given guild."""
@@ -1466,6 +1491,7 @@ class AudioService:
         requester_avatar_url: str = None,
         sts_thumbnail_url: str = None,
         ready_event: 'asyncio.Event' = None,
+        interrupt_event: 'threading.Event' = None,
     ) -> bool:
         """Play a live-streaming TTS from a POSIX FIFO (named pipe).
 
@@ -1495,6 +1521,10 @@ class AudioService:
             sts_thumbnail_url: STS source thumbnail URL.
             ready_event: Set when ``voice_client.play()`` has been called
                 and FFmpeg is actively reading from the FIFO.
+            interrupt_event: Optional ``threading.Event`` that the caller
+                monitors to abort FIFO writes early (e.g. when ``play_slap``
+                interrupts this stream).  Stored per-guild and also set by
+                the ``after_playing`` callback for natural completion.
 
         Returns:
             ``True`` if playback was started, ``False`` on failure.
@@ -1553,6 +1583,9 @@ class AudioService:
                 options=ffmpeg_options,
             )
 
+            # Capture interrupt event for the after_playing closure
+            _interrupt_event = interrupt_event
+
             def after_playing(error):
                 try:
                     if error:
@@ -1560,6 +1593,10 @@ class AudioService:
                             "[AudioService] Live TTS playback error: %s", error
                         )
                 finally:
+                    # Signal interrupt so a blocked FIFO writer can unblock
+                    # even when playback ends naturally (FFmpeg exit).
+                    if _interrupt_event is not None:
+                        _interrupt_event.set()
                     guild_event = self._guild_playback_done.get(guild_id)
                     if guild_event is not None:
                         self.bot.loop.call_soon_threadsafe(guild_event.set)
@@ -1571,6 +1608,10 @@ class AudioService:
                     )
 
             voice_client.play(source, after=after_playing)
+
+            # Store interrupt event so play_slap / play_audio can find it
+            if interrupt_event is not None:
+                self._guild_live_tts_interrupt_events[guild_id] = interrupt_event
             self._mark_playback_started(
                 guild_id,
                 audio_file,
@@ -1710,6 +1751,11 @@ class AudioService:
                 hasattr(voice_client, "is_paused") and voice_client.is_paused()
             )
             if is_currently_playing:
+                # Interrupt any active live TTS stream before stopping the
+                # voice client so the FIFO writer can unblock early.
+                self._interrupt_live_tts_stream(
+                    guild_id, reason="slap",
+                )
                 self._guild_stop_progress_update[guild_id] = True  # Stop the progress bar animation
                 self.stop_progress_update = True
                 self._cancel_progress_update_task(guild_id)
@@ -1888,6 +1934,11 @@ class AudioService:
                     return False
 
                 was_interrupted = True
+                # Interrupt any active live TTS stream before stopping the
+                # voice client so the FIFO writer can unblock early.
+                self._interrupt_live_tts_stream(
+                    guild_id, reason="interrupted_by_new_sound",
+                )
                 self._guild_stop_progress_update[guild_id] = True
                 self.stop_progress_update = True
                 self._cancel_progress_update_task(guild_id)

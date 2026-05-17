@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import threading
 import time
 import requests
 import urllib.parse
@@ -20,27 +21,50 @@ from bot.database import Database
 logger = logging.getLogger(__name__)
 
 
-def _write_all_to_fd(fd: int, data: bytes) -> None:
+def _write_all_to_fd(fd: int, data: bytes, interrupt_event=None) -> None:
     """Write *data* entirely to *fd*, handling short writes.
+
+    When *interrupt_event* is provided and the write blocks
+    (``BlockingIOError`` / ``EAGAIN`` / ``EWOULDBLOCK``), the file
+    descriptor should have been opened with ``os.O_NONBLOCK`` so that a
+    full pipe buffer produces a ``BlockingIOError`` instead of a
+    permanent hang.  The function will sleep-and-retry while
+    *interrupt_event* is not set, and raise ``BrokenPipeError`` if
+    interrupted.
 
     Args:
         fd: File descriptor (e.g. a FIFO write end).
         data: Bytes to write.
+        interrupt_event: Optional ``threading.Event`` to make the
+            write interruptible when the pipe is full.
 
     Raises:
         BrokenPipeError: If the write end is closed before all bytes
-            are written (or ``os.write`` returns 0).
+            are written, ``os.write`` returns 0, or the write was
+            interrupted via *interrupt_event*.
         OSError: On other I/O errors.
     """
     offset = 0
     while offset < len(data):
-        n = os.write(fd, data[offset:])
-        if n == 0:
-            raise BrokenPipeError(
-                f"write to fd {fd} returned 0 after "
-                f"{offset}/{len(data)} bytes"
-            )
-        offset += n
+        try:
+            n = os.write(fd, data[offset:])
+            if n == 0:
+                raise BrokenPipeError(
+                    f"write to fd {fd} returned 0 after "
+                    f"{offset}/{len(data)} bytes"
+                )
+            offset += n
+        except BlockingIOError:
+            if interrupt_event is None:
+                raise
+            if interrupt_event.is_set():
+                raise BrokenPipeError(
+                    f"write to fd {fd} interrupted after "
+                    f"{offset}/{len(data)} bytes"
+                )
+            # Brief sleep to avoid busy-spinning while the pipe buffer
+            # drains or the interrupt event is set.
+            time.sleep(0.01)
 
 
 class TTS:
@@ -643,7 +667,8 @@ class TTS:
         if self.el_tts_live_playback_enabled:
             live_channel = self._get_default_voice_channel(guild_id=guild_id)
 
-        text = text[:1000]
+        # ElevenLabs TTS API accepts up to 5000 characters per request.
+        text = text[:5000]
         url = self._build_el_tts_url()
         headers = {
             "Accept": "audio/mpeg",
@@ -703,6 +728,7 @@ class TTS:
                         fifo_path: Optional[str] = None
                         live_fifo_fd: Optional[int] = None
                         live_ready_event: Optional[asyncio.Event] = None
+                        live_interrupt_event: Optional[threading.Event] = None
 
                         if should_live:
                             try:
@@ -711,6 +737,7 @@ class TTS:
                                 os.mkfifo(fifo_path)
 
                                 live_ready_event = asyncio.Event()
+                                live_interrupt_event = threading.Event()
                                 live_task = asyncio.create_task(
                                     self.behavior.play_tts_live_stream(
                                         fifo_path=fifo_path,
@@ -723,6 +750,7 @@ class TTS:
                                         requester_avatar_url=requester_avatar_url,
                                         sts_thumbnail_url=sts_thumbnail_url,
                                         ready_event=live_ready_event,
+                                        interrupt_event=live_interrupt_event,
                                     )
                                 )
 
@@ -752,10 +780,17 @@ class TTS:
                                     )
                                     raise RuntimeError("live failed")
 
-                                # Open the FIFO write end with O_RDWR so the
-                                # open never blocks (Linux FIFO semantics).
+                                # Open the FIFO write end with O_RDWR |
+                                # O_NONBLOCK so that 1) open never blocks
+                                # (Linux FIFO semantics) and 2) os.write
+                                # raises BlockingIOError instead of hanging
+                                # when the pipe buffer is full — allowing
+                                # the interrupt_event to unblock the stream.
+                                open_flags = os.O_RDWR
+                                if hasattr(os, 'O_NONBLOCK'):
+                                    open_flags |= os.O_NONBLOCK
                                 live_fifo_fd = os.open(
-                                    fifo_path, os.O_RDWR
+                                    fifo_path, open_flags
                                 )
                                 # Bump pipe buffer to ~256 KB so short
                                 # connection races do not stall the event loop.
@@ -800,6 +835,10 @@ class TTS:
                                 fifo_path = None
                                 live_playback_started = False
 
+                        # Track whether the live stream was externally
+                        # interrupted (e.g. by play_slap).
+                        live_interrupted = False
+
                         # --- Chunk loop: write to file (+ FIFO if live) ---
                         with open(path, "wb") as f:
                             async for chunk in response.content.iter_chunked(
@@ -807,6 +846,19 @@ class TTS:
                             ):
                                 if first_chunk_time is None:
                                     first_chunk_time = time.time()
+
+                                # Check for external interrupt of the live
+                                # stream (play_slap, play_audio skip, etc.).
+                                if (live_playback_started
+                                        and live_interrupt_event is not None
+                                        and live_interrupt_event.is_set()):
+                                    live_interrupted = True
+                                    logger.info(
+                                        "EL_TTS live playback "
+                                        "interrupted/skipped"
+                                    )
+                                    break
+
                                 f.write(chunk)
                                 # Feed the FIFO writer via a thread so the event
                                 # loop stays free to serve Discord interactions
@@ -816,6 +868,7 @@ class TTS:
                                         await asyncio.to_thread(
                                             _write_all_to_fd,
                                             live_fifo_fd, chunk,
+                                            live_interrupt_event,
                                         )
                                     except (BrokenPipeError, OSError) as e:
                                         logger.debug(
@@ -845,6 +898,25 @@ class TTS:
                                 logger.debug(
                                     "EL_TTS FIFO cleanup: %s", e,
                                 )
+
+                        if live_interrupted:
+                            # Remove partial file if it was created
+                            try:
+                                if os.path.exists(path):
+                                    os.remove(path)
+                            except Exception as e:
+                                logger.debug(
+                                    "EL_TTS interrupted file cleanup: %s",
+                                    e,
+                                )
+                            perf_end = time.time()
+                            logger.info(
+                                "EL_TTS live playback interrupted "
+                                "perf_start=%.3f perf_end=%.3f "
+                                "file=%s text_len=%d",
+                                perf_start, perf_end, filename, len(text),
+                            )
+                            return
 
                         file_size = os.path.getsize(path)
                     else:

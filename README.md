@@ -306,6 +306,7 @@ This README is based on the current codebase behavior (not historical README ass
 - `PLAYBACK_QUEUE_INTERVAL` (internal web request bridge polling interval in seconds, default `0.25`)
 - `OPENROUTER_API_KEY` (optional; enables the web TTS Enhance button)
 - `WEB_TTS_ENHANCER_MODEL` (optional; OpenRouter model for web TTS enhancement, default `qwen/qwen3-coder-next`)
+- `WEB_TTS_ENHANCER_MAX_TOKENS` (optional; max tokens for the enhance response, default `8192`, minimum `256`)
 - `OPENROUTER_API_URL` (optional; OpenRouter-compatible chat completions endpoint)
 - `OWNER_USER_IDS` (comma-separated Discord user IDs allowed to run admin-only commands)
 - `AUDIO_LATENCY_MODE` (`low_latency` default, or `balanced` / `high_quality`)

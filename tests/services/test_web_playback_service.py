@@ -327,6 +327,53 @@ def test_queue_control_request_queues_tts_message_payload(tmp_path):
     assert row == ('{"message":"hello from web","profile":"pt"}', "tts", "tts")
 
 
+def test_queue_control_request_queues_tts_message_at_20000_chars(tmp_path):
+    db_path = tmp_path / "web.db"
+    _create_web_tables(db_path)
+
+    long_message = "x" * 20000
+    row_id = queue_control_request(
+        control_action="tts",
+        control_payload={"message": long_message, "profile": "en"},
+        requested_guild_id="359077662742020107",
+        db_path=str(db_path),
+        request_username="Discord User",
+        request_user_id="123",
+        env={},
+    )
+
+    conn = sqlite3.connect(db_path)
+    try:
+        sound_filename, request_type, control_action = conn.execute(
+            "SELECT sound_filename, request_type, control_action FROM playback_queue WHERE id = ?",
+            (row_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    import json
+    parsed = json.loads(sound_filename)
+    assert parsed["message"] == long_message
+    assert request_type == "tts"
+    assert control_action == "tts"
+
+
+def test_queue_control_request_rejects_tts_message_over_20000(tmp_path):
+    db_path = tmp_path / "web.db"
+    _create_web_tables(db_path)
+
+    with pytest.raises(ValueError, match="20000 characters or fewer"):
+        queue_control_request(
+            control_action="tts",
+            control_payload={"message": "x" * 20001, "profile": "en"},
+            requested_guild_id="359077662742020107",
+            db_path=str(db_path),
+            request_username="Discord User",
+            request_user_id="123",
+            env={},
+        )
+
+
 def test_queue_control_request_rejects_empty_tts_message(tmp_path):
     db_path = tmp_path / "web.db"
     _create_web_tables(db_path)

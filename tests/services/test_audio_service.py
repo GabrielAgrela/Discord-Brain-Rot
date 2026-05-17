@@ -668,6 +668,106 @@ class TestAudioService:
         audio_service._wait_for_audio_player_thread.assert_not_awaited()
         voice_client.play.assert_called_once()
 
+    @pytest.mark.asyncio
+    async def test_play_slap_interrupts_live_tts_stream(self, audio_service):
+        """Ensure slap calls _interrupt_live_tts_stream before stopping."""
+        from bot.services.audio import AudioService
+
+        audio_service.ffmpeg_path = "/usr/bin/ffmpeg"
+        audio_service.audio_latency_mode = "low_latency"
+        audio_service.volume = 1.0
+        audio_service._cancel_progress_update_task = Mock()
+        audio_service._stop_voice_client_and_wait = AsyncMock()
+        audio_service._log_perf = Mock()
+        audio_service._interrupt_live_tts_stream = Mock()
+
+        voice_client = Mock()
+        voice_client.is_connected.return_value = True
+        voice_client.is_playing.return_value = True
+        voice_client.is_paused.return_value = False
+        voice_client.play = Mock()
+        voice_client._player = Mock()
+
+        audio_service.ensure_voice_connected = AsyncMock(return_value=voice_client)
+        audio_service._guild_current_sound_message = {}
+        audio_service._guild_current_view = {}
+
+        channel = Mock()
+        channel.guild = Mock(id=789)
+
+        with patch("bot.services.audio.os.path.exists", return_value=True), \
+             patch("bot.services.audio.discord.FFmpegPCMAudio", return_value=Mock()), \
+             patch("bot.services.audio.discord.PCMVolumeTransformer", return_value=Mock()), \
+             patch("bot.services.audio.asyncio.sleep", new=AsyncMock()):
+            result = await AudioService.play_slap(audio_service, channel, "slap.mp3", "tester")
+
+        assert result is True
+        audio_service._interrupt_live_tts_stream.assert_called_once_with(789, reason="slap")
+        audio_service._stop_voice_client_and_wait.assert_awaited_once_with(voice_client)
+
+    def test_interrupt_live_tts_stream_sets_event(self, audio_service):
+        """Verify _interrupt_live_tts_stream sets the stored event."""
+        import threading
+        event = threading.Event()
+        audio_service._guild_live_tts_interrupt_events = {999: event}
+
+        audio_service._interrupt_live_tts_stream(999, reason="test")
+
+        assert event.is_set()
+
+    def test_interrupt_live_tts_stream_handles_missing_event(self, audio_service):
+        """_interrupt_live_tts_stream silently handles guild with no event."""
+        import threading
+        event = threading.Event()
+        audio_service._guild_live_tts_interrupt_events = {999: event}
+
+        # Call for guild without event — no crash
+        audio_service._interrupt_live_tts_stream(888, reason="test")
+
+        # Existing event should be untouched
+        assert not event.is_set()
+
+    @pytest.mark.asyncio
+    async def test_play_tts_live_stream_stores_interrupt_event(self, audio_service):
+        """Ensure play_tts_live_stream stores the interrupt_event per-guild."""
+        from bot.services.audio import AudioService
+        import threading
+        audio_service.ffmpeg_path = "/usr/bin/ffmpeg"
+        audio_service.bot = Mock()
+        audio_service.mute_service = Mock()
+        audio_service.mute_service.is_muted = False
+        audio_service.message_service = Mock()
+        audio_service.message_service.get_bot_channel = Mock()
+        audio_service.image_generator = Mock()
+        audio_service.image_generator.generate_sound_card = AsyncMock(return_value=None)
+
+        interrupt_event = threading.Event()
+
+        voice_client = Mock()
+        voice_client.is_playing.return_value = False
+        is_paused_attr = Mock(return_value=False)
+        voice_client.is_paused = is_paused_attr
+        voice_client.is_connected.return_value = True
+        voice_client._player = None
+
+        audio_service.ensure_voice_connected = AsyncMock(return_value=voice_client)
+
+        channel = Mock()
+        channel.guild.id = 555
+
+        result = await AudioService.play_tts_live_stream(
+            audio_service,
+            fifo_path="/tmp/fake_fifo",
+            audio_file="test_live.mp3",
+            channel=channel,
+            user="tester",
+            interrupt_event=interrupt_event,
+        )
+
+        # Should have stored the event in the guild dict
+        stored = audio_service._guild_live_tts_interrupt_events.get(555)
+        assert stored is interrupt_event
+
     # ------------------------------------------------------------------ #
     # AFK channel detection guards
     # ------------------------------------------------------------------ #
