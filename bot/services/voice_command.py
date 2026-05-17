@@ -8,7 +8,8 @@ post-prompt PCM audio for that user is recorded until silence or max duration.
 The captured audio is sent to Groq Whisper for transcription.  If the
 transcript matches a recognised command verb (e.g. ``play``, ``toca``), a
 done prompt clip is played and the sound is played via SoundService.play_request.
-If no command verb is recognised, the transcript is routed to
+If the command is ``mute``, no prompt is played and the caller activates the
+30-minute mute.  If no command verb is recognised, the transcript is routed to
 ``VenturaChatService`` which sends it to an OpenRouter model (default
 ``qwen/qwen3-coder-next``) for a Ventura parody reply in European Portuguese.
 The reply is then sent to ElevenLabs Ventura TTS and played back.
@@ -474,8 +475,12 @@ def pcm_to_wav(
 # ---------------------------------------------------------------------------
 
 # Command verb aliases recognised in voice transcripts.  The canonical
-# command name is always ``"play"`` so callers do not need to handle
-# Portuguese variants.
+# command name is ``"play"`` for play aliases; ``"mute"`` is also supported
+# and normalised to ``"mute"`` (no trailing argument required).
+#
+# Mute aliases include Portuguese commands (``cala-te`` / ``cala te`` /
+# ``calate`` -- variants likely from Whisper, ``silêncio`` / ``silencio``)
+# and English equivalents (``shut up`` / ``shutup`` / ``quiet``).
 _COMMAND_VERBS: dict[str, str] = {
     "play": "play",
     "toca": "play",
@@ -486,6 +491,16 @@ _COMMAND_VERBS: dict[str, str] = {
     "poe": "play",
     "reproduz": "play",
     "reproduzir": "play",
+    # -- mute aliases --
+    "mute": "mute",
+    "cala-te": "mute",
+    "cala te": "mute",
+    "calate": "mute",
+    "silêncio": "mute",
+    "silencio": "mute",
+    "shut up": "mute",
+    "shutup": "mute",
+    "quiet": "mute",
 }
 
 # Pre-compiled pattern: word-boundary-anchored verb alternation, longest first.
@@ -586,17 +601,31 @@ def parse_voice_command(
     start).  The text *after* the last recognised wake word is used for
     command matching, so preamble before the wake word is ignored.
 
-    Supported command verbs (all normalised to ``"play"``):
+    Supported command verbs:
 
         ``play``, ``toca``, ``tocar``, ``mete``, ``meter``,
         ``põe``, ``poe``, ``reproduz``, ``reproduzir``
+
+    All play aliases normalise to ``"play"``.  ``mute`` and the
+    following aliases are also recognised and all return
+    ``("mute", "")`` (no trailing argument required):
+
+        ``mute``, ``cala-te``, ``cala te``, ``calate``,
+        ``silêncio``, ``silencio``,
+        ``shut up``, ``shutup``, ``quiet``
 
     Examples::
 
         "Ventura, play das páginas."       → ("play", "das páginas")
         "ventura toca das páginas"         → ("play", "das páginas")
         "olha ventura, toca das páginas"   → ("play", "das páginas")
+        "ventura mute"                     → ("mute", "")
+        "ventura mute."                    → ("mute", "")
+        "ventura cala-te"                  → ("mute", "")
+        "ventura silêncio"                 → ("mute", "")
+        "ventura shut up"                  → ("mute", "")
         "play something"                   → ("play", "something")
+        "mute"                             → ("mute", "")
 
     Args:
         transcript: Raw transcript text.
@@ -605,7 +634,7 @@ def parse_voice_command(
             the transcript is expected to start directly with a command.
 
     Returns:
-        ``("play", "<sound name>")`` or ``None``.
+        ``("play", "<sound name>")``, ``("mute", "")``, or ``None``.
     """
     if not transcript or not transcript.strip():
         return None
@@ -638,6 +667,9 @@ def parse_voice_command(
 
     sound_name = _extract_sound_name(text[m.end():])
     if sound_name is None:
+        # Allow "mute" without a trailing sound name argument.
+        if canonical == "mute":
+            return (canonical, "")
         return None
 
     return (canonical, sound_name)

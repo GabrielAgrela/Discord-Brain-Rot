@@ -204,6 +204,132 @@ class TestParseVoiceCommand:
         )
         assert result is None
 
+    # ------------------------------------------------------------------
+    #  Mute command parsing
+    # ------------------------------------------------------------------
+
+    def test_wake_word_mute(self):
+        """``bot mute`` → (mute, '')."""
+        result = self._parse("bot mute")
+        assert result == ("mute", "")
+
+    def test_wake_word_mute_punctuation(self):
+        """``bot mute.`` → (mute, '')."""
+        result = self._parse("bot mute.")
+        assert result == ("mute", "")
+
+    def test_mute_without_wake_word(self):
+        """``mute`` → (mute, '') even without wake word."""
+        result = self._parse("mute")
+        assert result == ("mute", "")
+
+    def test_mute_case_insensitive(self):
+        """``Bot MUTE`` → (mute, '')."""
+        result = self._parse("Bot MUTE")
+        assert result == ("mute", "")
+
+    def test_ventura_mute(self):
+        """``ventura mute`` → (mute, '')."""
+        from bot.services.voice_command import parse_voice_command
+        result = parse_voice_command("ventura mute", wake_words=["ventura"])
+        assert result == ("mute", "")
+
+    def test_ventura_mute_punctuation(self):
+        """``ventura mute.`` → (mute, '')."""
+        from bot.services.voice_command import parse_voice_command
+        result = parse_voice_command("ventura mute.", wake_words=["ventura"])
+        assert result == ("mute", "")
+
+    def test_ventura_mute_with_comma(self):
+        """``ventura, mute.`` → (mute, '')."""
+        from bot.services.voice_command import parse_voice_command
+        result = parse_voice_command("ventura, mute.", wake_words=["ventura"])
+        assert result == ("mute", "")
+
+    def test_play_still_requires_argument(self):
+        """``play`` (without mute) should still return None (no argument)."""
+        assert self._parse("play") is None
+
+    # ------------------------------------------------------------------
+    #  Mute aliases (cala-te, silêncio, shut up, etc.)
+    # ------------------------------------------------------------------
+
+    def test_wake_word_cala_te_hyphen(self):
+        """``bot cala-te`` → (mute, '')."""
+        result = self._parse("bot cala-te")
+        assert result == ("mute", "")
+
+    def test_wake_word_cala_te_space(self):
+        """``bot cala te`` → (mute, '')."""
+        result = self._parse("bot cala te")
+        assert result == ("mute", "")
+
+    def test_wake_word_calate_fused(self):
+        """``bot calate`` → (mute, '')."""
+        result = self._parse("bot calate")
+        assert result == ("mute", "")
+
+    def test_wake_word_silencio_accent(self):
+        """``bot silêncio`` → (mute, '')."""
+        result = self._parse("bot silêncio")
+        assert result == ("mute", "")
+
+    def test_wake_word_silencio_no_accent(self):
+        """``bot silencio`` → (mute, '')."""
+        result = self._parse("bot silencio")
+        assert result == ("mute", "")
+
+    def test_wake_word_shut_up(self):
+        """``bot shut up`` → (mute, '')."""
+        result = self._parse("bot shut up")
+        assert result == ("mute", "")
+
+    def test_wake_word_shutup_fused(self):
+        """``bot shutup`` → (mute, '')."""
+        result = self._parse("bot shutup")
+        assert result == ("mute", "")
+
+    def test_wake_word_quiet(self):
+        """``bot quiet`` → (mute, '')."""
+        result = self._parse("bot quiet")
+        assert result == ("mute", "")
+
+    def test_ventura_cala_te(self):
+        """``ventura cala-te`` → (mute, '')."""
+        from bot.services.voice_command import parse_voice_command
+        result = parse_voice_command("ventura cala-te", wake_words=["ventura"])
+        assert result == ("mute", "")
+
+    def test_ventura_cala_te_punctuation(self):
+        """``ventura cala-te.`` → (mute, '')."""
+        from bot.services.voice_command import parse_voice_command
+        result = parse_voice_command("ventura cala-te.", wake_words=["ventura"])
+        assert result == ("mute", "")
+
+    def test_ventura_silencio(self):
+        """``ventura silêncio`` → (mute, '')."""
+        from bot.services.voice_command import parse_voice_command
+        result = parse_voice_command("ventura silêncio", wake_words=["ventura"])
+        assert result == ("mute", "")
+
+    def test_ventura_quiet(self):
+        """``ventura quiet`` → (mute, '')."""
+        from bot.services.voice_command import parse_voice_command
+        result = parse_voice_command("ventura quiet", wake_words=["ventura"])
+        assert result == ("mute", "")
+
+    def test_play_still_works_with_mute_alias_sound_name(self):
+        """``ventura play cala-te`` → (play, cala-te), not mute."""
+        from bot.services.voice_command import parse_voice_command
+        result = parse_voice_command("ventura play cala-te", wake_words=["ventura"])
+        assert result == ("play", "cala-te")
+
+    def test_play_still_works_with_silencio_sound_name(self):
+        """``ventura play silêncio`` → (play, silêncio), not mute."""
+        from bot.services.voice_command import parse_voice_command
+        result = parse_voice_command("ventura play silêncio", wake_words=["ventura"])
+        assert result == ("play", "silêncio")
+
 
 # ====================================================================
 #  build_voice_request_note

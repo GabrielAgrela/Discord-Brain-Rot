@@ -1547,6 +1547,192 @@ class TestAudioService:
         sink.audio_service._play_voice_command_prompt.assert_awaited_once()
         sink.audio_service.sound_service.play_request.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_handle_voice_command_mute_activates_mute(self):
+        """Verify ``mute`` transcript activates mute and logs action (no slap fallback)."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        sink.guild = Mock()
+        sink.guild.id = 666
+        sink.voice_command_enabled = True
+        sink.voice_command_wake_words = ["ventura"]
+        sink.voice_command_vosk_wake_words = ["ventura"]
+        sink.voice_command_transcript_wake_words = ["ventura"]
+
+        sink.audio_service = Mock()
+        sink.audio_service._voice_command_cooldowns = {}
+        sink.audio_service.voice_command_cooldown_seconds = 5
+        sink.audio_service.voice_command_capture_seconds = 6
+        sink.audio_service.sound_service = AsyncMock()
+        sink.audio_service._play_voice_command_prompt = AsyncMock(return_value=True)
+        sink.audio_service.play_slap = AsyncMock()
+
+        # Mock mute service
+        sink.audio_service.mute_service = Mock()
+        sink.audio_service.mute_service.activate = AsyncMock(return_value=True)
+
+        # Mock action_repo
+        sink.audio_service.action_repo = Mock()
+        sink.audio_service.action_repo.insert = Mock()
+
+        # Behavior with no slap sounds (so play_slap is never called)
+        behavior = Mock()
+        behavior.db.get_sounds = Mock(return_value=[])
+        sink.audio_service._behavior = behavior
+
+        sink._record_voice_command_after_beep = AsyncMock(return_value=b"\x00\x00" * 100)
+
+        mock_voice_service = Mock()
+        mock_voice_service.is_available = True
+        mock_voice_service.transcribe = AsyncMock(return_value="ventura mute")
+        sink.audio_service._get_voice_command_service = Mock(return_value=mock_voice_service)
+
+        await sink._handle_voice_command(666, "MuteUser", Mock())
+
+        # Prompt is called once (start only; no done prompt for mute)
+        assert sink.audio_service._play_voice_command_prompt.await_count == 1
+
+        # No play_request or Ventura chat
+        sink.audio_service.sound_service.play_request.assert_not_called()
+        sink.audio_service._get_ventura_chat_service.assert_not_called()
+
+        # Slap was not called because no slap sounds available
+        sink.audio_service.play_slap.assert_not_called()
+
+        # Mute service was activated with 1800 seconds
+        sink.audio_service.mute_service.activate.assert_awaited_once_with(
+            duration_seconds=1800,
+            requested_by="MuteUser",
+        )
+
+        # Action was logged
+        sink.audio_service.action_repo.insert.assert_called_once_with(
+            "MuteUser", "mute_30_minutes", "", guild_id=666,
+        )
+
+    @pytest.mark.asyncio
+    async def test_handle_voice_command_mute_with_slap(self):
+        """Verify ``mute`` transcript plays a slap before muting when slaps exist."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        sink.guild = Mock()
+        sink.guild.id = 667
+        sink.voice_command_enabled = True
+        sink.voice_command_wake_words = ["ventura"]
+        sink.voice_command_vosk_wake_words = ["ventura"]
+        sink.voice_command_transcript_wake_words = ["ventura"]
+
+        sink.audio_service = Mock()
+        sink.audio_service._voice_command_cooldowns = {}
+        sink.audio_service.voice_command_cooldown_seconds = 5
+        sink.audio_service.voice_command_capture_seconds = 6
+        sink.audio_service.sound_service = AsyncMock()
+        sink.audio_service._play_voice_command_prompt = AsyncMock(return_value=True)
+        sink.audio_service.play_slap = AsyncMock(return_value=True)
+
+        # Mock mute service
+        sink.audio_service.mute_service = Mock()
+        sink.audio_service.mute_service.activate = AsyncMock(return_value=True)
+
+        # Mock action_repo
+        sink.audio_service.action_repo = Mock()
+        sink.audio_service.action_repo.insert = Mock()
+
+        # Behavior with slap sounds available
+        behavior = Mock()
+        mock_slap = (1, "slap-name", "slap-file.mp3", 0, 0, 0, 1, "2024-01-01", 0, None)
+        behavior.db.get_sounds = Mock(return_value=[mock_slap])
+        sink.audio_service._behavior = behavior
+
+        sink._record_voice_command_after_beep = AsyncMock(return_value=b"\x00\x00" * 100)
+
+        mock_voice_service = Mock()
+        mock_voice_service.is_available = True
+        mock_voice_service.transcribe = AsyncMock(return_value="ventura mute")
+        sink.audio_service._get_voice_command_service = Mock(return_value=mock_voice_service)
+
+        await sink._handle_voice_command(667, "SlapMuteUser", Mock())
+
+        # Slap was played
+        sink.audio_service.play_slap.assert_awaited_once()
+
+        # Mute was activated
+        sink.audio_service.mute_service.activate.assert_awaited_once_with(
+            duration_seconds=1800,
+            requested_by="SlapMuteUser",
+        )
+
+        # Action was logged
+        sink.audio_service.action_repo.insert.assert_called_once_with(
+            "SlapMuteUser", "mute_30_minutes", "", guild_id=667,
+        )
+
+    @pytest.mark.asyncio
+    async def test_handle_voice_command_cala_te_mute(self):
+        """Verify ``ventura cala-te`` transcript activates mute (alias integration)."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        sink.guild = Mock()
+        sink.guild.id = 668
+        sink.voice_command_enabled = True
+        sink.voice_command_wake_words = ["ventura"]
+        sink.voice_command_vosk_wake_words = ["ventura"]
+        sink.voice_command_transcript_wake_words = ["ventura"]
+
+        sink.audio_service = Mock()
+        sink.audio_service._voice_command_cooldowns = {}
+        sink.audio_service.voice_command_cooldown_seconds = 5
+        sink.audio_service.voice_command_capture_seconds = 6
+        sink.audio_service.sound_service = AsyncMock()
+        sink.audio_service._play_voice_command_prompt = AsyncMock(return_value=True)
+        sink.audio_service.play_slap = AsyncMock()
+
+        # Mock mute service
+        sink.audio_service.mute_service = Mock()
+        sink.audio_service.mute_service.activate = AsyncMock(return_value=True)
+
+        # Mock action_repo
+        sink.audio_service.action_repo = Mock()
+        sink.audio_service.action_repo.insert = Mock()
+
+        # Behavior with no slap sounds
+        behavior = Mock()
+        behavior.db.get_sounds = Mock(return_value=[])
+        sink.audio_service._behavior = behavior
+
+        sink._record_voice_command_after_beep = AsyncMock(return_value=b"\x00\x00" * 100)
+
+        mock_voice_service = Mock()
+        mock_voice_service.is_available = True
+        mock_voice_service.transcribe = AsyncMock(return_value="ventura cala-te")
+        sink.audio_service._get_voice_command_service = Mock(return_value=mock_voice_service)
+
+        await sink._handle_voice_command(668, "CalaTeUser", Mock())
+
+        # Prompt is called once (start only; no done prompt for mute)
+        assert sink.audio_service._play_voice_command_prompt.await_count == 1
+
+        # No play_request or Ventura chat
+        sink.audio_service.sound_service.play_request.assert_not_called()
+        sink.audio_service._get_ventura_chat_service.assert_not_called()
+
+        # Slap not called because no slap sounds
+        sink.audio_service.play_slap.assert_not_called()
+
+        # Mute service was activated with 1800 seconds
+        sink.audio_service.mute_service.activate.assert_awaited_once_with(
+            duration_seconds=1800,
+            requested_by="CalaTeUser",
+        )
+
+        # Action was logged
+        sink.audio_service.action_repo.insert.assert_called_once_with(
+            "CalaTeUser", "mute_30_minutes", "", guild_id=668,
+        )
+
     # ------------------------------------------------------------------ #
     # Voice command capture feeding in write()
     # ------------------------------------------------------------------ #

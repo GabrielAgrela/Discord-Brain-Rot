@@ -81,16 +81,26 @@ Read this when changing uploads, sound ingest, playback, generated sound cards, 
       - An optional `prompt` field (`GROQ_WHISPER_PROMPT`) can guide transcription, but the default is empty because verbose prompts caused Groq Whisper to hallucinate prompt text or generic Portuguese filler on short/noisy captures.
       - A `temperature` field (`GROQ_WHISPER_TEMPERATURE`, default `0`) is sent for deterministic transcription.
       - A `language` field (`GROQ_WHISPER_LANGUAGE`) is sent; default `"pt"` so Whisper transcribes Portuguese rather than auto-detecting and potentially translating to English. Set env `GROQ_WHISPER_LANGUAGE=` (empty) to restore auto-detect for strongly mixed-language deployments.
-   6. Parses the transcript via `parse_voice_command()` using the combined `voice_command_transcript_wake_words`. The parser:
-      - Finds the **last** wake word in the transcript (not only at the start), so English preamble before "Ventura" is ignored.
-      - Supports both English (`play`) and Portuguese (`toca`, `tocar`, `mete`, `meter`, `põe`, `poe`, `reproduz`, `reproduzir`) command verbs — all normalised to `"play"`.
-      - Returns `("play", "<sound name>")` on match, or `None`.
-   7. **If** the parser returns `("play", "<sound name>")`:
-      - **Plays a done prompt clip** (same mechanism as start, with `wait=True`) as acknowledgment.
-      - Delegates to `SoundService.play_request(sound_name, requester_name, guild=self.guild, request_note=f"play {sound_name}", allow_rejected_exact_fallback=True)` — the fuzzy-matching path used by `/toca`, augmented with:
-        - ``request_note`` — appears as a compact "Heard: play <sound>" pill on the generated sound card image (and in the embed fallback).
-        - ``allow_rejected_exact_fallback=True`` — when the exact name match is blacklisted (rejected), the service does NOT immediately reject; instead it falls through to fuzzy search to find a non-blacklisted close match. This is important because voice commands have no autocomplete, so saying "ventura play despacito" should play "despacito cars.mp3" if that is the closest non-rejected sound.
-    8. **Else** (no recognised play command):
+     6. Parses the transcript via `parse_voice_command()` using the combined `voice_command_transcript_wake_words`. The parser:
+
+        - Supports both English (`play`) and Portuguese (`toca`, `tocar`, `mete`, `meter`, `põe`, `poe`, `reproduz`, `reproduzir`) command verbs — all normalised to `"play"`. Also supports `"mute"` and the following mute aliases — all returning `("mute", "")` (no trailing argument required):
+
+          ``mute``, ``cala-te``, ``cala te``, ``calate``,
+          ``silêncio``, ``silencio``,
+          ``shut up``, ``shutup``, ``quiet``
+
+        - Returns `("play", "<sound name>")`, `("mute", "")`, or `None`.
+    7. **If** the parser returns `("play", "<sound name>")`:
+       - **Plays a done prompt clip** (same mechanism as start, with `wait=True`) as acknowledgment.
+       - Delegates to `SoundService.play_request(sound_name, requester_name, guild=self.guild, request_note=f"play {sound_name}", allow_rejected_exact_fallback=True)` — the fuzzy-matching path used by `/toca`, augmented with:
+         - ``request_note`` — appears as a compact "Heard: play <sound>" pill on the generated sound card image (and in the embed fallback).
+         - ``allow_rejected_exact_fallback=True`` — when the exact name match is blacklisted (rejected), the service does NOT immediately reject; instead it falls through to fuzzy search to find a non-blacklisted close match. This is important because voice commands have no autocomplete, so saying "ventura play despacito" should play "despacito cars.mp3" if that is the closest non-rejected sound.
+    8. **If** the parser returns `("mute", "")`:
+       - **No done prompt** is played.
+       - The bot attempts a best-effort random slap playback (via `AudioService.play_slap`), then calls `MuteService.activate(duration_seconds=1800)` to mute the bot for 30 minutes.
+       - An action `"mute_30_minutes"` is logged via `ActionRepository.insert(requester_name, "mute_30_minutes", "", guild_id=...)`.
+       - This mirrors the behavior of the mute button and web mute control.
+     9. **Else** (no recognised play/mute command):
        - **No done prompt** is played.
        - A `request_note` is computed from the transcript via `build_voice_request_note()` (strips the last wake word and trailing punctuation) so the generated TTS sound card shows the user's heard command as a ``TTS:`` footer pill — the same footer style used for play commands.
        - The transcript is sent to `VenturaChatService.reply()` (OpenRouter Qwen Coder model) which returns short European Portuguese text with ElevenLabs square-bracket performance tags.

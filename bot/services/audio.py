@@ -3463,6 +3463,36 @@ class KeywordDetectionSink(sinks.Sink):
                 )
                 return
 
+            elif command == "mute":
+                # ---- voice-command mute: best-effort slap, activate mute ---
+                # No done prompt (mirrors the mute button/web mute behavior).
+                print(f"[VoiceCommand] Executing mute by {requester_name}")
+
+                # Best-effort random slap playback (non-blocking).
+                behavior = getattr(self.audio_service, "_behavior", None)
+                slap_sounds = []
+                if behavior is not None:
+                    slap_sounds = behavior.db.get_sounds(
+                        slap=True, num_sounds=100, guild_id=self.guild.id,
+                    )
+                if slap_sounds:
+                    random_slap = random.choice(slap_sounds)
+                    await self.audio_service.play_slap(
+                        channel, random_slap[2], requester_name,
+                    )
+
+                # Activate mute for 30 minutes (1800 seconds).
+                await self.audio_service.mute_service.activate(
+                    duration_seconds=1800,
+                    requested_by=requester_name,
+                )
+
+                # Log the action.
+                self.audio_service.action_repo.insert(
+                    requester_name, "mute_30_minutes", "", guild_id=self.guild.id,
+                )
+                return
+
         # ---- Non-play: Ventura Chat + ElevenLabs TTS --------------------
         print(f"[VoiceCommand] No recognised command in transcript from {requester_name}; routing to Ventura chat")
 
