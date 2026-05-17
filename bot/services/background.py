@@ -136,12 +136,6 @@ class BackgroundService:
                 if target_channel:
                     print(f"[BackgroundService] Auto-joining '{target_channel.name}' in '{guild.name}'")
                     await self.audio_service.ensure_voice_connected(target_channel)
-                    sounds = self.sound_repo.get_random_sounds(num_sounds=1, guild_id=guild.id)
-                    if sounds:
-                        sound = sounds[0]
-                        print(f"[BackgroundService] Playing startup sound '{sound[1]}' in '{guild.name}'")
-                        await self.audio_service.play_audio(target_channel, sound[2], "startup")
-                        self.action_repo.insert("startup", "play_startup_sound", sound[0], guild_id=guild.id)
             except Exception as e:
                 print(f"[BackgroundService] Failed to auto-join in '{guild.name}': {e}")
 

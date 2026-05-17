@@ -793,10 +793,10 @@ class TestAutoJoinChannels:
     @patch("bot.services.background.ActionRepository")
     @patch("bot.services.background.SoundRepository")
     @patch("bot.services.background.asyncio.sleep", new_callable=AsyncMock)
-    async def test_auto_join_logs_startup_sound_play(
+    async def test_auto_join_does_not_play_startup_sound(
         self, _mock_sleep, _mock_sound_repo_cls, _mock_action_repo_cls
     ):
-        """Ensure startup autojoin playback is persisted in actions for audit visibility."""
+        """Ensure startup autojoin only joins the channel and does not play a sound."""
         from bot.services.background import BackgroundService
 
         voice_channel = Mock()
@@ -814,7 +814,7 @@ class TestAutoJoinChannels:
             sound_service=Mock(),
             behavior=Mock(),
         )
-        service.sound_repo.get_random_sounds = Mock(return_value=[(55, "orig.mp3", "clip.mp3")])
+        service.sound_repo = _mock_sound_repo_cls()
 
         settings = Mock(autojoin_enabled=True, default_voice_channel_id="111222333")
         service.guild_settings_service = Mock()
@@ -822,13 +822,14 @@ class TestAutoJoinChannels:
 
         await service._auto_join_channels()
 
-        audio_service.play_audio.assert_awaited_once_with(voice_channel, "clip.mp3", "startup")
-        service.action_repo.insert.assert_called_once_with(
-            "startup",
-            "play_startup_sound",
-            55,
-            guild_id=999,
-        )
+        # Must join the configured channel
+        audio_service.ensure_voice_connected.assert_awaited_once_with(voice_channel)
+        # Must NOT play any audio on startup
+        audio_service.play_audio.assert_not_awaited()
+        # Must NOT fetch random sounds
+        service.sound_repo.get_random_sounds.assert_not_called()
+        # Must NOT insert a startup action
+        service.action_repo.insert.assert_not_called()
 
     @pytest.mark.asyncio
     @patch("bot.services.background.ActionRepository")
