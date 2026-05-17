@@ -75,6 +75,39 @@ Read this when changing `WebPage.py`, `bot/web/`, web repositories/services, tem
 - Web slap/mute controls belong inside the control-room panel, not the nav header.
 - Keep control-room metrics as a flat status strip, not boxed cards inside the rounded banner.
 - Verify desktop control-room/table rhythm in the 1920x1080 browser-window check; the 7-row tables rely on compact desktop header/row heights.
-- On mobile, the control room should be a compact two-row controller: status plus slap/mute buttons on row one, voice facts on row two.
+- On mobile, the control room should be a compact two-row controller: row one has status plus slap/mute, row two has voice, system (compact CPU/RAM), upload, and TTS.
 - Mobile play/slap/mute buttons need direct `touchend` handlers with duplicate-click suppression.
 - On mobile, nav intentionally scrolls away and the control-room panel is the sticky top element. Do not make both sticky.
+
+## System Monitor (`WebSystemMonitorService` / `HostSystemMonitorService`)
+
+### Invariant — host process collection belongs in the bot container
+
+Only the bot container has ``pid: host`` in ``docker-compose.yml``, so **all host-level per-process data collection must happen in the bot**, not the web container. The web container sees only its own Python worker processes when enumerating ``/proc/[pid]/``.
+
+### Architecture
+
+1. **``HostSystemMonitorService``** (``bot/services/system_monitor.py``) — reads ``/proc/stat``, ``/proc/meminfo``, ``/proc/[pid]/stat``, ``/proc/[pid]/status``, and ``/proc/[pid]/cmdline`` from the **bot's** perspective (which shows real host processes because of ``pid: host``). It is two-sample: the first call warms, subsequent calls compute CPU-percent deltas. It also resolves descriptive display names via cmdline analysis (e.g. "WebPage.py" instead of "python"). Instantiated and used by ``BackgroundService.web_system_monitor_status_loop``.
+
+2. **``WebSystemStatusRepository``** (``bot/repositories/web_system_status.py``) — lightweight singleton table ``web_system_status`` with columns ``id`` (always 1), ``snapshot_json`` (TEXT), and ``updated_at`` (TEXT). The bot background loop writes a snapshot every 1 s. The web endpoint reads it.
+
+3. **``WebSystemMonitorService``** (``bot/services/web_system_monitor.py``) — the Flask-side service. It now reads the persisted snapshot from ``WebSystemStatusRepository`` instead of directly reading ``/proc``. If the snapshot is missing or stale (>5 s), it returns ``"available": false`` with ``"status_label": "Waiting for host monitor"``.
+
+### Dev fallback
+
+Set ``WEB_SYSTEM_MONITOR_ALLOW_WEB_PROC_FALLBACK=1`` to fall back to reading ``/proc`` from the web container (two-sample, container-local processes only). This is **not** the recommended configuration; use only for local testing without the bot.
+
+### Env vars
+
+- ``WEB_SYSTEM_MONITOR_PROCFS_ROOT`` — override `/proc` for ``WebSystemMonitorService`` fallback (testing).
+- ``HOST_SYSTEM_MONITOR_PROCFS_ROOT`` — override `/proc` for ``HostSystemMonitorService`` (testing).
+
+### Tests
+
+- ``tests/services/test_system_monitor_service.py`` — covers ``HostSystemMonitorService`` with fake ``/proc`` trees and ``WebSystemMonitorService`` with a mocked repository.
+- ``tests/repositories/test_web_system_status_repository.py`` — covers upsert, read, staleness, and edge cases.
+- ``tests/test_webpage.py`` system-monitor endpoint tests replace the service with fakes and verify route behaviour.
+
+### Page UI
+
+The control-room host metric shows ``Host CPU & RAM`` with a dropdown. The process section is labelled ``Top CPU`` (reflecting that these are the top host-wide CPU consumers). The footnote shows the bot-side sample interval (~1 s). When no snapshot is available the dropdown shows "Waiting for host monitor".

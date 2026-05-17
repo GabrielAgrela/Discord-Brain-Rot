@@ -173,9 +173,11 @@ def web_client(tmp_path, monkeypatch):
 
     original_db_path = app.config["DATABASE_PATH"]
     original_sounds_dir = app.config["SOUNDS_DIR"]
+    original_debug = app.debug
     sounds_dir = tmp_path / "Sounds"
     sounds_dir.mkdir()
     app.config.update(TESTING=True, DATABASE_PATH=str(db_path), SOUNDS_DIR=str(sounds_dir))
+    app.debug = True  # auto_reload for Jinja test isolation
 
     try:
         with app.test_client() as client:
@@ -183,6 +185,7 @@ def web_client(tmp_path, monkeypatch):
     finally:
         app.config["DATABASE_PATH"] = original_db_path
         app.config["SOUNDS_DIR"] = original_sounds_dir
+        app.debug = original_debug
 
 
 def test_play_sound_endpoint_sends_request_with_inferred_single_guild(web_client):
@@ -2451,3 +2454,108 @@ def test_analytics_endpoints_do_not_censor_logged_in_voice_user(web_client):
         "timestamp": "2026-04-01 12:01:00",
         "display_sound": "nig-ventura-27-07-2.mp3",
     }
+
+
+# ======================================================================
+# System Monitor Endpoint
+# ======================================================================
+
+
+def test_system_monitor_endpoint_returns_json_safely(web_client):
+    """The system monitor endpoint returns a valid JSON payload."""
+    client, _ = web_client
+
+    response = client.get("/api/system_monitor/status")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert isinstance(payload, dict)
+    # Must be JSON-serializable regardless of backend
+    assert "available" in payload
+    assert "total_cpu_percent" in payload
+    assert "ram_total_bytes" in payload
+    assert "top_processes" in payload
+
+
+def test_system_monitor_endpoint_clamps_limit(web_client):
+    """The limit query parameter is clamped to 1-8."""
+    client, _ = web_client
+
+    # limit=0 → clamped to 1
+    response = client.get("/api/system_monitor/status?limit=0")
+    assert response.status_code == 200
+
+    # limit=999 → clamped to 8
+    response = client.get("/api/system_monitor/status?limit=999")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert len(payload.get("top_processes", [])) <= 8
+
+    # limit=abc → defaults to 4
+    response = client.get("/api/system_monitor/status?limit=abc")
+    assert response.status_code == 200
+
+
+def test_system_monitor_endpoint_handles_exception(web_client, monkeypatch):
+    """When the underlying service raises, the endpoint returns 500."""
+    client, _ = web_client
+
+    class BrokenService:
+        def get_snapshot(self, top_limit=4):
+            raise RuntimeError("boom")
+
+    original = app.extensions.get("web_system_monitor_service")
+    app.extensions["web_system_monitor_service"] = BrokenService()
+    try:
+        response = client.get("/api/system_monitor/status")
+        assert response.status_code == 500
+        payload = response.get_json()
+        assert payload["available"] is False
+        assert payload["error"] == "System monitor unavailable"
+    finally:
+        if original is None:
+            app.extensions.pop("web_system_monitor_service", None)
+        else:
+            app.extensions["web_system_monitor_service"] = original
+
+
+def test_system_monitor_fake_service_returns_expected_payload(web_client):
+    """Replace the real service with a fake and verify the endpoint passes it through."""
+    client, _ = web_client
+
+    class FakeService:
+        def get_snapshot(self, top_limit=4):
+            return {
+                "available": True,
+                "total_cpu_percent": 23.5,
+                "ram_total_bytes": 17179869184,
+                "ram_available_bytes": 8589934592,
+                "ram_used_bytes": 8589934592,
+                "ram_percent": 50.0,
+                "cpu_warming": False,
+                "sample_interval_seconds": 1.0,
+                "updated_at_unix": 1234567890.0,
+                "top_processes": [
+                    {
+                        "pid": 101,
+                        "name": "test-proc",
+                        "cpu_percent": 10.5,
+                        "memory_rss_bytes": 4194304,
+                        "memory_percent": 0.02,
+                    }
+                ],
+            }
+
+    original = app.extensions.get("web_system_monitor_service")
+    app.extensions["web_system_monitor_service"] = FakeService()
+    try:
+        response = client.get("/api/system_monitor/status?limit=3")
+        assert response.status_code == 200
+        payload = response.get_json()
+        assert payload["total_cpu_percent"] == 23.5
+        assert len(payload["top_processes"]) == 1
+        assert payload["top_processes"][0]["name"] == "test-proc"
+    finally:
+        if original is None:
+            app.extensions.pop("web_system_monitor_service", None)
+        else:
+            app.extensions["web_system_monitor_service"] = original

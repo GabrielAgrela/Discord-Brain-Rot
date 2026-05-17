@@ -112,6 +112,7 @@
         let webControlMuteIsMuted = false;
         let webControlStateRequestInFlight = false;
         let controlRoomRequestInFlight = false;
+        let systemMonitorRequestInFlight = false;
         let latestControlRoomStatus = {};
         let previousNowPlayingText = '';
         let currentPageActions = 1;
@@ -622,6 +623,147 @@
                 console.error('Error loading control room status:', error);
             } finally {
                 controlRoomRequestInFlight = false;
+            }
+        }
+
+        // ── System Monitor ──────────────────────────────────────────
+
+        function formatBytesForSystem(bytes) {
+            if (!Number.isFinite(bytes) || bytes < 0) return '--';
+            if (bytes >= 1073741824) return (bytes / 1073741824).toFixed(1) + ' GB';
+            if (bytes >= 1048576) return (bytes / 1048576).toFixed(1) + ' MB';
+            if (bytes >= 1024) return (bytes / 1024).toFixed(0) + ' KB';
+            return bytes + ' B';
+        }
+
+        function formatPercentForSystem(value) {
+            if (value === null || value === undefined || !Number.isFinite(value)) return '--';
+            return value.toFixed(1) + '%';
+        }
+
+        function updateSystemMonitor(payload) {
+            const summary = document.getElementById('systemMonitorSummary');
+            const totalCpu = document.getElementById('systemMonitorTotalCpu');
+            const totalRam = document.getElementById('systemMonitorTotalRam');
+            const processList = document.getElementById('systemMonitorProcessList');
+            const footnote = document.getElementById('systemMonitorFootnote');
+
+            if (!payload.available) {
+                if (summary) summary.textContent = 'CPU -- \u00B7 RAM --';
+                if (totalCpu) totalCpu.textContent = '--';
+                if (totalRam) totalRam.textContent = '--';
+                if (processList) processList.innerHTML = '<p class="system-monitor-empty">' + (payload.status_label || 'Unavailable') + '</p>';
+                if (footnote) footnote.textContent = '';
+                return;
+            }
+
+            const cpuText = payload.cpu_warming
+                ? 'CPU sampling\u2026'
+                : 'CPU ' + formatPercentForSystem(payload.total_cpu_percent);
+            const ramText = 'RAM ' + formatBytesForSystem(payload.ram_used_bytes) + ' / ' + formatBytesForSystem(payload.ram_total_bytes);
+            const ramPercent = payload.ram_percent !== null && payload.ram_percent !== undefined
+                ? ' (' + payload.ram_percent.toFixed(1) + '%)'
+                : '';
+
+            if (summary) {
+                summary.textContent = cpuText + ' \u00B7 ' + ramText;
+            }
+
+            if (totalCpu) {
+                totalCpu.textContent = cpuText;
+            }
+            if (totalRam) {
+                totalRam.textContent = ramText + ramPercent;
+            }
+
+            if (processList) {
+                    const processes = Array.isArray(payload.top_processes) ? payload.top_processes : [];
+                    if (processes.length === 0) {
+                        processList.innerHTML = '<p class="system-monitor-empty">' + (payload.cpu_warming ? 'Sampling\u2026' : (payload.status_label || 'No process data')) + '</p>';
+                    } else {
+                        const fragment = document.createDocumentFragment();
+                        processes.forEach(function(proc) {
+                            const row = document.createElement('div');
+                            row.className = 'system-monitor-process-row';
+
+                            const name = document.createElement('span');
+                            name.className = 'system-monitor-process-name';
+                            name.textContent = proc.display_name || proc.name || 'pid:' + proc.pid;
+
+                        const cpu = document.createElement('span');
+                        cpu.className = 'system-monitor-process-cpu';
+                        cpu.textContent = formatPercentForSystem(proc.cpu_percent);
+
+                        const mem = document.createElement('span');
+                        mem.className = 'system-monitor-process-mem';
+                        mem.textContent = formatBytesForSystem(proc.memory_rss_bytes);
+
+                        row.append(name, cpu, mem);
+                        fragment.appendChild(row);
+                    });
+                    processList.replaceChildren(fragment);
+                }
+            }
+
+            if (footnote) {
+                const interval = payload.sample_interval_seconds;
+                if (Number.isFinite(interval) && interval > 0) {
+                    footnote.textContent = interval.toFixed(1) + 's sample interval';
+                } else {
+                    footnote.textContent = '';
+                }
+            }
+        }
+
+        async function refreshSystemMonitorStatus() {
+            if (systemMonitorRequestInFlight) {
+                return;
+            }
+
+            systemMonitorRequestInFlight = true;
+            try {
+                const response = await fetch('/api/system_monitor/status?limit=4');
+                if (!response.ok) {
+                    return;
+                }
+                const payload = await response.json();
+                updateSystemMonitor(payload);
+            } catch (error) {
+                // Silently fail – the summary will keep showing the last good value.
+            } finally {
+                systemMonitorRequestInFlight = false;
+            }
+        }
+
+        function openSystemMonitorDropdown() {
+            const dropdown = document.getElementById('systemMonitorDropdown');
+            const button = document.getElementById('systemMonitorButton');
+            if (!dropdown) return;
+            dropdown.classList.add('open');
+            dropdown.setAttribute('aria-hidden', 'false');
+            if (button) {
+                button.setAttribute('aria-expanded', 'true');
+            }
+        }
+
+        function closeSystemMonitorDropdown() {
+            const dropdown = document.getElementById('systemMonitorDropdown');
+            const button = document.getElementById('systemMonitorButton');
+            if (!dropdown) return;
+            dropdown.classList.remove('open');
+            dropdown.setAttribute('aria-hidden', 'true');
+            if (button) {
+                button.setAttribute('aria-expanded', 'false');
+            }
+        }
+
+        function toggleSystemMonitorDropdown() {
+            const dropdown = document.getElementById('systemMonitorDropdown');
+            if (!dropdown) return;
+            if (dropdown.classList.contains('open')) {
+                closeSystemMonitorDropdown();
+            } else {
+                openSystemMonitorDropdown();
             }
         }
 
@@ -3249,6 +3391,41 @@
             Promise.all([fetchActions(), fetchFavorites(), fetchAllSounds(), refreshWebControlState(), refreshControlRoomStatus()]);
         }, 2000);
 
+        // System monitor polls every 1 s (separate from the 2 s table / control-room interval).
+        setInterval(refreshSystemMonitorStatus, 1000);
+
+        // ── System Monitor Dropdown ──────────────────────────────────
+        const systemMonitorButton = document.getElementById('systemMonitorButton');
+        const systemMonitorDropdown = document.getElementById('systemMonitorDropdown');
+
+        if (systemMonitorButton) {
+            systemMonitorButton.addEventListener('click', function(event) {
+                event.stopPropagation();
+                toggleSystemMonitorDropdown();
+            });
+        }
+
+        if (systemMonitorDropdown) {
+            systemMonitorDropdown.addEventListener('click', function(event) {
+                event.stopPropagation();
+            });
+        }
+
+        document.addEventListener('click', function(event) {
+            const button = document.getElementById('systemMonitorButton');
+            const dropdown = document.getElementById('systemMonitorDropdown');
+            if (!button || !dropdown) return;
+            if (!button.contains(event.target) && !dropdown.contains(event.target)) {
+                closeSystemMonitorDropdown();
+            }
+        });
+
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'Escape') {
+                closeSystemMonitorDropdown();
+            }
+        });
+
         Object.keys(fetchersByEndpoint).forEach(applyTableGeometry);
         Object.keys(fetchersByEndpoint).forEach(endpoint => {
             updateResultMeta(endpoint, initialSoundboardData?.[endpoint] || {}, 1);
@@ -3261,6 +3438,7 @@
         document.querySelectorAll('.web-control-button').forEach(applyWebControlButtonState);
         refreshWebControlState();
         refreshControlRoomStatus();
+        refreshSystemMonitorStatus();
         loadUploadInbox();
         fitActionBadges();
 

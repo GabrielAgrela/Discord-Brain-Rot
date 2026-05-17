@@ -13,7 +13,7 @@
                 </div>
             </div>
             <div class="control-room-metrics">
-                <div class="control-room-metric" id="controlRoomVoiceMetric">
+                <div class="control-room-metric control-room-metric--voice" id="controlRoomVoiceMetric">
                     <span class="control-room-metric-label">Voice</span>
                     <button type="button" id="controlRoomVoiceButton" class="control-room-voice-button"
                         aria-haspopup="dialog" aria-label="Show voice channel members" disabled>
@@ -27,7 +27,35 @@
                         <div id="voiceMembersDropdownList" class="voice-members-dropdown-list"></div>
                     </div>
                 </div>
-                <div class="control-room-metric control-room-metric--action">
+                <div class="control-room-metric control-room-metric--system" id="controlRoomSystemMetric">
+                    <span class="control-room-metric-label">Host</span>
+                    <button type="button" id="systemMonitorButton" class="control-room-system-button"
+                        aria-haspopup="dialog" aria-label="Show system resource usage" aria-expanded="false" aria-controls="systemMonitorDropdown">
+                        <strong id="systemMonitorSummary">CPU -- · RAM --</strong>
+                    </button>
+                    <div id="systemMonitorDropdown" class="system-monitor-dropdown" aria-hidden="true">
+                        <div class="system-monitor-dropdown-header">
+                            <p class="card-kicker">System Resources</p>
+                            <h3 class="system-monitor-dropdown-title">Host CPU &amp; RAM</h3>
+                        </div>
+                        <div id="systemMonitorTotals" class="system-monitor-totals">
+                            <div class="system-monitor-total-row">
+                                <span class="system-monitor-total-label">CPU</span>
+                                <span class="system-monitor-total-value" id="systemMonitorTotalCpu">--</span>
+                            </div>
+                            <div class="system-monitor-total-row">
+                                <span class="system-monitor-total-label">RAM</span>
+                                <span class="system-monitor-total-value" id="systemMonitorTotalRam">--</span>
+                            </div>
+                        </div>
+                        <div id="systemMonitorProcesses" class="system-monitor-processes">
+                            <p class="card-kicker">Top CPU</p>
+                            <div id="systemMonitorProcessList" class="system-monitor-process-list"></div>
+                        </div>
+                        <p id="systemMonitorFootnote" class="system-monitor-footnote"></p>
+                    </div>
+                </div>
+                <div class="control-room-metric control-room-metric--upload control-room-metric--action">
                     <span class="control-room-metric-label">Upload</span>
                     <button type="button" id="webUploadOpenButton"
                         class="control-room-metric-button web-upload-control-button{% if not discord_user %} login-required{% endif %}"
@@ -36,7 +64,7 @@
                         {% if discord_user %}⬆️{% else %}🔒{% endif %}
                     </button>
                 </div>
-                <div class="control-room-metric control-room-metric--action">
+                <div class="control-room-metric control-room-metric--tts control-room-metric--action">
                     <span class="control-room-metric-label">TTS</span>
                     <button type="button" id="controlRoomTtsButton"
                         class="control-room-metric-button web-control-button{% if not discord_user %} login-required{% endif %}"
@@ -46,7 +74,7 @@
                         {% if discord_user %}💬{% else %}🔒{% endif %}
                     </button>
                 </div>
-                <div class="control-room-metric control-room-metric--action">
+                <div class="control-room-metric control-room-metric--slap control-room-metric--action">
                     <span class="control-room-metric-label">Slap</span>
                     <button type="button" id="controlRoomSlapButton"
                         class="control-room-metric-button web-control-button{% if not discord_user %} login-required{% endif %}"
@@ -56,7 +84,7 @@
                         {% if discord_user %}👋{% else %}🔒{% endif %}
                     </button>
                 </div>
-                <div class="control-room-metric control-room-metric--action">
+                <div class="control-room-metric control-room-metric--mute control-room-metric--action">
                     <span class="control-room-metric-label">Mute</span>
                     <button type="button" id="controlRoomMuteButton"
                         class="control-room-metric-button web-control-button{% if not discord_user %} login-required{% endif %}"

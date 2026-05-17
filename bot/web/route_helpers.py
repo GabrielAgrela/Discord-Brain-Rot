@@ -239,6 +239,23 @@ def _get_web_control_room_service() -> WebControlRoomService:
     )
 
 
+def _get_web_system_monitor_service() -> WebSystemMonitorService:
+    """Return the shared web system monitor service."""
+    from bot.repositories.web_system_status import WebSystemStatusRepository
+    from bot.services.web_system_monitor import WebSystemMonitorService
+
+    service = current_app.extensions.get("web_system_monitor_service")
+    if service is None:
+        service = WebSystemMonitorService(
+            repository=WebSystemStatusRepository(
+                db_path=current_app.config["DATABASE_PATH"],
+                use_shared=False,
+            )
+        )
+        current_app.extensions["web_system_monitor_service"] = service
+    return service
+
+
 def _get_web_tts_enhancer_service() -> WebTtsEnhancerService:
     """Return the shared web TTS enhancer service."""
     service = current_app.extensions.get("web_tts_enhancer_service")

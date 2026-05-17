@@ -11,9 +11,15 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Tuple
 import discord
 from discord.ext import tasks
-from bot.repositories import SoundRepository, ActionRepository, WebControlRoomRepository
+from bot.repositories import (
+    SoundRepository,
+    ActionRepository,
+    WebControlRoomRepository,
+    WebSystemStatusRepository,
+)
 from bot.downloaders.sound import SoundDownloader
 from bot.services.guild_settings import GuildSettingsService
+from bot.services.system_monitor import HostSystemMonitorService
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +44,12 @@ class BackgroundService:
         self.sound_repo = SoundRepository()
         self.action_repo = ActionRepository()
         self.web_control_room_repo = WebControlRoomRepository()
+        self.web_system_status_repo = WebSystemStatusRepository()
         self.guild_settings_service = GuildSettingsService()
+
+        # Host system monitor (collects host CPU/RAM/top processes)
+        self._host_system_monitor = HostSystemMonitorService()
+        self._host_monitor_warmed = False
         
         self._started = False
         self._perf_tick_rate_seconds = max(
@@ -106,6 +117,8 @@ class BackgroundService:
                 self.performance_telemetry_loop.start()
             if not self.web_control_room_status_loop.is_running():
                 self.web_control_room_status_loop.start()
+            if not self.web_system_monitor_status_loop.is_running():
+                self.web_system_monitor_status_loop.start()
             if self._weekly_wrapped_enabled and not self.weekly_wrapped_scheduler_loop.is_running():
                 self.weekly_wrapped_scheduler_loop.start()
             if self._rlstore_notify_enabled and not self.rlstore_notification_loop.is_running():
@@ -1209,6 +1222,22 @@ class BackgroundService:
                 )
         except Exception as e:
             print(f"[BackgroundService] Error updating web control room status: {e}")
+
+    @tasks.loop(seconds=1)
+    async def web_system_monitor_status_loop(self):
+        """Collect host CPU/RAM/top processes and persist to DB every 1 s."""
+        try:
+            snapshot = self._host_system_monitor.get_snapshot(top_limit=8)
+            if snapshot.get("available"):
+                self._host_monitor_warmed = True
+            if self._host_monitor_warmed:
+                self.web_system_status_repo.upsert_snapshot(snapshot)
+        except Exception as e:
+            logger.error(
+                "[BackgroundService] Error in host system monitor loop: %s",
+                e,
+                exc_info=True,
+            )
 
     @tasks.loop(minutes=5)
     async def weekly_wrapped_scheduler_loop(self):

@@ -125,7 +125,7 @@ This README is based on the current codebase behavior (not historical README ass
 ### Web Soundboard
 - `GET /` shows the web soundboard with All Sounds as the primary library, plus recent actions and favorites.
 - Multi-guild web deployments expose a guild selector; soundboard tables, control-room status, play/control requests, and uploads include the selected `guild_id` instead of relying on implicit backend inference.
-- A web control-room panel shows live bot status: current sound/requester with a playback progress bar and elapsed/total time, voice channel, mute state, and quick upload/TTS/Slap/mute controls; clicking the voice channel opens the current user/avatar list.
+- A web control-room panel shows live bot status: current sound/requester with a playback progress bar and elapsed/total time, voice channel, mute state, and quick upload/TTS/Slap/mute controls; clicking the voice channel opens the current user/avatar list. A host metric in the control-room strip shows live CPU and RAM totals alongside top host CPU-consuming processes (updated once per second). Host process data is collected by the bot container (which has host PID access) and persisted to the database every 1 second; the web endpoint reads the persisted snapshot.
 - Favorites and All Sounds rows show MP3 duration under the sound name when the file is available on disk; hovering a sound also shows Discord-card-style `Added` date and uploader.
 - Authenticated users can open the web upload modal from the control-room upload icon and queue a sound with the same fields as the bot upload modal: MP3/TikTok/YouTube/Instagram URL, MP3 file, optional custom name, and optional video time limit.
 - Desktop nav uses text labels for Soundboard and Analytics; mobile nav compacts those controls to emoji-only buttons.
@@ -280,6 +280,7 @@ This README is based on the current codebase behavior (not historical README ass
 - `POST /api/web_control`
 - `GET /api/web_control_state`
 - `GET /api/control_room/status`
+- `GET /api/system_monitor/status` (optional `?limit=1-8`, default 4)
 - `GET /api/analytics/summary`
 - `GET /api/analytics/top_users`
 - `GET /api/analytics/top_sounds`

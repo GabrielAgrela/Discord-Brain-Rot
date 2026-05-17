@@ -13,6 +13,8 @@ from flask import Flask
 
 from bot.services.web_auth import WebAuthService
 from bot.services.text_censor import TextCensorService
+from bot.repositories.web_system_status import WebSystemStatusRepository
+from bot.services.web_system_monitor import WebSystemMonitorService
 from bot.services.web_tts_enhancer import WebTtsEnhancerService
 from bot.web.routes import register_web_routes
 
@@ -62,6 +64,12 @@ def create_app() -> Flask:
 
     app.extensions["web_auth_service"] = WebAuthService()
     app.extensions["web_text_censor_service"] = TextCensorService()
+    app.extensions["web_system_monitor_service"] = WebSystemMonitorService(
+        repository=WebSystemStatusRepository(
+            db_path=app.config["DATABASE_PATH"],
+            use_shared=False,
+        )
+    )
     app.extensions["web_tts_enhancer_service"] = WebTtsEnhancerService()
     app.extensions["web_upload_executor"] = ThreadPoolExecutor(
         max_workers=_get_web_upload_worker_count()
