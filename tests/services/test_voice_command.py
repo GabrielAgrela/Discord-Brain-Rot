@@ -206,6 +206,73 @@ class TestParseVoiceCommand:
 
 
 # ====================================================================
+#  build_voice_request_note
+# ====================================================================
+
+class TestBuildVoiceRequestNote:
+    """Tests for the voice-command display-note helper."""
+
+    def _build(self, transcript: str, wake_words=None):
+        from bot.services.voice_command import build_voice_request_note
+        return build_voice_request_note(transcript, wake_words=wake_words)
+
+    def test_strips_wake_word(self):
+        """``ventura stop doing that`` → ``stop doing that``."""
+        result = self._build("ventura stop doing that", wake_words=["ventura"])
+        assert result == "stop doing that"
+
+    def test_strips_wake_word_with_comma(self):
+        """``ventura, diz qualquer coisa`` → ``diz qualquer coisa``."""
+        result = self._build("ventura, diz qualquer coisa", wake_words=["ventura"])
+        assert result == "diz qualquer coisa"
+
+    def test_strips_trailing_punctuation(self):
+        """``ventura stop doing that.`` → ``stop doing that`` (period stripped)."""
+        result = self._build("ventura stop doing that.", wake_words=["ventura"])
+        assert result == "stop doing that"
+
+    def test_strips_trailing_exclamation(self):
+        """``ventura para!`` → ``para``."""
+        result = self._build("ventura para!", wake_words=["ventura"])
+        assert result == "para"
+
+    def test_no_wake_word(self):
+        """No wake words → original trimmed transcript."""
+        result = self._build("hello world", wake_words=None)
+        assert result == "hello world"
+
+    def test_empty_wake_words_list(self):
+        """Empty wake words list → original trimmed transcript."""
+        result = self._build("hello world", wake_words=[])
+        assert result == "hello world"
+
+    def test_empty_transcript(self):
+        """Empty transcript → empty string."""
+        assert self._build("") == ""
+        assert self._build("   ") == ""
+
+    def test_wake_word_only(self):
+        """Only wake word → fallback to raw trimmed transcript."""
+        result = self._build("ventura", wake_words=["ventura"])
+        assert result == "ventura"
+
+    def test_no_wake_word_in_transcript(self):
+        """Wake word not found → raw trimmed transcript."""
+        result = self._build("hello world", wake_words=["ventura"])
+        assert result == "hello world"
+
+    def test_ventura_what_time_is_it(self):
+        """Realistic: ``ventura what time is it`` → ``what time is it``."""
+        result = self._build("ventura what time is it", wake_words=["ventura"])
+        assert result == "what time is it"
+
+    def test_multiple_wake_words_uses_last(self):
+        """When multiple wake words appear, strip after the last one."""
+        result = self._build("bot ventura do something", wake_words=["bot", "ventura"])
+        assert result == "do something"
+
+
+# ====================================================================
 #  pcm_to_wav
 # ====================================================================
 

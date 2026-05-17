@@ -56,7 +56,7 @@ This README is based on the current codebase behavior (not historical README ass
 - Supported voice commands:
    - `<wake word/alias> play/toca/mete/põe/reproduz <sound name>` — fuzzy-matches and plays the requested sound, like `/toca` but with an important difference: if the exact name match is blacklisted/rejected, voice commands **skip it and fall back** to the nearest non-blacklisted fuzzy match (since voice has no autocomplete).
 - Pre-decoded prompt MP3 clips from `Sounds/` (no FFmpeg, no DB lookup) are played as wake acknowledgement (start prompt) and capture-complete indication (done prompt, play path only) without interrupting current audio playback. Both prompts randomly select from a configurable pool of filenames (single or comma-separated). The done prompt is only played **after** Groq transcription when a play command is detected.
-- Voice-command-initiated playback includes a "Heard: play <sound>" note on the generated sound card image (and in the embed fallback).
+- Voice-command-initiated playback includes a "Heard: <command>" footer pill on the generated sound card image (and in the embed fallback): for play commands this shows "play <sound>", and for non-play Ventura chat commands this shows the user's transcript after the wake word (e.g. "what time is it").
 - Requires `GROQ_API_KEY` for transcription. Additionally requires `OPENROUTER_API_KEY` for the non-play Ventura chat branch (OpenRouter Qwen Coder model, default `qwen/qwen3-coder-next`) and `EL_key`/`EL_voice_id_pt` for ElevenLabs Ventura TTS playback.
 - Configurable capture duration, silence timeout, cooldown, model, wake words, Vosk aliases, confidence threshold, prompt clips, and prompt enable/disable via environment variables.
  - Debug save of the exact WAV bytes sent to Groq is disabled by default. Set ``GROQ_WHISPER_DEBUG_SAVE_AUDIO=true`` to enable saving WAV files to ``Debug/groq_whisper/`` with timestamped names plus a ``latest.wav`` overwrite for quick inspection. With the fresh post-prompt capture, debug WAV files contain only the command speech (e.g., "play despacito"), not several pre-wake seconds.
@@ -157,13 +157,14 @@ This README is based on the current codebase behavior (not historical README ass
   - `/favoritewatcher add url:<TikTok collection URL>` seeds the current collection as a baseline and imports only future additions.
   - `/favoritewatcher list`
   - `/favoritewatcher remove watcher_id:<id>`
-- Backup service creates compressed project backups with exclusions and now updates the ephemeral `/backup` response with live stage/progress status while archiving.
+- Backup service creates full compressed project backups (1:1 copy of the full host project folder including `.git`, `venv`, `.env`, `.gemini`, `docs`, etc.) with live stage/progress status updates in the ephemeral `/backup` response. A weekly scheduled backup runs by default Friday 18:00 UTC, configurable via `BACKUP_SCHEDULER_*` env vars, and posts progress to the configured bot channel. In Docker, the host repo is mounted read-only at `/backup-source/Discord-Brain-Rot` and configured via `BACKUP_SOURCE_DIR` env var, so the archive is a complete host-level snapshot regardless of what the container's `/app` bind-mounts or `.dockerignore` exclude.
 
 ### Background Automations
 - Random periodic sound playback loop (feature-flagged per guild; disabled by default).
 - MyInstants scraping loop.
 - TikTok collection favorite watcher loop (every 10 seconds; imports only videos added after a watcher URL was configured and posts an image-card notification with a play button).
 - Weekly wrapped scheduler loop (UTC-based, default Friday 18:00, deduped per guild/week).
+- Weekly backup scheduler loop (UTC-based, default Friday 18:00, deduped per day, runs on any first tick inside the window).
 - Daily `rlstore` notification loop (UTC-based, default 19:05, mentions the configured target user, posts the paginated image-card shop view to `#botrl` when that channel exists, otherwise falls back to the configured bot channel, and includes a non-unfurled `https://rlshop.gg` source URL).
 - Scraper start + completion image cards with compact run summary.
 - Controls-button normalizer loop (every minute): keeps one recent inline `⚙️` on eligible bot messages by adding if missing and removing extras with safe raw-component edits.
@@ -383,6 +384,12 @@ This README is based on the current codebase behavior (not historical README ass
 - `WEEKLY_WRAPPED_HOUR_UTC` (0-23, default `18`)
 - `WEEKLY_WRAPPED_MINUTE_UTC` (0-59, default `0`)
 - `WEEKLY_WRAPPED_LOOKBACK_DAYS` (1-30, default `7`)
+
+### Backup Scheduler
+- `BACKUP_SCHEDULER_ENABLED` (`true` default; enables the weekly backup scheduler loop)
+- `BACKUP_SCHEDULER_DAY_UTC` (0-6, Monday=0, default `4` for Friday)
+- `BACKUP_SCHEDULER_HOUR_UTC` (0-23, default `18`)
+- `BACKUP_SCHEDULER_MINUTE_UTC` (0-59, default `0`)
 
 ### ElevenLabs
 - `EL_key`

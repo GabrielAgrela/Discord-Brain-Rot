@@ -540,6 +540,42 @@ def _extract_sound_name(after_verb: str) -> Optional[str]:
     return name
 
 
+def build_voice_request_note(
+    transcript: str,
+    wake_words: Optional[list[str]] = None,
+) -> str:
+    """Build a display note from a voice transcript for the sound card footer pill.
+
+    Strips the last recognised wake word and leading punctuation/whitespace
+    from *transcript*, then trims trailing sentence punctuation.  Falls back
+    to the original trimmed transcript when no wake word is present or when
+    stripping yields an empty string.
+
+    Args:
+        transcript: Raw transcript text (e.g. ``"ventura stop doing that."``).
+        wake_words: Optional list of wake words to strip (e.g.
+            ``["ventura"]``).  Pass ``None`` or an empty list to return the
+            raw trimmed transcript.
+
+    Returns:
+        Cleaned display string suitable for a ``request_note`` footer pill
+        (e.g. ``"stop doing that"``).
+    """
+    if not transcript or not transcript.strip():
+        return (transcript or "").strip()
+
+    text = transcript.strip()
+
+    if wake_words:
+        after = _text_after_last_wake_word(text, wake_words)
+        if after and after.strip():
+            text = after.strip()
+
+    # Strip trailing sentence punctuation (. ! ?)
+    text = re.sub(r"[.!?]+$", "", text).strip()
+    return text if text else transcript.strip()
+
+
 def parse_voice_command(
     transcript: str,
     wake_words: Optional[list[str]] = None,

@@ -1145,12 +1145,13 @@ class TestAudioService:
         mock_ventura.reply.assert_awaited_once()
         reply_call_kwargs = mock_ventura.reply.await_args.kwargs
         assert reply_call_kwargs.get("conversation_key") == "guild:222:user:888"
-        # TTS was invoked with Ventura's reply and lang="pt"
+        # TTS was invoked with Ventura's reply, lang="pt", and request_note
         vt = sink.audio_service.voice_transformation_service
         vt.tts_EL.assert_awaited_once()
         call_args = vt.tts_EL.await_args
         assert call_args is not None
         assert call_args.kwargs.get("lang") == "pt"
+        assert call_args.kwargs.get("request_note") == "stop doing that"
         assert call_args.args[1] == "[shouts] Isto é uma vergonha!"
 
     @pytest.mark.asyncio

@@ -80,8 +80,14 @@ class VoiceTransformationService:
         ))
 
     async def tts_EL(self, user, speech: str, lang: str = "en", region: str = "", send_controls=True,
-                     loading_message=None, requester_avatar_url=None, sts_thumbnail_url=None):
-        """ElevenLabs text-to-speech."""
+                     loading_message=None, requester_avatar_url=None, sts_thumbnail_url=None,
+                     request_note: Optional[str] = None):
+        """ElevenLabs text-to-speech.
+
+        Args:
+            request_note: Optional text shown as a "TTS:" footer pill on the
+                sound card (e.g. the user's original voice-command transcript).
+        """
         guild_id = self._resolve_guild_id(user)
         self.action_repo.insert(user.name, "tts_EL", speech, guild_id=guild_id)
         requester_name = getattr(user, 'display_name', getattr(user, 'name', str(user)))
@@ -92,6 +98,7 @@ class VoiceTransformationService:
             sts_thumbnail_url=sts_thumbnail_url,
             requester_name=requester_name,
             guild_id=guild_id,
+            request_note=request_note,
         ))
 
     async def sts_EL(self, user, sound: str, char: str = "ventura", region: str = "",

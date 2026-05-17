@@ -26,6 +26,7 @@ class BackgroundService:
 
     RLSTORE_NOTIFY_ACTION = "rlstore_daily_notification_sent"
     RLSTORE_CHANNEL_NAME = "botrl"
+    BACKUP_SCHEDULER_ACTION = "scheduled_backup_created"
     
     def __init__(self, bot, audio_service, sound_service, behavior=None):
         self.bot = bot
@@ -61,6 +62,11 @@ class BackgroundService:
         self._rlstore_notify_hour_utc = self._env_int("RLSTORE_NOTIFY_HOUR_UTC", 19, 0, 23)
         self._rlstore_notify_minute_utc = self._env_int("RLSTORE_NOTIFY_MINUTE_UTC", 5, 0, 59)
         self._rlstore_notify_target = (os.getenv("RLSTORE_NOTIFY_TARGET_USERNAME", "sopustos") or "").strip()
+        self._backup_scheduler_enabled = self._env_flag("BACKUP_SCHEDULER_ENABLED", True)
+        self._backup_scheduler_day_utc = self._env_int("BACKUP_SCHEDULER_DAY_UTC", 4, 0, 6)
+        self._backup_scheduler_hour_utc = self._env_int("BACKUP_SCHEDULER_HOUR_UTC", 18, 0, 23)
+        self._backup_scheduler_minute_utc = self._env_int("BACKUP_SCHEDULER_MINUTE_UTC", 0, 0, 59)
+        self._backup_scheduler_running = False
         self._self_heal_enabled = self._env_flag("BOT_SELF_HEAL_RESTART_ENABLED", True)
         self._gateway_unready_restart_seconds = self._env_int(
             "BOT_GATEWAY_UNREADY_RESTART_SECONDS", 300, 60, 3600
@@ -104,6 +110,8 @@ class BackgroundService:
                 self.weekly_wrapped_scheduler_loop.start()
             if self._rlstore_notify_enabled and not self.rlstore_notification_loop.is_running():
                 self.rlstore_notification_loop.start()
+            if self._backup_scheduler_enabled and not self.backup_scheduler_loop.is_running():
+                self.backup_scheduler_loop.start()
             if not self.favorite_watcher_loop.is_running():
                 self.favorite_watcher_loop.start()
             if self._self_heal_enabled and not self.bot_self_heal_watchdog_loop.is_running():
@@ -932,6 +940,75 @@ class BackgroundService:
         """Return a stable per-day key for rlstore scheduler dedupe."""
         return f"rlstore:{now_utc.date().isoformat()}"
 
+    def _is_backup_window(self, now_utc: datetime) -> bool:
+        """Return True when the current UTC time matches the configured weekly backup window."""
+        if now_utc.weekday() != self._backup_scheduler_day_utc:
+            return False
+        if now_utc.hour != self._backup_scheduler_hour_utc:
+            return False
+        return now_utc.minute >= self._backup_scheduler_minute_utc
+
+    @staticmethod
+    def _backup_notify_key(now_utc: datetime) -> str:
+        """Return a stable per-day key for backup scheduler dedupe."""
+        return f"backup:{now_utc.date().isoformat()}"
+
+    async def _run_backup_scheduler_tick(
+        self,
+        now_utc: Optional[datetime] = None,
+    ) -> int:
+        """
+        Execute one scheduler tick for the weekly backup.
+
+        Args:
+            now_utc: Optional injected UTC time for deterministic tests.
+
+        Returns:
+            1 if a backup was created, 0 otherwise.
+        """
+        if not self._backup_scheduler_enabled or not self.behavior:
+            return 0
+        if self._backup_scheduler_running:
+            return 0
+
+        backup_service = getattr(self.behavior, "_backup_service", None)
+        if backup_service is None:
+            return 0
+
+        now_utc = now_utc or datetime.now(timezone.utc)
+        if now_utc.tzinfo is None:
+            now_utc = now_utc.replace(tzinfo=timezone.utc)
+
+        if not self._is_backup_window(now_utc):
+            return 0
+
+        notify_key = self._backup_notify_key(now_utc)
+        if self.action_repo.has_action_for_target(
+            self.BACKUP_SCHEDULER_ACTION,
+            notify_key,
+        ):
+            return 0
+
+        guild = next(iter(self.bot.guilds), None)
+        self._backup_scheduler_running = True
+        try:
+            await backup_service.perform_scheduled_backup(guild=guild)
+            self.action_repo.insert(
+                "scheduler",
+                self.BACKUP_SCHEDULER_ACTION,
+                notify_key,
+            )
+            return 1
+        except Exception as exc:
+            logger.error(
+                "[BackgroundService] Scheduled backup failed: %s",
+                exc,
+                exc_info=True,
+            )
+            return 0
+        finally:
+            self._backup_scheduler_running = False
+
     def _resolve_rlstore_notify_member(self, guild: discord.Guild) -> Optional[discord.Member]:
         """Resolve the configured rlstore notification target to a guild member."""
         target = self._rlstore_notify_target.strip()
@@ -1152,6 +1229,20 @@ class BackgroundService:
                 print(f"[BackgroundService] rlstore notification sent in {sent_count} guild(s)")
         except Exception as e:
             print(f"[BackgroundService] Error in rlstore notification scheduler: {e}")
+
+    @tasks.loop(minutes=5)
+    async def backup_scheduler_loop(self):
+        """Create a weekly backup at the configured UTC time."""
+        try:
+            result = await self._run_backup_scheduler_tick()
+            if result > 0:
+                logger.info("[BackgroundService] Scheduled backup created successfully")
+        except Exception as e:
+            logger.error(
+                "[BackgroundService] Error in backup scheduler: %s",
+                e,
+                exc_info=True,
+            )
 
     @tasks.loop(seconds=10)
     async def favorite_watcher_loop(self):

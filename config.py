@@ -47,7 +47,11 @@ COMMAND_LOG_FILE = '/var/log/personalgreeter.log'
 
 # Backup directory (one level up from project root)
 BACKUP_DIR = PROJECT_ROOT.parent / "backups" / "discord-brainrot"
-BACKUP_EXCLUSIONS = ["venv", "actions-runner", ".git", "__pycache__", ".pytest_cache", "Logs", "Downloads", ".gemini"]
+BACKUP_EXCLUSIONS: list[str] = []
+
+# Backup source directory – can be overridden via env var so Docker can point to a
+# read-only full host repo mount for a complete 1:1 archive (including .git, venv, etc.).
+BACKUP_SOURCE_DIR = Path(os.getenv("BACKUP_SOURCE_DIR", str(PROJECT_ROOT))).expanduser().resolve()
 
 
 # ============================================================================

@@ -1038,3 +1038,197 @@ class TestAutoJoinChannels:
 
         assert sent_count == 0
         behavior._rocket_league_store_service.fetch_store_snapshot.assert_not_awaited()
+
+
+class TestBackupScheduler:
+    """Tests for BackgroundService backup scheduler."""
+
+    @pytest.mark.asyncio
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    async def test_default_schedule_is_friday_18_utc(self, _mock_sound_repo, _mock_action_repo):
+        """Backup scheduler defaults to Friday 18:00 UTC when env vars are unset."""
+        from bot.services.background import BackgroundService
+
+        with patch.dict(
+            "os.environ",
+            {
+                "BACKUP_SCHEDULER_DAY_UTC": "",
+                "BACKUP_SCHEDULER_HOUR_UTC": "",
+                "BACKUP_SCHEDULER_MINUTE_UTC": "",
+            },
+            clear=False,
+        ):
+            service = BackgroundService(
+                bot=Mock(),
+                audio_service=Mock(),
+                sound_service=Mock(),
+                behavior=Mock(),
+            )
+
+        assert service._backup_scheduler_day_utc == 4
+        assert service._backup_scheduler_hour_utc == 18
+        assert service._backup_scheduler_minute_utc == 0
+
+    @pytest.mark.asyncio
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    async def test_tick_runs_in_window_and_records_action(self, _mock_sound_repo, _mock_action_repo):
+        """Backup scheduler should run in the configured window and record an action."""
+        from bot.services.background import BackgroundService
+
+        guild = Mock(name="Test Guild")
+        bot = Mock(guilds=[guild])
+        behavior = Mock()
+        behavior._backup_service = Mock()
+        behavior._backup_service.perform_scheduled_backup = AsyncMock()
+
+        service = BackgroundService(
+            bot=bot,
+            audio_service=Mock(),
+            sound_service=Mock(),
+            behavior=behavior,
+        )
+        service._backup_scheduler_enabled = True
+        service._backup_scheduler_day_utc = 4
+        service._backup_scheduler_hour_utc = 18
+        service._backup_scheduler_minute_utc = 0
+        service.action_repo.has_action_for_target = Mock(return_value=False)
+        service.action_repo.insert = Mock()
+
+        now_utc = datetime(2026, 5, 22, 18, 5, tzinfo=timezone.utc)
+
+        result = await service._run_backup_scheduler_tick(now_utc=now_utc)
+
+        assert result == 1
+        behavior._backup_service.perform_scheduled_backup.assert_awaited_once_with(guild=guild)
+        service.action_repo.insert.assert_called_once_with(
+            "scheduler",
+            BackgroundService.BACKUP_SCHEDULER_ACTION,
+            "backup:2026-05-22",
+        )
+
+    @pytest.mark.asyncio
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    async def test_tick_skips_outside_window(self, _mock_sound_repo, _mock_action_repo):
+        """Backup scheduler should do nothing outside the configured UTC window."""
+        from bot.services.background import BackgroundService
+
+        behavior = Mock()
+        behavior._backup_service = Mock()
+        behavior._backup_service.perform_scheduled_backup = AsyncMock()
+
+        service = BackgroundService(
+            bot=Mock(guilds=[Mock(name="Guild")]),
+            audio_service=Mock(),
+            sound_service=Mock(),
+            behavior=behavior,
+        )
+        service._backup_scheduler_enabled = True
+        service._backup_scheduler_day_utc = 4
+        service._backup_scheduler_hour_utc = 18
+        service._backup_scheduler_minute_utc = 15
+
+        # Window starts at 18:15, testing 18:14
+        now_utc = datetime(2026, 5, 22, 18, 14, tzinfo=timezone.utc)
+
+        result = await service._run_backup_scheduler_tick(now_utc=now_utc)
+
+        assert result == 0
+        behavior._backup_service.perform_scheduled_backup.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    async def test_tick_skips_already_recorded(self, _mock_sound_repo, _mock_action_repo):
+        """Backup scheduler should skip when an action is already recorded for this day."""
+        from bot.services.background import BackgroundService
+
+        guild = Mock(name="Test Guild")
+        bot = Mock(guilds=[guild])
+        behavior = Mock()
+        behavior._backup_service = Mock()
+        behavior._backup_service.perform_scheduled_backup = AsyncMock()
+
+        service = BackgroundService(
+            bot=bot,
+            audio_service=Mock(),
+            sound_service=Mock(),
+            behavior=behavior,
+        )
+        service._backup_scheduler_enabled = True
+        service._backup_scheduler_day_utc = 4
+        service._backup_scheduler_hour_utc = 18
+        service._backup_scheduler_minute_utc = 0
+        service.action_repo.has_action_for_target = Mock(return_value=True)
+        service.action_repo.insert = Mock()
+
+        now_utc = datetime(2026, 5, 22, 18, 5, tzinfo=timezone.utc)
+
+        result = await service._run_backup_scheduler_tick(now_utc=now_utc)
+
+        assert result == 0
+        behavior._backup_service.perform_scheduled_backup.assert_not_awaited()
+        service.action_repo.insert.assert_not_called()
+
+    @pytest.mark.asyncio
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    async def test_tick_skips_when_already_running(self, _mock_sound_repo, _mock_action_repo):
+        """Backup scheduler should skip when another backup is already in progress."""
+        from bot.services.background import BackgroundService
+
+        guild = Mock(name="Test Guild")
+        bot = Mock(guilds=[guild])
+        behavior = Mock()
+        behavior._backup_service = Mock()
+        behavior._backup_service.perform_scheduled_backup = AsyncMock()
+
+        service = BackgroundService(
+            bot=bot,
+            audio_service=Mock(),
+            sound_service=Mock(),
+            behavior=behavior,
+        )
+        service._backup_scheduler_enabled = True
+        service._backup_scheduler_day_utc = 4
+        service._backup_scheduler_hour_utc = 18
+        service._backup_scheduler_minute_utc = 0
+        service._backup_scheduler_running = True  # Already running
+        service.action_repo.has_action_for_target = Mock(return_value=False)
+
+        now_utc = datetime(2026, 5, 22, 18, 5, tzinfo=timezone.utc)
+
+        result = await service._run_backup_scheduler_tick(now_utc=now_utc)
+
+        assert result == 0
+        behavior._backup_service.perform_scheduled_backup.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    async def test_tick_noop_when_backup_service_missing(self, _mock_sound_repo, _mock_action_repo):
+        """Backup scheduler should no-op when behavior has no backup_service."""
+        from bot.services.background import BackgroundService
+
+        behavior = Mock()
+        # No _backup_service attribute
+        del behavior._backup_service
+
+        service = BackgroundService(
+            bot=Mock(guilds=[Mock(name="Guild")]),
+            audio_service=Mock(),
+            sound_service=Mock(),
+            behavior=behavior,
+        )
+        service._backup_scheduler_enabled = True
+        service._backup_scheduler_day_utc = 4
+        service._backup_scheduler_hour_utc = 18
+        service._backup_scheduler_minute_utc = 0
+
+        now_utc = datetime(2026, 5, 22, 18, 5, tzinfo=timezone.utc)
+
+        result = await service._run_backup_scheduler_tick(now_utc=now_utc)
+
+        assert result == 0

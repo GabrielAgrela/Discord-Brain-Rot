@@ -7,8 +7,11 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
-from config import BACKUP_DIR, BACKUP_EXCLUSIONS, PROJECT_ROOT
+import discord
+
+from config import BACKUP_DIR, BACKUP_EXCLUSIONS, BACKUP_SOURCE_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +35,77 @@ class BackupProgress:
     finished: bool = False
 
 
+class _ScheduledBackupTarget:
+    """
+    Duck-typed interaction replacement for scheduled backups.
+
+    Wraps a Discord text channel so that ``perform_backup()`` can send
+    progress to a channel message instead of an interaction response.
+    The first status update sends a new message; subsequent updates edit
+    the same message in place.
+    """
+
+    def __init__(self, channel: discord.TextChannel):
+        self.channel = channel
+        self._message: Optional[discord.Message] = None
+        self.interaction = self  # matches getattr(interaction, "interaction", …)
+
+    class _Response:
+        def __init__(self, target: "_ScheduledBackupTarget"):
+            self._target = target
+
+        def is_done(self) -> bool:
+            return self._target._message is not None
+
+        async def send_message(self, content: str, ephemeral: bool = True) -> None:
+            self._target._message = await self._target.channel.send(content)
+
+    @property
+    def response(self) -> _Response:
+        return self._Response(self)
+
+    async def edit_original_response(self, content: str | None = None, **kwargs) -> None:
+        if self._message is not None:
+            await self._message.edit(content=content)
+
+    class _Followup:
+        @staticmethod
+        async def send(content: str, ephemeral: bool = True) -> None:
+            pass
+
+    @property
+    def followup(self) -> _Followup:
+        return self._Followup()
+
+
+class _NullBackupTarget:
+    """Silent no-op target used when no bot channel is available."""
+
+    interaction = None
+
+    class _Response:
+        @staticmethod
+        def is_done() -> bool:
+            return True
+
+        @staticmethod
+        async def send_message(content: str, ephemeral: bool = True) -> None:
+            pass
+
+    response = _Response()
+
+    class _Followup:
+        @staticmethod
+        async def send(content: str, ephemeral: bool = True) -> None:
+            pass
+
+    followup = _Followup()
+
+    @staticmethod
+    async def edit_original_response(content: str | None = None, **kwargs) -> None:
+        pass
+
+
 class BackupService:
     """
     Service for backing up the bot's data and codebase.
@@ -41,7 +115,7 @@ class BackupService:
         self.bot = bot
         self.message_service = message_service
         self.backup_dir = BACKUP_DIR
-        self.project_root = PROJECT_ROOT
+        self.project_root = BACKUP_SOURCE_DIR
         self.exclusions = BACKUP_EXCLUSIONS
         self.progress_update_interval_seconds = 2.0
 
@@ -184,6 +258,27 @@ class BackupService:
                 f"❌ **An unexpected error occurred:** {self._truncate_text(str(exc))}",
             )
 
+    async def perform_scheduled_backup(self, guild: Optional[discord.Guild] = None) -> None:
+        """
+        Perform a backup triggered by the weekly scheduler.
+
+        Resolves a bot channel (guild-specific or global fallback) and
+        reuses the full ``perform_backup`` pipeline with a fake interaction
+        target that sends/edits a single channel message.  When no channel
+        is available the backup still runs but progress is only logged.
+
+        Args:
+            guild: Optional guild used for channel resolution.
+        """
+        channel = self.message_service.get_bot_channel(guild)
+        if channel is not None:
+            target = _ScheduledBackupTarget(channel)
+        else:
+            logger.info("[BackupService] No bot channel for scheduled backup; running silently.")
+            target = _NullBackupTarget()
+
+        await self.perform_backup(target)
+
     async def _create_archive_with_progress(
         self,
         interaction,
@@ -299,18 +394,16 @@ class BackupService:
 
             for filename in filenames:
                 file_path = Path(dirpath) / filename
-                if file_path.is_symlink():
-                    continue
 
                 try:
-                    size = file_path.stat().st_size
+                    stat_result = file_path.lstat()
                 except OSError as exc:
                     logger.warning("Skipping unreadable file during backup scan %s: %s", file_path, exc)
                     continue
 
                 archive_path = f"{self.project_root.name}/{file_path.relative_to(path).as_posix()}"
-                stats.file_sizes[archive_path] = size
-                stats.total_bytes += size
+                stats.file_sizes[archive_path] = stat_result.st_size
+                stats.total_bytes += stat_result.st_size
                 stats.total_entries += 1
 
         return stats

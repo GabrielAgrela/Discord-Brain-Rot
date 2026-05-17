@@ -1492,6 +1492,7 @@ class AudioService:
         sts_thumbnail_url: str = None,
         ready_event: 'asyncio.Event' = None,
         interrupt_event: 'threading.Event' = None,
+        request_note: Optional[str] = None,
     ) -> bool:
         """Play a live-streaming TTS from a POSIX FIFO (named pipe).
 
@@ -1525,6 +1526,8 @@ class AudioService:
                 monitors to abort FIFO writes early (e.g. when ``play_slap``
                 interrupts this stream).  Stored per-guild and also set by
                 the ``after_playing`` callback for natural completion.
+            request_note: Optional text shown as a "TTS:" footer pill on the
+                sound card (e.g. the user's original voice-command transcript).
 
         Returns:
             ``True`` if playback was started, ``False`` on failure.
@@ -1685,6 +1688,7 @@ class AudioService:
                             sts_char=None,
                             requester_avatar_url=resolved_avatar,
                             sts_thumbnail_url=sts_thumbnail_url,
+                            request_note=request_note,
                         )
                     )
 
@@ -3467,6 +3471,11 @@ class KeywordDetectionSink(sinks.Sink):
             print("[VoiceCommand] VenturaChat not available (OPENROUTER_API_KEY missing); skipping")
             return
 
+        # Build a request_note from the transcript so the TTS sound card
+        # footer shows what the user actually said (like play commands do).
+        from bot.services.voice_command import build_voice_request_note
+        request_note = build_voice_request_note(transcript, transcript_wake_words)
+
         conversation_key = f"guild:{self.guild.id}:user:{user_id}"
         reply = await ventura_service.reply(
             transcript,
@@ -3501,4 +3510,5 @@ class KeywordDetectionSink(sinks.Sink):
             user_obj, reply, lang="pt", send_controls=True,
             requester_avatar_url=avatar_url,
             sts_thumbnail_url=sts_thumbnail,
+            request_note=request_note,
         )

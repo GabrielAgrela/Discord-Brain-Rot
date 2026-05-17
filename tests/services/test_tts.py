@@ -402,7 +402,10 @@ class TestSaveAsMp3ELLive:
         tts._get_default_voice_channel = MagicMock(return_value=fake_channel)
 
         # play_tts_live_stream mock: set ready_event and return True
+        play_tts_live_kwargs = {}
+
         async def _fake_play_live(**kwargs):
+            play_tts_live_kwargs.update(kwargs)
             re = kwargs.get("ready_event")
             if re is not None:
                 re.set()
@@ -414,6 +417,9 @@ class TestSaveAsMp3ELLive:
 
         mock_db().insert_sound.assert_called_once()
         tts.behavior.play_audio.assert_not_called()
+
+        # request_note should be forwarded through to play_tts_live_stream
+        assert play_tts_live_kwargs.get("request_note") is None
 
 
 # ============================================================================

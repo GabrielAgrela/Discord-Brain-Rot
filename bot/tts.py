@@ -639,7 +639,8 @@ class TTS:
 
     async def save_as_mp3_EL(self, text, lang="pt", region="", send_controls=True,
                              loading_message=None, requester_avatar_url=None, sts_thumbnail_url=None,
-                             requester_name="admin", guild_id: Optional[int] = None):
+                             requester_name="admin", guild_id: Optional[int] = None,
+                             request_note: Optional[str] = None):
         boost_volume = 0
         # Sanitize filename-safe text (keep it reasonably short for FS, but image gen will use full text)
         safe_text = "".join(x for x in text[:30] if x.isalnum() or x in " -_")
@@ -751,6 +752,7 @@ class TTS:
                                         sts_thumbnail_url=sts_thumbnail_url,
                                         ready_event=live_ready_event,
                                         interrupt_event=live_interrupt_event,
+                                        request_note=request_note,
                                     )
                                 )
 
@@ -964,7 +966,8 @@ class TTS:
                             send_controls=send_controls,
                             loading_message=loading_message,
                             requester_avatar_url=requester_avatar_url,
-                            sts_thumbnail_url=sts_thumbnail_url
+                            sts_thumbnail_url=sts_thumbnail_url,
+                            request_note=request_note,
                         )
                     self.update_last_request_time(guild_id=guild_id)
                     logger.info(

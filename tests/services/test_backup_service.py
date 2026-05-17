@@ -103,6 +103,74 @@ class TestBackupService:
             "Discord-Brain-Rot/keep/nested.txt": (project_root / "keep" / "nested.txt").stat().st_size,
         }
 
+    def test_scan_backup_contents_default_includes_all_when_no_exclusions(self, backup_service, tmp_path):
+        """With empty exclusions, all directories and files are included in the scan."""
+        project_root = tmp_path / "Discord-Brain-Rot"
+        project_root.mkdir()
+        # Create directories that were previously excluded by default
+        (project_root / "venv").mkdir()
+        (project_root / ".git").mkdir()
+        (project_root / "__pycache__").mkdir()
+        (project_root / "Logs").mkdir()
+        (project_root / "Downloads").mkdir()
+        (project_root / ".gemini").mkdir()
+        # Regular file and file inside a previously-excluded dir
+        (project_root / "keep_me.py").write_text("code", encoding="utf-8")
+        (project_root / "venv" / "lib.py").write_text("lib", encoding="utf-8")
+
+        backup_service.project_root = project_root
+        stats = backup_service._scan_backup_contents(project_root, [])
+
+        # Root dir (1) + 6 subdirs + 2 files = 9 entries
+        assert stats.total_entries == 9, f"Expected 9 entries, got {stats.total_entries}"
+        assert "Discord-Brain-Rot/venv/lib.py" in stats.file_sizes
+        assert "Discord-Brain-Rot/keep_me.py" in stats.file_sizes
+        expected_bytes = (
+            (project_root / "keep_me.py").lstat().st_size
+            + (project_root / "venv" / "lib.py").lstat().st_size
+        )
+        assert stats.total_bytes == expected_bytes
+
+    def test_scan_backup_contents_includes_symlink_files(self, backup_service, tmp_path):
+        """Symlink files should be included in the scan using their own lstat size."""
+        project_root = tmp_path / "Discord-Brain-Rot"
+        project_root.mkdir()
+        (project_root / "real_file.txt").write_text("real-data", encoding="utf-8")
+
+        # Create a file symlink (symlink target path as string)
+        link_path = project_root / "link.txt"
+        link_path.symlink_to("real_file.txt")
+
+        backup_service.project_root = project_root
+        stats = backup_service._scan_backup_contents(project_root, [])
+
+        assert "Discord-Brain-Rot/link.txt" in stats.file_sizes
+        assert "Discord-Brain-Rot/real_file.txt" in stats.file_sizes
+        expected_bytes = (
+            (project_root / "real_file.txt").lstat().st_size
+            + link_path.lstat().st_size
+        )
+        assert stats.total_bytes == expected_bytes
+        # Root dir (1) + 2 files = 3 entries
+        assert stats.total_entries == 3
+
+    def test_scan_backup_contents_respects_explicit_exclusions_when_provided(self, backup_service, tmp_path):
+        """Explicitly provided exclusions should still be respected by the scan."""
+        project_root = tmp_path / "Discord-Brain-Rot"
+        project_root.mkdir()
+        (project_root / "keep").mkdir()
+        (project_root / "exclude_me").mkdir()
+        (project_root / "root.txt").write_text("root", encoding="utf-8")
+        (project_root / "exclude_me" / "ignored.txt").write_text("ignored", encoding="utf-8")
+
+        backup_service.project_root = project_root
+        stats = backup_service._scan_backup_contents(project_root, ["exclude_me"])
+
+        assert "Discord-Brain-Rot/exclude_me/ignored.txt" not in stats.file_sizes
+        assert "Discord-Brain-Rot/root.txt" in stats.file_sizes
+        # Root (1) + 1 subdir (keep) + 1 file (root.txt) = 3 entries
+        assert stats.total_entries == 3
+
     def test_build_archive_progress_message_includes_progress_bar_and_status_details(self, backup_service):
         """Archive progress messages should expose useful live status details."""
         from bot.services.backup import BackupProgress, BackupScanStats
@@ -184,6 +252,44 @@ class TestBackupService:
         interaction.followup.send.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_perform_backup_tar_command_has_no_exclude_args_when_exclusions_empty(
+        self, backup_service, fake_context, tmp_path
+    ):
+        """When exclusions list is empty, the tar command should contain no --exclude flags."""
+        from bot.services.backup import BackupScanStats
+
+        project_root = tmp_path / "Discord-Brain-Rot"
+        project_root.mkdir()
+        backup_service.project_root = project_root
+        backup_service.backup_dir = tmp_path / "backups"
+        backup_service.exclusions = []
+
+        scan_stats = BackupScanStats(total_bytes=30, total_entries=3, file_sizes={})
+
+        async def fake_to_thread(func, *args, **kwargs):
+            return func(*args, **kwargs)
+
+        captured_command = None
+
+        async def fake_create_subprocess_exec(*command, **_kwargs):
+            nonlocal captured_command
+            captured_command = command
+            backup_path = Path(command[2])
+            backup_path.parent.mkdir(parents=True, exist_ok=True)
+            backup_path.write_bytes(b"x" * 4096)
+            return FakeProcess(stdout_lines=[b"a\n", b"b\n"], stderr=b"", returncode=0)
+
+        with patch("bot.services.backup.asyncio.to_thread", new=AsyncMock(side_effect=fake_to_thread)):
+            with patch.object(backup_service, "_scan_backup_contents", return_value=scan_stats):
+                with patch("bot.services.backup.shutil.disk_usage", return_value=(10, 1, 10_000_000)):
+                    with patch("bot.services.backup.asyncio.create_subprocess_exec", side_effect=fake_create_subprocess_exec):
+                        with patch.object(backup_service, "_monitor_archive_progress", new=AsyncMock()):
+                            await backup_service.perform_backup(fake_context)
+
+        assert captured_command is not None
+        assert "--exclude" not in captured_command, f"Unexpected --exclude in tar command: {captured_command}"
+
+    @pytest.mark.asyncio
     async def test_perform_backup_fails_fast_when_disk_space_is_too_low(
         self, backup_service, fake_context, tmp_path
     ):
@@ -208,3 +314,84 @@ class TestBackupService:
         assert "❌ **Backup failed**" in last_edit
         assert "Not enough disk space" in last_edit
         mock_exec.assert_not_called()
+
+
+class TestBackupServiceScheduled:
+    """Tests for scheduled backup target classes and perform_scheduled_backup."""
+
+    @pytest.fixture
+    def backup_service(self):
+        """Create a BackupService with mocked dependencies."""
+        from bot.services.backup import BackupService
+
+        return BackupService(bot=Mock(), message_service=Mock())
+
+    @pytest.mark.asyncio
+    async def test_scheduled_target_first_send_then_edit(self):
+        """Scheduled target should send first message then edit subsequent ones."""
+        from bot.services.backup import _ScheduledBackupTarget
+
+        message_mock = AsyncMock()
+        channel = AsyncMock()
+        channel.send = AsyncMock(return_value=message_mock)
+
+        target = _ScheduledBackupTarget(channel)
+
+        # First update: not done → send
+        assert not target.response.is_done()
+        await target.response.send_message("first", ephemeral=True)
+        channel.send.assert_awaited_once_with("first")
+
+        # Subsequent updates: done → edit
+        assert target.response.is_done()
+        await target.edit_original_response(content="second")
+        message_mock.edit.assert_awaited_once_with(content="second")
+
+    @pytest.mark.asyncio
+    async def test_scheduled_target_edit_before_send_is_noop(self):
+        """Editing before the first send should be a no-op (no message to edit)."""
+        from bot.services.backup import _ScheduledBackupTarget
+
+        target = _ScheduledBackupTarget(AsyncMock())
+        # Should not raise
+        await target.edit_original_response(content="anything")
+
+    @pytest.mark.asyncio
+    async def test_null_target_no_crash(self):
+        """All null target methods should be safe no-ops."""
+        from bot.services.backup import _NullBackupTarget
+
+        target = _NullBackupTarget()
+        assert target.response.is_done()
+        await target.response.send_message("test", ephemeral=True)
+        await target.edit_original_response(content="test")
+        await target.followup.send("test", ephemeral=True)
+
+    @pytest.mark.asyncio
+    async def test_perform_scheduled_backup_with_channel_delegates(self, backup_service):
+        """perform_scheduled_backup with a channel should call perform_backup."""
+        channel = AsyncMock()
+        backup_service.message_service.get_bot_channel = Mock(return_value=channel)
+
+        with patch.object(backup_service, "perform_backup", new_callable=AsyncMock) as mock_perform:
+            await backup_service.perform_scheduled_backup(guild=Mock())
+
+        mock_perform.assert_awaited_once()
+        target = mock_perform.await_args.args[0]
+        from bot.services.backup import _ScheduledBackupTarget
+        assert isinstance(target, _ScheduledBackupTarget)
+        assert target.channel is channel
+
+    @pytest.mark.asyncio
+    async def test_perform_scheduled_backup_no_channel_no_crash(self, backup_service):
+        """perform_scheduled_backup without a channel should not crash."""
+        backup_service.message_service.get_bot_channel = Mock(return_value=None)
+
+        with patch.object(backup_service, "perform_backup", new_callable=AsyncMock) as mock_perform:
+            await backup_service.perform_scheduled_backup()
+
+        mock_perform.assert_awaited_once()
+        from bot.services.backup import _NullBackupTarget
+        assert isinstance(mock_perform.await_args.args[0], _NullBackupTarget)
+
+
