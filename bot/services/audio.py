@@ -2742,6 +2742,12 @@ class KeywordDetectionSink(sinks.Sink):
         self.voice_command_silence_seconds = getattr(
             audio_service, 'voice_command_silence_seconds', 1.0
         )
+
+        # Voice-command listening state: when active, other Vosk keyword
+        # actions (slap, list, second wake word) are suppressed.
+        # Set while the start prompt plays + fresh post-prompt capture runs.
+        self._voice_command_listening_user_id: Optional[int] = None
+        self._voice_command_listening_lock = threading.Lock()
         
         # Log directory for per-user transcripts
         self.log_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Data", "vosk_logs"))
@@ -2803,6 +2809,53 @@ class KeywordDetectionSink(sinks.Sink):
         except Exception as e:
             print(f"[VoskLogger] Error writing log for {username}: {e}")
 
+    # ------------------------------------------------------------------ #
+    # Voice-command listening state management
+    # ------------------------------------------------------------------ #
+
+    def _is_voice_command_listening(self) -> bool:
+        """Check whether a voice-command listening session is active.
+
+        Thread-safe; safe to call on instances created with ``__new__``
+        (uses ``getattr`` fallback).
+        """
+        with self._get_voice_command_listening_lock():
+            return getattr(self, '_voice_command_listening_user_id', None) is not None
+
+    def _get_voice_command_listening_lock(self) -> threading.Lock:
+        """Return the listening-state lock, creating it lazily if needed.
+
+        Handles instances created via ``__new__`` that skip ``__init__``.
+        """
+        lock = getattr(self, '_voice_command_listening_lock', None)
+        if lock is None:
+            lock = threading.Lock()
+            self._voice_command_listening_lock = lock
+        return lock
+
+    def _begin_voice_command_listening(self, user_id: int) -> bool:
+        """Acquire the voice-command listening state for *user_id*.
+
+        Returns ``False`` if another session is already active.
+        """
+        with self._get_voice_command_listening_lock():
+            current = getattr(self, '_voice_command_listening_user_id', None)
+            if current is not None:
+                return False
+            self._voice_command_listening_user_id = user_id
+            return True
+
+    def _end_voice_command_listening(self, user_id: int) -> None:
+        """Release the voice-command listening state for *user_id*.
+
+        Only clears the state when it belongs to *user_id*; otherwise a
+        no-op (e.g. a test that never began listening, or an already-
+        replaced session).
+        """
+        with self._get_voice_command_listening_lock():
+            if getattr(self, '_voice_command_listening_user_id', None) == user_id:
+                self._voice_command_listening_user_id = None
+
     def stop(self):
         self.running = False
         self.queue.put((None, None))
@@ -2848,6 +2901,12 @@ class KeywordDetectionSink(sinks.Sink):
                 cap["chunks"].append(data)
                 cap["total_bytes"] = cap.get("total_bytes", 0) + len(data)
                 cap["last_audio_time"] = time.time()
+
+        # Skip Vosk keyword detection while a voice-command listening
+        # session is active. The triggering user's audio still feeds
+        # _active_captures above, but we suppress other keyword actions.
+        if self._is_voice_command_listening():
+            return
 
         # Buffer audio per-user to reduce queue pressure
         if user_id not in self.audio_buffers:
@@ -3093,6 +3152,10 @@ class KeywordDetectionSink(sinks.Sink):
             keyword, action, _word_info = self._check_keywords(text, result)
             if keyword:
                 print(f"[{timestamp}] [KeywordDetection] Detected keyword '{keyword}' from user {username}!")
+                # Suppress keyword actions while voice command is listening.
+                if self._is_voice_command_listening():
+                    print(f"[{timestamp}] [KeywordDetection] Ignoring - voice command listening active")
+                    return
                 if not self.audio_service.bot.loop.is_closed():
                     asyncio.run_coroutine_threadsafe(self.trigger_action(user_id, keyword, action), self.audio_service.bot.loop)
 
@@ -3139,6 +3202,10 @@ class KeywordDetectionSink(sinks.Sink):
         return None, None, None
 
     def detect_keyword(self, pcm_data, user_id, is_silence=False):
+        # Skip Vosk processing while voice command listening is active.
+        if self._is_voice_command_listening():
+            return
+
         member = self.guild.get_member(user_id)
         username = member.name if member else f"user_{user_id}"
         
@@ -3218,6 +3285,16 @@ class KeywordDetectionSink(sinks.Sink):
         channel = self.guild.voice_client.channel
         
         if not channel:
+            return
+        
+        # Suppress slap/list keywords while a voice-command listening
+        # session is active (the ``write()`` guard already prevents most
+        # Vosk work, but already-queued items can still arrive here).
+        if action != "voice_command" and self._is_voice_command_listening():
+            print(
+                f"[KeywordDetection] Ignoring keyword '{keyword}' "
+                f"(action={action}) while voice command listening active"
+            )
             return
         
         if action == "slap":
@@ -3389,24 +3466,35 @@ class KeywordDetectionSink(sinks.Sink):
             return
         cooldowns[cooldown_key] = now
 
-        # ---- play start prompt (waits for completion before recording) ----
-        start_sound = getattr(
-            self.audio_service, "voice_command_start_sound",
-            "16-05-26-19-52-51-637928-Sim.mp3",
-        )
-        await self.audio_service._play_voice_command_prompt(
-            channel, start_sound, wait=True,
-        )
+        # ---- acquire voice-command listening state -------------------------
+        # Suppresses other Vosk keyword actions for the duration of prompt
+        # playback + fresh post-prompt capture.
+        if not self._begin_voice_command_listening(user_id):
+            return
+        try:
+            # ---- play start prompt (waits for completion before recording) ----
+            start_sound = getattr(
+                self.audio_service, "voice_command_start_sound",
+                "16-05-26-19-52-51-637928-Sim.mp3",
+            )
+            await self.audio_service._play_voice_command_prompt(
+                channel, start_sound, wait=True,
+            )
 
-        # ---- record fresh post-prompt audio until silence -----------------
-        capture_seconds = getattr(self.audio_service, "voice_command_capture_seconds", 6)
-        silence_seconds = getattr(self, "voice_command_silence_seconds", 1.0)
-        pcm_data = await self._record_voice_command_after_beep(
-            user_id,
-            requester_name,
-            max_seconds=capture_seconds,
-            silence_seconds=silence_seconds,
-        )
+            # ---- record fresh post-prompt audio until silence -----------------
+            capture_seconds = getattr(self.audio_service, "voice_command_capture_seconds", 6)
+            silence_seconds = getattr(self, "voice_command_silence_seconds", 1.0)
+            pcm_data = await self._record_voice_command_after_beep(
+                user_id,
+                requester_name,
+                max_seconds=capture_seconds,
+                silence_seconds=silence_seconds,
+            )
+        finally:
+            # Listening is done after the prompt + capture; release state so
+            # other keywords can fire during the Groq/Ventura/TTS pipeline.
+            self._end_voice_command_listening(user_id)
+
         if not pcm_data:
             print(f"[VoiceCommand] No post-prompt audio for {requester_name}; skipping")
             return

@@ -1838,6 +1838,285 @@ class TestAudioService:
             sink.write(b"some data", 999)
 
     # ------------------------------------------------------------------ #
+    # Voice-command listening state suppression tests
+    # ------------------------------------------------------------------ #
+
+    def test_write_skips_vosk_queuing_and_still_feeds_capture_during_listening(self):
+        """write() feeds _active_captures but does not queue to Vosk while listening."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        sink.running = True
+        sink.worker_thread = Mock()
+        sink.worker_thread.is_alive = Mock(return_value=True)
+        sink.last_audio_time = {}
+        sink.buffer_last_update = {}
+        sink.user_audio_buffers = {}
+        sink._active_captures = {}
+        sink.audio_buffers = {}
+        sink.queue = Mock()
+        sink.queue.qsize = Mock(return_value=5)
+        sink.queue.put = Mock()
+        sink.buffer_lock = Mock()
+        sink.buffer_lock.__enter__ = Mock(return_value=None)
+        sink.buffer_lock.__exit__ = Mock(return_value=None)
+        sink.buffer_seconds = 30
+        sink.min_batch_size = 28800
+        sink.max_queue_size = 100
+
+        # Manually set the listening state
+        sink._voice_command_listening_user_id = 12345
+        sink._voice_command_listening_lock = Mock()
+        sink._voice_command_listening_lock.__enter__ = Mock(return_value=None)
+        sink._voice_command_listening_lock.__exit__ = Mock(return_value=None)
+
+        user_id = 12345
+        data = b"\xaa\xbb" * 50
+
+        # Set up an active capture (must still be fed!)
+        capture = {"chunks": [], "last_audio_time": 0.0, "total_bytes": 0}
+        sink._active_captures[user_id] = capture
+
+        with patch("bot.services.audio.time.time", return_value=1000.0):
+            sink.write(data, user_id)
+
+        # Capture should still get the data (for voice-command recording)
+        assert capture["chunks"] == [data]
+        assert capture["total_bytes"] == len(data)
+
+        # Vosk queue should NOT have been called
+        sink.queue.put.assert_not_called()
+
+    def test_write_skips_vosk_for_other_user_during_listening(self):
+        """write() does not queue other users' audio to Vosk while listening."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        sink.running = True
+        sink.worker_thread = Mock()
+        sink.worker_thread.is_alive = Mock(return_value=True)
+        sink.last_audio_time = {}
+        sink.buffer_last_update = {}
+        sink.user_audio_buffers = {}
+        sink._active_captures = {}
+        sink.audio_buffers = {}
+        sink.queue = Mock()
+        sink.queue.qsize = Mock(return_value=5)
+        sink.queue.put = Mock()
+        sink.buffer_lock = Mock()
+        sink.buffer_lock.__enter__ = Mock(return_value=None)
+        sink.buffer_lock.__exit__ = Mock(return_value=None)
+        sink.buffer_seconds = 30
+        sink.min_batch_size = 28800
+        sink.max_queue_size = 100
+
+        # Listening to user 12345
+        sink._voice_command_listening_user_id = 12345
+        sink._voice_command_listening_lock = Mock()
+        sink._voice_command_listening_lock.__enter__ = Mock(return_value=None)
+        sink._voice_command_listening_lock.__exit__ = Mock(return_value=None)
+
+        # Other user speaks
+        with patch("bot.services.audio.time.time", return_value=1000.0):
+            sink.write(b"other data", 99999)
+
+        # Vosk queue should NOT have been called
+        sink.queue.put.assert_not_called()
+
+    def test_begin_voice_command_listening_returns_true_when_inactive(self):
+        """_begin_voice_command_listening returns True when no session is active."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        # Attributes are missing (no __init__) — helpers must handle this.
+        result = sink._begin_voice_command_listening(12345)
+        assert result is True
+        assert sink._voice_command_listening_user_id == 12345
+
+    def test_begin_voice_command_listening_returns_false_when_active(self):
+        """_begin_voice_command_listening returns False when a session is already active."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        # First call succeeds
+        assert sink._begin_voice_command_listening(111) is True
+        # Second call (different user) fails
+        assert sink._begin_voice_command_listening(222) is False
+        # State still belongs to first user
+        assert sink._voice_command_listening_user_id == 111
+
+    def test_end_voice_command_listening_clears_for_correct_user(self):
+        """_end_voice_command_listening only clears when user_id matches."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        sink._begin_voice_command_listening(111)
+
+        # Wrong user does not clear
+        sink._end_voice_command_listening(222)
+        assert sink._voice_command_listening_user_id == 111
+
+        # Correct user clears
+        sink._end_voice_command_listening(111)
+        assert sink._voice_command_listening_user_id is None
+
+    def test_end_voice_command_listening_noop_when_not_active(self):
+        """_end_voice_command_listening is a no-op when no session is active."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        # Should not raise even though state was never set
+        sink._end_voice_command_listening(111)
+
+    def test_is_voice_command_listening_uses_getattr_fallback(self):
+        """_is_voice_command_listening handles missing attributes (__new__ pattern)."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        # Attributes not set — should not raise
+        assert sink._is_voice_command_listening() is False
+
+    def test_detect_keyword_skips_during_listening(self):
+        """detect_keyword returns early while voice-command listening is active."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        sink.guild = Mock()
+        sink.guild.get_member = Mock(return_value=None)
+        sink.audio_service = Mock()
+        sink.audio_service.vosk_model = Mock()
+        sink.recognizers = {}
+        sink.resample_states = {}
+        sink.last_partial = {}
+
+        # Set listening state
+        sink._voice_command_listening_user_id = 12345
+        sink._voice_command_listening_lock = Mock()
+        sink._voice_command_listening_lock.__enter__ = Mock(return_value=None)
+        sink._voice_command_listening_lock.__exit__ = Mock(return_value=None)
+
+        # This should be a no-op (no Vosk processing, no error)
+        sink.detect_keyword(b"\x00\x00" * 100, 12345)
+
+        # Verify no recognizer was created
+        assert 12345 not in sink.recognizers
+
+    def test_trigger_action_ignores_slap_during_listening(self):
+        """trigger_action does not play slap while voice-command listening is active."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        sink.guild = Mock()
+        sink.guild.voice_client = Mock()
+        sink.guild.voice_client.channel = Mock()
+        sink.guild.get_member = Mock(return_value=None)
+        sink.audio_service = Mock()
+
+        # Set listening state
+        sink._voice_command_listening_user_id = 12345
+        sink._voice_command_listening_lock = Mock()
+        sink._voice_command_listening_lock.__enter__ = Mock(return_value=None)
+        sink._voice_command_listening_lock.__exit__ = Mock(return_value=None)
+
+        # Should not raise and should not play any slap
+        import asyncio
+        asyncio.run(sink.trigger_action(12345, "diogo", "slap"))
+
+        # audio_service._behavior.db.get_sounds should not have been called
+        sink.audio_service._behavior.assert_not_called()
+
+    def test_trigger_action_ignores_list_during_listening(self):
+        """trigger_action does not play list sounds while voice-command listening is active."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        sink.guild = Mock()
+        sink.guild.voice_client = Mock()
+        sink.guild.voice_client.channel = Mock()
+        sink.guild.get_member = Mock(return_value=None)
+        sink.audio_service = Mock()
+
+        # Set listening state
+        sink._voice_command_listening_user_id = 12345
+        sink._voice_command_listening_lock = Mock()
+        sink._voice_command_listening_lock.__enter__ = Mock(return_value=None)
+        sink._voice_command_listening_lock.__exit__ = Mock(return_value=None)
+
+        import asyncio
+        asyncio.run(sink.trigger_action(12345, "hugo", "list:mylist"))
+
+        # No play_audio or sound_service interaction
+        sink.audio_service.play_audio.assert_not_called()
+        sink.audio_service.sound_service.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_handle_voice_command_clears_listening_after_recording(self):
+        """Listening state is released right after recording (no-audio path)."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        sink.guild = Mock()
+        sink.guild.id = 999
+        sink.voice_command_enabled = True
+        sink.voice_command_wake_words = ["ventura"]
+        sink.voice_command_vosk_wake_words = []
+
+        sink.audio_service = Mock()
+        sink.audio_service._voice_command_cooldowns = {}
+        sink.audio_service.voice_command_cooldown_seconds = 5
+        sink.audio_service.voice_command_capture_seconds = 6
+        sink.audio_service.sound_service = AsyncMock()
+        sink.audio_service._play_voice_command_prompt = AsyncMock(return_value=True)
+
+        # Mock recording to return empty bytes (no audio path)
+        sink._record_voice_command_after_beep = AsyncMock(return_value=bytes())
+
+        # Listening state should NOT be active yet
+        assert sink._is_voice_command_listening() is False
+
+        await sink._handle_voice_command(999, "SilentUser", Mock())
+
+        # After the call completes, listening state should be released
+        assert sink._is_voice_command_listening() is False
+
+    @pytest.mark.asyncio
+    async def test_handle_voice_command_does_not_interleave(self):
+        """A second voice-command call while one is active is ignored."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        sink.guild = Mock()
+        sink.guild.id = 777
+        sink.voice_command_enabled = True
+        sink.voice_command_wake_words = ["ventura"]
+        sink.voice_command_vosk_wake_words = []
+
+        sink.audio_service = Mock()
+        sink.audio_service._voice_command_cooldowns = {}
+        sink.audio_service.voice_command_cooldown_seconds = 5
+        sink.audio_service.voice_command_capture_seconds = 6
+        sink.audio_service.sound_service = AsyncMock()
+        sink.audio_service._play_voice_command_prompt = AsyncMock(return_value=True)
+        sink._record_voice_command_after_beep = AsyncMock(return_value=b"\x00\x00" * 100)
+
+        mock_voice_service = Mock()
+        mock_voice_service.is_available = True
+        mock_voice_service.transcribe = AsyncMock(return_value="ventura play test")
+        sink.audio_service._get_voice_command_service = Mock(return_value=mock_voice_service)
+        sink.audio_service.sound_service.play_request = AsyncMock()
+
+        # First call begins listening
+        await sink._handle_voice_command(777, "UserA", Mock())
+
+        # Set listening to simulate a concurrent second wake
+        sink._voice_command_listening_user_id = 888
+        result = sink._begin_voice_command_listening(888)
+        assert result is False  # Already listening to another user
+
+        # Clean up for subsequent tests
+        sink._end_voice_command_listening(888)
+
+    # ------------------------------------------------------------------ #
     # Vosk alias fallback and confidence threshold tests
     # ------------------------------------------------------------------ #
 

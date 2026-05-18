@@ -47,6 +47,7 @@ This README is based on the current codebase behavior (not historical README ass
 
 ### Voice Commands (Wake Word + Groq Whisper + Ventura Chat)
 - When Vosk detects the configured wake word, the bot plays a **start prompt clip** from `Sounds/` (no DB lookup), then **records fresh per-user PCM audio after the prompt** (not a rolling buffer). Recording stops when the user stops talking (silence timeout) or a max duration is reached. The captured audio is wrapped as WAV and sent to Groq Whisper (`whisper-large-v3`) for transcription. This avoids sending pre-wake conversation/silence.
+- **Keyword suppression during listening**: While the start prompt plays and fresh command audio is being captured, all other Vosk keyword detections (slap, list, second wake word) are suppressed. This prevents the bot from triggering slap/list actions or starting a second voice-command session during the voice-command listening window. Suppression ends as soon as the capture completes, before Groq/Ventura/TTS processing begins.
 - **Three-way branching** after transcription:
     1. **Play command** (e.g. "ventura play air horn"): the bot plays a **done prompt clip** (acknowledgment), then fuzzy-matches and plays the requested sound, like `/toca`.
     2. **Mute command** (e.g. "ventura mute"): the bot activates the 30-minute mute (same behavior as the mute button: plays a random slap sound if available, then prevents sound playback for 30 minutes).
