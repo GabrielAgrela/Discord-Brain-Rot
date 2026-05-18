@@ -9,6 +9,9 @@ warms and returns ``cpu_warming: true`` with an empty process list.
 Process display names are improved by reading ``cmdline``: for Python processes
 the script basename is used (e.g. ``PersonalGreeter.py``) instead of the generic
 ``python``; for other interpreters the script/module basename is preferred.
+Chrome-family processes (chrome, chromium, google-chrome, brave, msedge, etc.)
+get role-specific labels such as ``chrome renderer``, ``chrome GPU``,
+``chrome browser``, or ``chrome utility (Network)``.
 """
 
 from __future__ import annotations
@@ -19,6 +22,96 @@ import time
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# Chrome-family browser binary basenames → display prefix
+_CHROME_DISPLAY_PREFIX: dict[str, str] = {
+    "chrome": "chrome",
+    "chromium": "chromium",
+    "chromium-browser": "chromium",
+    "google-chrome": "chrome",
+    "google-chrome-stable": "chrome",
+    "google-chrome-unstable": "chrome",
+    "brave": "brave",
+    "brave-browser": "brave",
+    "msedge": "edge",
+    "microsoft-edge": "edge",
+    "microsoft-edge-stable": "edge",
+    "vivaldi": "vivaldi",
+    "opera": "opera",
+}
+
+# Role labels for Chrome --type= values
+_CHROME_TYPE_LABEL: dict[str, str] = {
+    "renderer": "renderer",
+    "gpu-process": "GPU",
+    "utility": "utility",
+    "zygote": "zygote",
+    "broker": "broker",
+    "crashpad-handler": "crashpad",
+    "ppapi": "PPAPI",
+    "ppapi-broker": "PPAPI broker",
+    "sandbox-linux-namespace": "sandbox",
+    "extension": "extension",
+}
+
+
+def _classify_chrome_process(args: list[str]) -> str | None:
+    """Return a role-specific process label for a Chrome-family browser.
+
+    Examines command-line args for ``--type=`` and ``--utility-sub-type=``
+    switches to produce labels such as ``chrome renderer``, ``chrome GPU``,
+    ``chrome browser``, or ``chrome utility (Network)``.
+
+    Args:
+        args: Decoded command-line argument list (argv).
+
+    Returns:
+        A human-readable label (e.g. ``chrome renderer``) or *None* if the
+        process is not a Chrome-family browser.
+    """
+    if not args:
+        return None
+
+    binary = os.path.basename(args[0]).lower()
+    prefix = _CHROME_DISPLAY_PREFIX.get(binary)
+    if prefix is None:
+        return None
+
+    type_val: str | None = None
+    utility_subtype: str | None = None
+    is_extension = False
+
+    for arg in args[1:]:
+        if arg.startswith("--type="):
+            type_val = arg.split("=", 1)[1]
+        elif arg.startswith("--utility-sub-type="):
+            utility_subtype = arg.split("=", 1)[1]
+        elif arg == "--extension-process":
+            is_extension = True
+        # Also detect extension URLs (chrome-extension://) as a hint
+        if "chrome-extension://" in arg:
+            is_extension = True
+
+    if type_val is None:
+        return f"{prefix} browser"
+
+    if type_val == "renderer" and is_extension:
+        return f"{prefix} extension"
+
+    label = _CHROME_TYPE_LABEL.get(type_val, type_val)
+
+    if type_val == "utility" and utility_subtype:
+        # Extract concise subtype from dotted path, e.g. "NetworkService" from
+        # "network.mojom.NetworkService" or "Audio" from "audio.mojom.AudioService".
+        short = utility_subtype.rsplit(".", 1)[-1] if "." in utility_subtype else utility_subtype
+        # Drop common suffixes.
+        for suffix in ("Service", "Impl", "Manager", "Handler"):
+            if short.endswith(suffix) and len(short) > len(suffix):
+                short = short[: -len(suffix)]
+                break
+        return f"{prefix} {label} ({short})"
+
+    return f"{prefix} {label}"
 
 
 class HostSystemMonitorService:
@@ -34,16 +127,23 @@ class HostSystemMonitorService:
         snap = svc.get_snapshot(top_limit=4)
     """
 
-    def __init__(self, proc_root: str | None = None) -> None:
+    def __init__(
+        self,
+        proc_root: str | None = None,
+        sys_root: str | None = None,
+    ) -> None:
         """
         Args:
             proc_root: Override the ``/proc`` mount point (for testing).
                 Defaults to the ``HOST_SYSTEM_MONITOR_PROCFS_ROOT`` env var
                 or ``/proc``.
+            sys_root: Override the ``/sys`` mount point (for testing CPU temp).
+                Defaults to ``/sys``.
         """
         self._proc_root: str = proc_root or os.getenv(
             "HOST_SYSTEM_MONITOR_PROCFS_ROOT", "/proc"
         )
+        self._sys_root: str = sys_root or "/sys"
         # Previous aggregate CPU counters: {"total": int, "idle": int}
         self._prev_cpu: dict[str, int] | None = None
         # Previous per-process data: {pid: (comm, utime+stime)}
@@ -124,6 +224,8 @@ class HostSystemMonitorService:
                 "sample_interval_seconds": _r(interval),
                 "updated_at_unix": ts,
                 "top_processes": processes,
+                "cpu_temperature_celsius": self._read_cpu_temperature(),
+                "cpu_fan_rpm": self._read_cpu_fan_rpm(),
             }
 
         except Exception as exc:
@@ -140,7 +242,252 @@ class HostSystemMonitorService:
                 "sample_interval_seconds": 0.0,
                 "updated_at_unix": time.time(),
                 "top_processes": [],
+                "cpu_temperature_celsius": None,
+                "cpu_fan_rpm": None,
             }
+
+    # ------------------------------------------------------------------
+    # sysfs readers (CPU temperature)
+    # ------------------------------------------------------------------
+
+    def _read_cpu_temperature(self) -> float | None:
+        """Read CPU temperature from sysfs, return Celsius or ``None``.
+
+        Tries ``/sys/class/thermal/thermal_zone*/`` zones first (preferring
+        CPU-related type labels such as ``x86_pkg_temp``, ``coretemp``,
+        ``cpu-thermal``), then ``/sys/class/hwmon/hwmon*/`` devices (matching
+        by device name or sensor labels).
+
+        Returns:
+            Temperature in °C rounded to 1 decimal place, or ``None`` when
+            no CPU sensor is available or readable.
+        """
+        _CPU_KEYWORDS = (
+            "cpu", "package", "core", "soc",
+            "x86_pkg_temp", "k10temp", "tctl", "tdie",
+        )
+
+        def _parse_temp(raw: str) -> float | None:
+            try:
+                val = int(raw.strip())
+                # sysfs values are usually millidegrees (42000 → 42.0 °C)
+                celsius = val / 1000.0 if val > 1000 else float(val)
+                return round(celsius, 1) if 0 < celsius < 150 else None
+            except (ValueError, TypeError):
+                return None
+
+        # -- Thermal zones ---------------------------------------------------
+        try:
+            tz_dir = f"{self._sys_root}/class/thermal"
+            if os.path.isdir(tz_dir):
+                for entry in sorted(os.listdir(tz_dir)):
+                    if not entry.startswith("thermal_zone"):
+                        continue
+                    type_path = f"{tz_dir}/{entry}/type"
+                    temp_path = f"{tz_dir}/{entry}/temp"
+                    if not (os.path.isfile(type_path) and os.path.isfile(temp_path)):
+                        continue
+                    try:
+                        with open(type_path, encoding="utf-8") as f:
+                            zone_type = f.read().strip().lower()
+                        if not any(kw in zone_type for kw in _CPU_KEYWORDS):
+                            continue
+                        with open(temp_path, encoding="utf-8") as f:
+                            temp = _parse_temp(f.read())
+                        if temp is not None:
+                            return temp
+                    except OSError:
+                        continue
+        except OSError:
+            pass
+
+        # -- hwmon devices ---------------------------------------------------
+        try:
+            hw_dir = f"{self._sys_root}/class/hwmon"
+            if os.path.isdir(hw_dir):
+                for device in sorted(os.listdir(hw_dir)):
+                    if not device.startswith("hwmon"):
+                        continue
+                    dev_path = f"{hw_dir}/{device}"
+
+                    # Read device name (e.g. "coretemp", "k10temp")
+                    dev_name = ""
+                    name_path = f"{dev_path}/name"
+                    try:
+                        with open(name_path, encoding="utf-8") as f:
+                            dev_name = f.read().strip().lower()
+                    except OSError:
+                        pass
+
+                    is_cpu_dev = any(kw in dev_name for kw in _CPU_KEYWORDS) if dev_name else False
+
+                    # Collect temperature labels
+                    labels: dict[str, str] = {}
+                    try:
+                        for entry in os.listdir(dev_path):
+                            if entry.startswith("temp") and entry.endswith("_label"):
+                                idx = entry[4:-6]  # "temp" + idx + "_label"
+                                try:
+                                    with open(f"{dev_path}/{entry}", encoding="utf-8") as f:
+                                        labels[idx] = f.read().strip().lower()
+                                except OSError:
+                                    pass
+                    except OSError:
+                        continue
+
+                    # Scan temperature inputs
+                    cpu_candidates: list[float] = []
+                    all_candidates: list[float] = []
+
+                    try:
+                        for entry in os.listdir(dev_path):
+                            if entry.startswith("temp") and entry.endswith("_input"):
+                                idx = entry[4:-6]  # "temp" + idx + "_input"
+                                try:
+                                    with open(f"{dev_path}/{entry}", encoding="utf-8") as f:
+                                        temp = _parse_temp(f.read())
+                                    if temp is not None:
+                                        label = labels.get(idx, "")
+                                        if is_cpu_dev or any(kw in label for kw in _CPU_KEYWORDS):
+                                            cpu_candidates.append(temp)
+                                        all_candidates.append(temp)
+                                except OSError:
+                                    continue
+                    except OSError:
+                        continue
+
+                    if cpu_candidates:
+                        return round(cpu_candidates[0], 1)
+                    if all_candidates and is_cpu_dev:
+                        return round(all_candidates[0], 1)
+        except OSError:
+            pass
+
+        return None
+
+    # ------------------------------------------------------------------
+    # sysfs readers (CPU fan)
+    # ------------------------------------------------------------------
+
+    def _read_cpu_fan_rpm(self) -> int | None:
+        """Read CPU fan speed from sysfs, return RPM or ``None``.
+
+        Tries ``/sys/class/hwmon/hwmon*/`` devices, preferring fan inputs
+        whose ``fan*_label`` contains CPU-related keywords.  Falls back to
+        the first valid fan input from a known hwmon device (common
+        motherboard/sensor chip names) or the first valid fan overall.
+
+        Returns:
+            Fan speed in RPM, or ``None`` when no fan sensor is available
+            or readable.
+        """
+        _FAN_CPU_KEYWORDS = (
+            "cpu", "processor", "package", "core", "soc", "tctl", "tdie",
+        )
+        _FAN_KNOWN_NAMES = (
+            "nct", "it87", "asus", "gigabyte", "thinkpad", "dell", "hp",
+            "amdgpu",
+        )
+        _MAX_RPM = 99999
+
+        def _parse_fan(raw: str) -> int | None:
+            """Parse a fan RPM value from sysfs.
+
+            Returns the RPM value when it is a valid, readable sensor output
+            in the range ``[0, _MAX_RPM)``.  A value of ``0`` is valid and
+            indicates a stopped or idle fan.  Returns ``None`` for negative,
+            outlandish, or unreadable values.
+            """
+            try:
+                val = int(raw.strip())
+                return val if 0 <= val < _MAX_RPM else None
+            except (ValueError, TypeError):
+                return None
+
+        try:
+            hw_dir = f"{self._sys_root}/class/hwmon"
+            if not os.path.isdir(hw_dir):
+                return None
+
+            for device in sorted(os.listdir(hw_dir)):
+                if not device.startswith("hwmon"):
+                    continue
+                dev_path = f"{hw_dir}/{device}"
+
+                # Read device name (e.g. "nct6797", "coretemp")
+                dev_name = ""
+                name_path = f"{dev_path}/name"
+                try:
+                    with open(name_path, encoding="utf-8") as f:
+                        dev_name = f.read().strip().lower()
+                except OSError:
+                    pass
+
+                is_cpu_dev = (
+                    any(kw in dev_name for kw in _FAN_CPU_KEYWORDS)
+                    if dev_name else False
+                )
+                is_known_dev = (
+                    any(kw in dev_name for kw in _FAN_KNOWN_NAMES)
+                    if dev_name else False
+                )
+
+                # Collect fan labels
+                labels: dict[str, str] = {}
+                try:
+                    for entry in os.listdir(dev_path):
+                        if entry.startswith("fan") and entry.endswith("_label"):
+                            idx = entry[3:-6]  # "fan" + idx + "_label"
+                            try:
+                                with open(
+                                    f"{dev_path}/{entry}", encoding="utf-8"
+                                ) as f:
+                                    labels[idx] = f.read().strip().lower()
+                            except OSError:
+                                pass
+                except OSError:
+                    continue
+
+                # Scan fan inputs
+                cpu_candidates: list[int] = []
+                known_candidates: list[int] = []
+                all_candidates: list[int] = []
+
+                try:
+                    for entry in os.listdir(dev_path):
+                        if entry.startswith("fan") and entry.endswith("_input"):
+                            idx = entry[3:-6]  # "fan" + idx + "_input"
+                            try:
+                                with open(
+                                    f"{dev_path}/{entry}", encoding="utf-8"
+                                ) as f:
+                                    rpm = _parse_fan(f.read())
+                                if rpm is not None:
+                                    label = labels.get(idx, "")
+                                    if is_cpu_dev or any(
+                                        kw in label
+                                        for kw in _FAN_CPU_KEYWORDS
+                                    ):
+                                        cpu_candidates.append(rpm)
+                                    elif is_known_dev:
+                                        known_candidates.append(rpm)
+                                    all_candidates.append(rpm)
+                            except OSError:
+                                continue
+                except OSError:
+                    continue
+
+                if cpu_candidates:
+                    return cpu_candidates[0]
+                if known_candidates:
+                    return known_candidates[0]
+                if all_candidates and is_cpu_dev:
+                    return all_candidates[0]
+
+        except OSError:
+            pass
+
+        return None
 
     # ------------------------------------------------------------------
     # /proc readers
@@ -204,10 +551,13 @@ class HostSystemMonitorService:
         Each entry::
 
             {"pid": int, "name": str, "display_name": str | None,
+             "detail": str | None,
              "cpu_percent": float, "memory_rss_bytes": int,
              "memory_percent": float}
 
-        Returns an empty list on the first call (warming).
+        ``detail`` is an optional longer description (e.g. full command line)
+        suitable for tooltips.  Returns an empty list on the first call
+        (warming).
         """
         # Read current per-process data
         cur_proc: dict[int, tuple[str, int]] = {}
@@ -239,8 +589,9 @@ class HostSystemMonitorService:
         ram_total = self._read_meminfo().get("MemTotal", 0)
         processes: list[dict[str, Any]] = []
 
-        # Cache for cmdline reads (lazy, per pid)
-        cmdline_cache: dict[int, str | None] = {}
+        # Cache for cmdline reads (lazy, per pid).
+        # Values are (display_name, detail_or_None) or None for unresolvable.
+        cmdline_cache: dict[int, tuple[str, str | None] | None] = {}
 
         for pid, (cur_name, cur_clk) in cur_proc.items():
             prev_data = self._prev_proc_info.get(pid)
@@ -257,13 +608,16 @@ class HostSystemMonitorService:
             mem_pct = _pct(rss, ram_total)
 
             # Resolve a more descriptive display name via cmdline
-            display_name = self._resolve_display_name(pid, cur_name, cmdline_cache)
+            display_name, detail = self._resolve_display_name(
+                pid, cur_name, cmdline_cache
+            )
 
             processes.append(
                 {
                     "pid": pid,
                     "name": cur_name,
                     "display_name": display_name,
+                    "detail": detail,
                     "cpu_percent": _r(cpu_pct),
                     "memory_rss_bytes": rss,
                     "memory_percent": _r(mem_pct),
@@ -285,32 +639,40 @@ class HostSystemMonitorService:
         self,
         pid: int,
         comm: str,
-        cache: dict[int, str | None],
-    ) -> str:
+        cache: dict[int, tuple[str, str | None] | None],
+    ) -> tuple[str, str | None]:
         """
-        Return a more descriptive display name for a process.
+        Return ``(display_name, detail)`` for a process.
+
+        ``display_name`` is a human-readable process name (e.g. ``chrome
+        renderer``, ``WebPage.py``).  ``detail`` is an optional longer string
+        (truncated full command line) for tooltips.
 
         For common interpreters (python, node, java, etc.) reads
         ``/proc/<pid>/cmdline`` to find the script or module being run.
-        Falls back to the raw ``comm`` (process name from ``/proc/pid/stat``)
-        if cmdline is unavailable or unhelpful.
+        Chrome-family processes are classified by ``--type=`` switch.
+
+        Falls back to ``(comm, None)`` if cmdline is unavailable or unhelpful.
 
         Handles the fact that some processes (e.g. Chrome subprocesses) write
         their cmdline with space separators instead of NUL bytes.
         """
         if pid in cache:
-            return cache[pid] if cache[pid] else comm
+            cached = cache[pid]
+            if cached is not None:
+                return cached
+            return comm, None
 
         try:
             with open(f"{self._proc_root}/{pid}/cmdline", "rb") as f:
                 raw = f.read()
         except OSError:
             cache[pid] = None
-            return comm
+            return comm, None
 
         if not raw:
             cache[pid] = None
-            return comm
+            return comm, None
 
         # Try NUL-separated first.
         # Some processes (e.g. Chrome subprocesses) write space-separated
@@ -329,7 +691,10 @@ class HostSystemMonitorService:
 
         if not args:
             cache[pid] = None
-            return comm
+            return comm, None
+
+        # Build a compact command-line detail for tooltips
+        detail = self._truncate_display_name(" ".join(args), max_len=120)
 
         interpreter_bin = os.path.basename(args[0]).lower() if args[0] else ""
         interpreters = {
@@ -343,17 +708,26 @@ class HostSystemMonitorService:
                     continue
                 script = os.path.basename(arg)
                 if script:
-                    cache[pid] = self._truncate_display_name(script)
-                    return cache[pid]
+                    display = self._truncate_display_name(script)
+                    cache[pid] = (display, detail)
+                    return display, detail
+
+        # Check Chrome-family browser – returns role label such as
+        # "chrome renderer" or None if not a browser process.
+        chrome_label = _classify_chrome_process(args)
+        if chrome_label:
+            cache[pid] = (chrome_label, detail)
+            return chrome_label, detail
 
         # For non-interpreters, use the binary basename
         binary = os.path.basename(args[0])
         if binary:
-            cache[pid] = self._truncate_display_name(binary)
-            return cache[pid]
+            display = self._truncate_display_name(binary)
+            cache[pid] = (display, detail)
+            return display, detail
 
         cache[pid] = None
-        return comm
+        return comm, None
 
     # ------------------------------------------------------------------
     # Single-process readers

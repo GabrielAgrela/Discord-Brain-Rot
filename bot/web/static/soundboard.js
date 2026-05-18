@@ -98,6 +98,154 @@
             deferMotion();
         }
 
+        // ── Cross-tab shared fetch cache ──────────────────────────────
+        // Deduplicate GET requests across open tabs via BroadcastChannel
+        // + localStorage fallback. Falls open cleanly when unavailable.
+        const TAB_ID = Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+        const SHARED_CACHE_PREFIX = 'soundboard:shared-fetch:v1:';
+        const BC = typeof BroadcastChannel !== 'undefined'
+            ? new BroadcastChannel('soundboard-shared-fetch')
+            : null;
+
+        function _sharedCacheKey(url) { return SHARED_CACHE_PREFIX + url; }
+
+        function _readSharedCache(key, now) {
+            try {
+                var raw = localStorage.getItem(key);
+                if (!raw) return null;
+                var entry = JSON.parse(raw);
+                if (entry.expiresAt <= now) { localStorage.removeItem(key); return null; }
+                return entry.payload;
+            } catch (_e) { return null; }
+        }
+
+        function _writeSharedCache(key, payload, ttlMs, now) {
+            try {
+                localStorage.setItem(key, JSON.stringify({
+                    payload: payload,
+                    timestamp: now,
+                    expiresAt: now + ttlMs
+                }));
+            } catch (_e) { /* storage full or unavailable */ }
+        }
+
+        function _acquireLock(key, now) {
+            try {
+                var lockKey = key + ':lock';
+                var raw = localStorage.getItem(lockKey);
+                if (raw) {
+                    var lock = JSON.parse(raw);
+                    if (lock.expiresAt > now && lock.tabId !== TAB_ID) return false;
+                }
+                localStorage.setItem(lockKey, JSON.stringify({
+                    tabId: TAB_ID,
+                    expiresAt: now + 2500
+                }));
+                return true;
+            } catch (_e) { return false; }
+        }
+
+        function _releaseLock(key) {
+            try {
+                var lockKey = key + ':lock';
+                var raw = localStorage.getItem(lockKey);
+                if (raw) {
+                    var lock = JSON.parse(raw);
+                    if (lock.tabId === TAB_ID) localStorage.removeItem(lockKey);
+                }
+            } catch (_e) { /* ignore */ }
+        }
+
+        async function fetchSharedJson(url, opts) {
+            opts = opts || {};
+            var ttlMs = opts.ttlMs;
+            var forceNetwork = opts.forceNetwork === true;
+
+            // Force-network or no TTL: bypass cache but still write back.
+            if (forceNetwork || !ttlMs) {
+                var resp = await fetch(url);
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                var payload = await resp.json();
+                if (ttlMs) _writeSharedCache(_sharedCacheKey(url), payload, ttlMs, Date.now());
+                return payload;
+            }
+
+            var now = Date.now();
+            var key = _sharedCacheKey(url);
+
+            // Check shared cache first.
+            var cached = _readSharedCache(key, now);
+            if (cached !== null) return cached;
+
+            // Try to acquire a short-lived lock so only one tab fetches.
+            var haveLock = false;
+            try { haveLock = _acquireLock(key, now); } catch (_e) {}
+
+            if (haveLock) {
+                try {
+                    var resp = await fetch(url);
+                    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                    var payload = await resp.json();
+                    _writeSharedCache(key, payload, ttlMs, Date.now());
+                    if (BC) BC.postMessage({ type: 'cache-update', key: key, payload: payload, ttlMs: ttlMs });
+                    return payload;
+                } finally {
+                    _releaseLock(key);
+                }
+            }
+
+            // Another tab holds the lock. Wait for broadcast or storage update.
+            return new Promise(function (resolve, reject) {
+                var startTime = Date.now();
+                var maxWait = Math.min(ttlMs, 2000);
+                var settled = false;
+
+                function settle(value) {
+                    if (settled) return;
+                    settled = true;
+                    if (BC) BC.removeEventListener('message', handler);
+                    clearTimeout(timeout);
+                    resolve(value);
+                }
+
+                function fallback() {
+                    if (settled) return;
+                    settled = true;
+                    if (BC) BC.removeEventListener('message', handler);
+                    clearTimeout(timeout);
+                    // Do our own fetch as fallback.
+                    fetch(url).then(function (r) {
+                        if (!r.ok) throw new Error('HTTP ' + r.status);
+                        return r.json();
+                    }).then(function (payload) {
+                        _writeSharedCache(key, payload, ttlMs, Date.now());
+                        resolve(payload);
+                    }).catch(function (err) {
+                        reject(err);
+                    });
+                }
+
+                var handler = function (event) {
+                    if (event.data && event.data.type === 'cache-update' && event.data.key === key) {
+                        settle(event.data.payload);
+                    }
+                };
+                if (BC) BC.addEventListener('message', handler);
+
+                // Poll localStorage as fallback for tabs that don't support BC.
+                (function poll() {
+                    if (settled) return;
+                    var elapsed = Date.now() - startTime;
+                    if (elapsed >= maxWait) { fallback(); return; }
+                    var val = _readSharedCache(key, Date.now());
+                    if (val !== null) { settle(val); return; }
+                    setTimeout(poll, 150);
+                })();
+
+                var timeout = setTimeout(fallback, maxWait + 50);
+            });
+        }
+
         const soundboardConfigElement = document.getElementById('soundboard-config');
         const soundboardConfig = soundboardConfigElement ? JSON.parse(soundboardConfigElement.textContent || '{}') : {};
         const discordUser = soundboardConfig.discord_user || null;
@@ -341,7 +489,8 @@
                 });
         }
 
-        async function refreshWebControlState() {
+        async function refreshWebControlState(options) {
+            options = options || {};
             if (!discordUser || webControlStateRequestInFlight) {
                 return;
             }
@@ -350,11 +499,10 @@
             try {
                 const params = new URLSearchParams();
                 appendGuildParam(params);
-                const response = await fetch(`/api/web_control_state?${params.toString()}`);
-                if (!response.ok) {
-                    return;
-                }
-                const payload = await response.json();
+                var payload = await fetchSharedJson('/api/web_control_state?' + params.toString(), {
+                    ttlMs: WEBCTRL_SHARED_CACHE_MS,
+                    forceNetwork: options.forceNetwork === true
+                });
                 updateWebControlMuteState(payload?.mute?.is_muted);
             } catch (error) {
                 console.error('Error loading web control state:', error);
@@ -604,7 +752,8 @@
             return `Ready in ${status.voice_channel_name || 'voice'}.`;
         }
 
-        async function refreshControlRoomStatus() {
+        async function refreshControlRoomStatus(options) {
+            options = options || {};
             if (controlRoomRequestInFlight) {
                 return;
             }
@@ -613,11 +762,10 @@
             try {
                 const params = new URLSearchParams();
                 appendGuildParam(params);
-                const response = await fetch(`/api/control_room/status?${params.toString()}`);
-                if (!response.ok) {
-                    return;
-                }
-                const payload = await response.json();
+                var payload = await fetchSharedJson('/api/control_room/status?' + params.toString(), {
+                    ttlMs: STATUS_SHARED_CACHE_MS,
+                    forceNetwork: options.forceNetwork === true
+                });
                 updateControlRoomStatus(payload);
             } catch (error) {
                 console.error('Error loading control room status:', error);
@@ -641,17 +789,32 @@
             return value.toFixed(1) + '%';
         }
 
+        function formatTemperatureForSystem(celsius) {
+            if (celsius === null || celsius === undefined || !Number.isFinite(celsius)) return '--';
+            return celsius.toFixed(1) + '\u00B0C';
+        }
+
+        function formatFanSpeedForSystem(rpm) {
+            if (rpm === null || rpm === undefined || !Number.isFinite(rpm) || rpm < 0) return '--';
+            return Math.round(rpm).toLocaleString() + ' RPM';
+        }
+
         function updateSystemMonitor(payload) {
             const summary = document.getElementById('systemMonitorSummary');
             const totalCpu = document.getElementById('systemMonitorTotalCpu');
             const totalRam = document.getElementById('systemMonitorTotalRam');
+            const totalTemp = document.getElementById('systemMonitorTotalTemp');
             const processList = document.getElementById('systemMonitorProcessList');
             const footnote = document.getElementById('systemMonitorFootnote');
 
+            const button = document.getElementById('systemMonitorButton');
+
             if (!payload.available) {
-                if (summary) summary.textContent = 'CPU -- \u00B7 RAM --';
+                if (summary) summary.textContent = 'CPU --';
+                if (button) button.setAttribute('aria-label', 'System monitor unavailable');
                 if (totalCpu) totalCpu.textContent = '--';
                 if (totalRam) totalRam.textContent = '--';
+                if (totalTemp) totalTemp.textContent = '--';
                 if (processList) processList.innerHTML = '<p class="system-monitor-empty">' + (payload.status_label || 'Unavailable') + '</p>';
                 if (footnote) footnote.textContent = '';
                 return;
@@ -664,16 +827,33 @@
             const ramPercent = payload.ram_percent !== null && payload.ram_percent !== undefined
                 ? ' (' + payload.ram_percent.toFixed(1) + '%)'
                 : '';
+            const tempText = formatTemperatureForSystem(payload.cpu_temperature_celsius);
+            const fanText = formatFanSpeedForSystem(payload.cpu_fan_rpm);
 
             if (summary) {
-                summary.textContent = cpuText + ' \u00B7 ' + ramText;
+                summary.textContent = cpuText;
+            }
+            if (button) {
+                var ariaLabel = cpuText + ' \u00B7 ' + ramText + ramPercent;
+                if (tempText !== '--') {
+                    ariaLabel += ' \u00B7 Temp ' + tempText;
+                }
+                if (fanText !== '--') {
+                    ariaLabel += ' \u00B7 Fan ' + fanText;
+                }
+                ariaLabel += ' \u2014 click or tap for details';
+                button.setAttribute('aria-label', ariaLabel);
             }
 
             if (totalCpu) {
-                totalCpu.textContent = cpuText;
+                const cpuWithFanText = fanText !== '--' ? cpuText + ' (' + fanText + ')' : cpuText;
+                totalCpu.textContent = cpuWithFanText;
             }
             if (totalRam) {
                 totalRam.textContent = ramText + ramPercent;
+            }
+            if (totalTemp) {
+                totalTemp.textContent = tempText;
             }
 
             if (processList) {
@@ -689,6 +869,9 @@
                             const name = document.createElement('span');
                             name.className = 'system-monitor-process-name';
                             name.textContent = proc.display_name || proc.name || 'pid:' + proc.pid;
+                            if (proc.detail) {
+                                name.title = proc.detail;
+                            }
 
                         const cpu = document.createElement('span');
                         cpu.className = 'system-monitor-process-cpu';
@@ -715,18 +898,18 @@
             }
         }
 
-        async function refreshSystemMonitorStatus() {
+        async function refreshSystemMonitorStatus(options) {
+            options = options || {};
             if (systemMonitorRequestInFlight) {
                 return;
             }
 
             systemMonitorRequestInFlight = true;
             try {
-                const response = await fetch('/api/system_monitor/status?limit=4');
-                if (!response.ok) {
-                    return;
-                }
-                const payload = await response.json();
+                var payload = await fetchSharedJson('/api/system_monitor/status?limit=4', {
+                    ttlMs: SYS_MON_SHARED_CACHE_MS,
+                    forceNetwork: options.forceNetwork === true
+                });
                 updateSystemMonitor(payload);
             } catch (error) {
                 // Silently fail – the summary will keep showing the last good value.
@@ -735,15 +918,43 @@
             }
         }
 
+        function positionSystemMonitorDropdown() {
+            const dropdown = document.getElementById('systemMonitorDropdown');
+            const metric = document.getElementById('controlRoomSystemMetric');
+            if (!dropdown || !metric) return;
+
+            var isMobile = window.matchMedia('(max-width: 640px)').matches;
+            if (isMobile) {
+                var button = document.getElementById('systemMonitorButton');
+                var rect = button
+                    ? button.getBoundingClientRect()
+                    : metric.getBoundingClientRect();
+                var top = Math.min(
+                    rect.bottom + 8,
+                    window.innerHeight - 16
+                );
+                var maxHeight = Math.max(180, window.innerHeight - top - 16);
+                dropdown.style.setProperty('--system-monitor-dropdown-top', top + 'px');
+                dropdown.style.setProperty('--system-monitor-dropdown-max-height', maxHeight + 'px');
+            } else {
+                dropdown.style.removeProperty('--system-monitor-dropdown-top');
+                dropdown.style.removeProperty('--system-monitor-dropdown-max-height');
+            }
+        }
+
         function openSystemMonitorDropdown() {
             const dropdown = document.getElementById('systemMonitorDropdown');
             const button = document.getElementById('systemMonitorButton');
             if (!dropdown) return;
+            positionSystemMonitorDropdown();
             dropdown.classList.add('open');
             dropdown.setAttribute('aria-hidden', 'false');
             if (button) {
                 button.setAttribute('aria-expanded', 'true');
             }
+            // Adaptive polling: faster cadence while open + immediate refresh.
+            _sysMonDropdownOpen = true;
+            refreshSystemMonitorStatus();
         }
 
         function closeSystemMonitorDropdown() {
@@ -755,6 +966,8 @@
             if (button) {
                 button.setAttribute('aria-expanded', 'false');
             }
+            // Adaptive polling: slow down to summary cadence.
+            _sysMonDropdownOpen = false;
         }
 
         function toggleSystemMonitorDropdown() {
@@ -1251,9 +1464,13 @@
             if (showLoading) {
                 setEndpointLoading(endpoint, true);
             }
-            return fetch(apiUrl)
-                .then(response => response.json())
-                .then(data => {
+
+            var isPassive = !showLoading;
+            var fetchPromise = isPassive
+                ? fetchSharedJson(apiUrl, { ttlMs: TABLE_SHARED_CACHE_MS })
+                : fetchSharedJson(apiUrl, { forceNetwork: true });
+
+            return fetchPromise.then(data => {
                     if (hasRenderableFilterPayload(endpoint, data.filters) && !pendingInitialRenderEndpoints.has(endpoint)) {
                         renderFilterControls(endpoint, data.filters || {}, fetchersByEndpoint[endpoint]);
                     }
@@ -3382,17 +3599,83 @@
         setupBackendSearch('searchFavorites', fetchFavorites);
         setupBackendSearch('searchAllSounds', fetchAllSounds);
 
-        setInterval(() => {
-            const isInteractingWithFilters = document.activeElement && document.activeElement.classList.contains('filter-select');
-            const isEditingPageInput = document.activeElement && document.activeElement.classList.contains('pagination-page-input');
-            if (isInteractingWithFilters || isEditingPageInput) {
-                return;
-            }
-            Promise.all([fetchActions(), fetchFavorites(), fetchAllSounds(), refreshWebControlState(), refreshControlRoomStatus()]);
-        }, 2000);
+        // ── Staggered passive polling ────────────────────────────────────
+        // Instead of bursting 5 fetches every 2 s, spread work across time:
+        //   - Table data (actions/favorites/all_sounds): one table per tick,
+        //     ~3.5 s apart, full cycle ~10.5 s (reduces burst CPU & SQL load).
+        //   - Control room status: ~4 s loop.
+        //   - Web control state: ~5 s loop.
+        //   - System monitor (next section): adaptive cadence.
+        // All loops use setTimeout chains (not setInterval) so each next tick
+        // is scheduled after the previous one fires, preventing pile-up.
 
-        // System monitor polls every 1 s (separate from the 2 s table / control-room interval).
-        setInterval(refreshSystemMonitorStatus, 1000);
+        const TABLE_POLL_MS = 3500;
+        const STATUS_POLL_MS = 4000;
+        const WEBCTRL_POLL_MS = 5000;
+        const SYS_MON_SUMMARY_MS = 4000;   // dropdown closed
+        const SYS_MON_DETAILED_MS = 1500;  // dropdown open
+        const SYS_MON_HIDDEN_MS = 20000;   // tab hidden
+
+        // Cross-tab shared-cache TTLs (slightly less than poll interval
+        // so the next poll usually gets a fresh response).
+        const SYS_MON_SHARED_CACHE_MS = 1200;
+        const STATUS_SHARED_CACHE_MS = 1800;
+        const WEBCTRL_SHARED_CACHE_MS = 1800;
+        const TABLE_SHARED_CACHE_MS = 3000;
+
+        // ── Table round-robin ──
+        const _tableFetchers = [fetchActions, fetchFavorites, fetchAllSounds];
+        var _tablePollIndex = Math.floor(Math.random() * _tableFetchers.length); // jitter
+        var _tablePollTimer = null;
+
+        function _scheduleTablePoll() {
+            const el = document.activeElement;
+            const skip = el && (
+                el.classList.contains('filter-select') ||
+                el.classList.contains('pagination-page-input')
+            );
+            if (!skip) {
+                _tableFetchers[_tablePollIndex]();
+            }
+            _tablePollIndex = (_tablePollIndex + 1) % _tableFetchers.length;
+            _tablePollTimer = setTimeout(_scheduleTablePoll, TABLE_POLL_MS);
+        }
+
+        // ── Control room status ──
+        var _statusPollTimer = null;
+
+        function _scheduleStatusPoll() {
+            _statusPollTimer = setTimeout(function () {
+                refreshControlRoomStatus().then(_scheduleStatusPoll);
+            }, STATUS_POLL_MS);
+        }
+
+        // ── Web control state ──
+        var _webCtrlPollTimer = null;
+
+        function _scheduleWebCtrlPoll() {
+            _webCtrlPollTimer = setTimeout(function () {
+                refreshWebControlState().then(_scheduleWebCtrlPoll);
+            }, WEBCTRL_POLL_MS);
+        }
+
+        // ── System monitor (adaptive cadence) ──
+        var _sysMonPollTimer = null;
+        var _sysMonDropdownOpen = false;
+
+        function _scheduleSysMonPoll() {
+            var interval;
+            if (document.hidden) {
+                interval = SYS_MON_HIDDEN_MS;
+            } else if (_sysMonDropdownOpen) {
+                interval = SYS_MON_DETAILED_MS;
+            } else {
+                interval = SYS_MON_SUMMARY_MS;
+            }
+            _sysMonPollTimer = setTimeout(function () {
+                refreshSystemMonitorStatus().then(_scheduleSysMonPoll);
+            }, interval);
+        }
 
         // ── System Monitor Dropdown ──────────────────────────────────
         const systemMonitorButton = document.getElementById('systemMonitorButton');
@@ -3426,6 +3709,61 @@
             }
         });
 
+        // Reposition dropdown on resize when open (mobile fixed mode)
+        window.addEventListener('resize', function() {
+            var dropdown = document.getElementById('systemMonitorDropdown');
+            if (dropdown && dropdown.classList.contains('open')) {
+                positionSystemMonitorDropdown();
+            }
+        });
+
+        // ── System Monitor hover-open (desktop only) ─────────────
+        const systemMetric = document.getElementById('controlRoomSystemMetric');
+        if (systemMetric && window.matchMedia('(hover: hover) and (pointer: fine)').matches) {
+            let hoverTimeout = null;
+
+            function hoverOpen() {
+                if (hoverTimeout !== null) {
+                    clearTimeout(hoverTimeout);
+                    hoverTimeout = null;
+                }
+                openSystemMonitorDropdown();
+            }
+
+            function hoverCloseDelayed() {
+                if (hoverTimeout !== null) {
+                    clearTimeout(hoverTimeout);
+                }
+                hoverTimeout = setTimeout(function () {
+                    closeSystemMonitorDropdown();
+                    hoverTimeout = null;
+                }, 250);
+            }
+
+            systemMetric.addEventListener('mouseenter', hoverOpen);
+            systemMetric.addEventListener('mouseleave', hoverCloseDelayed);
+
+            if (systemMonitorDropdown) {
+                systemMonitorDropdown.addEventListener('mouseenter', function () {
+                    if (hoverTimeout !== null) {
+                        clearTimeout(hoverTimeout);
+                        hoverTimeout = null;
+                    }
+                });
+                systemMonitorDropdown.addEventListener('mouseleave', hoverCloseDelayed);
+            }
+        }
+
+        // ── Tab visibility: refresh when becoming visible, slowdown when hidden ──
+        document.addEventListener('visibilitychange', function () {
+            if (!document.hidden) {
+                refreshSystemMonitorStatus();
+                refreshControlRoomStatus();
+                refreshWebControlState();
+                _tableFetchers[_tablePollIndex]();
+            }
+        });
+
         Object.keys(fetchersByEndpoint).forEach(applyTableGeometry);
         Object.keys(fetchersByEndpoint).forEach(endpoint => {
             updateResultMeta(endpoint, initialSoundboardData?.[endpoint] || {}, 1);
@@ -3439,6 +3777,13 @@
         refreshWebControlState();
         refreshControlRoomStatus();
         refreshSystemMonitorStatus();
+
+        // Start staggered polling loops (initial fetches done above).
+        _scheduleTablePoll();
+        _scheduleStatusPoll();
+        _scheduleWebCtrlPoll();
+        _scheduleSysMonPoll();
+
         loadUploadInbox();
         fitActionBadges();
 

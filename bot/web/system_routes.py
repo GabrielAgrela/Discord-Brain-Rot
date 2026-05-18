@@ -31,7 +31,11 @@ def register_system_routes(app: Flask) -> None:
         try:
             service: WebSystemMonitorService = _get_web_system_monitor_service()
             payload = service.get_snapshot(top_limit=limit)
-            return jsonify(payload), 200
+            response = jsonify(payload)
+            # Allow browser to serve cached response for 1 s to reduce
+            # redundant requests from aggressive polling intervals.
+            response.headers["Cache-Control"] = "private, max-age=1"
+            return response, 200
         except Exception:
             logger.exception("System monitor route error")
             return jsonify(
@@ -47,5 +51,7 @@ def register_system_routes(app: Flask) -> None:
                     "sample_interval_seconds": 0.0,
                     "updated_at_unix": 0.0,
                     "top_processes": [],
+                    "cpu_temperature_celsius": None,
+                    "cpu_fan_rpm": None,
                 }
             ), 500

@@ -9,7 +9,9 @@ from typing import Any
 from flask import Flask, jsonify, request
 
 from bot.web.route_helpers import (
+    _build_read_cache_key,
     _get_current_discord_user,
+    _get_response_cache,
     _get_web_control_room_service,
     _get_web_playback_service,
     _get_web_tts_enhancer_service,
@@ -72,8 +74,19 @@ def register_playback_routes(app: Flask) -> None:
     def get_web_control_state() -> Any:
         """Return current bot control state for the authenticated web user."""
         _remember_selected_guild_id(request.args.get("guild_id"))
+        cache = _get_response_cache()
+        key = _build_read_cache_key("/api/web_control_state", visibility="auth")
         try:
-            return jsonify(_get_web_playback_service().get_control_state(request.args)), 200
+            payload = cache.get_or_set(
+                key,
+                ttl=1.0,
+                producer=lambda: _get_web_playback_service().get_control_state(
+                    request.args
+                ),
+            )
+            response = jsonify(payload)
+            response.headers["Cache-Control"] = "private, max-age=1"
+            return response, 200
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
         except sqlite3.Error:
@@ -104,13 +117,24 @@ def register_playback_routes(app: Flask) -> None:
     def get_control_room_status() -> Any:
         """Return live bot status for the web control room."""
         _remember_selected_guild_id(request.args.get("guild_id"))
+        current_user = _get_current_discord_user()
+        visibility = "auth" if current_user is not None else "anon"
+        cache = _get_response_cache()
+        key = _build_read_cache_key(
+            "/api/control_room/status", visibility=visibility
+        )
         try:
-            return jsonify(
-                _get_web_control_room_service().get_status(
+            payload = cache.get_or_set(
+                key,
+                ttl=1.5,
+                producer=lambda: _get_web_control_room_service().get_status(
                     request.args,
-                    current_user=_get_current_discord_user(),
-                )
-            ), 200
+                    current_user=current_user,
+                ),
+            )
+            response = jsonify(payload)
+            response.headers["Cache-Control"] = "private, max-age=1"
+            return response, 200
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
         except sqlite3.Error:

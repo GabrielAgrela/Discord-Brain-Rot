@@ -9,6 +9,13 @@ returns the latest snapshot to the Flask endpoint.
 If the persisted snapshot is missing or stale (older than 5 s) the service
 returns ``"available": false`` with ``"status_label": "Waiting for host monitor"``.
 
+In-process cache
+~~~~~~~~~~~~~~~~
+An optional short-lived in-memory cache reduces repeated SQLite reads when
+multiple tabs or rapid polling hits the endpoint.  The cache TTL defaults to
+1.0 s and can be overridden via the constructor.  Only valid (available)
+snapshots are cached; unavailable responses always re-query the repository.
+
 Dev fallback
 ~~~~~~~~~~~~
 Set ``WEB_SYSTEM_MONITOR_ALLOW_WEB_PROC_FALLBACK=1`` to fall back to reading
@@ -44,6 +51,7 @@ class WebSystemMonitorService:
         self,
         repository: Optional[WebSystemStatusRepository] = None,
         db_path: Optional[str] = None,
+        cache_ttl: float = 1.0,
     ) -> None:
         """
         Args:
@@ -51,12 +59,20 @@ class WebSystemMonitorService:
                 and *db_path* is given, one is created.
             db_path: Path to the SQLite database.  Used only when *repository* is
                 not provided.
+            cache_ttl: Maximum age (seconds) of the in-memory snapshot cache.
+                Set to 0 to disable caching.  Defaults to 1.0.
         """
         self._repo = repository or (
             WebSystemStatusRepository(db_path=db_path, use_shared=False)
             if db_path
             else None
         )
+        self._cache_ttl = cache_ttl
+
+        # In-process snapshot cache: stores the last valid (available) snapshot
+        # so that rapid polling within cache_ttl avoids redundant SQLite reads.
+        self._cache_snapshot: dict[str, Any] | None = None
+        self._cache_time: float = 0.0
 
         # Two-sample state for the optional web /proc fallback.
         self._prev_cpu: dict[str, int] | None = None
@@ -107,14 +123,29 @@ class WebSystemMonitorService:
 
         # Preferred path: read from the persisted bot-side snapshot.
         if self._repo is not None:
+            # In-process cache: return cached snapshot if still fresh.
+            now = time.monotonic()
+            if self._cache_ttl > 0 and self._cache_snapshot is not None:
+                if now - self._cache_time < self._cache_ttl:
+                    return {
+                        **self._cache_snapshot,
+                        "top_processes": (
+                            self._cache_snapshot.get("top_processes") or []
+                        )[:top_limit],
+                    }
+
             snapshot = self._repo.get_latest_snapshot(max_age_seconds=5)
             if snapshot is not None:
+                # Cache the full snapshot (before per-request slicing).
+                self._cache_snapshot = snapshot
+                self._cache_time = now
                 return {
                     **snapshot,
                     "top_processes": (snapshot.get("top_processes") or [])[:top_limit],
                 }
 
-            # Snapshot missing or stale.
+            # Snapshot missing or stale — invalidate cache.
+            self._cache_snapshot = None
             return {
                 "available": False,
                 "status_label": "Waiting for host monitor",
@@ -128,6 +159,8 @@ class WebSystemMonitorService:
                 "sample_interval_seconds": 0.0,
                 "updated_at_unix": time.time(),
                 "top_processes": [],
+                "cpu_temperature_celsius": None,
+                "cpu_fan_rpm": None,
             }
 
         # No repository — try fallback /proc reading if enabled.
@@ -147,6 +180,8 @@ class WebSystemMonitorService:
             "sample_interval_seconds": 0.0,
             "updated_at_unix": time.time(),
             "top_processes": [],
+            "cpu_temperature_celsius": None,
+            "cpu_fan_rpm": None,
         }
 
     # ------------------------------------------------------------------
@@ -203,6 +238,8 @@ class WebSystemMonitorService:
                 "sample_interval_seconds": _r(interval),
                 "updated_at_unix": ts,
                 "top_processes": processes,
+                "cpu_temperature_celsius": None,
+                "cpu_fan_rpm": None,
             }
         except Exception as exc:
             logger.warning("Web fallback system monitor unavailable: %s", exc)
@@ -219,6 +256,8 @@ class WebSystemMonitorService:
                 "sample_interval_seconds": 0.0,
                 "updated_at_unix": time.time(),
                 "top_processes": [],
+                "cpu_temperature_celsius": None,
+                "cpu_fan_rpm": None,
             }
 
     @staticmethod

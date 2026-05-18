@@ -64,6 +64,67 @@ def _get_web_content_service() -> WebContentService:
     )
 
 
+def _get_response_cache() -> "ResponseCache":
+    """Return the shared per-process response cache from app extensions."""
+    from bot.web.response_cache import ResponseCache
+
+    cache: ResponseCache | None = current_app.extensions.get("web_response_cache")
+    if cache is None:
+        cache = ResponseCache()
+        current_app.extensions["web_response_cache"] = cache
+    return cache
+
+
+def _get_content_visibility_scope(
+    current_user: DiscordWebUser | None,
+) -> str:
+    """Return a cache visibility scope for content/pagination endpoints.
+
+    Returns one of ``anon``, ``auth_censored``, or ``auth_uncensored``
+    so that payloads with different username-censorship rules do not
+    accidentally share a cache entry.
+    """
+    if current_user is None:
+        return "anon"
+    db_path = current_app.config["DATABASE_PATH"]
+    repo = WebUserAccessRepository(db_path=db_path, use_shared=False)
+    has_voice = repo.has_voice_activity_for_usernames(
+        (current_user.username, current_user.global_name)
+    )
+    return "auth_uncensored" if has_voice else "auth_censored"
+
+
+def _build_read_cache_key(
+    endpoint_name: str,
+    *,
+    visibility: str | None = None,
+) -> str:
+    """Build a deterministic cache key from endpoint name and sorted query args.
+
+    Args:
+        endpoint_name: URL path or logical endpoint identifier.
+        visibility: Optional scope string (e.g. ``anon``, ``auth``, …).
+
+    Returns:
+        String key safe for use as a ``ResponseCache`` key.
+    """
+    parts: list[str] = [endpoint_name]
+
+    # Sort query-string keys for deterministic ordering across clients.
+    sorted_query = sorted(
+        (key, value)
+        for key in sorted(request.args.keys())
+        for value in request.args.getlist(key)
+    )
+    if sorted_query:
+        parts.append("?" + "&".join(f"{k}={v}" for k, v in sorted_query))
+
+    if visibility:
+        parts.append(f"v={visibility}")
+
+    return "|".join(parts)
+
+
 def _get_web_analytics_service() -> WebAnalyticsService:
     """Build an analytics service for the current request config."""
     db_path = current_app.config["DATABASE_PATH"]

@@ -331,6 +331,478 @@ def test_display_name_for_non_interpreter(tmp_path):
 
 
 # ======================================================================
+# HostSystemMonitorService — Chrome process classification
+# ======================================================================
+
+
+def test_chrome_browser_process(tmp_path):
+    """Chrome main process (no --type) → 'chrome browser'."""
+    _write_proc(tmp_path, "meminfo", "MemTotal: 16777216 kB\nMemAvailable: 8388608 kB\n")
+    cpu1 = (100, 50, 25, 800, 10, 0, 0, 0, 0, 0)
+    _write_proc(tmp_path, "stat", f"cpu  {' '.join(str(v) for v in cpu1)}\n")
+    _write_proc(tmp_path, "101/stat", "101 (chrome) R 1 2 3 4 5 6 7 8 9 10 100 50\n")
+    _write_proc(tmp_path, "101/status", "Name:\tchrome\nVmRSS:\t4096 kB\n")
+    _write_proc_binary(
+        tmp_path, "101/cmdline",
+        b"/opt/google/chrome/chrome\x00--flag-switches-begin\x00",
+    )
+
+    svc = HostSystemMonitorService(proc_root=str(tmp_path))
+    svc.get_snapshot()  # warm-up
+
+    cpu2 = (200, 100, 50, 1600, 20, 0, 0, 0, 0, 0)
+    _write_proc(tmp_path, "stat", f"cpu  {' '.join(str(v) for v in cpu2)}\n")
+    _write_proc(tmp_path, "101/stat", "101 (chrome) R 1 2 3 4 5 6 7 8 9 10 200 100\n")
+
+    snap = svc.get_snapshot()
+    proc = snap["top_processes"][0]
+    assert proc["display_name"] == "chrome browser"
+    assert proc["name"] == "chrome"
+    assert isinstance(proc["detail"], str)
+    assert "chrome" in proc["detail"]
+
+
+def test_chrome_renderer_process(tmp_path):
+    """Chrome renderer → 'chrome renderer'."""
+    _write_proc(tmp_path, "meminfo", "MemTotal: 16777216 kB\nMemAvailable: 8388608 kB\n")
+    cpu1 = (100, 50, 25, 800, 10, 0, 0, 0, 0, 0)
+    _write_proc(tmp_path, "stat", f"cpu  {' '.join(str(v) for v in cpu1)}\n")
+    _write_proc(tmp_path, "101/stat", "101 (chrome) R 1 2 3 4 5 6 7 8 9 10 100 50\n")
+    _write_proc(tmp_path, "101/status", "Name:\tchrome\nVmRSS:\t4096 kB\n")
+    _write_proc_binary(
+        tmp_path, "101/cmdline",
+        b"/opt/google/chrome/chrome\x00--type=renderer\x00--field-trial-handle=123\x00",
+    )
+
+    svc = HostSystemMonitorService(proc_root=str(tmp_path))
+    svc.get_snapshot()
+
+    cpu2 = (200, 100, 50, 1600, 20, 0, 0, 0, 0, 0)
+    _write_proc(tmp_path, "stat", f"cpu  {' '.join(str(v) for v in cpu2)}\n")
+    _write_proc(tmp_path, "101/stat", "101 (chrome) R 1 2 3 4 5 6 7 8 9 10 200 100\n")
+
+    snap = svc.get_snapshot()
+    proc = snap["top_processes"][0]
+    assert proc["display_name"] == "chrome renderer"
+    assert isinstance(proc["detail"], str)
+
+
+def test_chrome_gpu_process(tmp_path):
+    """Chrome GPU process → 'chrome GPU'."""
+    _write_proc(tmp_path, "meminfo", "MemTotal: 16777216 kB\nMemAvailable: 8388608 kB\n")
+    cpu1 = (100, 50, 25, 800, 10, 0, 0, 0, 0, 0)
+    _write_proc(tmp_path, "stat", f"cpu  {' '.join(str(v) for v in cpu1)}\n")
+    _write_proc(tmp_path, "101/stat", "101 (chrome) R 1 2 3 4 5 6 7 8 9 10 100 50\n")
+    _write_proc(tmp_path, "101/status", "Name:\tchrome\nVmRSS:\t4096 kB\n")
+    _write_proc_binary(
+        tmp_path, "101/cmdline",
+        b"/opt/google/chrome/chrome\x00--type=gpu-process\x00",
+    )
+
+    svc = HostSystemMonitorService(proc_root=str(tmp_path))
+    svc.get_snapshot()
+
+    cpu2 = (200, 100, 50, 1600, 20, 0, 0, 0, 0, 0)
+    _write_proc(tmp_path, "stat", f"cpu  {' '.join(str(v) for v in cpu2)}\n")
+    _write_proc(tmp_path, "101/stat", "101 (chrome) R 1 2 3 4 5 6 7 8 9 10 200 100\n")
+
+    snap = svc.get_snapshot()
+    proc = snap["top_processes"][0]
+    assert proc["display_name"] == "chrome GPU"
+
+
+def test_chrome_utility_with_subtype(tmp_path):
+    """Chrome utility with network subtype → 'chrome utility (Network)'."""
+    _write_proc(tmp_path, "meminfo", "MemTotal: 16777216 kB\nMemAvailable: 8388608 kB\n")
+    cpu1 = (100, 50, 25, 800, 10, 0, 0, 0, 0, 0)
+    _write_proc(tmp_path, "stat", f"cpu  {' '.join(str(v) for v in cpu1)}\n")
+    _write_proc(tmp_path, "101/stat", "101 (chrome) R 1 2 3 4 5 6 7 8 9 10 100 50\n")
+    _write_proc(tmp_path, "101/status", "Name:\tchrome\nVmRSS:\t4096 kB\n")
+    _write_proc_binary(
+        tmp_path, "101/cmdline",
+        b"/opt/google/chrome/chrome\x00--type=utility\x00"
+        b"--utility-sub-type=network.mojom.NetworkService\x00",
+    )
+
+    svc = HostSystemMonitorService(proc_root=str(tmp_path))
+    svc.get_snapshot()
+
+    cpu2 = (200, 100, 50, 1600, 20, 0, 0, 0, 0, 0)
+    _write_proc(tmp_path, "stat", f"cpu  {' '.join(str(v) for v in cpu2)}\n")
+    _write_proc(tmp_path, "101/stat", "101 (chrome) R 1 2 3 4 5 6 7 8 9 10 200 100\n")
+
+    snap = svc.get_snapshot()
+    proc = snap["top_processes"][0]
+    assert proc["display_name"] == "chrome utility (Network)"
+
+
+def test_chrome_renderer_extension(tmp_path):
+    """Chrome extension renderer → 'chrome extension'."""
+    _write_proc(tmp_path, "meminfo", "MemTotal: 16777216 kB\nMemAvailable: 8388608 kB\n")
+    cpu1 = (100, 50, 25, 800, 10, 0, 0, 0, 0, 0)
+    _write_proc(tmp_path, "stat", f"cpu  {' '.join(str(v) for v in cpu1)}\n")
+    _write_proc(tmp_path, "101/stat", "101 (chrome) R 1 2 3 4 5 6 7 8 9 10 100 50\n")
+    _write_proc(tmp_path, "101/status", "Name:\tchrome\nVmRSS:\t4096 kB\n")
+    _write_proc_binary(
+        tmp_path, "101/cmdline",
+        b"/opt/google/chrome/chrome\x00--type=renderer\x00"
+        b"--extension-process\x00--extension-id=abc123\x00",
+    )
+
+    svc = HostSystemMonitorService(proc_root=str(tmp_path))
+    svc.get_snapshot()
+
+    cpu2 = (200, 100, 50, 1600, 20, 0, 0, 0, 0, 0)
+    _write_proc(tmp_path, "stat", f"cpu  {' '.join(str(v) for v in cpu2)}\n")
+    _write_proc(tmp_path, "101/stat", "101 (chrome) R 1 2 3 4 5 6 7 8 9 10 200 100\n")
+
+    snap = svc.get_snapshot()
+    proc = snap["top_processes"][0]
+    assert proc["display_name"] == "chrome extension"
+
+
+def test_chromium_browser_process(tmp_path):
+    """Chromium browser (no --type) → 'chromium browser'."""
+    _write_proc(tmp_path, "meminfo", "MemTotal: 16777216 kB\nMemAvailable: 8388608 kB\n")
+    cpu1 = (100, 50, 25, 800, 10, 0, 0, 0, 0, 0)
+    _write_proc(tmp_path, "stat", f"cpu  {' '.join(str(v) for v in cpu1)}\n")
+    _write_proc(tmp_path, "101/stat", "101 (chromium) R 1 2 3 4 5 6 7 8 9 10 100 50\n")
+    _write_proc(tmp_path, "101/status", "Name:\tchromium\nVmRSS:\t4096 kB\n")
+    _write_proc_binary(tmp_path, "101/cmdline", b"/usr/lib/chromium/chromium\x00")
+
+    svc = HostSystemMonitorService(proc_root=str(tmp_path))
+    svc.get_snapshot()
+
+    cpu2 = (200, 100, 50, 1600, 20, 0, 0, 0, 0, 0)
+    _write_proc(tmp_path, "stat", f"cpu  {' '.join(str(v) for v in cpu2)}\n")
+    _write_proc(tmp_path, "101/stat", "101 (chromium) R 1 2 3 4 5 6 7 8 9 10 200 100\n")
+
+    snap = svc.get_snapshot()
+    proc = snap["top_processes"][0]
+    assert proc["display_name"] == "chromium browser"
+
+
+def test_brave_browser_gpu(tmp_path):
+    """Brave GPU process → 'brave GPU'."""
+    _write_proc(tmp_path, "meminfo", "MemTotal: 16777216 kB\nMemAvailable: 8388608 kB\n")
+    cpu1 = (100, 50, 25, 800, 10, 0, 0, 0, 0, 0)
+    _write_proc(tmp_path, "stat", f"cpu  {' '.join(str(v) for v in cpu1)}\n")
+    _write_proc(tmp_path, "101/stat", "101 (brave) R 1 2 3 4 5 6 7 8 9 10 100 50\n")
+    _write_proc(tmp_path, "101/status", "Name:\tbrave\nVmRSS:\t4096 kB\n")
+    _write_proc_binary(tmp_path, "101/cmdline", b"/usr/bin/brave-browser\x00--type=gpu-process\x00")
+
+    svc = HostSystemMonitorService(proc_root=str(tmp_path))
+    svc.get_snapshot()
+
+    cpu2 = (200, 100, 50, 1600, 20, 0, 0, 0, 0, 0)
+    _write_proc(tmp_path, "stat", f"cpu  {' '.join(str(v) for v in cpu2)}\n")
+    _write_proc(tmp_path, "101/stat", "101 (brave) R 1 2 3 4 5 6 7 8 9 10 200 100\n")
+
+    snap = svc.get_snapshot()
+    proc = snap["top_processes"][0]
+    assert proc["display_name"] == "brave GPU"
+
+
+def test_chrome_process_detail_json_safe(tmp_path):
+    """The detail field for chrome processes must be JSON-safe."""
+    _write_proc(tmp_path, "meminfo", "MemTotal: 16777216 kB\nMemAvailable: 8388608 kB\n")
+    cpu1 = (100, 50, 25, 800, 10, 0, 0, 0, 0, 0)
+    _write_proc(tmp_path, "stat", f"cpu  {' '.join(str(v) for v in cpu1)}\n")
+    _write_proc(tmp_path, "101/stat", "101 (chrome) R 1 2 3 4 5 6 7 8 9 10 100 50\n")
+    _write_proc(tmp_path, "101/status", "Name:\tchrome\nVmRSS:\t4096 kB\n")
+    _write_proc_binary(
+        tmp_path, "101/cmdline",
+        b"/opt/google/chrome/chrome\x00--type=renderer\x00--some=flag\x00",
+    )
+
+    svc = HostSystemMonitorService(proc_root=str(tmp_path))
+    svc.get_snapshot()
+
+    cpu2 = (200, 100, 50, 1600, 20, 0, 0, 0, 0, 0)
+    _write_proc(tmp_path, "stat", f"cpu  {' '.join(str(v) for v in cpu2)}\n")
+    _write_proc(tmp_path, "101/stat", "101 (chrome) R 1 2 3 4 5 6 7 8 9 10 200 100\n")
+
+    snap = svc.get_snapshot()
+    # This will raise if any value is not serialisable.
+    import json
+    json.dumps(snap)
+
+
+# ======================================================================
+# HostSystemMonitorService — CPU temperature from sysfs
+# ======================================================================
+
+
+def _make_thermal_zone(root: Path, zone_num: int, zone_type: str, temp_millidegrees: int) -> None:
+    """Create a thermal_zone directory under a fake sysfs tree."""
+    tz_dir = root / "class" / "thermal" / f"thermal_zone{zone_num}"
+    tz_dir.mkdir(parents=True, exist_ok=True)
+    (tz_dir / "type").write_text(f"{zone_type}\n", encoding="utf-8")
+    (tz_dir / "temp").write_text(f"{temp_millidegrees}\n", encoding="utf-8")
+
+
+def _make_hwmon_device(
+    root: Path,
+    dev_num: int,
+    name: str,
+    temps: dict[str, tuple[int, str | None]],
+) -> None:
+    """Create a hwmon device under a fake sysfs tree.
+
+    *temps* maps sensor index (e.g. ``"1"``) to ``(millidegrees, label_or_None)``.
+    """
+    dev_dir = root / "class" / "hwmon" / f"hwmon{dev_num}"
+    dev_dir.mkdir(parents=True, exist_ok=True)
+    (dev_dir / "name").write_text(f"{name}\n", encoding="utf-8")
+    for idx, (millidegrees, label) in temps.items():
+        (dev_dir / f"temp{idx}_input").write_text(f"{millidegrees}\n", encoding="utf-8")
+        if label is not None:
+            (dev_dir / f"temp{idx}_label").write_text(f"{label}\n", encoding="utf-8")
+
+
+def _make_hwmon_fan_device(
+    root: Path,
+    dev_num: int,
+    name: str,
+    fans: dict[str, tuple[int, str | None]],
+) -> None:
+    """Create a hwmon device with fan inputs under a fake sysfs tree.
+
+    *fans* maps sensor index (e.g. ``"1"``) to ``(rpm, label_or_None)``.
+    """
+    dev_dir = root / "class" / "hwmon" / f"hwmon{dev_num}"
+    dev_dir.mkdir(parents=True, exist_ok=True)
+    (dev_dir / "name").write_text(f"{name}\n", encoding="utf-8")
+    for idx, (rpm, label) in fans.items():
+        (dev_dir / f"fan{idx}_input").write_text(f"{rpm}\n", encoding="utf-8")
+        if label is not None:
+            (dev_dir / f"fan{idx}_label").write_text(f"{label}\n", encoding="utf-8")
+
+
+def test_cpu_temperature_thermal_zone(tmp_path):
+    """CPU temperature from a thermal_zone with CPU type is returned."""
+    _make_proc_tree(tmp_path)
+    _make_thermal_zone(tmp_path, 0, "x86_pkg_temp", 42000)
+
+    svc = HostSystemMonitorService(proc_root=str(tmp_path), sys_root=str(tmp_path))
+    snap = svc.get_snapshot()
+
+    assert snap["cpu_temperature_celsius"] == 42.0
+
+
+def test_cpu_temperature_hwmon_coretemp(tmp_path):
+    """CPU temperature from a hwmon coretemp device."""
+    _make_proc_tree(tmp_path)
+    _make_hwmon_device(
+        tmp_path, 0, "coretemp",
+        {"1": (44000, "Package id 0"), "2": (41000, "Core 0"), "3": (39000, "Core 1")},
+    )
+
+    svc = HostSystemMonitorService(proc_root=str(tmp_path), sys_root=str(tmp_path))
+    snap = svc.get_snapshot()
+
+    assert snap["cpu_temperature_celsius"] == 44.0
+
+
+def test_cpu_temperature_prefers_cpu_label(tmp_path):
+    """When a hwmon device has non-CPU sensors, the CPU-labeled one is preferred."""
+    _make_proc_tree(tmp_path)
+    _make_hwmon_device(
+        tmp_path, 0, "acpitz",
+        {"1": (30000, None), "2": (65000, "CPU")},
+    )
+
+    svc = HostSystemMonitorService(proc_root=str(tmp_path), sys_root=str(tmp_path))
+    snap = svc.get_snapshot()
+
+    assert snap["cpu_temperature_celsius"] == 65.0
+
+
+def test_cpu_temperature_thermal_zone_preferred_over_hwmon(tmp_path):
+    """Thermal zone with CPU type takes priority over hwmon."""
+    _make_proc_tree(tmp_path)
+    _make_thermal_zone(tmp_path, 0, "x86_pkg_temp", 42000)
+    _make_hwmon_device(tmp_path, 0, "coretemp", {"1": (50000, "Package id 0")})
+
+    svc = HostSystemMonitorService(proc_root=str(tmp_path), sys_root=str(tmp_path))
+    snap = svc.get_snapshot()
+
+    assert snap["cpu_temperature_celsius"] == 42.0
+
+
+def test_cpu_temperature_missing_returns_none(tmp_path):
+    """When no sysfs CPU temperature is available, returns None."""
+    _make_proc_tree(tmp_path)
+
+    svc = HostSystemMonitorService(proc_root=str(tmp_path), sys_root=str(tmp_path))
+    snap = svc.get_snapshot()
+
+    assert snap["cpu_temperature_celsius"] is None
+
+
+def test_cpu_temperature_json_safe(tmp_path):
+    """Temperature value must survive JSON serialisation."""
+    import json
+
+    _make_proc_tree(tmp_path)
+    _make_thermal_zone(tmp_path, 0, "x86_pkg_temp", 42000)
+
+    svc = HostSystemMonitorService(proc_root=str(tmp_path), sys_root=str(tmp_path))
+    snap = svc.get_snapshot()
+
+    json.dumps(snap)
+
+
+def test_cpu_temperature_in_all_returns(tmp_path):
+    """cpu_temperature_celsius is present even when all /proc reads produce zeros."""
+    # Point at a valid but empty temp dir - meminfo is missing, cpu_stats returns zeros
+    svc = HostSystemMonitorService(proc_root=str(tmp_path / "inaccessible"), sys_root=str(tmp_path))
+    snap = svc.get_snapshot()
+
+    # Service gracefully returns available=True with zero/None values
+    assert snap["available"] is True
+    assert "cpu_temperature_celsius" in snap
+    # Temperature should be None (no sysfs sensors set up)
+    assert snap["cpu_temperature_celsius"] is None
+    assert snap["total_cpu_percent"] is None  # warming
+    assert snap["ram_total_bytes"] == 0
+
+
+# ======================================================================
+# HostSystemMonitorService — CPU fan from sysfs
+# ======================================================================
+
+
+def test_cpu_fan_from_label(tmp_path):
+    """CPU-labeled fan input is returned as RPM."""
+    _make_proc_tree(tmp_path)
+    _make_hwmon_fan_device(
+        tmp_path, 0, "nct6797",
+        {"1": (1200, None), "2": (850, "CPU Fan"), "3": (0, None)},
+    )
+
+    svc = HostSystemMonitorService(proc_root=str(tmp_path), sys_root=str(tmp_path))
+    snap = svc.get_snapshot()
+
+    assert snap["cpu_fan_rpm"] == 850
+
+
+def test_cpu_fan_from_device_name(tmp_path):
+    """Fan from a CPU-named hwmon device (coretemp) is returned."""
+    _make_proc_tree(tmp_path)
+    _make_hwmon_fan_device(
+        tmp_path, 0, "coretemp",
+        {"1": (2200, None)},
+    )
+
+    svc = HostSystemMonitorService(proc_root=str(tmp_path), sys_root=str(tmp_path))
+    snap = svc.get_snapshot()
+
+    assert snap["cpu_fan_rpm"] == 2200
+
+
+def test_cpu_fan_falls_back_to_known_device(tmp_path):
+    """When no CPU-labeled fan exists, falls back to a known device fan."""
+    _make_proc_tree(tmp_path)
+    _make_hwmon_fan_device(
+        tmp_path, 0, "nct6797",
+        {"1": (1500, "Chassis Fan"), "2": (800, None)},
+    )
+
+    svc = HostSystemMonitorService(proc_root=str(tmp_path), sys_root=str(tmp_path))
+    snap = svc.get_snapshot()
+
+    assert snap["cpu_fan_rpm"] == 1500
+
+
+def test_cpu_fan_prefers_cpu_label_over_known_device(tmp_path):
+    """CPU-labeled fan is preferred over an unlabeled fan on a known device."""
+    _make_proc_tree(tmp_path)
+    _make_hwmon_fan_device(
+        tmp_path, 0, "nct6797",
+        {"1": (500, None), "2": (1800, "CPU Fan")},
+    )
+
+    svc = HostSystemMonitorService(proc_root=str(tmp_path), sys_root=str(tmp_path))
+    snap = svc.get_snapshot()
+
+    assert snap["cpu_fan_rpm"] == 1800
+
+
+def test_cpu_fan_invalid_values_ignored(tmp_path):
+    """Negative and outlandish RPM values are ignored; zero is valid."""
+    _make_proc_tree(tmp_path)
+    # Only invalid values: negative and exceeding MAX_RPM
+    _make_hwmon_fan_device(
+        tmp_path, 0, "nct6797",
+        {"1": (-1, None), "2": (999999, None)},
+    )
+
+    svc = HostSystemMonitorService(proc_root=str(tmp_path), sys_root=str(tmp_path))
+    snap = svc.get_snapshot()
+
+    assert snap["cpu_fan_rpm"] is None
+
+
+def test_cpu_fan_zero_rpm_is_reported(tmp_path):
+    """Zero RPM from a readable CPU-labeled fan is reported as 0, not None."""
+    _make_proc_tree(tmp_path)
+    _make_hwmon_fan_device(
+        tmp_path, 0, "thinkpad",
+        {"1": (0, "CPU Fan"), "2": (0, None)},
+    )
+
+    svc = HostSystemMonitorService(proc_root=str(tmp_path), sys_root=str(tmp_path))
+    snap = svc.get_snapshot()
+
+    # Fan 1 has a CPU label → should be returned as 0
+    assert snap["cpu_fan_rpm"] == 0
+
+    # Also verify JSON serialisation works with int zero
+    import json
+    json.dumps(snap)
+
+
+def test_cpu_fan_missing_returns_none(tmp_path):
+    """When no sysfs fan sensor is available, returns None."""
+    _make_proc_tree(tmp_path)
+
+    svc = HostSystemMonitorService(proc_root=str(tmp_path), sys_root=str(tmp_path))
+    snap = svc.get_snapshot()
+
+    assert snap["cpu_fan_rpm"] is None
+
+
+def test_cpu_fan_in_all_returns(tmp_path):
+    """cpu_fan_rpm is present even when all /proc reads produce zeros."""
+    svc = HostSystemMonitorService(
+        proc_root=str(tmp_path / "inaccessible"),
+        sys_root=str(tmp_path),
+    )
+    snap = svc.get_snapshot()
+
+    assert snap["available"] is True
+    assert "cpu_fan_rpm" in snap
+    assert snap["cpu_fan_rpm"] is None
+
+
+def test_cpu_fan_json_safe(tmp_path):
+    """Fan RPM value must survive JSON serialisation."""
+    import json
+
+    _make_proc_tree(tmp_path)
+    _make_hwmon_fan_device(
+        tmp_path, 0, "nct6797",
+        {"1": (1200, "CPU Fan")},
+    )
+
+    svc = HostSystemMonitorService(proc_root=str(tmp_path), sys_root=str(tmp_path))
+    snap = svc.get_snapshot()
+
+    json.dumps(snap)
+
+
+# ======================================================================
 # WebSystemMonitorService — DB-backed mode
 # ======================================================================
 
@@ -352,6 +824,7 @@ def test_web_service_returns_snapshot_from_repo(tmp_path):
         "cpu_warming": False,
         "sample_interval_seconds": 1.0,
         "updated_at_unix": 1234567890.0,
+        "cpu_fan_rpm": 1200,
     }
     repo.upsert_snapshot(snapshot)
 
@@ -362,6 +835,7 @@ def test_web_service_returns_snapshot_from_repo(tmp_path):
     assert result["total_cpu_percent"] == 23.5
     assert len(result["top_processes"]) == 1
     assert result["top_processes"][0]["display_name"] == "WebPage.py"
+    assert result["cpu_fan_rpm"] == 1200
 
 
 def test_web_service_returns_unavailable_when_no_snapshot(tmp_path):
@@ -410,3 +884,158 @@ def test_web_service_limits_top_processes(tmp_path):
     result = svc.get_snapshot(top_limit=3)
 
     assert len(result["top_processes"]) <= 3
+
+
+# ======================================================================
+# WebSystemMonitorService — in-process cache
+# ======================================================================
+
+
+def _make_web_repo(tmp_path, data: dict | None = None):
+    """Create a WebSystemStatusRepository with optional snapshot."""
+    from bot.repositories.web_system_status import WebSystemStatusRepository
+
+    db_path = str(tmp_path / "test.db")
+    repo = WebSystemStatusRepository(db_path=db_path, use_shared=False)
+    if data is not None:
+        repo.upsert_snapshot(data)
+    return repo
+
+
+def test_web_cache_hit_returns_cached_snapshot(tmp_path):
+    """Repeated calls within cache_ttl should return the cached snapshot."""
+    snapshot = {
+        "available": True,
+        "total_cpu_percent": 23.5,
+        "cpu_temperature_celsius": 42.0,
+        "cpu_fan_rpm": 1200,
+        "top_processes": [
+            {"pid": 1, "name": "procA", "display_name": None, "cpu_percent": 10.0,
+             "memory_rss_bytes": 1024, "memory_percent": 0.01}
+        ],
+        "cpu_warming": False,
+        "sample_interval_seconds": 1.0,
+    }
+    repo = _make_web_repo(tmp_path, snapshot)
+    svc = WebSystemMonitorService(repository=repo, cache_ttl=60)
+
+    with patch("time.monotonic", side_effect=[100.0, 100.5]):
+        first = svc.get_snapshot(top_limit=4)
+        second = svc.get_snapshot(top_limit=4)
+
+    assert first["total_cpu_percent"] == 23.5
+    assert second["total_cpu_percent"] == 23.5
+
+    # After cache, modify repo data — cache should still serve old value.
+    repo.upsert_snapshot({**snapshot, "total_cpu_percent": 99.9})
+    with patch("time.monotonic", side_effect=[101.0, 101.3]):
+        cached = svc.get_snapshot()
+
+    assert cached["total_cpu_percent"] == 23.5  # still from cache
+
+
+def test_web_cache_respects_different_top_limit(tmp_path):
+    """Cache should serve different ``top_limit`` values by re-slicing."""
+    snapshot = {
+        "available": True,
+        "total_cpu_percent": 42.0,
+        "top_processes": [
+            {"pid": i, "name": f"proc{i}", "display_name": None,
+             "cpu_percent": float(i), "memory_rss_bytes": 1024,
+             "memory_percent": 0.01}
+            for i in range(10)
+        ],
+        "cpu_warming": False,
+        "sample_interval_seconds": 1.0,
+    }
+    repo = _make_web_repo(tmp_path, snapshot)
+    svc = WebSystemMonitorService(repository=repo, cache_ttl=60)
+
+    # Prime cache with one limit.
+    with patch("time.monotonic", side_effect=[100.0]):
+        svc.get_snapshot(top_limit=8)
+
+    # Re-read with a different limit — should re-slice from cached full list.
+    with patch("time.monotonic", side_effect=[101.0]):
+        result = svc.get_snapshot(top_limit=3)
+
+    assert len(result["top_processes"]) == 3
+    assert result["total_cpu_percent"] == 42.0
+
+
+def test_web_cache_miss_after_ttl(tmp_path):
+    """After TTL expires, a fresh repo read should occur."""
+    snapshot = {
+        "available": True,
+        "total_cpu_percent": 10.0,
+        "top_processes": [],
+        "cpu_warming": False,
+        "sample_interval_seconds": 1.0,
+    }
+    repo = _make_web_repo(tmp_path, snapshot)
+    svc = WebSystemMonitorService(repository=repo, cache_ttl=1.0)
+
+    # First call — caches.
+    with patch("time.monotonic", side_effect=[100.0]):
+        svc.get_snapshot()
+
+    # Update repo with new data.
+    repo.upsert_snapshot({**snapshot, "total_cpu_percent": 50.0})
+
+    # Second call after TTL — should fetch fresh.
+    with patch("time.monotonic", side_effect=[102.0]):
+        result = svc.get_snapshot()
+
+    assert result["total_cpu_percent"] == 50.0
+
+
+def test_web_cache_disabled_with_ttl_zero(tmp_path):
+    """With cache_ttl=0, every call should go to the repository."""
+    snapshot = {
+        "available": True,
+        "total_cpu_percent": 10.0,
+        "top_processes": [],
+        "cpu_warming": False,
+        "sample_interval_seconds": 1.0,
+    }
+    repo = _make_web_repo(tmp_path, snapshot)
+    svc = WebSystemMonitorService(repository=repo, cache_ttl=0)
+
+    with patch("time.monotonic", side_effect=[100.0, 100.1]):
+        first = svc.get_snapshot()
+        second = svc.get_snapshot()
+
+    # Both should be 10.0 because repo hasn't changed (but they should hit repo).
+    assert first["total_cpu_percent"] == 10.0
+    assert second["total_cpu_percent"] == 10.0
+
+    # Update repo and verify next call picks it up immediately.
+    repo.upsert_snapshot({**snapshot, "total_cpu_percent": 75.0})
+    with patch("time.monotonic", side_effect=[100.2]):
+        third = svc.get_snapshot()
+
+    assert third["total_cpu_percent"] == 75.0
+
+
+def test_web_cache_does_not_cache_unavailable(tmp_path):
+    """Unavailable (no repo data) should not cache — next call re-queries."""
+    repo = _make_web_repo(tmp_path)  # empty — no snapshot
+    svc = WebSystemMonitorService(repository=repo, cache_ttl=60)
+
+    with patch("time.monotonic", side_effect=[100.0, 100.5]):
+        first = svc.get_snapshot()
+        second = svc.get_snapshot()
+
+    assert first["available"] is False
+    assert second["available"] is False
+
+    # Insert data after the unavailable calls — next call should pick it up.
+    repo.upsert_snapshot({
+        "available": True, "total_cpu_percent": 42.0, "top_processes": [],
+        "cpu_warming": False, "sample_interval_seconds": 1.0,
+    })
+    with patch("time.monotonic", side_effect=[101.0]):
+        third = svc.get_snapshot()
+
+    assert third["available"] is True
+    assert third["total_cpu_percent"] == 42.0

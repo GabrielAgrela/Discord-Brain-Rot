@@ -33,6 +33,8 @@ class BackgroundService:
     RLSTORE_NOTIFY_ACTION = "rlstore_daily_notification_sent"
     RLSTORE_CHANNEL_NAME = "botrl"
     BACKUP_SCHEDULER_ACTION = "scheduled_backup_created"
+    # Discord allows 5 presence updates per 20 seconds, so 4s is the fastest safe cadence.
+    STATUS_UPDATE_INTERVAL_SECONDS = 4
     
     def __init__(self, bot, audio_service, sound_service, behavior=None):
         self.bot = bot
@@ -1395,7 +1397,33 @@ class BackgroundService:
         except Exception as e:
             logger.error("[BackgroundService] Error in self-heal watchdog: %s", e, exc_info=True)
 
-    @tasks.loop(seconds=60)
+    def _format_cpu_for_status(self) -> str | None:
+        """
+        Return a CPU usage string for the bot's presence status, or ``None``.
+
+        Reads the latest warmed host system snapshot from the persisted repo
+        and formats ``total_cpu_percent`` as ``"🖥️ 12.3%"``.
+
+        Returns ``None`` when the snapshot is stale, warming, unavailable, or
+        when ``total_cpu_percent`` is not a number, so the caller can skip it.
+        """
+        try:
+            snapshot = self.web_system_status_repo.get_latest_snapshot(max_age_seconds=10)
+            if snapshot is None:
+                return None
+            if not snapshot.get("available"):
+                return None
+            if snapshot.get("cpu_warming", True):
+                return None
+            cpu_pct = snapshot.get("total_cpu_percent")
+            if cpu_pct is None:
+                return None
+            return f"🖥️ {cpu_pct}%"
+        except Exception as e:
+            logger.warning("[BackgroundService] Error reading CPU for status: %s", e)
+            return None
+
+    @tasks.loop(seconds=STATUS_UPDATE_INTERVAL_SECONDS)
     async def update_bot_status_loop(self):
         """Continuously update the bot's status based on scheduled background work."""
         try:
@@ -1426,6 +1454,11 @@ class BackgroundService:
                         status_parts.append(f'🔍 in ~{scrape_minutes}m')
                 else:
                     status_parts.append('🔍')
+
+            # 3. CPU usage (appended last as requested)
+            cpu_part = self._format_cpu_for_status()
+            if cpu_part is not None:
+                status_parts.append(cpu_part)
 
             if status_parts:
                 status_text = " | ".join(status_parts)

@@ -4,6 +4,7 @@ Tests for bot/services/background.py - BackgroundService.
 
 import os
 import sys
+import time
 from collections import namedtuple
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, Mock, patch
@@ -1232,3 +1233,254 @@ class TestBackupScheduler:
         result = await service._run_backup_scheduler_tick(now_utc=now_utc)
 
         assert result == 0
+
+
+class TestBotStatusCpu:
+    """Tests for CPU usage in bot presence status."""
+
+    def test_update_bot_status_loop_uses_discord_presence_limit_interval(self):
+        """Verify presence updates run at Discord's 5-per-20s limit."""
+        from bot.services.background import BackgroundService
+
+        assert BackgroundService.update_bot_status_loop.seconds == 4
+
+    @pytest.mark.asyncio
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    async def test_format_cpu_for_status_returns_string_when_valid(
+        self, _mock_sound_repo, _mock_action_repo
+    ):
+        """Verify helper returns an emoji-prefixed percentage with valid CPU data."""
+        from bot.services.background import BackgroundService
+
+        service = BackgroundService(
+            bot=Mock(),
+            audio_service=Mock(),
+            sound_service=Mock(),
+            behavior=Mock(),
+        )
+
+        service.web_system_status_repo.get_latest_snapshot = Mock(
+            return_value={
+                "available": True,
+                "cpu_warming": False,
+                "total_cpu_percent": 12.3,
+            }
+        )
+
+        result = service._format_cpu_for_status()
+        assert result == "🖥️ 12.3%"
+
+    @pytest.mark.asyncio
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    async def test_format_cpu_for_status_returns_none_when_warming(
+        self, _mock_sound_repo, _mock_action_repo
+    ):
+        """Verify helper returns None when snapshot is still warming."""
+        from bot.services.background import BackgroundService
+
+        service = BackgroundService(
+            bot=Mock(),
+            audio_service=Mock(),
+            sound_service=Mock(),
+            behavior=Mock(),
+        )
+
+        service.web_system_status_repo.get_latest_snapshot = Mock(
+            return_value={
+                "available": True,
+                "cpu_warming": True,
+                "total_cpu_percent": None,
+            }
+        )
+
+        result = service._format_cpu_for_status()
+        assert result is None
+
+    @pytest.mark.asyncio
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    async def test_format_cpu_for_status_returns_none_when_unavailable(
+        self, _mock_sound_repo, _mock_action_repo
+    ):
+        """Verify helper returns None when system monitor is unavailable."""
+        from bot.services.background import BackgroundService
+
+        service = BackgroundService(
+            bot=Mock(),
+            audio_service=Mock(),
+            sound_service=Mock(),
+            behavior=Mock(),
+        )
+
+        service.web_system_status_repo.get_latest_snapshot = Mock(
+            return_value={
+                "available": False,
+                "cpu_warming": True,
+                "total_cpu_percent": None,
+            }
+        )
+
+        result = service._format_cpu_for_status()
+        assert result is None
+
+    @pytest.mark.asyncio
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    async def test_format_cpu_for_status_returns_none_when_no_snapshot(
+        self, _mock_sound_repo, _mock_action_repo
+    ):
+        """Verify helper returns None when no snapshot is persisted."""
+        from bot.services.background import BackgroundService
+
+        service = BackgroundService(
+            bot=Mock(),
+            audio_service=Mock(),
+            sound_service=Mock(),
+            behavior=Mock(),
+        )
+
+        service.web_system_status_repo.get_latest_snapshot = Mock(return_value=None)
+
+        result = service._format_cpu_for_status()
+        assert result is None
+
+    @pytest.mark.asyncio
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    async def test_format_cpu_for_status_returns_none_when_cpu_percent_none(
+        self, _mock_sound_repo, _mock_action_repo
+    ):
+        """Verify helper returns None when total_cpu_percent is None (reported but no data)."""
+        from bot.services.background import BackgroundService
+
+        service = BackgroundService(
+            bot=Mock(),
+            audio_service=Mock(),
+            sound_service=Mock(),
+            behavior=Mock(),
+        )
+
+        service.web_system_status_repo.get_latest_snapshot = Mock(
+            return_value={
+                "available": True,
+                "cpu_warming": False,
+                "total_cpu_percent": None,
+            }
+        )
+
+        result = service._format_cpu_for_status()
+        assert result is None
+
+    @pytest.mark.asyncio
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    async def test_format_cpu_for_status_returns_none_on_exception(
+        self, _mock_sound_repo, _mock_action_repo
+    ):
+        """Verify helper gracefully handles repository exceptions."""
+        from bot.services.background import BackgroundService
+
+        service = BackgroundService(
+            bot=Mock(),
+            audio_service=Mock(),
+            sound_service=Mock(),
+            behavior=Mock(),
+        )
+
+        service.web_system_status_repo.get_latest_snapshot = Mock(
+            side_effect=RuntimeError("DB locked")
+        )
+
+        result = service._format_cpu_for_status()
+        assert result is None
+
+    @pytest.mark.asyncio
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    async def test_update_bot_status_loop_appends_cpu_last(
+        self, _mock_sound_repo, _mock_action_repo
+    ):
+        """Verify CPU usage is appended after existing status parts."""
+        from bot.services.background import BackgroundService
+
+        bot = Mock()
+        bot.change_presence = AsyncMock()
+        bot.next_download_time = time.time() + 300   # ~5 minutes
+        bot.next_scrape_time = time.time() + 600     # ~10 minutes
+
+        service = BackgroundService(
+            bot=bot,
+            audio_service=Mock(),
+            sound_service=Mock(),
+            behavior=Mock(),
+        )
+
+        service._format_cpu_for_status = Mock(return_value="🖥️ 12.3%")
+
+        # Invoke the loop body coroutine directly.
+        await type(service).update_bot_status_loop.coro(service)
+
+        bot.change_presence.assert_awaited_once()
+        activity = bot.change_presence.await_args.kwargs["activity"]
+        assert isinstance(activity, discord.Activity)
+        assert activity.name.endswith(" | 🖥️ 12.3%")
+
+    @pytest.mark.asyncio
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    async def test_update_bot_status_loop_updates_with_cpu_only(
+        self, _mock_sound_repo, _mock_action_repo
+    ):
+        """Verify presence is updated with CPU-only when no other status parts exist."""
+        from bot.services.background import BackgroundService
+
+        bot = Mock()
+        bot.change_presence = AsyncMock()
+        # Delete auto-created mock attributes so hasattr returns False for these.
+        del bot.next_download_time
+        del bot.next_scrape_time
+
+        service = BackgroundService(
+            bot=bot,
+            audio_service=Mock(),
+            sound_service=Mock(),
+            behavior=Mock(),
+        )
+
+        service._format_cpu_for_status = Mock(return_value="🖥️ 5.0%")
+
+        await type(service).update_bot_status_loop.coro(service)
+
+        bot.change_presence.assert_awaited_once()
+        activity = bot.change_presence.await_args.kwargs["activity"]
+        assert activity.name == "🖥️ 5.0%"
+
+    @pytest.mark.asyncio
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    async def test_update_bot_status_loop_skips_cpu_when_unavailable(
+        self, _mock_sound_repo, _mock_action_repo
+    ):
+        """Verify presence is not updated when CPU is the only part and it's unavailable."""
+        from bot.services.background import BackgroundService
+
+        bot = Mock()
+        bot.change_presence = AsyncMock()
+        # Ensure no other status parts are generated.
+        del bot.next_download_time
+        del bot.next_scrape_time
+
+        service = BackgroundService(
+            bot=bot,
+            audio_service=Mock(),
+            sound_service=Mock(),
+            behavior=Mock(),
+        )
+
+        service._format_cpu_for_status = Mock(return_value=None)
+
+        await type(service).update_bot_status_loop.coro(service)
+
+        bot.change_presence.assert_not_awaited()

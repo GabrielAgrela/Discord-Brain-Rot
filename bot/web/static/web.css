@@ -1350,6 +1350,15 @@ html.theme-dark .control-room-metric + .control-room-metric::before {
     text-transform: uppercase;
 }
 
+.control-room-metric--system .control-room-metric-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+}
+
 .control-room-metric strong {
     display: inline-block;
     margin-top: 0;
@@ -4790,7 +4799,7 @@ body.page-soundboard .tables-grid > .card:nth-child(3) {
         justify-self: start;
         min-width: 0;
         max-width: 100%;
-        overflow: hidden;
+        overflow: visible;
     }
 
     .control-room-system-button strong {
@@ -4800,6 +4809,20 @@ body.page-soundboard .tables-grid > .card:nth-child(3) {
         white-space: nowrap;
         font-size: 0.78rem;
         line-height: 1.1;
+    }
+
+    /* On mobile, use fixed positioning so the dropdown stays within the viewport
+       and does not create horizontal page overflow.  Top and max-height are set
+       by a JS custom properties helper. */
+    .system-monitor-dropdown.open {
+        position: fixed;
+        top: var(--system-monitor-dropdown-top, 5rem);
+        left: max(0.75rem, env(safe-area-inset-left, 0px));
+        right: max(0.75rem, env(safe-area-inset-right, 0px));
+        width: auto;
+        max-width: none;
+        max-height: var(--system-monitor-dropdown-max-height, 60vh);
+        z-index: 70;
     }
 
     .control-room-metric + .control-room-metric {
@@ -4816,15 +4839,6 @@ body.page-soundboard .tables-grid > .card:nth-child(3) {
         height: 1px;
         overflow: hidden;
         clip: rect(0, 0, 0, 0);
-        white-space: nowrap;
-    }
-
-    .control-room-metric--system .control-room-metric-label {
-        position: static;
-        width: auto;
-        height: auto;
-        overflow: visible;
-        clip: auto;
         white-space: nowrap;
     }
 

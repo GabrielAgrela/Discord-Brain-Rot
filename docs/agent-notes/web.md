@@ -97,17 +97,120 @@ Only the bot container has ``pid: host`` in ``docker-compose.yml``, so **all hos
 
 Set ``WEB_SYSTEM_MONITOR_ALLOW_WEB_PROC_FALLBACK=1`` to fall back to reading ``/proc`` from the web container (two-sample, container-local processes only). This is **not** the recommended configuration; use only for local testing without the bot.
 
+### CPU temperature
+
+``HostSystemMonitorService.get_snapshot()`` includes a ``cpu_temperature_celsius`` key (``float | None``). The bot-side service reads CPU temperature from sysfs: first ``/sys/class/thermal/thermal_zone*/`` (preferring zones with CPU-related ``type`` labels such as ``x86_pkg_temp``), then ``/sys/class/hwmon/hwmon*/`` (matching by device ``name`` or sensor ``temp*_label``). A constructor param ``sys_root`` is available for test overrides (no env var needed for production). When no sensor is available or readable the value is ``None``.
+
+### CPU fan speed
+
+``HostSystemMonitorService.get_snapshot()`` also includes a ``cpu_fan_rpm`` key (``int | None``). The bot-side service reads CPU fan RPM from sysfs ``/sys/class/hwmon/hwmon*/fan*_input`` values. It prefers sensors whose ``fan*_label`` contains CPU-related keywords (``cpu``, ``processor``, ``package``, ``core``, ``soc``, ``tctl``, ``tdie``), then falls back to fans on known hwmon devices (common motherboard/sensor chip names), then to the first valid fan input. A value of ``0`` RPM is valid — it means a readable (but stopped/idle) fan — and is reported as ``0``. Invalid values (negative, outlandish > 99999 RPM, or unreadable/non-numeric) are ignored. When no fan sensor is available or readable the value is ``None``. Unavailable/fallback/error payloads in ``WebSystemMonitorService`` and route handlers include ``"cpu_fan_rpm": None``.
+
 ### Env vars
 
 - ``WEB_SYSTEM_MONITOR_PROCFS_ROOT`` — override `/proc` for ``WebSystemMonitorService`` fallback (testing).
 - ``HOST_SYSTEM_MONITOR_PROCFS_ROOT`` — override `/proc` for ``HostSystemMonitorService`` (testing).
 
+### In-process cache (WebSystemMonitorService)
+
+``WebSystemMonitorService.get_snapshot()`` has an optional in-memory cache (TTL defaults to 1 s, configurable via the ``cache_ttl`` constructor parameter). Only valid ``available: true`` snapshots are cached; unavailable responses always re-query the repository. This reduces redundant SQLite reads when multiple browser tabs or rapid polling hit the endpoint within the TTL window. Set ``cache_ttl=0`` to disable.
+
+The ``/api/system_monitor/status`` route also sets ``Cache-Control: private, max-age=1`` so the browser itself can serve cached responses for up to 1 s without a network round-trip.
+
+### Browser polling policy
+
+The control-room page no longer uses setInterval bursts. Instead it uses staggered setTimeout chains with adaptive cadences:
+
+| What | Cadence (dropdown closed) | Cadence (dropdown open) | Hidden tab |
+|---|---|---|---|
+| Table data (actions/favorites/all_sounds) | One table every 3.5 s, round-robin | Same | Same (no additional slowdown) |
+| Control room status | 4 s | 4 s | N/A |
+| Web control (mute) state | 5 s | 5 s | N/A |
+| System monitor | 4 s | 1.5 s | 20 s |
+
+- Each loop uses `setTimeout` chains so the next tick is scheduled only after the previous tick fires (``setInterval`` would pile up if a fetch stalls).
+- Passive table refresh skips while a filter select or pagination input is focused.
+- Opening the system monitor dropdown triggers an immediate refresh and switches to the faster cadence. Closing it resets to the slow cadence.
+- ``visibilitychange`` triggers an immediate refresh of all key state when the tab becomes visible.
+
+### Cross-tab request deduplication
+
+Since every open tab runs its own polling loops, 10 tabs could fire 10 identical network requests within seconds. A browser-side shared-fetch cache in ``soundboard.js`` deduplicates GET requests across tabs:
+
+1. **BroadcastChannel** — primary cross-tab communication. The first tab to need fresh data fetches from the server, then posts the result (``{ type: 'cache-update', key, payload, ttlMs }``) on the ``soundboard-shared-fetch`` channel. Other tabs receive the broadcast and resolve their pending fetch with the shared result.
+
+2. **localStorage fallback** — used both as the persistent cache store (with ``expiresAt`` timestamps) and as a fallback when BroadcastChannel is unavailable. A per-URL lock key (``{ tabId, expiresAt }``, 2.5 s TTL) prevents thundering herds even across tabs that do not share a BroadcastChannel.
+
+3. **TTL policy** — cached entries live slightly less than their poll interval so the next scheduled poll gets fresh data:
+
+   | Endpoint | Shared-cache TTL |
+   |---|---|
+   | System monitor | 1200 ms |
+   | Control room status | 1800 ms |
+   | Web control (mute) state | 1800 ms |
+   | Table data (actions/favorites/all_sounds) | 3000 ms |
+
+4. **Fallback** — when a lock is held by another tab and no result arrives via BroadcastChannel or localStorage within 2 s (or the TTL, whichever is smaller), the waiting tab does its own fetch. This guarantees forward progress when the locking tab crashes or its page is closed.
+
+5. **Failure handling** — non-ok HTTP responses are never cached. Failed fetches silently fall through (the calling function already handled errors gracefully).
+
+6. **Server-side headers** — the following JSON endpoints also set ``Cache-Control: private, max-age=1`` so the browser can serve a cached response within the same tab without a network round-trip:
+   - ``/api/system_monitor/status``
+   - ``/api/control_room/status``
+   - ``/api/web_control_state``
+   - ``/api/actions``, ``/api/favorites``, ``/api/all_sounds``
+
+7. **What is NOT cached** — POST/mutation requests (play, mute, TTS, slap, upload, sound-options) bypass the shared cache entirely. ``forceNetwork: true`` is passed for user-triggered searches, pagination clicks, and mutation-response refreshes.
+
+### Server-side multi-client route cache
+
+The browser cross-tab dedupe (BroadcastChannel + localStorage) only helps within a single browser profile.  It does **not** reduce duplicate network requests from different users, devices, or separate browser profiles.  To handle multi-client polling, a per-process, thread-safe TTL cache sits in front of read-only JSON endpoints.
+
+#### Implementation
+
+- ``bot/web/response_cache.py`` — ``ResponseCache`` class: per-process, thread-safe TTL JSON payload cache.
+  - Double-checked locking with per-key locks so simultaneous identical misses do not all run the producer.
+  - Opportunistic purge of expired entries; hard cap of 256 entries prevents unbounded growth from arbitrary query strings.
+  - ``get_or_set(key, ttl, producer)`` returns the cached payload or calls *producer* at most once per TTL window.
+  - In-memory only; **not** shared across Gunicorn workers or separate containers (Redis would be needed for cross-worker caching).
+
+- ``bot/web/route_helpers.py`` exposes:
+  - ``_get_response_cache()`` — returns the shared ``ResponseCache`` from ``current_app.extensions["web_response_cache"]``.
+  - ``_build_read_cache_key(endpoint_name, *, visibility=None)`` — builds a deterministic key from endpoint path plus sorted ``request.args`` and an optional visibility scope.
+  - ``_get_content_visibility_scope(current_user)`` — returns ``anon``, ``auth_censored``, or ``auth_uncensored`` depending on authentication and voice-activity presence.  This prevents username/sound-label leaks across visibility boundaries.
+
+#### Cached endpoints
+
+| Endpoint | TTL | Visibility scope | Notes |
+|---|---|---|---|
+| ``/api/actions`` | 1.5 s | anon / auth_censored / auth_uncensored | Full query (page, filters, search) + scope in key |
+| ``/api/favorites`` | 1.5 s | anon / auth_censored / auth_uncensored | Same keying as actions |
+| ``/api/all_sounds`` | 1.5 s | anon / auth_censored / auth_uncensored | Same keying as actions |
+| ``/api/control_room/status`` | 1.5 s | anon / auth | ``current_user is None`` vs authenticated (only username censorship differs) |
+| ``/api/web_control_state`` | 1.0 s | auth | Already requires login; share across all authenticated users for same guild |
+
+The TTLs are intentionally short (1.0–1.5 s) so that user-triggered searches, pagination clicks, and mutations do not see stale data for long.
+
+**Not cached**: POST/mutation/upload/TTS/play/sound-options endpoints.  Error responses are never cached (the producer is simply not called when the service raises).
+
+#### Safety checks
+
+- **Visibility isolation**: Anonymous ``anon`` payloads never leak to authenticated users and vice versa (different scope strings produce different cache keys).
+- **Authenticated censorship**: Users with no voice activity see censored ``auth_censored`` payloads; users with activity see ``auth_uncensored``.  These scopes never share a cache entry.
+- **Query isolation**: Different page numbers, search queries, filters, or guild IDs produce different cache keys.
+- **Per-key locking**: Multiple concurrent requests for the same uncached key do not all run the producer — only one wins and the rest read the cached result.
+
+#### Limitations
+
+- The cache lives **per Flask process/worker**.  With multiple Gunicorn workers, each has its own independent cache.  For true global multi-worker caching, add a Redis layer or redesign endpoints to use SSE/server-push.
+- Cache entries are evicted when the entry count exceeds 256 (oldest are removed first).
+- The cache does not persist across web container restarts.
+
 ### Tests
 
-- ``tests/services/test_system_monitor_service.py`` — covers ``HostSystemMonitorService`` with fake ``/proc`` trees and ``WebSystemMonitorService`` with a mocked repository.
+- ``tests/services/test_system_monitor_service.py`` — covers ``HostSystemMonitorService`` with fake ``/proc`` trees and ``WebSystemMonitorService`` with a mocked repository, plus in-process cache hit/miss/TTL behavior.
 - ``tests/repositories/test_web_system_status_repository.py`` — covers upsert, read, staleness, and edge cases.
-- ``tests/test_webpage.py`` system-monitor endpoint tests replace the service with fakes and verify route behaviour.
+- ``tests/test_webpage.py`` — system-monitor endpoint tests replace the service with fakes and verify route behaviour; cache tests verify producer-count reduction, scope isolation, query-param isolation, and TTL invalidation for the five cached endpoints.
 
 ### Page UI
 
-The control-room host metric shows ``Host CPU & RAM`` with a dropdown. The process section is labelled ``Top CPU`` (reflecting that these are the top host-wide CPU consumers). The footnote shows the bot-side sample interval (~1 s). When no snapshot is available the dropdown shows "Waiting for host monitor".
+The control-room host metric shows ``Host CPU, Temp & RAM`` with a dropdown. CPU fan speed appears in parentheses on the CPU total row (e.g. ``CPU 12.3% (2,500 RPM)`` or ``CPU sampling… (2,500 RPM)``) when available; if fan speed is unavailable, the parentheses are omitted. The process section is labelled ``Top CPU`` (reflecting that these are the top host-wide CPU consumers). The footnote shows the bot-side sample interval (~1 s). When no snapshot is available the dropdown shows "Waiting for host monitor".

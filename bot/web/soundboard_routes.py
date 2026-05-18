@@ -11,9 +11,12 @@ from flask import Flask, jsonify, render_template, request
 from bot.web.route_helpers import (
     _build_initial_soundboard_data,
     _build_paginated_query,
+    _build_read_cache_key,
     _build_tts_profile_options,
     _current_web_user_is_admin,
+    _get_content_visibility_scope,
     _get_current_discord_user,
+    _get_response_cache,
     _get_selected_guild_id,
     _get_web_content_service,
     _get_web_guild_service,
@@ -55,38 +58,68 @@ def register_soundboard_routes(app: Flask) -> None:
     @app.route("/api/actions")
     def get_actions() -> Any:
         """Return paginated recent actions for the web soundboard."""
+        current_user = _get_current_discord_user()
         query = _build_paginated_query(filter_names=("action", "user", "sound"))
-        return jsonify(
-            _get_web_content_service().get_actions(
+        include_filters = _parse_include_filters_arg()
+        visibility = _get_content_visibility_scope(current_user)
+        cache = _get_response_cache()
+        key = _build_read_cache_key("/api/actions", visibility=visibility)
+        payload = cache.get_or_set(
+            key,
+            ttl=1.5,
+            producer=lambda: _get_web_content_service().get_actions(
                 query,
-                include_filters=_parse_include_filters_arg(),
-                current_user=_get_current_discord_user(),
-            )
+                include_filters=include_filters,
+                current_user=current_user,
+            ),
         )
+        response = jsonify(payload)
+        response.headers["Cache-Control"] = "private, max-age=1"
+        return response
 
     @app.route("/api/favorites")
     def get_favorites() -> Any:
         """Return paginated favorite sounds for the web soundboard."""
+        current_user = _get_current_discord_user()
         query = _build_paginated_query(filter_names=("sound", "user"))
-        return jsonify(
-            _get_web_content_service().get_favorites(
+        include_filters = _parse_include_filters_arg()
+        visibility = _get_content_visibility_scope(current_user)
+        cache = _get_response_cache()
+        key = _build_read_cache_key("/api/favorites", visibility=visibility)
+        payload = cache.get_or_set(
+            key,
+            ttl=1.5,
+            producer=lambda: _get_web_content_service().get_favorites(
                 query,
-                include_filters=_parse_include_filters_arg(),
-                current_user=_get_current_discord_user(),
-            )
+                include_filters=include_filters,
+                current_user=current_user,
+            ),
         )
+        response = jsonify(payload)
+        response.headers["Cache-Control"] = "private, max-age=1"
+        return response
 
     @app.route("/api/all_sounds")
     def get_all_sounds() -> Any:
         """Return paginated sound inventory for the web soundboard."""
+        current_user = _get_current_discord_user()
         query = _build_paginated_query(filter_names=("sound", "date", "list"))
-        return jsonify(
-            _get_web_content_service().get_all_sounds(
+        include_filters = _parse_include_filters_arg()
+        visibility = _get_content_visibility_scope(current_user)
+        cache = _get_response_cache()
+        key = _build_read_cache_key("/api/all_sounds", visibility=visibility)
+        payload = cache.get_or_set(
+            key,
+            ttl=1.5,
+            producer=lambda: _get_web_content_service().get_all_sounds(
                 query,
-                include_filters=_parse_include_filters_arg(),
-                current_user=_get_current_discord_user(),
-            )
+                include_filters=include_filters,
+                current_user=current_user,
+            ),
         )
+        response = jsonify(payload)
+        response.headers["Cache-Control"] = "private, max-age=1"
+        return response
 
     @app.route("/api/sounds/<int:sound_id>/options")
     @_require_discord_login_api

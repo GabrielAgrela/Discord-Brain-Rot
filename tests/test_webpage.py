@@ -167,6 +167,12 @@ def _login_web_user(
 
 @pytest.fixture
 def web_client(tmp_path, monkeypatch):
+    # Clear any residual response cache from previous tests to prevent
+    # stale payloads from affecting this test.
+    stale = app.extensions.get("web_response_cache")
+    if stale is not None:
+        stale.invalidate()
+
     db_path = tmp_path / "web.db"
     _create_web_tables(db_path)
     monkeypatch.delenv("DEFAULT_GUILD_ID", raising=False)
@@ -2543,6 +2549,8 @@ def test_system_monitor_fake_service_returns_expected_payload(web_client):
                         "memory_percent": 0.02,
                     }
                 ],
+                "cpu_temperature_celsius": 42.0,
+                "cpu_fan_rpm": 1800,
             }
 
     original = app.extensions.get("web_system_monitor_service")
@@ -2552,6 +2560,7 @@ def test_system_monitor_fake_service_returns_expected_payload(web_client):
         assert response.status_code == 200
         payload = response.get_json()
         assert payload["total_cpu_percent"] == 23.5
+        assert payload["cpu_temperature_celsius"] == 42.0
         assert len(payload["top_processes"]) == 1
         assert payload["top_processes"][0]["name"] == "test-proc"
     finally:
@@ -2559,3 +2568,299 @@ def test_system_monitor_fake_service_returns_expected_payload(web_client):
             app.extensions.pop("web_system_monitor_service", None)
         else:
             app.extensions["web_system_monitor_service"] = original
+
+
+# ============================================================================
+# Server-side response cache (multi-client route caching) tests
+# ============================================================================
+
+
+def _clear_response_cache():
+    """Remove the per-process response cache so tests start fresh."""
+    cached = app.extensions.pop("web_response_cache", None)
+    if cached is not None:
+        cached.invalidate()
+
+
+def test_actions_cache_returns_same_payload_for_duplicate_request(web_client):
+    """Two identical calls within TTL produce the same payload and hit the
+    service only once."""
+    client, _ = web_client
+    _clear_response_cache()
+
+    from bot.services.web_content import WebContentService
+
+    call_count = [0]
+
+    original = WebContentService.get_actions
+
+    def counting_get_actions(self, *args, **kwargs):
+        call_count[0] += 1
+        return original(self, *args, **kwargs)
+
+    WebContentService.get_actions = counting_get_actions
+    try:
+        resp1 = client.get("/api/actions")
+        assert resp1.status_code == 200
+        first_count = call_count[0]
+        assert first_count > 0, "service should have been called once"
+
+        resp2 = client.get("/api/actions")
+        assert resp2.status_code == 200
+        # Service should NOT have been called again (within TTL).
+        assert call_count[0] == first_count, (
+            f"expected {first_count} calls, got {call_count[0]}"
+        )
+
+        # Both responses should be identical.
+        assert resp1.get_json() == resp2.get_json()
+    finally:
+        WebContentService.get_actions = original
+
+
+def test_favorites_cache_returns_same_payload_for_duplicate_request(web_client):
+    """Two identical calls within TTL hit favorites service only once."""
+    client, _ = web_client
+    _clear_response_cache()
+
+    from bot.services.web_content import WebContentService
+
+    call_count = [0]
+
+    original = WebContentService.get_favorites
+
+    def counting_get_favorites(self, *args, **kwargs):
+        call_count[0] += 1
+        return original(self, *args, **kwargs)
+
+    WebContentService.get_favorites = counting_get_favorites
+    try:
+        resp1 = client.get("/api/favorites")
+        assert resp1.status_code == 200
+        first_count = call_count[0]
+        assert first_count > 0
+
+        resp2 = client.get("/api/favorites")
+        assert resp2.status_code == 200
+        assert call_count[0] == first_count
+        assert resp1.get_json() == resp2.get_json()
+    finally:
+        WebContentService.get_favorites = original
+
+
+def test_all_sounds_cache_returns_same_payload_for_duplicate_request(web_client):
+    """Two identical calls within TTL hit all_sounds service only once."""
+    client, _ = web_client
+    _clear_response_cache()
+
+    from bot.services.web_content import WebContentService
+
+    call_count = [0]
+
+    original = WebContentService.get_all_sounds
+
+    def counting_get_all_sounds(self, *args, **kwargs):
+        call_count[0] += 1
+        return original(self, *args, **kwargs)
+
+    WebContentService.get_all_sounds = counting_get_all_sounds
+    try:
+        resp1 = client.get("/api/all_sounds")
+        assert resp1.status_code == 200
+        first_count = call_count[0]
+        assert first_count > 0
+
+        resp2 = client.get("/api/all_sounds")
+        assert resp2.status_code == 200
+        assert call_count[0] == first_count
+        assert resp1.get_json() == resp2.get_json()
+    finally:
+        WebContentService.get_all_sounds = original
+
+
+def test_control_room_status_cache_returns_same_payload(web_client):
+    """Two identical calls within TTL hit control-room service only once."""
+    client, db_path = web_client
+    _clear_response_cache()
+
+    # Insert minimal guild data so the endpoint does not 400.
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute("INSERT INTO guild_settings (guild_id) VALUES (?)", ("111",))
+        conn.commit()
+    finally:
+        conn.close()
+
+    from bot.services.web_control_room import WebControlRoomService
+
+    call_count = [0]
+
+    original = WebControlRoomService.get_status
+
+    def counting_get_status(self, *args, **kwargs):
+        call_count[0] += 1
+        return original(self, *args, **kwargs)
+
+    WebControlRoomService.get_status = counting_get_status
+    try:
+        resp1 = client.get("/api/control_room/status")
+        assert resp1.status_code == 200
+        first_count = call_count[0]
+        assert first_count > 0
+
+        resp2 = client.get("/api/control_room/status")
+        assert resp2.status_code == 200
+        assert call_count[0] == first_count
+        assert resp1.get_json() == resp2.get_json()
+    finally:
+        WebControlRoomService.get_status = original
+
+
+def test_web_control_state_cache_returns_same_payload(web_client):
+    """Two identical calls within TTL hit control-state service only once."""
+    client, db_path = web_client
+    _clear_response_cache()
+
+    _login_web_user(client)
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO guild_settings (guild_id) VALUES (?)",
+            ("359077662742020107",),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    from bot.services.web_playback import WebPlaybackService
+
+    call_count = [0]
+
+    original = WebPlaybackService.get_control_state
+
+    def counting_get_control_state(self, *args, **kwargs):
+        call_count[0] += 1
+        return original(self, *args, **kwargs)
+
+    WebPlaybackService.get_control_state = counting_get_control_state
+    try:
+        resp1 = client.get("/api/web_control_state?guild_id=359077662742020107")
+        assert resp1.status_code == 200
+        first_count = call_count[0]
+        assert first_count > 0
+
+        resp2 = client.get("/api/web_control_state?guild_id=359077662742020107")
+        assert resp2.status_code == 200
+        assert call_count[0] == first_count
+        assert resp1.get_json() == resp2.get_json()
+    finally:
+        WebPlaybackService.get_control_state = original
+
+
+def test_read_cache_separates_different_query_params(web_client):
+    """Different query args for the same endpoint produce different cache entries."""
+    client, _ = web_client
+    _clear_response_cache()
+
+    from bot.services.web_content import WebContentService
+
+    call_count = [0]
+
+    original = WebContentService.get_actions
+
+    def counting_get_actions(self, *args, **kwargs):
+        call_count[0] += 1
+        return original(self, *args, **kwargs)
+
+    WebContentService.get_actions = counting_get_actions
+    try:
+        resp1 = client.get("/api/actions?page=1")
+        assert resp1.status_code == 200
+        first_count = call_count[0]
+
+        # Different page — different cache key.
+        resp2 = client.get("/api/actions?page=2")
+        assert resp2.status_code == 200
+        # Service should have been called again because the cache key differs.
+        assert call_count[0] == first_count + 1, (
+            f"expected {first_count + 1} calls after page=2 request, got {call_count[0]}"
+        )
+
+        # First page should still be cached.
+        resp3 = client.get("/api/actions?page=1")
+        assert resp3.status_code == 200
+        assert call_count[0] == first_count + 1  # no new call
+        assert resp1.get_json() == resp3.get_json()
+    finally:
+        WebContentService.get_actions = original
+
+
+def test_read_cache_separates_anon_vs_auth_content(web_client):
+    """Anonymous and authenticated visibility scopes get separate cache entries."""
+    client, db_path = web_client
+    _clear_response_cache()
+
+    from bot.services.web_content import WebContentService
+
+    call_count = [0]
+
+    original = WebContentService.get_actions
+
+    def counting_get_actions(self, *args, **kwargs):
+        call_count[0] += 1
+        return original(self, *args, **kwargs)
+
+    WebContentService.get_actions = counting_get_actions
+    try:
+        # Anonymous request.
+        resp_anon = client.get("/api/actions")
+        assert resp_anon.status_code == 200
+        anon_count = call_count[0]
+
+        # Authenticated request — should use a different cache scope.
+        _login_web_user(client)
+        resp_auth = client.get("/api/actions")
+        assert resp_auth.status_code == 200
+        assert call_count[0] == anon_count + 1
+
+        # Third request as authenticated — cached.
+        resp_auth2 = client.get("/api/actions")
+        assert resp_auth2.status_code == 200
+        assert call_count[0] == anon_count + 1
+        assert resp_auth.get_json() == resp_auth2.get_json()
+    finally:
+        WebContentService.get_actions = original
+
+
+def test_read_cache_invalidates_after_ttl_via_invalidate(web_client):
+    """Forcing cache invalidation causes a fresh producer call."""
+    client, _ = web_client
+    _clear_response_cache()
+
+    from bot.services.web_content import WebContentService
+
+    call_count = [0]
+
+    original = WebContentService.get_actions
+
+    def counting_get_actions(self, *args, **kwargs):
+        call_count[0] += 1
+        return original(self, *args, **kwargs)
+
+    WebContentService.get_actions = counting_get_actions
+    try:
+        resp1 = client.get("/api/actions")
+        assert resp1.status_code == 200
+        assert call_count[0] == 1
+
+        # Invalidate cache directly.
+        cache = app.extensions.get("web_response_cache")
+        assert cache is not None
+        cache.invalidate()
+
+        resp2 = client.get("/api/actions")
+        assert resp2.status_code == 200
+        assert call_count[0] == 2  # fresh call after invalidation
+    finally:
+        WebContentService.get_actions = original

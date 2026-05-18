@@ -31,12 +31,12 @@
                     <span class="control-room-metric-label">Host</span>
                     <button type="button" id="systemMonitorButton" class="control-room-system-button"
                         aria-haspopup="dialog" aria-label="Show system resource usage" aria-expanded="false" aria-controls="systemMonitorDropdown">
-                        <strong id="systemMonitorSummary">CPU -- · RAM --</strong>
+                        <strong id="systemMonitorSummary">CPU --</strong>
                     </button>
                     <div id="systemMonitorDropdown" class="system-monitor-dropdown" aria-hidden="true">
                         <div class="system-monitor-dropdown-header">
                             <p class="card-kicker">System Resources</p>
-                            <h3 class="system-monitor-dropdown-title">Host CPU &amp; RAM</h3>
+                            <h3 class="system-monitor-dropdown-title">Host CPU, Temp &amp; RAM</h3>
                         </div>
                         <div id="systemMonitorTotals" class="system-monitor-totals">
                             <div class="system-monitor-total-row">
@@ -46,6 +46,10 @@
                             <div class="system-monitor-total-row">
                                 <span class="system-monitor-total-label">RAM</span>
                                 <span class="system-monitor-total-value" id="systemMonitorTotalRam">--</span>
+                            </div>
+                            <div class="system-monitor-total-row">
+                                <span class="system-monitor-total-label">TEMP</span>
+                                <span class="system-monitor-total-value" id="systemMonitorTotalTemp">--</span>
                             </div>
                         </div>
                         <div id="systemMonitorProcesses" class="system-monitor-processes">
