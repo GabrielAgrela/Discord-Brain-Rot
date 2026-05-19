@@ -11,7 +11,7 @@ done prompt clip is played and the sound is played via SoundService.play_request
 If the command is ``mute``, no prompt is played and the caller activates the
 30-minute mute.  If no command verb is recognised, the transcript is routed to
 ``VenturaChatService`` which sends it to an OpenRouter model (default
-``qwen/qwen3-coder-next``) for a Ventura parody reply in European Portuguese.
+``deepseek/deepseek-v4-flash``) for a Ventura parody reply in European Portuguese.
 The reply is then sent to ElevenLabs Ventura TTS and played back.
 
 The transcript parser searches for the wake word **anywhere** in the returned
@@ -36,6 +36,7 @@ import json
 import logging
 import os
 import re
+import time
 import wave
 from datetime import datetime, timezone
 from pathlib import Path
@@ -253,14 +254,25 @@ OPENROUTER_API_URL: str = os.getenv(
     "OPENROUTER_API_URL",
     "https://openrouter.ai/api/v1/chat/completions",
 )
-VENTURA_CHAT_MODEL: str = os.getenv("VENTURA_CHAT_MODEL", "qwen/qwen3-coder-flash")
+VENTURA_CHAT_MODEL: str = os.getenv("VENTURA_CHAT_MODEL", "deepseek/deepseek-v4-flash")
 VENTURA_CHAT_TIMEOUT_SECONDS: int = max(1, int(os.getenv("VENTURA_CHAT_TIMEOUT_SECONDS", "20")))
 VENTURA_CHAT_MAX_TOKENS: int = max(50, int(os.getenv("VENTURA_CHAT_MAX_TOKENS", "250")))
 VENTURA_CHAT_TEMPERATURE: float = max(
     0.0, min(2.0, float(os.getenv("VENTURA_CHAT_TEMPERATURE", "0.7")))
 )
+VENTURA_CHAT_REASONING_ENABLED: bool = (
+    os.getenv("VENTURA_CHAT_REASONING_ENABLED", "false").strip().lower()
+    not in {"0", "false", "off", "no"}
+)
 VENTURA_SYSTEM_EXTRA: str = os.getenv(
     "VENTURA_SYSTEM_EXTRA",
+)
+VENTURA_CHAT_PROVIDER_SORT: str = os.getenv(
+    "VENTURA_CHAT_PROVIDER_SORT", "throughput"
+).strip()
+VENTURA_CHAT_LOG_PAYLOAD: bool = (
+    os.getenv("VENTURA_CHAT_LOG_PAYLOAD", "true").strip().lower()
+    not in {"0", "false", "off", "no"}
 )
 
 
@@ -285,6 +297,9 @@ class VenturaChatService:
         self.timeout_seconds: int = VENTURA_CHAT_TIMEOUT_SECONDS
         self.max_tokens: int = VENTURA_CHAT_MAX_TOKENS
         self.temperature: float = VENTURA_CHAT_TEMPERATURE
+        self.reasoning_enabled: bool = VENTURA_CHAT_REASONING_ENABLED
+        self.provider_sort: str = VENTURA_CHAT_PROVIDER_SORT
+        self.log_payload: bool = VENTURA_CHAT_LOG_PAYLOAD
 
         # Per-conversation history: key -> list of (user_text, assistant_text)
         self._history: dict[str, list[tuple[str, str]]] = {}
@@ -321,19 +336,35 @@ class VenturaChatService:
 
         payload = self._build_request_payload(transcript, requester_name, effective_key)
 
-        # Log the full request payload for debugging (no secrets — payload
+        # Log the request payload or summary for debugging (no secrets — payload
         # only contains model/temperature/max_tokens/messages; auth headers
         # are set separately and never included in the log).
-        ctx_count = len(self._history.get(effective_key, []))
-        logger.info(
-            "[VenturaChat] Request payload — conversation_key=%s "
-            "context_exchanges=%d message_count=%d\n%s",
-            effective_key,
-            ctx_count,
-            len(payload.get("messages", [])),
-            json.dumps(payload, ensure_ascii=False, indent=2),
-        )
+        ctx_count = max(0, (len(payload.get("messages", [])) - 2) // 2)
+        if self.log_payload:
+            logger.info(
+                "[VenturaChat] Request payload — conversation_key=%s "
+                "context_exchanges=%d message_count=%d\n%s",
+                effective_key,
+                ctx_count,
+                len(payload.get("messages", [])),
+                json.dumps(payload, ensure_ascii=False, indent=2),
+            )
+        else:
+            reasoning_status = "disabled" if not self.reasoning_enabled else "enabled"
+            logger.info(
+                "[VenturaChat] Request summary — conversation_key=%s "
+                "context_exchanges=%d message_count=%d model=%s max_tokens=%d "
+                "reasoning=%s provider_sort=%s",
+                effective_key,
+                ctx_count,
+                len(payload.get("messages", [])),
+                self.model,
+                self.max_tokens,
+                reasoning_status,
+                self.provider_sort or "none",
+            )
 
+        start_time = time.perf_counter()
         try:
             timeout = aiohttp.ClientTimeout(total=self.timeout_seconds)
             async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -347,6 +378,13 @@ class VenturaChatService:
                     },
                     json=payload,
                 ) as resp:
+                    latency = time.perf_counter() - start_time
+                    logger.info(
+                        "[VenturaChat] OpenRouter completed in %.2fs status=%d model=%s",
+                        latency,
+                        resp.status,
+                        self.model,
+                    )
                     if resp.status >= 400:
                         error_text = await resp.text()
                         logger.error(
@@ -361,13 +399,20 @@ class VenturaChatService:
                         self._append_history(effective_key, transcript, text)
                     return text if text else None
         except asyncio.TimeoutError:
+            latency = time.perf_counter() - start_time
             logger.error(
-                "[VenturaChat] Request timed out after %ss",
+                "[VenturaChat] Request timed out after %.2fs (limit %ss)",
+                latency,
                 self.timeout_seconds,
             )
             return None
         except Exception as exc:
-            logger.error("[VenturaChat] Request failed: %s", exc)
+            latency = time.perf_counter() - start_time
+            logger.error(
+                "[VenturaChat] Request failed after %.2fs: %s",
+                latency,
+                exc,
+            )
             return None
 
     def _append_history(
@@ -400,7 +445,7 @@ class VenturaChatService:
             "[sarcastic], [laughs], [grumbling], [sighs], [scoffs], etc to express emotions. "
             "Keep responses short (1-2 sentences, max 200 characters). "
             f"{VENTURA_SYSTEM_EXTRA}\n"
-            "Roast ideas, bureaucracy, politicians, opponents, or the situation instead. "
+            "Roast ideas, bureaucracy, politicians, opponents, or the situation. "
             "Be brainrot but not cliche. Be creative, angry, and entertaining. "
             "Return ONLY the spoken text with tags, no explanations."
         )
@@ -409,21 +454,27 @@ class VenturaChatService:
             {"role": "system", "content": system_instruction},
         ]
 
-        # Include up to the last N prior exchanges for context.
+        # Include up to the last _MAX_HISTORY_EXCHANGES prior exchanges for context.
         history = self._history.get(conversation_key, [])
-        for user_msg, assistant_msg in history:
+        included_history = history[-self._MAX_HISTORY_EXCHANGES:] if self._MAX_HISTORY_EXCHANGES > 0 else []
+        for user_msg, assistant_msg in included_history:
             messages.append({"role": "user", "content": user_msg})
             messages.append({"role": "assistant", "content": assistant_msg})
 
         # Current user transcript.
         messages.append({"role": "user", "content": transcript})
 
-        return {
+        payload = {
             "model": self.model,
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
             "messages": messages,
         }
+        if not self.reasoning_enabled:
+            payload["reasoning"] = {"enabled": False}
+        if self.provider_sort:
+            payload["provider"] = {"sort": self.provider_sort}
+        return payload
 
     @staticmethod
     def _extract_response_text(payload: dict) -> str:

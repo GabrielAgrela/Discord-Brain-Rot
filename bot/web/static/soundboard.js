@@ -1079,6 +1079,13 @@
             }[endpoint] || 1;
         }
 
+        function isSoundOptionsColumn(endpoint, columnIndex) {
+            return (
+                (endpoint === 'favorites' && columnIndex === 2)
+                || (endpoint === 'all_sounds' && columnIndex === 3)
+            );
+        }
+
         function getEndpointSearchInputId(endpoint) {
             return {
                 actions: 'searchActions',
@@ -1144,7 +1151,11 @@
                 const row = document.createElement('tr');
                 row.className = 'placeholder-row';
                 for (let columnIndex = 0; columnIndex < columnCount; columnIndex++) {
-                    row.appendChild(document.createElement('td'));
+                    const cell = document.createElement('td');
+                    if (isSoundOptionsColumn(endpoint, columnIndex)) {
+                        cell.className = 'sound-options-column';
+                    }
+                    row.appendChild(cell);
                 }
                 fragment.appendChild(row);
             }
@@ -1449,7 +1460,7 @@
             }
         }
 
-        function fetchData(endpoint, page, tableBodyId, totalPagesId, prevButtonId, nextButtonId, pageInputId, searchInputId, showLoading = false) {
+        function fetchData(endpoint, page, tableBodyId, totalPagesId, prevButtonId, nextButtonId, pageInputId, searchInputId, showLoading = false, isIntentional = false) {
             const tableBody = document.getElementById(tableBodyId);
             const container = tableBody ? tableBody.closest('.table-container') : null;
             const searchInput = document.getElementById(searchInputId);
@@ -1496,7 +1507,8 @@
                             data.items.forEach((item, index) => {
                                 const row = document.createElement('tr');
                                 row.classList.add('row-reveal');
-                                row.style.animationDelay = `${Math.min(index * 0.04, 0.4)}s`;
+                                const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+                                row.style.animationDelay = prefersReducedMotion ? '0s' : `${Math.min(index * 0.04, 0.4)}s`;
 
                                 if (endpoint === 'actions') {
                                     if (item.sound_id) {
@@ -1544,6 +1556,7 @@
                                     row.appendChild(playCell);
 
                                     const optionsCell = document.createElement('td');
+                                    optionsCell.className = 'sound-options-column';
                                     optionsCell.appendChild(buildSoundOptionsButton(item));
                                     row.appendChild(optionsCell);
                                 } else if (endpoint === 'all_sounds') {
@@ -1568,6 +1581,7 @@
                                     row.appendChild(playCell);
 
                                     const optionsCell = document.createElement('td');
+                                    optionsCell.className = 'sound-options-column';
                                     optionsCell.appendChild(buildSoundOptionsButton(item));
                                     row.appendChild(optionsCell);
                                 }
@@ -1584,7 +1598,32 @@
                             }
                         };
 
-                        deferOrRunEndpointRender(endpoint, renderFetchedData);
+                        const runRenderWithAnimation = () => {
+                            const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+                            if (isIntentional && tableBody && !prefersReducedMotion) {
+                                tableBody.classList.remove('page-swap-enter', 'page-swap-active');
+                                tableBody.classList.add('page-swap-exit');
+
+                                setTimeout(() => {
+                                    renderFetchedData();
+                                    tableBody.classList.remove('page-swap-exit');
+                                    tableBody.classList.add('page-swap-enter');
+
+                                    // Force reflow
+                                    tableBody.offsetHeight;
+
+                                    tableBody.classList.add('page-swap-active');
+
+                                    setTimeout(() => {
+                                        tableBody.classList.remove('page-swap-enter', 'page-swap-active');
+                                    }, 200);
+                                }, 120);
+                            } else {
+                                renderFetchedData();
+                            }
+                        };
+
+                        deferOrRunEndpointRender(endpoint, runRenderWithAnimation);
                     }
 
                     return hasNewEntries;
@@ -1687,17 +1726,20 @@
 
         function fetchActions(increment = null, forcePageOne = false, showLoading = false) {
             currentPageActions = resolveRequestedPage(currentPageActions, increment, forcePageOne);
-            return fetchData('actions', currentPageActions, 'actionsTableBody', 'totalPagesActions', 'prevPageActions', 'nextPageActions', 'pageInputActions', 'searchActions', showLoading);
+            const isIntentional = (increment !== null || forcePageOne || showLoading);
+            return fetchData('actions', currentPageActions, 'actionsTableBody', 'totalPagesActions', 'prevPageActions', 'nextPageActions', 'pageInputActions', 'searchActions', showLoading, isIntentional);
         }
 
         function fetchFavorites(increment = null, forcePageOne = false, showLoading = false) {
             currentPageFavorites = resolveRequestedPage(currentPageFavorites, increment, forcePageOne);
-            return fetchData('favorites', currentPageFavorites, 'favoritesTableBody', 'totalPagesFavorites', 'prevPageFavorites', 'nextPageFavorites', 'pageInputFavorites', 'searchFavorites', showLoading);
+            const isIntentional = (increment !== null || forcePageOne || showLoading);
+            return fetchData('favorites', currentPageFavorites, 'favoritesTableBody', 'totalPagesFavorites', 'prevPageFavorites', 'nextPageFavorites', 'pageInputFavorites', 'searchFavorites', showLoading, isIntentional);
         }
 
         function fetchAllSounds(increment = null, forcePageOne = false, showLoading = false) {
             currentPageAllSounds = resolveRequestedPage(currentPageAllSounds, increment, forcePageOne);
-            return fetchData('all_sounds', currentPageAllSounds, 'allSoundsTableBody', 'totalPagesAllSounds', 'prevPageAllSounds', 'nextPageAllSounds', 'pageInputAllSounds', 'searchAllSounds', showLoading);
+            const isIntentional = (increment !== null || forcePageOne || showLoading);
+            return fetchData('all_sounds', currentPageAllSounds, 'allSoundsTableBody', 'totalPagesAllSounds', 'prevPageAllSounds', 'nextPageAllSounds', 'pageInputAllSounds', 'searchAllSounds', showLoading, isIntentional);
         }
 
         const fetchersByEndpoint = {

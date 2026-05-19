@@ -1213,6 +1213,9 @@ def test_soundboard_page_renders_shared_redesign(web_client):
     assert 'class="favorite-button' not in html
     assert 'class="sound-options-row" data-sound-id="1" data-favorite="true" data-slap="false"' in html
     assert 'data-favorite="false"' in html
+    assert '<th class="sound-options-column">More</th>' in html
+    assert '<td class="sound-options-column">\n                                    <button type="button" class="sound-options-button"' in html
+    assert '<td class="sound-options-column">\n                                    <button class="play-button' not in html
     assert "Unmake slap" in script
     assert "tablesGrid.addEventListener('contextmenu', openSoundRowContextMenu)" in script
     assert "showSoundHoverCard" in script
@@ -1347,6 +1350,8 @@ def test_web_static_stylesheet_is_served(web_client):
     assert "html.theme-dark .play-button" in stylesheet
     assert "html.theme-dark .favorite-button" not in stylesheet
     assert ".sound-action-cell" not in stylesheet
+    assert "#favoritesTable .sound-options-column,\n#allSoundsTable .sound-options-column {\n    display: none;" in stylesheet
+    assert "#favoritesTable .sound-options-column,\n    #allSoundsTable .sound-options-column {\n        display: table-cell;" in stylesheet
     assert "html.theme-dark .nav-brand-mark" in stylesheet
     assert "html.theme-dark .auth-inbox-button" in stylesheet
     assert "background: var(--error)" in stylesheet

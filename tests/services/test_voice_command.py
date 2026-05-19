@@ -826,6 +826,64 @@ class TestVenturaChatService:
         srv.api_key = "test-openrouter-key"
         return srv
 
+    def test_default_model_is_deepseek_v4_flash(self, service):
+        """Default model is deepseek/deepseek-v4-flash."""
+        assert service.model == "deepseek/deepseek-v4-flash"
+
+    def test_default_speed_settings(self, service):
+        """Verify new defaults tailored for fast responses."""
+        assert service.max_tokens == 250
+        assert service.provider_sort == "throughput"
+        assert service.log_payload is True
+
+    def test_payload_includes_provider_sort(self, service):
+        """Payload includes provider sorting options when configured."""
+        service.provider_sort = "throughput"
+        payload = service._build_request_payload("hello", None)
+        assert "provider" in payload
+        assert payload["provider"] == {"sort": "throughput"}
+
+    @pytest.mark.asyncio
+    async def test_compact_logging(self, service):
+        """When log_payload is False, only a compact summary is logged."""
+        service.log_payload = False
+        with patch("bot.services.voice_command.aiohttp.ClientSession.post") as mock_post:
+            mock_resp = AsyncMock()
+            mock_resp.status = 200
+            mock_resp.json = AsyncMock(return_value={
+                "choices": [{"message": {"content": "OK"}}]
+            })
+            mock_post.return_value.__aenter__ = AsyncMock(return_value=mock_resp)
+
+            with patch("bot.services.voice_command.logger.info") as mock_logger_info:
+                await service.reply("test transcript")
+                # Should log request summary and completion time
+                assert mock_logger_info.call_count == 2
+                summary_call = None
+                for call_args in mock_logger_info.call_args_list:
+                    if "[VenturaChat] Request summary" in call_args[0][0]:
+                        summary_call = call_args
+                        break
+                assert summary_call is not None
+                # Assert summary contains metadata but not full messages
+                log_fmt = summary_call[0][0]
+                assert "Request summary" in log_fmt
+                assert "max_tokens" in log_fmt
+                assert "provider_sort" in log_fmt
+
+    def test_payload_includes_no_reasoning_when_disabled(self, service):
+        """Payload includes reasoning={"enabled": False} when reasoning is disabled (default)."""
+        service.reasoning_enabled = False
+        payload = service._build_request_payload("hello", None)
+        assert "reasoning" in payload
+        assert payload["reasoning"] == {"enabled": False}
+
+    def test_payload_excludes_no_reasoning_when_enabled(self, service):
+        """Payload does not contain reasoning field when reasoning is enabled."""
+        service.reasoning_enabled = True
+        payload = service._build_request_payload("hello", None)
+        assert "reasoning" not in payload
+
     # ------------------------------------------------------------------
     # Payload construction with history
     # ------------------------------------------------------------------
@@ -990,6 +1048,7 @@ class TestVenturaChatService:
         """reply logs the full OpenRouter payload JSON at INFO level,
         including messages content, prior history, and no auth secrets."""
         # Seed some history to verify it appears in the log.
+        service.log_payload = True
         service._history["test-key"] = [
             ("prior user text", "prior assistant reply"),
         ]
@@ -1007,10 +1066,18 @@ class TestVenturaChatService:
                     conversation_key="test-key",
                 )
                 assert result == "OK"
-                # logger.info should be called exactly once
-                mock_logger_info.assert_called_once()
-                call_pos_args = mock_logger_info.call_args[0]
-                assert "[VenturaChat] Request payload" in call_pos_args[0]
+                # logger.info should be called twice (payload log + timing log)
+                assert mock_logger_info.call_count == 2
+                
+                # Check payload log call
+                payload_call = None
+                for call_args in mock_logger_info.call_args_list:
+                    if "[VenturaChat] Request payload" in call_args[0][0]:
+                        payload_call = call_args
+                        break
+                
+                assert payload_call is not None
+                call_pos_args = payload_call[0]
                 # The last argument is the JSON payload string.
                 payload_json = call_pos_args[-1]
                 assert isinstance(payload_json, str)

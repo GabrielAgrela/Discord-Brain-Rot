@@ -37,7 +37,7 @@
                                 <th>Sound</th>
                                 <th>Date</th>
                                 <th>Play</th>
-                                <th>More</th>
+                                <th class="sound-options-column">More</th>
                             </tr>
                         </thead>
                         <tbody id="allSoundsTableBody">
@@ -62,7 +62,7 @@
                                         {% if discord_user %}▶{% else %}🔒{% endif %}
                                     </button>
                                 </td>
-                                <td>
+                                <td class="sound-options-column">
                                     <button type="button" class="sound-options-button"
                                         data-sound-id="{{ item.get('sound_id') }}"
                                         aria-label="Show sound options" title="Sound options">⋯</button>
@@ -213,7 +213,7 @@
                             <tr>
                                 <th>Sound</th>
                                 <th>Play</th>
-                                <th>More</th>
+                                <th class="sound-options-column">More</th>
                             </tr>
                         </thead>
                         <tbody id="favoritesTableBody">
@@ -236,7 +236,7 @@
                                         {% if discord_user %}▶{% else %}🔒{% endif %}
                                     </button>
                                 </td>
-                                <td>
+                                <td class="sound-options-column">
                                     <button type="button" class="sound-options-button"
                                         data-sound-id="{{ item.get('sound_id') }}"
                                         aria-label="Show sound options" title="Sound options">⋯</button>

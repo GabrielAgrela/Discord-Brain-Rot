@@ -581,26 +581,71 @@ html.theme-dark .auth-inbox-button.has-unreviewed {
     display: inline-flex;
     align-items: center;
     gap: 0.45rem;
-    padding: 0.62rem 0.75rem;
-    background: var(--paper-muted);
-    border: 1px solid var(--border);
+    padding: 0.4rem 0.48rem 0.4rem 0.78rem;
+    background: rgb(247, 239, 229);
+    background:
+        linear-gradient(180deg, oklch(98% 0.014 82 / 0.96), oklch(92% 0.028 82 / 0.88)),
+        oklch(96.1% 0.018 82 / 0.82);
+    border: 1px solid rgba(23, 18, 13, 0.24);
+    border-color: oklch(19.5% 0.024 58 / 0.34);
     color: var(--ink-muted);
     font-size: 0.68rem;
     font-weight: 800;
     letter-spacing: 0.08em;
     text-transform: uppercase;
+    box-shadow: 2px 2px 0 rgba(197, 72, 52, 0.14), inset 0 1px 0 rgba(255, 253, 248, 0.78);
+    box-shadow:
+        2px 2px 0 oklch(58% 0.15 32 / 0.16),
+        inset 0 1px 0 oklch(98.2% 0.012 82 / 0.78);
+    transition:
+        transform var(--motion-duration-fast) var(--ease-out-quint),
+        border-color var(--motion-duration-fast) ease,
+        box-shadow var(--motion-duration-fast) ease,
+        background var(--motion-duration-fast) ease;
 }
 
 .guild-selector {
     max-width: 12rem;
     border: 0;
-    background: transparent;
+    appearance: none;
+    -webkit-appearance: none;
+    min-height: 1.82rem;
+    padding: 0 2.05rem 0 0;
+    background:
+        linear-gradient(45deg, transparent 50%, rgb(151, 57, 43) 50%) calc(100% - 0.82rem) 48% / 0.34rem 0.34rem no-repeat,
+        linear-gradient(135deg, rgb(151, 57, 43) 50%, transparent 50%) calc(100% - 0.59rem) 48% / 0.34rem 0.34rem no-repeat,
+        linear-gradient(180deg, rgba(197, 72, 52, 0.12), rgba(243, 185, 85, 0.08)) right 0.08rem center / 1.68rem 1.62rem no-repeat;
+    background:
+        linear-gradient(45deg, transparent 50%, var(--accent-deep) 50%) calc(100% - 0.82rem) 48% / 0.34rem 0.34rem no-repeat,
+        linear-gradient(135deg, var(--accent-deep) 50%, transparent 50%) calc(100% - 0.59rem) 48% / 0.34rem 0.34rem no-repeat,
+        linear-gradient(180deg, var(--accent-soft), oklch(68% 0.13 72 / 0.1)) right 0.08rem center / 1.68rem 1.62rem no-repeat;
+    color: rgb(23, 18, 13);
     color: var(--ink);
     font: inherit;
     font-size: 0.76rem;
+    font-weight: 850;
     letter-spacing: 0;
     text-transform: none;
     outline: none;
+}
+
+.guild-selector-shell:hover,
+.guild-selector-shell:focus-within {
+    border-color: rgba(197, 72, 52, 0.46);
+    border-color: oklch(58% 0.15 32 / 0.52);
+    background: rgb(250, 243, 233);
+    background:
+        linear-gradient(180deg, oklch(98% 0.014 82 / 0.98), oklch(93% 0.03 82 / 0.94)),
+        oklch(97.2% 0.018 82 / 0.9);
+    box-shadow: 3px 3px 0 rgba(197, 72, 52, 0.16), inset 0 1px 0 rgba(255, 253, 248, 0.88);
+    box-shadow:
+        3px 3px 0 oklch(58% 0.15 32 / 0.2),
+        inset 0 1px 0 oklch(98.2% 0.012 82 / 0.88);
+}
+
+.guild-selector-shell:focus-within {
+    outline: 3px solid var(--accent-soft);
+    outline-offset: 3px;
 }
 
 .theme-toggle {
@@ -687,7 +732,42 @@ html.theme-dark .nav-link:not(.active) {
 }
 
 html.theme-dark .guild-selector {
+    background:
+        linear-gradient(45deg, transparent 50%, rgb(243, 185, 85) 50%) calc(100% - 0.82rem) 48% / 0.34rem 0.34rem no-repeat,
+        linear-gradient(135deg, rgb(243, 185, 85) 50%, transparent 50%) calc(100% - 0.59rem) 48% / 0.34rem 0.34rem no-repeat,
+        linear-gradient(180deg, rgba(243, 185, 85, 0.18), rgba(28, 34, 31, 0.68)) right 0.08rem center / 1.68rem 1.62rem no-repeat;
+    background:
+        linear-gradient(45deg, transparent 50%, oklch(82% 0.12 72) 50%) calc(100% - 0.82rem) 48% / 0.34rem 0.34rem no-repeat,
+        linear-gradient(135deg, oklch(82% 0.12 72) 50%, transparent 50%) calc(100% - 0.59rem) 48% / 0.34rem 0.34rem no-repeat,
+        linear-gradient(180deg, oklch(74% 0.12 72 / 0.2), oklch(17% 0.02 154 / 0.68)) right 0.08rem center / 1.68rem 1.62rem no-repeat;
     color: #f4f0e8;
+}
+
+html.theme-dark .guild-selector-shell {
+    border-color: rgba(244, 240, 232, 0.2);
+    border-color: oklch(89% 0.018 82 / 0.2);
+    background: rgb(28, 34, 31);
+    background:
+        linear-gradient(180deg, oklch(25% 0.018 154 / 0.92), oklch(18% 0.016 154 / 0.9)),
+        oklch(17% 0.02 154);
+    box-shadow: 2px 2px 0 rgba(5, 7, 6, 0.34), inset 0 1px 0 rgba(244, 240, 232, 0.08);
+    box-shadow:
+        2px 2px 0 oklch(5% 0.01 164 / 0.34),
+        inset 0 1px 0 oklch(89% 0.018 82 / 0.08);
+}
+
+html.theme-dark .guild-selector-shell:hover,
+html.theme-dark .guild-selector-shell:focus-within {
+    border-color: rgba(243, 185, 85, 0.42);
+    border-color: oklch(74% 0.12 72 / 0.5);
+    background: rgb(31, 38, 34);
+    background:
+        linear-gradient(180deg, oklch(27% 0.02 154 / 0.96), oklch(20% 0.018 154 / 0.92)),
+        oklch(17% 0.02 154);
+    box-shadow: 3px 3px 0 rgba(5, 7, 6, 0.38), inset 0 1px 0 rgba(244, 240, 232, 0.12);
+    box-shadow:
+        3px 3px 0 oklch(5% 0.01 164 / 0.38),
+        inset 0 1px 0 oklch(89% 0.018 82 / 0.12);
 }
 
 html.theme-dark .play-button:hover:not(:disabled),
@@ -1651,28 +1731,24 @@ html.theme-dark .system-monitor-processes {
 .sound-list-dialog,
 .sound-similar-dialog,
 .sound-event-dialog {
-    animation: dialogEnter 0.22s var(--ease-out-quart) both;
+    animation: dialogEnter 0.17s var(--ease-out-quart) both;
+    will-change: transform, opacity;
 }
 
 .web-upload-dialog::backdrop,
 .web-tts-dialog::backdrop {
     animation: backdropEnter 0.2s ease both;
+    background: rgba(23, 18, 13, 0.50);
 }
 
 html.theme-dark .web-upload-dialog::backdrop,
 html.theme-dark .web-tts-dialog::backdrop {
-    background: rgba(0, 0, 0, 0.58);
-    backdrop-filter: blur(5px);
+    background: rgba(18, 14, 10, 0.68);
 }
 
 .web-upload-inbox-dialog {
     margin: 4.8rem max(0.75rem, calc((100vw - min(1180px, calc(100% - 2rem))) / 2)) auto auto;
     width: min(31rem, calc(100vw - 1.5rem));
-}
-
-.web-upload-dialog::backdrop {
-    background: rgba(23, 18, 13, 0.48);
-    backdrop-filter: blur(5px);
 }
 
 html.theme-dark .web-upload-dialog {
@@ -2496,6 +2572,12 @@ html.theme-dark .card {
         background 0.18s ease;
 }
 
+.filter-select {
+    font-size: 0.78rem;
+    font-weight: 850;
+    letter-spacing: 0.035em;
+}
+
 .search-input::placeholder {
     color: #897c70;
 }
@@ -2634,33 +2716,179 @@ html.theme-dark .filter-select:focus {
 }
 
 .filter-select {
-    min-height: 2.62rem;
+    min-height: 2.58rem;
     appearance: none;
     -webkit-appearance: none;
-    padding-right: 2.4rem;
+    padding: 0.68rem 2.74rem 0.68rem 0.86rem;
+    border: 2px solid rgba(23, 18, 13, 0.24);
+    border-color: oklch(19.5% 0.024 58 / 0.34);
+    background: rgb(247, 239, 229);
+    background:
+        linear-gradient(180deg, oklch(98% 0.014 82 / 0.98), oklch(92% 0.028 82 / 0.9)),
+        oklch(96.1% 0.018 82 / 0.82);
+    color: rgb(23, 18, 13);
+    box-shadow: 2px 2px 0 rgba(23, 18, 13, 0.08), inset 0 1px 0 rgba(255, 253, 248, 0.8);
+    box-shadow:
+        2px 2px 0 oklch(19.5% 0.024 58 / 0.12),
+        inset 0 1px 0 oklch(98.2% 0.012 82 / 0.8);
+    cursor: pointer;
+    text-transform: none;
 }
 
 .select-shell {
     position: relative;
+    isolation: isolate;
+    border-radius: var(--radius-sm);
+    transition:
+        filter var(--motion-duration-fast) ease,
+        transform var(--motion-duration-fast) var(--ease-out-quint);
 }
 
+.select-shell::before,
 .select-shell::after {
     content: "";
     position: absolute;
+    pointer-events: none;
+}
+
+.select-shell::before {
+    right: 0.36rem;
+    top: 50%;
+    z-index: 1;
+    width: 1.84rem;
+    height: 1.84rem;
+    border: 1px solid rgba(197, 72, 52, 0.3);
+    border-color: oklch(58% 0.15 32 / 0.32);
+    border-radius: 9px;
+    background: rgb(251, 241, 225);
+    background:
+        linear-gradient(180deg, oklch(74% 0.12 72 / 0.22), oklch(68% 0.13 72 / 0.1)),
+        oklch(97% 0.018 82 / 0.84);
+    box-shadow: inset 0 1px 0 rgba(255, 253, 248, 0.7), 0 1px 0 rgba(23, 18, 13, 0.04);
+    box-shadow:
+        inset 0 1px 0 oklch(98.2% 0.012 82 / 0.7),
+        0 1px 0 oklch(19.5% 0.024 58 / 0.04);
+    transform: translateY(-50%);
+}
+
+.select-shell::after {
     right: 1rem;
     top: 50%;
+    z-index: 2;
     width: 0.46rem;
     height: 0.46rem;
-    border-right: 2px solid var(--ink-muted);
-    border-bottom: 2px solid var(--ink-muted);
-    pointer-events: none;
+    border-right: 2px solid rgb(151, 57, 43);
+    border-bottom: 2px solid rgb(151, 57, 43);
+    border-color: oklch(46% 0.13 32);
     transform: translateY(-65%) rotate(45deg);
+}
+
+.select-shell:hover {
+    transform: translateY(-1px);
+}
+
+.select-shell:active {
+    transform: translateY(0);
+}
+
+.select-shell:hover .filter-select,
+.select-shell:focus-within .filter-select {
+    border-color: rgba(197, 72, 52, 0.46);
+    border-color: oklch(58% 0.15 32 / 0.52);
+    background: rgb(250, 243, 233);
+    background:
+        linear-gradient(180deg, oklch(98% 0.014 82 / 0.98), oklch(92% 0.032 82 / 0.94)),
+        oklch(97.2% 0.018 82 / 0.9);
+    box-shadow: 3px 3px 0 rgba(197, 72, 52, 0.12), inset 0 1px 0 rgba(255, 253, 248, 0.84);
+    box-shadow:
+        3px 3px 0 oklch(58% 0.15 32 / 0.15),
+        inset 0 1px 0 oklch(98.2% 0.012 82 / 0.84);
+}
+
+.select-shell:active .filter-select {
+    box-shadow: 1px 1px 0 rgba(197, 72, 52, 0.1), inset 0 1px 0 rgba(255, 253, 248, 0.76);
+    box-shadow:
+        1px 1px 0 oklch(58% 0.15 32 / 0.12),
+        inset 0 1px 0 oklch(98.2% 0.012 82 / 0.76);
+}
+
+.select-shell:focus-within::before {
+    border-color: rgba(197, 72, 52, 0.44);
+    border-color: oklch(58% 0.15 32 / 0.48);
+    background: rgb(250, 237, 219);
+    background:
+        linear-gradient(180deg, oklch(68% 0.13 72 / 0.18), var(--accent-soft)),
+        oklch(97% 0.018 82 / 0.88);
 }
 
 .filter-select:disabled {
     color: var(--ink-muted);
     cursor: progress;
     opacity: 0.74;
+}
+
+html.theme-dark .filter-select {
+    border-color: rgba(244, 240, 232, 0.18);
+    border-color: oklch(89% 0.018 82 / 0.18);
+    background: rgb(28, 34, 31);
+    background:
+        linear-gradient(180deg, oklch(25% 0.018 154 / 0.92), oklch(18% 0.016 154 / 0.9)),
+        oklch(17% 0.02 154);
+    color: rgb(244, 240, 232);
+    color: oklch(94% 0.012 82);
+    box-shadow: 2px 2px 0 rgba(5, 7, 6, 0.34), inset 0 1px 0 rgba(244, 240, 232, 0.08);
+    box-shadow:
+        2px 2px 0 oklch(5% 0.01 164 / 0.34),
+        inset 0 1px 0 oklch(89% 0.018 82 / 0.08);
+}
+
+html.theme-dark .select-shell::before {
+    border-color: rgba(243, 185, 85, 0.28);
+    border-color: oklch(74% 0.12 72 / 0.32);
+    background: rgb(33, 39, 36);
+    background:
+        linear-gradient(180deg, oklch(74% 0.12 72 / 0.2), oklch(17% 0.02 154 / 0.86)),
+        oklch(22% 0.018 154 / 0.9);
+    box-shadow: inset 0 1px 0 rgba(244, 240, 232, 0.1);
+    box-shadow: inset 0 1px 0 oklch(89% 0.018 82 / 0.1);
+}
+
+html.theme-dark .select-shell::after {
+    border-right-color: rgb(243, 185, 85);
+    border-bottom-color: rgb(243, 185, 85);
+    border-color: oklch(82% 0.12 72);
+}
+
+html.theme-dark .select-shell:hover .filter-select,
+html.theme-dark .select-shell:focus-within .filter-select {
+    border-color: rgba(243, 185, 85, 0.42);
+    border-color: oklch(74% 0.12 72 / 0.5);
+    background: rgb(31, 38, 34);
+    background:
+        linear-gradient(180deg, oklch(27% 0.02 154 / 0.96), oklch(20% 0.018 154 / 0.92)),
+        oklch(17% 0.02 154);
+    box-shadow: 3px 3px 0 rgba(5, 7, 6, 0.38), inset 0 1px 0 rgba(244, 240, 232, 0.12);
+    box-shadow:
+        3px 3px 0 oklch(5% 0.01 164 / 0.38),
+        inset 0 1px 0 oklch(89% 0.018 82 / 0.12);
+}
+
+html.theme-dark .select-shell:focus-within::before {
+    border-color: rgba(243, 185, 85, 0.46);
+    border-color: oklch(82% 0.12 72 / 0.48);
+    background: rgb(36, 42, 38);
+    background:
+        linear-gradient(180deg, oklch(74% 0.12 72 / 0.26), oklch(58% 0.15 32 / 0.16)),
+        oklch(23% 0.018 154 / 0.94);
+}
+
+.select-shell:has(.filter-select:disabled) {
+    transform: none;
+}
+
+.select-shell:has(.filter-select:disabled)::before,
+.select-shell:has(.filter-select:disabled)::after {
+    opacity: 0.48;
 }
 
 .table-container {
@@ -3234,21 +3462,24 @@ html.theme-dark .sound-options-button {
 
 #favoritesTable th:first-child,
 #favoritesTable td:first-child {
-    width: calc(100% - 7.5rem);
+    width: calc(100% - 3.75rem);
 }
 
 #favoritesTable th:nth-child(2),
-#favoritesTable td:nth-child(2),
-#favoritesTable th:last-child,
-#favoritesTable td:last-child {
+#favoritesTable td:nth-child(2) {
     width: 3.75rem;
     text-align: center;
     overflow: visible;
 }
 
+#favoritesTable .sound-options-column,
+#allSoundsTable .sound-options-column {
+    display: none;
+}
+
 #allSoundsTable th:first-child,
 #allSoundsTable td:first-child {
-    width: calc(100% - 13rem);
+    width: calc(100% - 9.25rem);
 }
 
 #allSoundsTable th:nth-child(2),
@@ -3257,9 +3488,7 @@ html.theme-dark .sound-options-button {
 }
 
 #allSoundsTable th:nth-child(3),
-#allSoundsTable td:nth-child(3),
-#allSoundsTable th:last-child,
-#allSoundsTable td:last-child {
+#allSoundsTable td:nth-child(3) {
     width: 3.75rem;
     text-align: center;
     overflow: visible;
@@ -4259,11 +4488,11 @@ body.page-soundboard .tables-grid > .card:nth-child(3) {
 @keyframes dialogEnter {
     from {
         opacity: 0;
-        transform: translateY(12px) scale(0.96);
+        transform: translate3d(0, 6px, 0) scale(0.985);
     }
     to {
         opacity: 1;
-        transform: translateY(0) scale(1);
+        transform: translate3d(0, 0, 0) scale(1);
     }
 }
 
@@ -4930,10 +5159,16 @@ body.page-soundboard .tables-grid > .card:nth-child(3) {
         width: calc(100% - 92px);
     }
 
+    #favoritesTable .sound-options-column,
+    #allSoundsTable .sound-options-column {
+        display: table-cell;
+        text-align: center;
+        overflow: visible;
+    }
+
     #favoritesTable th:nth-child(2),
     #favoritesTable td:nth-child(2),
-    #favoritesTable th:last-child,
-    #favoritesTable td:last-child {
+    #favoritesTable .sound-options-column {
         width: 46px;
     }
 
@@ -4949,15 +5184,14 @@ body.page-soundboard .tables-grid > .card:nth-child(3) {
 
     #allSoundsTable th:nth-child(3),
     #allSoundsTable td:nth-child(3),
-    #allSoundsTable th:last-child,
-    #allSoundsTable td:last-child {
+    #allSoundsTable .sound-options-column {
         width: 40px;
     }
 
     #favoritesTable th:nth-child(2),
-    #favoritesTable th:last-child,
+    #favoritesTable th.sound-options-column,
     #allSoundsTable th:nth-child(3),
-    #allSoundsTable th:last-child {
+    #allSoundsTable th.sound-options-column {
         font-size: 0;
         letter-spacing: 0;
         text-align: center;
@@ -4969,8 +5203,8 @@ body.page-soundboard .tables-grid > .card:nth-child(3) {
         font-size: 0.76rem;
     }
 
-    #favoritesTable th:last-child::after,
-    #allSoundsTable th:last-child::after {
+    #favoritesTable th.sound-options-column::after,
+    #allSoundsTable th.sound-options-column::after {
         content: "⋯";
         font-size: 1rem;
         line-height: 1;
@@ -5008,6 +5242,31 @@ body.page-soundboard .tables-grid > .card:nth-child(3) {
     .login-modal-login {
         width: 100%;
     }
+}
+
+/* Page change animation classes for tables */
+tbody.page-swap-exit {
+    opacity: 0 !important;
+    transform: translateY(-4px) !important;
+    transition: opacity 0.12s var(--ease-out-quint), transform 0.12s var(--ease-out-quint) !important;
+}
+
+tbody.page-swap-enter {
+    opacity: 0 !important;
+    transform: translateY(4px) !important;
+    transition: none !important;
+}
+
+tbody.page-swap-active {
+    opacity: 1 !important;
+    transform: translateY(0) !important;
+    transition: opacity 0.18s var(--ease-out-quint), transform 0.18s var(--ease-out-quint) !important;
+}
+
+/* Remove top accent bars on analytics page cards and stat cards to prevent protruding green/accent lines, especially on stacked mobile layouts */
+.page-analytics .card::before,
+.page-analytics .stat-card::before {
+    display: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -5066,8 +5325,11 @@ body.page-soundboard .tables-grid > .card:nth-child(3) {
     .sound-rename-dialog,
     .sound-list-dialog,
     .sound-similar-dialog,
-    .sound-event-dialog {
+    .sound-event-dialog,
+    .web-upload-dialog::backdrop,
+    .web-tts-dialog::backdrop {
         animation: none !important;
+        backdrop-filter: none !important;
     }
 
     .play-button::before,
