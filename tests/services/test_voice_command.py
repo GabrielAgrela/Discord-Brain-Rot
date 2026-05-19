@@ -991,7 +991,7 @@ class TestVenturaChatService:
             result = await service.reply("hello ventura", requester_name="TestUser", conversation_key="test-key")
             assert result == "[shouts] Isto é uma vergonha!"
             assert "test-key" in service._history
-            assert service._history["test-key"] == [("hello ventura", "[shouts] Isto é uma vergonha!")]
+            assert service._history["test-key"] == [("TestUser: hello ventura", "[shouts] Isto é uma vergonha!")]
 
     @pytest.mark.asyncio
     async def test_reply_api_error_does_not_append(self, service):
@@ -1092,7 +1092,7 @@ class TestVenturaChatService:
                 assert messages[1] == {"role": "user", "content": "prior user text"}
                 assert messages[2] == {"role": "assistant", "content": "prior assistant reply"}
                 # Verify current transcript is included.
-                assert messages[3] == {"role": "user", "content": "current transcript"}
+                assert messages[3] == {"role": "user", "content": "TestUser: current transcript"}
                 # Ensure no API key or Authorization header leaks into log.
                 payload_str = json.dumps(payload_json)
                 assert "OPENROUTER_API_KEY" not in payload_str
@@ -1127,3 +1127,34 @@ class TestVenturaChatService:
         assert len(service._history["key-a"]) == 1
         assert len(service._history["key-b"]) == 1
         assert service._history["key-a"] != service._history["key-b"]
+
+    def test_format_user_transcript_with_requester_name(self, service):
+        """_format_user_transcript adds username prefix when provided."""
+        res = service._format_user_transcript("hello", "sopustos")
+        assert res == "sopustos: hello"
+
+    def test_format_user_transcript_without_requester_name(self, service):
+        """_format_user_transcript returns transcript only when username is empty/None."""
+        assert service._format_user_transcript("hello", None) == "hello"
+        assert service._format_user_transcript("hello", "") == "hello"
+        assert service._format_user_transcript("hello", "   ") == "hello"
+
+    def test_payload_includes_requester_name_in_user_message(self, service):
+        """_build_request_payload prefixes the current user message if requester_name is provided."""
+        payload = service._build_request_payload("hello ventura", "sopustos", "test-key")
+        messages = payload["messages"]
+        assert messages[-1]["content"] == "sopustos: hello ventura"
+
+    @pytest.mark.asyncio
+    async def test_reply_appends_prefixed_transcript_to_history(self, service):
+        """A successful reply appends the username-prefixed transcript to the conversation history."""
+        with patch("bot.services.voice_command.aiohttp.ClientSession.post") as mock_post:
+            mock_resp = AsyncMock()
+            mock_resp.status = 200
+            mock_resp.json = AsyncMock(return_value={
+                "choices": [{"message": {"content": "Olá"}}]
+            })
+            mock_post.return_value.__aenter__ = AsyncMock(return_value=mock_resp)
+
+            await service.reply("how are you", requester_name="sopustos", conversation_key="test-key")
+            assert service._history["test-key"] == [("sopustos: how are you", "Olá")]

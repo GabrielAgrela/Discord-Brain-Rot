@@ -396,7 +396,8 @@ class VenturaChatService:
                     result = await resp.json()
                     text = self._extract_response_text(result)
                     if text:
-                        self._append_history(effective_key, transcript, text)
+                        formatted_transcript = self._format_user_transcript(transcript, requester_name)
+                        self._append_history(effective_key, formatted_transcript, text)
                     return text if text else None
         except asyncio.TimeoutError:
             latency = time.perf_counter() - start_time
@@ -414,6 +415,12 @@ class VenturaChatService:
                 exc,
             )
             return None
+
+    def _format_user_transcript(self, transcript: str, requester_name: Optional[str]) -> str:
+        """Format the transcript with the speaker's name as a prefix if provided."""
+        if requester_name and requester_name.strip():
+            return f"{requester_name.strip()}: {transcript.strip()}"
+        return transcript.strip()
 
     def _append_history(
         self,
@@ -462,7 +469,8 @@ class VenturaChatService:
             messages.append({"role": "assistant", "content": assistant_msg})
 
         # Current user transcript.
-        messages.append({"role": "user", "content": transcript})
+        formatted = self._format_user_transcript(transcript, requester_name)
+        messages.append({"role": "user", "content": formatted})
 
         payload = {
             "model": self.model,

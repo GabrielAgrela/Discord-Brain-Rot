@@ -364,7 +364,7 @@ This README is based on the current codebase behavior (not historical README ass
 - `VOICE_COMMAND_WAKE_WORDS` (optional; comma-separated wake words for voice commands, default `ventura`)
  - `VOICE_COMMAND_CAPTURE_SECONDS` (optional; max duration of post-prompt command recording sent to Whisper, default `6`, max `15`)
 - `VOICE_COMMAND_COOLDOWN_SECONDS` (optional; per-user rate limit between voice command transcriptions, default `5`)
- - `VOICE_COMMAND_SILENCE_SECONDS` (optional; silence timeout after start prompt before voice command is considered complete, default `1.0`, range `0.5`-`5.0`)
+  - `VOICE_COMMAND_SILENCE_SECONDS` (optional; silence timeout after start prompt before voice command is considered complete, default `0.5`, range `0.5`-`5.0`)
 
  - `VOICE_COMMAND_BEEP_ENABLED` (optional; set `false` to disable voice command prompt clips entirely, default `true`)
 
@@ -406,7 +406,8 @@ This README is based on the current codebase behavior (not historical README ass
 
 #### ElevenLabs TTS Performance Options (since Ventura chat generates via this path)
 - `EL_TTS_STREAMING_ENABLED` (optional; use the streaming TTS endpoint for lower latency, default `true`)
-- `EL_TTS_LIVE_PLAYBACK_ENABLED` (optional; live playback from a FIFO pipe while the MP3 is still being downloaded, default `true`; only applies when streaming is enabled, no local loudnorm/boost, and a voice channel is available; falls back to save-then-play otherwise)
+- `EL_TTS_LIVE_PLAYBACK_ENABLED` (optional; live playback from a FIFO pipe while the MP3 is still being downloaded, default `true`; only applies when streaming is enabled, no local loudnorm/boost, and a voice channel is available; falls back to save-then-play otherwise. To minimize start-to-speak latency, live FIFO setup and voice channel connectivity are initiated early in parallel with the ElevenLabs HTTP request generation)
+- `EL_TTS_LIVE_PREROLL_MS` (optional; explicit FFmpeg audio delay in milliseconds applied to the live TTS stream, default `25`; setting this lower reduces the speak delay, while higher values improve playback reliability under jittery connections)
 - `EL_TTS_OPTIMIZE_STREAMING_LATENCY` (optional; streaming latency optimisation level `0`-`4`, default `3`; higher values reduce latency but may reduce quality; set empty to omit the parameter; **only applied for models that support it** — automatically omitted for `eleven_v3` which does not accept this parameter)
 - `EL_TTS_OUTPUT_FORMAT` (optional; output audio format, default `mp3_44100_128`; other ElevenLabs formats such as `mp3_44100_64` or `pcm_16000` are possible)
 - `EL_TTS_MODEL_ID` (optional; ElevenLabs TTS model, default `eleven_v3`)

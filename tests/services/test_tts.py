@@ -421,6 +421,144 @@ class TestSaveAsMp3ELLive:
         # request_note should be forwarded through to play_tts_live_stream
         assert play_tts_live_kwargs.get("request_note") is None
 
+    @pytest.mark.asyncio
+    @patch("bot.tts.aiohttp.ClientSession")
+    @patch("bot.tts.Database")
+    @patch("bot.tts.os.path.getsize")
+    @patch("bot.tts.os.makedirs")
+    @patch("builtins.open", new_callable=MagicMock)
+    @patch("bot.tts.tempfile.mkdtemp")
+    @patch("bot.tts.os.mkfifo")
+    @patch("bot.tts.os.open")
+    @patch("bot.tts.os.close")
+    @patch("bot.tts.os.unlink")
+    @patch("bot.tts.os.rmdir")
+    async def test_early_live_setup_starts_before_post(
+        self,
+        mock_rmdir,
+        mock_unlink,
+        mock_close,
+        mock_os_open,
+        mock_mkfifo,
+        mock_mkdtemp,
+        mock_open,
+        mock_makedirs,
+        mock_getsize,
+        mock_db,
+        mock_session_cls,
+    ):
+        """Verify that play_tts_live_stream is started BEFORE the aiohttp ClientSession post call occurs."""
+        mock_getsize.return_value = 9999
+        mock_mkdtemp.return_value = "/tmp/el_tts_live_abc123"
+        mock_os_open.return_value = 42
+
+        call_order = []
+
+        resp = mock_response(
+            status=200,
+            content_chunks=[b"chunk_a"],
+        )
+
+        def _fake_post(*args, **kwargs):
+            call_order.append("http_post")
+            return resp
+
+        sess = MagicMock()
+        sess.__aenter__ = AsyncMock(return_value=sess)
+        sess.__aexit__ = AsyncMock()
+        sess.post = _fake_post
+        mock_session_cls.return_value = sess
+
+        fake_channel = MagicMock()
+        fake_channel.guild.id = 12345
+
+        tts = self._make_tts(
+            el_tts_live_playback_enabled=True,
+            el_tts_streaming_enabled=True,
+            el_tts_timeout_seconds=30,
+            loudnorm_mode="off",
+            voice_id="pt_voice",
+        )
+        tts._get_default_voice_channel = MagicMock(return_value=fake_channel)
+
+        async def _fake_play_live(**kwargs):
+            call_order.append("play_live")
+            re = kwargs.get("ready_event")
+            if re is not None:
+                re.set()
+            return True
+
+        tts.behavior.play_tts_live_stream = _fake_play_live
+
+        await tts.save_as_mp3_EL("hello early", lang="pt")
+
+        # "play_live" should be initiated before "http_post"!
+        assert "play_live" in call_order
+        assert "http_post" in call_order
+        assert call_order.index("play_live") < call_order.index("http_post")
+
+    @pytest.mark.asyncio
+    @patch("bot.tts.aiohttp.ClientSession")
+    @patch("bot.tts.Database")
+    @patch("bot.tts.os.path.getsize")
+    @patch("bot.tts.os.makedirs")
+    @patch("builtins.open", new_callable=MagicMock)
+    @patch("bot.tts.tempfile.mkdtemp")
+    @patch("bot.tts.os.mkfifo")
+    @patch("bot.tts.os.open")
+    @patch("bot.tts.os.close")
+    @patch("bot.tts.os.unlink")
+    @patch("bot.tts.os.rmdir")
+    async def test_early_live_setup_fallback_to_save_then_play(
+        self,
+        mock_rmdir,
+        mock_unlink,
+        mock_close,
+        mock_os_open,
+        mock_mkfifo,
+        mock_mkdtemp,
+        mock_open,
+        mock_makedirs,
+        mock_getsize,
+        mock_db,
+        mock_session_cls,
+    ):
+        """When the early live stream setup fails, it should clean up the FIFO and fallback to play_audio."""
+        mock_getsize.return_value = 9999
+        mock_mkdtemp.return_value = "/tmp/el_tts_live_abc123"
+
+        resp = mock_response(
+            status=200,
+            content_chunks=[b"chunk_a", b"chunk_b"],
+        )
+        sess = mock_session(post_response=resp)
+        mock_session_cls.return_value = sess
+
+        fake_channel = MagicMock()
+        fake_channel.guild.id = 12345
+
+        tts = self._make_tts(
+            el_tts_live_playback_enabled=True,
+            el_tts_streaming_enabled=True,
+            el_tts_timeout_seconds=30,
+            loudnorm_mode="off",
+            voice_id="pt_voice",
+        )
+        tts._get_default_voice_channel = MagicMock(return_value=fake_channel)
+
+        async def _fake_play_live_fail(**kwargs):
+            # return False to indicate setup failure
+            return False
+
+        tts.behavior.play_tts_live_stream = _fake_play_live_fail
+
+        await tts.save_as_mp3_EL("hello fallback", lang="pt")
+
+        # Must fall back to play_audio
+        tts.behavior.play_audio.assert_called_once()
+        # Should have attempted cleanup of directory and FIFO
+        mock_unlink.assert_called()
+
 
 # ============================================================================
 # Environment variable defaults

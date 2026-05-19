@@ -8,6 +8,9 @@ import io
 import wave
 import json
 import audioop
+import logging
+
+logger = logging.getLogger(__name__)
 import queue
 import random
 import re
@@ -136,7 +139,7 @@ class AudioService:
         self.voice_command_cooldown_seconds = max(1, int(os.getenv("VOICE_COMMAND_COOLDOWN_SECONDS", "5")))
         # Seconds of silence after the beep before considering the user done speaking.
         self.voice_command_silence_seconds = max(
-            0.5, min(5.0, float(os.getenv("VOICE_COMMAND_SILENCE_SECONDS", "1.0")))
+            0.5, min(5.0, float(os.getenv("VOICE_COMMAND_SILENCE_SECONDS", "0.5")))
         )
         self._voice_command_service = None
         self._ventura_chat_service = None
@@ -218,6 +221,14 @@ class AudioService:
         self.low_latency_mp3_start_preroll_ms = max(
             0, int(os.getenv("LOW_LATENCY_MP3_START_PREROLL_MS", "650"))
         )
+        # ElevenLabs TTS live streaming preroll (delay in ms before playback starts, to buffer some chunks)
+        # Default is 25ms.
+        try:
+            val = os.getenv("EL_TTS_LIVE_PREROLL_MS", "25").strip()
+            self.el_tts_live_preroll_ms = max(0, int(val))
+        except Exception as e:
+            logger.warning("[AudioService] Invalid EL_TTS_LIVE_PREROLL_MS, using default 25: %s", e)
+            self.el_tts_live_preroll_ms = 25
         self.entrance_playback_start_delay_seconds = float(
             os.getenv("ENTRANCE_PLAYBACK_START_DELAY_SECONDS", "1.0")
         )
@@ -1575,7 +1586,10 @@ class AudioService:
             # Basic volume-only filter + small adelay for startup reliability.
             # FFmpegOpusAudio.from_probe cannot be used because the FIFO is
             # not a complete seekable file.
-            live_filters = 'volume=1.0,adelay=100:all=1'
+            live_filters = 'volume=1.0'
+            preroll_ms = getattr(self, 'el_tts_live_preroll_ms', 25)
+            if preroll_ms > 0:
+                live_filters += f',adelay={preroll_ms}:all=1'
             ffmpeg_options = f'-filter:a "{live_filters}"'
             ffmpeg_before_options = '-nostdin'
 
@@ -2740,7 +2754,7 @@ class KeywordDetectionSink(sinks.Sink):
         
         # How long to wait for the user to stop speaking after the beep.
         self.voice_command_silence_seconds = getattr(
-            audio_service, 'voice_command_silence_seconds', 1.0
+            audio_service, 'voice_command_silence_seconds', 0.5
         )
 
         # Voice-command listening state: when active, other Vosk keyword
@@ -3483,7 +3497,7 @@ class KeywordDetectionSink(sinks.Sink):
 
             # ---- record fresh post-prompt audio until silence -----------------
             capture_seconds = getattr(self.audio_service, "voice_command_capture_seconds", 6)
-            silence_seconds = getattr(self, "voice_command_silence_seconds", 1.0)
+            silence_seconds = getattr(self, "voice_command_silence_seconds", 0.5)
             pcm_data = await self._record_voice_command_after_beep(
                 user_id,
                 requester_name,

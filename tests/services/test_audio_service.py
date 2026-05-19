@@ -768,6 +768,65 @@ class TestAudioService:
         stored = audio_service._guild_live_tts_interrupt_events.get(555)
         assert stored is interrupt_event
 
+    @pytest.mark.asyncio
+    @patch("bot.services.audio.discord.FFmpegPCMAudio")
+    async def test_play_tts_live_stream_preroll_ms(self, mock_ffmpeg_pcm, audio_service):
+        """Ensure play_tts_live_stream respects el_tts_live_preroll_ms when building ffmpeg filters."""
+        from bot.services.audio import AudioService
+        audio_service.ffmpeg_path = "/usr/bin/ffmpeg"
+        audio_service.bot = Mock()
+        audio_service.mute_service = Mock()
+        audio_service.mute_service.is_muted = False
+        audio_service.message_service = Mock()
+        audio_service.message_service.get_bot_channel = Mock()
+        audio_service.image_generator = Mock()
+        audio_service.image_generator.generate_sound_card = AsyncMock(return_value=None)
+
+        voice_client = Mock()
+        voice_client.is_playing.return_value = False
+        voice_client.is_paused = Mock(return_value=False)
+        voice_client.is_connected.return_value = True
+        voice_client._player = None
+
+        audio_service.ensure_voice_connected = AsyncMock(return_value=voice_client)
+
+        channel = Mock()
+        channel.guild.id = 555
+
+        # Test case 1: preroll > 0 (e.g. 50ms)
+        audio_service.el_tts_live_preroll_ms = 50
+        await AudioService.play_tts_live_stream(
+            audio_service,
+            fifo_path="/tmp/fake_fifo",
+            audio_file="test_live.mp3",
+            channel=channel,
+            user="tester",
+        )
+        mock_ffmpeg_pcm.assert_called_with(
+            "/tmp/fake_fifo",
+            executable="/usr/bin/ffmpeg",
+            before_options="-nostdin",
+            options='-filter:a "volume=1.0,adelay=50:all=1"',
+        )
+
+        mock_ffmpeg_pcm.reset_mock()
+
+        # Test case 2: preroll == 0
+        audio_service.el_tts_live_preroll_ms = 0
+        await AudioService.play_tts_live_stream(
+            audio_service,
+            fifo_path="/tmp/fake_fifo",
+            audio_file="test_live.mp3",
+            channel=channel,
+            user="tester",
+        )
+        mock_ffmpeg_pcm.assert_called_with(
+            "/tmp/fake_fifo",
+            executable="/usr/bin/ffmpeg",
+            before_options="-nostdin",
+            options='-filter:a "volume=1.0"',
+        )
+
     # ------------------------------------------------------------------ #
     # AFK channel detection guards
     # ------------------------------------------------------------------ #
@@ -2274,3 +2333,17 @@ class TestAudioService:
         sink.audio_service.sound_service.play_request.assert_awaited_once_with(
             "air horn", "AliasUser", guild=sink.guild, request_note="play air horn", allow_rejected_exact_fallback=True
         )
+
+    def test_default_silence_timeout_is_half_second(self):
+        """Verify the voice command silence timeout default value is 0.5."""
+        from bot.services.audio import AudioService, KeywordDetectionSink
+        
+        # Instantiate AudioService with env unset
+        with patch.dict("os.environ", {}), patch("bot.services.audio.vosk.Model"):
+            service = AudioService(bot=Mock(), ffmpeg_path=Mock(), mute_service=Mock(), message_service=Mock())
+            assert service.voice_command_silence_seconds == 0.5
+            
+            # Verify KeywordDetectionSink copies the 0.5 default
+            sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+            sink.voice_command_silence_seconds = getattr(service, "voice_command_silence_seconds", 0.5)
+            assert sink.voice_command_silence_seconds == 0.5

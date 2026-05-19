@@ -21,6 +21,14 @@ from bot.database import Database
 logger = logging.getLogger(__name__)
 
 
+class EarlyLiveContext:
+    def __init__(self):
+        self.live_task = None
+        self.fifo_path = None
+        self.live_fifo_fd = None
+        self.live_playback_started = False
+
+
 def _write_all_to_fd(fd: int, data: bytes, interrupt_event=None) -> None:
     """Write *data* entirely to *fd*, handling short writes.
 
@@ -641,6 +649,38 @@ class TTS:
                              loading_message=None, requester_avatar_url=None, sts_thumbnail_url=None,
                              requester_name="admin", guild_id: Optional[int] = None,
                              request_note: Optional[str] = None):
+        ctx = EarlyLiveContext()
+        try:
+            return await self._save_as_mp3_EL_impl(
+                text, lang, region, send_controls,
+                loading_message, requester_avatar_url, sts_thumbnail_url,
+                requester_name, guild_id, request_note, ctx
+            )
+        finally:
+            if not ctx.live_playback_started and ctx.live_task is not None:
+                logger.info("EL_TTS early live setup was not used or failed. Cleaning up live task.")
+                try:
+                    ctx.live_task.cancel()
+                except Exception:
+                    pass
+                if ctx.live_fifo_fd is not None:
+                    try:
+                        os.close(ctx.live_fifo_fd)
+                    except Exception:
+                        pass
+                if ctx.fifo_path is not None:
+                    try:
+                        os.unlink(ctx.fifo_path)
+                        os.rmdir(os.path.dirname(ctx.fifo_path))
+                    except Exception:
+                        pass
+
+    async def _save_as_mp3_EL_impl(self, text, lang="pt", region="", send_controls=True,
+                                  loading_message=None, requester_avatar_url=None, sts_thumbnail_url=None,
+                                  requester_name="admin", guild_id: Optional[int] = None,
+                                  request_note: Optional[str] = None, ctx: Optional[EarlyLiveContext] = None):
+        if ctx is None:
+            ctx = EarlyLiveContext()
         boost_volume = 0
         # Sanitize filename-safe text (keep it reasonably short for FS, but image gen will use full text)
         safe_text = "".join(x for x in text[:30] if x.isalnum() or x in " -_")
@@ -696,22 +736,59 @@ class TTS:
         first_chunk_time: Optional[float] = None
         http_status = None
 
+        # ---- Determine whether live-streaming can be used ----
+        should_live = (
+            self.el_tts_live_playback_enabled
+            and self.el_tts_streaming_enabled
+            and boost_volume == 0
+            and self.loudnorm_mode == "off"
+            and live_channel is not None
+        )
+
+        if should_live:
+            try:
+                fifo_dir = tempfile.mkdtemp(prefix="el_tts_live_")
+                ctx.fifo_path = os.path.join(fifo_dir, "stream.mp3")
+                os.mkfifo(ctx.fifo_path)
+
+                live_ready_event = asyncio.Event()
+                live_interrupt_event = threading.Event()
+                logger.info("EL_TTS early live setup start for guild_id=%s filename=%s", guild_id, filename)
+                ctx.live_task = asyncio.create_task(
+                    self.behavior.play_tts_live_stream(
+                        fifo_path=ctx.fifo_path,
+                        audio_file=filename,
+                        channel=live_channel,
+                        user=requester_name,
+                        original_message=text,
+                        send_controls=send_controls,
+                        loading_message=loading_message,
+                        requester_avatar_url=requester_avatar_url,
+                        sts_thumbnail_url=sts_thumbnail_url,
+                        ready_event=live_ready_event,
+                        interrupt_event=live_interrupt_event,
+                        request_note=request_note,
+                    )
+                )
+                # Yield to the event loop so the live task starts running immediately
+                await asyncio.sleep(0)
+            except Exception as e:
+                logger.warning(
+                    "EL_TTS early live setup failed: %s", e,
+                )
+                if ctx.fifo_path is not None:
+                    try:
+                        os.unlink(ctx.fifo_path)
+                        os.rmdir(os.path.dirname(ctx.fifo_path))
+                    except Exception:
+                        pass
+                ctx.fifo_path = None
+                ctx.live_task = None
+
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.post(url, json=data, headers=headers) as response:
                 http_status = response.status
                 if response.status == 200:
-                    # ---- Track whether live streaming was started ----
-                    live_playback_started = False
-
-                    # ---- Determine whether live-streaming can be used ----
-                    should_live = (
-                        self.el_tts_live_playback_enabled
-                        and self.el_tts_streaming_enabled
-                        and boost_volume == 0
-                        and self.loudnorm_mode == "off"
-                        and live_channel is not None
-                    )
-
                     if boost_volume == 0 and not self.el_tts_streaming_enabled:
                         # Non-streaming, no boost: read all, write directly (skip pydub decode/re-encode)
                         audio_data = await response.read()
@@ -725,39 +802,10 @@ class TTS:
                         # optionally live-stream to a FIFO for concurrent playback.
                         os.makedirs(os.path.dirname(path), exist_ok=True)
 
-                        # --- Live streaming setup (FIFO) ---
-                        fifo_path: Optional[str] = None
-                        live_fifo_fd: Optional[int] = None
-                        live_ready_event: Optional[asyncio.Event] = None
-                        live_interrupt_event: Optional[threading.Event] = None
-
-                        if should_live:
+                        if should_live and ctx.live_task is not None:
                             try:
-                                fifo_dir = tempfile.mkdtemp(prefix="el_tts_live_")
-                                fifo_path = os.path.join(fifo_dir, "stream.mp3")
-                                os.mkfifo(fifo_path)
-
-                                live_ready_event = asyncio.Event()
-                                live_interrupt_event = threading.Event()
-                                live_task = asyncio.create_task(
-                                    self.behavior.play_tts_live_stream(
-                                        fifo_path=fifo_path,
-                                        audio_file=filename,
-                                        channel=live_channel,
-                                        user=requester_name,
-                                        original_message=text,
-                                        send_controls=send_controls,
-                                        loading_message=loading_message,
-                                        requester_avatar_url=requester_avatar_url,
-                                        sts_thumbnail_url=sts_thumbnail_url,
-                                        ready_event=live_ready_event,
-                                        interrupt_event=live_interrupt_event,
-                                        request_note=request_note,
-                                    )
-                                )
-
                                 # Wait for FFmpeg to open the FIFO read end
-                                # (i.e. voice_client.play was called).  Use a
+                                # (i.e. voice_client.play was called). Use a
                                 # generous timeout for voice connection.
                                 try:
                                     await asyncio.wait_for(
@@ -767,16 +815,16 @@ class TTS:
                                     logger.warning(
                                         "EL_TTS live playback setup timed out"
                                     )
-                                    live_task.cancel()
+                                    ctx.live_task.cancel()
                                     try:
-                                        await live_task
+                                        await ctx.live_task
                                     except Exception:
                                         pass
                                     raise RuntimeError("live timeout")
 
                                 # Check the task result — play_tts_live_stream
                                 # may have returned False.
-                                if live_task.done() and not live_task.result():
+                                if ctx.live_task.done() and not ctx.live_task.result():
                                     logger.warning(
                                         "EL_TTS live playback returned False"
                                     )
@@ -791,22 +839,22 @@ class TTS:
                                 open_flags = os.O_RDWR
                                 if hasattr(os, 'O_NONBLOCK'):
                                     open_flags |= os.O_NONBLOCK
-                                live_fifo_fd = os.open(
-                                    fifo_path, open_flags
+                                ctx.live_fifo_fd = os.open(
+                                    ctx.fifo_path, open_flags
                                 )
                                 # Bump pipe buffer to ~256 KB so short
                                 # connection races do not stall the event loop.
                                 try:
                                     import fcntl
                                     fcntl.fcntl(
-                                        live_fifo_fd, 1031, 262144
+                                        ctx.live_fifo_fd, 1031, 262144
                                     )  # F_SETPIPE_SZ
                                 except (ImportError, OSError):
                                     pass
-                                live_playback_started = True
+                                ctx.live_playback_started = True
                                 logger.info(
                                     "EL_TTS live playback ready fifo=%s",
-                                    fifo_path,
+                                    ctx.fifo_path,
                                 )
                             except Exception as e:
                                 logger.warning(
@@ -815,27 +863,27 @@ class TTS:
                                 )
                                 # Cancel live task if still running
                                 try:
-                                    live_task.cancel()
-                                    await live_task
+                                    ctx.live_task.cancel()
+                                    await ctx.live_task
                                 except Exception:
                                     pass
                                 # Cleanup FIFO resources
-                                if live_fifo_fd is not None:
+                                if ctx.live_fifo_fd is not None:
                                     try:
-                                        os.close(live_fifo_fd)
+                                        os.close(ctx.live_fifo_fd)
                                     except Exception:
                                         pass
-                                    live_fifo_fd = None
-                                if fifo_path is not None:
+                                    ctx.live_fifo_fd = None
+                                if ctx.fifo_path is not None:
                                     try:
-                                        os.unlink(fifo_path)
+                                        os.unlink(ctx.fifo_path)
                                         os.rmdir(
-                                            os.path.dirname(fifo_path)
+                                            os.path.dirname(ctx.fifo_path)
                                         )
                                     except Exception:
                                         pass
-                                fifo_path = None
-                                live_playback_started = False
+                                ctx.fifo_path = None
+                                ctx.live_playback_started = False
 
                         # Track whether the live stream was externally
                         # interrupted (e.g. by play_slap).
@@ -851,7 +899,7 @@ class TTS:
 
                                 # Check for external interrupt of the live
                                 # stream (play_slap, play_audio skip, etc.).
-                                if (live_playback_started
+                                if (ctx.live_playback_started
                                         and live_interrupt_event is not None
                                         and live_interrupt_event.is_set()):
                                     live_interrupted = True
@@ -865,11 +913,11 @@ class TTS:
                                 # Feed the FIFO writer via a thread so the event
                                 # loop stays free to serve Discord interactions
                                 # and keyword actions.
-                                if live_fifo_fd is not None:
+                                if ctx.live_fifo_fd is not None:
                                     try:
                                         await asyncio.to_thread(
                                             _write_all_to_fd,
-                                            live_fifo_fd, chunk,
+                                            ctx.live_fifo_fd, chunk,
                                             live_interrupt_event,
                                         )
                                     except (BrokenPipeError, OSError) as e:
@@ -878,24 +926,24 @@ class TTS:
                                             "disabling live: %s", e,
                                         )
                                         try:
-                                            os.close(live_fifo_fd)
+                                            os.close(ctx.live_fifo_fd)
                                         except Exception:
                                             pass
-                                        live_fifo_fd = None
+                                        ctx.live_fifo_fd = None
 
                         # --- Close FIFO write end ---
-                        if live_fifo_fd is not None:
+                        if ctx.live_fifo_fd is not None:
                             try:
-                                os.close(live_fifo_fd)
+                                os.close(ctx.live_fifo_fd)
                             except Exception:
                                 pass
-                            live_fifo_fd = None
+                            ctx.live_fifo_fd = None
 
                         # --- Cleanup FIFO file ---
-                        if fifo_path is not None:
+                        if ctx.fifo_path is not None:
                             try:
-                                os.unlink(fifo_path)
-                                os.rmdir(os.path.dirname(fifo_path))
+                                os.unlink(ctx.fifo_path)
+                                os.rmdir(os.path.dirname(ctx.fifo_path))
                             except Exception as e:
                                 logger.debug(
                                     "EL_TTS FIFO cleanup: %s", e,
@@ -953,7 +1001,7 @@ class TTS:
 
                     # Playback: if live-stream was started, it is already
                     # playing.  Otherwise fall back to save-then-play.
-                    if not live_playback_started:
+                    if not ctx.live_playback_started:
                         channel = self._get_default_voice_channel(guild_id=guild_id)
                         if channel is None:
                             await self.behavior.send_error_message(
@@ -973,7 +1021,7 @@ class TTS:
                     logger.info(
                         "Audio stream saved and played successfully. "
                         "path=%s size=%s live=%s",
-                        path, file_size, live_playback_started,
+                        path, file_size, ctx.live_playback_started,
                     )
                 else:
                     error_body = await response.text()
