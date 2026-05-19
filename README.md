@@ -63,7 +63,7 @@ This README is based on the current codebase behavior (not historical README ass
 - Requires `GROQ_API_KEY` for transcription. Additionally requires `OPENROUTER_API_KEY` for the non-play Ventura chat branch (OpenRouter DeepSeek model, default `deepseek/deepseek-v4-flash` with reasoning disabled for fastest replies) and `EL_key`/`EL_voice_id_pt` for ElevenLabs Ventura TTS playback.
 - Configurable capture duration, silence timeout, cooldown, model, wake words, Vosk aliases, confidence threshold, prompt clips, and prompt enable/disable via environment variables.
  - Debug save of the exact WAV bytes sent to Groq is disabled by default. Set ``GROQ_WHISPER_DEBUG_SAVE_AUDIO=true`` to enable saving WAV files to ``Debug/groq_whisper/`` with timestamped names plus a ``latest.wav`` overwrite for quick inspection. With the fresh post-prompt capture, debug WAV files contain only the command speech (e.g., "play despacito"), not several pre-wake seconds.
-- Non-play Ventura chat keeps **up to the last 3 successful exchanges** per user/guild in memory as context, so follow-up queries ("you said X, but what about Y?") include prior conversation. Context is scoped by guild + user ID (``guild:{id}:user:{id}``). Only successful model replies are appended to history — API errors, timeouts, or empty responses are not stored.
+- Non-play Ventura chat keeps **up to the last 3 successful exchanges from the last 5 minutes** per user/guild in memory as context, so follow-up queries ("you said X, but what about Y?") include prior conversation. Expired entries older than the retention window are automatically pruned. Context is scoped by guild + user ID (``guild:{id}:user:{id}``). Only successful model replies are appended to history — API errors, timeouts, or empty responses are not stored.
 - Before each OpenRouter request, the bot logs the **full request payload** at INFO level with the ``[VenturaChat] Request payload`` prefix, including the system prompt, historical user/assistant messages, and the current user transcript — formatted as readable pretty-printed JSON (``ensure_ascii=False`` so Portuguese/accented text is legible). API keys, auth headers, and other secrets are never included in these log entries.
 
 ### Voice Connection Resilience
@@ -383,6 +383,7 @@ This README is based on the current codebase behavior (not historical README ass
 - `VENTURA_CHAT_TEMPERATURE` (optional; model temperature for Ventura chat, default `0.7`, range `0.0`-`2.0`)
 - `VENTURA_CHAT_PROVIDER_SORT` (optional; routing sort preference for OpenRouter, default `throughput` for lowest latency, can be set empty to disable)
 - `VENTURA_CHAT_LOG_PAYLOAD` (optional; set `false` to log compact metadata summary instead of full request payload/prompt, default `true`)
+- `VENTURA_CHAT_HISTORY_RETENTION_SECONDS` (optional; history entry lifetime in seconds, default `300` i.e. 5 minutes, `0` disables history entirely)
 - `VOICE_MAX_DAVE_PROTOCOL_VERSION` (default auto-detected from `davey` protocol version, currently `1`; set `0` only to force-disable DAVE negotiation)
 - `PERFORMANCE_MONITOR_TICK_SECONDS` (performance monitor interval in seconds, default `0.5`, minimum `0.1`)
 - `BOT_SELF_HEAL_RESTART_ENABLED` (`true` default; lets Docker restart the bot after unrecoverable gateway/voice health failures)

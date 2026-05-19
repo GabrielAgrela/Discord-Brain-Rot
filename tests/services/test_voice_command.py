@@ -7,6 +7,7 @@ import io
 import json
 import os
 import sys
+import time
 import wave
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -899,9 +900,10 @@ class TestVenturaChatService:
 
     def test_payload_includes_prior_exchanges(self, service):
         """Prior exchanges appear as user/assistant pairs before the current transcript."""
+        now = time.monotonic()
         service._history["test-key"] = [
-            ("first user", "first assistant"),
-            ("second user", "second assistant"),
+            (now, "first user", "first assistant"),
+            (now, "second user", "second assistant"),
         ]
         payload = service._build_request_payload("third user", None, "test-key")
         messages = payload["messages"]
@@ -917,7 +919,7 @@ class TestVenturaChatService:
     def test_payload_appends_current_transcript_after_history(self, service):
         """Current user transcript is appended after historical exchanges."""
         service._history["test-key"] = [
-            ("previous user", "previous assistant"),
+            (time.monotonic(), "previous user", "previous assistant"),
         ]
         payload = service._build_request_payload("current query", None, "test-key")
         messages = payload["messages"]
@@ -929,9 +931,12 @@ class TestVenturaChatService:
             service._append_history("test-key", f"user {i}", f"assistant {i}")
         # History should now have the last 3: (user 2, asst 2), (user 3, asst 3), (user 4, asst 4)
         assert len(service._history["test-key"]) == 3
-        assert service._history["test-key"][0] == ("user 2", "assistant 2")
-        assert service._history["test-key"][1] == ("user 3", "assistant 3")
-        assert service._history["test-key"][2] == ("user 4", "assistant 4")
+        assert service._history["test-key"][0][1] == "user 2"
+        assert service._history["test-key"][0][2] == "assistant 2"
+        assert service._history["test-key"][1][1] == "user 3"
+        assert service._history["test-key"][1][2] == "assistant 3"
+        assert service._history["test-key"][2][1] == "user 4"
+        assert service._history["test-key"][2][2] == "assistant 4"
 
     def test_payload_respects_cap(self, service):
         """Payload includes at most 3 prior exchanges."""
@@ -951,6 +956,74 @@ class TestVenturaChatService:
         assert messages[7]["content"] == "current"
 
     # ------------------------------------------------------------------
+    # History retention (TTL) behaviour
+    # ------------------------------------------------------------------
+
+    def test_payload_includes_fresh_history_within_retention(self, service):
+        """Unexpired entries (age < retention) appear in the payload."""
+        service._history["test-key"] = [
+            (time.monotonic(), "user msg", "asst reply"),
+        ]
+        payload = service._build_request_payload("current", None, "test-key")
+        messages = payload["messages"]
+        assert len(messages) == 4  # system + pair + current
+        assert messages[1]["content"] == "user msg"
+        assert messages[2]["content"] == "asst reply"
+
+    def test_payload_excludes_expired_history(self, service):
+        """Entries older than retention_seconds are excluded from the payload."""
+        old_ts = time.monotonic() - service.history_retention_seconds - 1
+        service._history["test-key"] = [
+            (old_ts, "old user", "old asst"),
+        ]
+        payload = service._build_request_payload("current", None, "test-key")
+        messages = payload["messages"]
+        # Only system + current (history was pruned)
+        assert len(messages) == 2
+
+    def test_prune_history_removes_expired_before_append(self, service):
+        """_append_history prunes expired entries before adding the new one."""
+        old_ts = time.monotonic() - service.history_retention_seconds - 1
+        service._history["test-key"] = [
+            (old_ts, "old user", "old asst"),
+            (old_ts, "old user 2", "old asst 2"),
+        ]
+        service._append_history("test-key", "new user", "new asst")
+        assert len(service._history["test-key"]) == 1
+        entry = service._history["test-key"][0]
+        assert entry[1] == "new user"
+        assert entry[2] == "new asst"
+
+    def test_empty_key_deleted_after_prune(self, service):
+        """A conversation key is removed when all its entries expire."""
+        old_ts = time.monotonic() - service.history_retention_seconds - 1
+        service._history["test-key"] = [(old_ts, "old", "old")]
+        service._prune_history("test-key")
+        assert "test-key" not in service._history
+
+    def test_retention_zero_clears_history(self, service):
+        """Setting retention_seconds to 0 effectively disables history."""
+        now = time.monotonic()
+        service._history["test-key"] = [(now, "fresh", "still fresh")]
+        service.history_retention_seconds = 0
+        payload = service._build_request_payload("current", None, "test-key")
+        messages = payload["messages"]
+        assert len(messages) == 2  # Only system + current
+
+    def test_payload_cap_still_applies_among_unexpired(self, service):
+        """Only the last 3 unexpired exchanges are included when more exist."""
+        now = time.monotonic()
+        for i in range(5):
+            service._append_history("test-key", f"user {i}", f"asst {i}")
+        # All entries are fresh, so only last 3 remain after cap + prune.
+        assert len(service._history["test-key"]) == 3
+        # Confirm they are the most recent 3.
+        entries = service._history["test-key"]
+        assert entries[0][1] == "user 2"
+        assert entries[1][1] == "user 3"
+        assert entries[2][1] == "user 4"
+
+    # ------------------------------------------------------------------
     # _append_history behaviour
     # ------------------------------------------------------------------
 
@@ -958,20 +1031,30 @@ class TestVenturaChatService:
         """_append_history creates the key when it doesn't exist."""
         service._append_history("new-key", "user text", "assistant text")
         assert "new-key" in service._history
-        assert service._history["new-key"] == [("user text", "assistant text")]
+        assert len(service._history["new-key"]) == 1
+        entry = service._history["new-key"][0]
+        assert isinstance(entry[0], float)  # timestamp
+        assert entry[1] == "user text"
+        assert entry[2] == "assistant text"
 
     def test_append_history_appends_to_existing(self, service):
         """_append_history appends to an existing key."""
-        service._history["test-key"] = [("first", "reply1")]
+        now = time.monotonic()
+        service._history["test-key"] = [(now, "first", "reply1")]
         service._append_history("test-key", "second", "reply2")
-        assert service._history["test-key"] == [("first", "reply1"), ("second", "reply2")]
+        assert len(service._history["test-key"]) == 2
+        assert service._history["test-key"][0][1] == "first"
+        assert service._history["test-key"][0][2] == "reply1"
+        assert service._history["test-key"][1][1] == "second"
+        assert service._history["test-key"][1][2] == "reply2"
 
     def test_append_history_trims_to_max(self, service):
         """_append_history trims to _MAX_HISTORY_EXCHANGES when over capacity."""
         for i in range(5):
             service._append_history("test-key", f"user {i}", f"assistant {i}")
         assert len(service._history["test-key"]) == 3
-        assert service._history["test-key"][0] == ("user 2", "assistant 2")
+        assert service._history["test-key"][0][1] == "user 2"
+        assert service._history["test-key"][0][2] == "assistant 2"
 
     # ------------------------------------------------------------------
     # reply() integration with mocked HTTP
@@ -991,7 +1074,11 @@ class TestVenturaChatService:
             result = await service.reply("hello ventura", requester_name="TestUser", conversation_key="test-key")
             assert result == "[shouts] Isto é uma vergonha!"
             assert "test-key" in service._history
-            assert service._history["test-key"] == [("TestUser: hello ventura", "[shouts] Isto é uma vergonha!")]
+            assert len(service._history["test-key"]) == 1
+            entry = service._history["test-key"][0]
+            assert isinstance(entry[0], float)  # timestamp
+            assert entry[1] == "TestUser: hello ventura"
+            assert entry[2] == "[shouts] Isto é uma vergonha!"
 
     @pytest.mark.asyncio
     async def test_reply_api_error_does_not_append(self, service):
@@ -1050,7 +1137,7 @@ class TestVenturaChatService:
         # Seed some history to verify it appears in the log.
         service.log_payload = True
         service._history["test-key"] = [
-            ("prior user text", "prior assistant reply"),
+            (time.monotonic(), "prior user text", "prior assistant reply"),
         ]
         with patch("bot.services.voice_command.aiohttp.ClientSession.post") as mock_post:
             mock_resp = AsyncMock()
@@ -1116,7 +1203,7 @@ class TestVenturaChatService:
 
     def test_build_payload_uses_key_to_lookup_history(self, service):
         """_build_request_payload uses conversation_key to look up history."""
-        service._history["guild:1:user:42"] = [("prev", "resp")]
+        service._history["guild:1:user:42"] = [(time.monotonic(), "prev", "resp")]
         payload = service._build_request_payload("now", None, conversation_key="guild:1:user:42")
         assert len(payload["messages"]) == 4  # system + pair + current
 
@@ -1157,4 +1244,8 @@ class TestVenturaChatService:
             mock_post.return_value.__aenter__ = AsyncMock(return_value=mock_resp)
 
             await service.reply("how are you", requester_name="sopustos", conversation_key="test-key")
-            assert service._history["test-key"] == [("sopustos: how are you", "Olá")]
+            assert len(service._history["test-key"]) == 1
+            entry = service._history["test-key"][0]
+            assert isinstance(entry[0], float)  # timestamp
+            assert entry[1] == "sopustos: how are you"
+            assert entry[2] == "Olá"

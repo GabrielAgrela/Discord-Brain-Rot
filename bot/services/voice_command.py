@@ -274,6 +274,9 @@ VENTURA_CHAT_LOG_PAYLOAD: bool = (
     os.getenv("VENTURA_CHAT_LOG_PAYLOAD", "true").strip().lower()
     not in {"0", "false", "off", "no"}
 )
+VENTURA_CHAT_HISTORY_RETENTION_SECONDS: float = max(
+    0.0, float(os.getenv("VENTURA_CHAT_HISTORY_RETENTION_SECONDS", "300"))
+)
 
 
 class VenturaChatService:
@@ -284,7 +287,9 @@ class VenturaChatService:
     tags, suitable for ``VoiceTransformationService.tts_EL(lang="pt")``.
 
     Keeps an in-memory conversation history per ``conversation_key`` (up to
-    the last 3 user/assistant exchanges) so follow-up queries have context.
+    the last 3 user/assistant exchanges from the last
+    ``VENTURA_CHAT_HISTORY_RETENTION_SECONDS``) so follow-up queries have
+    context while stale entries are automatically pruned.
     """
 
     # Maximum number of prior exchanges to include in the prompt.
@@ -300,9 +305,10 @@ class VenturaChatService:
         self.reasoning_enabled: bool = VENTURA_CHAT_REASONING_ENABLED
         self.provider_sort: str = VENTURA_CHAT_PROVIDER_SORT
         self.log_payload: bool = VENTURA_CHAT_LOG_PAYLOAD
+        self.history_retention_seconds: float = VENTURA_CHAT_HISTORY_RETENTION_SECONDS
 
-        # Per-conversation history: key -> list of (user_text, assistant_text)
-        self._history: dict[str, list[tuple[str, str]]] = {}
+        # Per-conversation history: key -> list of (monotonic_ts, user_text, assistant_text)
+        self._history: dict[str, list[tuple[float, str, str]]] = {}
 
     @property
     def is_available(self) -> bool:
@@ -422,6 +428,23 @@ class VenturaChatService:
             return f"{requester_name.strip()}: {transcript.strip()}"
         return transcript.strip()
 
+    def _prune_history(self, key: str) -> None:
+        """Remove expired entries for *key* and delete empty keys.
+
+        Entries older than ``self.history_retention_seconds`` (measured
+        from ``time.monotonic``) are removed.  A retention of ``0``
+        effectively clears all history immediately.
+        """
+        if key not in self._history:
+            return
+        if self.history_retention_seconds <= 0:
+            del self._history[key]
+            return
+        cutoff = time.monotonic() - self.history_retention_seconds
+        self._history[key] = [e for e in self._history[key] if e[0] >= cutoff]
+        if not self._history[key]:
+            del self._history[key]
+
     def _append_history(
         self,
         key: str,
@@ -429,9 +452,11 @@ class VenturaChatService:
         assistant_text: str,
     ) -> None:
         """Store a successful exchange in the rolling conversation history."""
+        # Prune any stale entries for this key before appending.
+        self._prune_history(key)
         if key not in self._history:
             self._history[key] = []
-        self._history[key].append((user_text, assistant_text))
+        self._history[key].append((time.monotonic(), user_text, assistant_text))
         # Trim to the last N exchanges.
         if len(self._history[key]) > self._MAX_HISTORY_EXCHANGES:
             self._history[key] = self._history[key][-self._MAX_HISTORY_EXCHANGES:]
@@ -461,10 +486,12 @@ class VenturaChatService:
             {"role": "system", "content": system_instruction},
         ]
 
-        # Include up to the last _MAX_HISTORY_EXCHANGES prior exchanges for context.
+        # Prune expired entries, then include up to the last
+        # _MAX_HISTORY_EXCHANGES prior exchanges for context.
+        self._prune_history(conversation_key)
         history = self._history.get(conversation_key, [])
         included_history = history[-self._MAX_HISTORY_EXCHANGES:] if self._MAX_HISTORY_EXCHANGES > 0 else []
-        for user_msg, assistant_msg in included_history:
+        for _ts, user_msg, assistant_msg in included_history:
             messages.append({"role": "user", "content": user_msg})
             messages.append({"role": "assistant", "content": assistant_msg})
 
