@@ -203,8 +203,22 @@ class SoundService:
                 await self.audio_service.play_audio(channel, sound[2], username)
                 self.action_repo.insert(username, "play_random_favorite_sound", sound[0], guild_id=guild_id)
 
-    async def play_random_sound_from_list(self, list_name: str, username: str, guild: Optional[discord.Guild] = None):
-        """Play a random sound from a specific list."""
+    async def play_random_sound_from_list(
+        self,
+        list_name: str,
+        username: str,
+        guild: Optional[discord.Guild] = None,
+        request_note: Optional[str] = None,
+    ):
+        """Play a random sound from a specific list.
+
+        Args:
+            list_name: Name of the sound list to play from.
+            username: Name of the requesting user.
+            guild: Discord guild for channel resolution.
+            request_note: Optional note displayed on the sound card
+                (e.g. the voice transcript heard by the bot).
+        """
         try:
             if guild is None:
                 print("[SoundService] No guild available for play_random_sound_from_list")
@@ -223,7 +237,10 @@ class SoundService:
                 await self.message_service.send_error(f"No sounds found in list '{list_name}'.")
                 return
             
-            await self.audio_service.play_audio(channel, random_sound[2], username)
+            await self.audio_service.play_audio(
+                channel, random_sound[2], username,
+                request_note=request_note,
+            )
             self.action_repo.insert(username, "play_from_list", random_sound[0], guild_id=guild_id)
         except Exception as e:
             print(f"[SoundService] Error playing random sound from list {list_name}: {e}")

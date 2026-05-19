@@ -74,12 +74,12 @@ class ListRepository(BaseRepository):
 
         if creator:
             row = self._execute_one(
-                f"SELECT * FROM sound_lists WHERE list_name = ? AND creator = ?{guild_clause}",
+                f"SELECT * FROM sound_lists WHERE list_name = ? COLLATE NOCASE AND creator = ?{guild_clause}",
                 (name, creator, *guild_params)
             )
         else:
             row = self._execute_one(
-                f"SELECT * FROM sound_lists WHERE list_name = ?{guild_clause}",
+                f"SELECT * FROM sound_lists WHERE list_name = ? COLLATE NOCASE{guild_clause}",
                 (name, *guild_params)
             )
         return (row['id'], row['list_name'], row['creator']) if row else None
@@ -231,7 +231,7 @@ class ListRepository(BaseRepository):
             FROM sounds s
             JOIN sound_list_items sli ON s.Filename = sli.sound_filename
             JOIN sound_lists sl ON sli.list_id = sl.id
-            WHERE sl.list_name = ?
+            WHERE sl.list_name = ? COLLATE NOCASE
             {guild_clause}
             ORDER BY RANDOM()
             LIMIT 1

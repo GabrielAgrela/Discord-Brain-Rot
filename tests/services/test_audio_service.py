@@ -1169,8 +1169,11 @@ class TestAudioService:
         sink.audio_service._voice_command_cooldowns = {}
         sink.audio_service.voice_command_cooldown_seconds = 5
         sink.audio_service.voice_command_capture_seconds = 6
-        sink.audio_service.sound_service = AsyncMock()
-        sink.audio_service.sound_service.play_request = AsyncMock(return_value=True)
+        sound_service = AsyncMock()
+        sound_service.play_request = AsyncMock(return_value=True)
+        sound_service.play_random_sound_from_list = AsyncMock(return_value=True)
+        sound_service.list_repo = None  # No list repo — forces play_request path
+        sink.audio_service.sound_service = sound_service
         sink.audio_service._play_voice_command_prompt = AsyncMock(return_value=True)
         # Mock ventura chat service (not called for play path, but must exist)
         mock_ventura = Mock()
@@ -1184,7 +1187,7 @@ class TestAudioService:
         from bot.services.voice_command import GroqWhisperService
         mock_voice_service = Mock(spec=GroqWhisperService)
         mock_voice_service.is_available = True
-        mock_voice_service.transcribe = AsyncMock(return_value="bot play air horn")
+        mock_voice_service.transcribe = AsyncMock(return_value="bot toca air horn")
         sink.audio_service._get_voice_command_service = Mock(return_value=mock_voice_service)
 
         await sink._handle_voice_command(999, "TestUser", Mock())
@@ -1192,7 +1195,7 @@ class TestAudioService:
         # Prompt is called twice: start + done (done now played after parse)
         assert sink.audio_service._play_voice_command_prompt.await_count == 2
         sink.audio_service.sound_service.play_request.assert_awaited_once_with(
-            "air horn", "TestUser", guild=sink.guild, request_note="play air horn", allow_rejected_exact_fallback=True
+            "air horn", "TestUser", guild=sink.guild, request_note="toca air horn", allow_rejected_exact_fallback=True
         )
         # Ventura chat should not be called for play path
         sink.audio_service._get_ventura_chat_service.assert_not_called()
@@ -1603,7 +1606,11 @@ class TestAudioService:
         sink.audio_service = Mock()
         sink.audio_service._voice_command_cooldowns = {}
         sink.audio_service.voice_command_cooldown_seconds = 5
-        sink.audio_service.sound_service = AsyncMock()
+        sound_service = AsyncMock()
+        sound_service.list_repo = None  # Forces play_request path
+        sound_service.play_request = AsyncMock()
+        sound_service.play_random_sound_from_list = AsyncMock()
+        sink.audio_service.sound_service = sound_service
         sink.audio_service._play_voice_command_prompt = AsyncMock(return_value=True)
         sink._record_voice_command_after_beep = AsyncMock(return_value=b"\x00\x00" * 100)
 
@@ -1612,9 +1619,8 @@ class TestAudioService:
             # First call sets cooldown
             mock_voice_service = Mock()
             mock_voice_service.is_available = True
-            mock_voice_service.transcribe = AsyncMock(return_value="bot play test")
+            mock_voice_service.transcribe = AsyncMock(return_value="bot toca test")
             sink.audio_service._get_voice_command_service = Mock(return_value=mock_voice_service)
-            sink.audio_service.sound_service.play_request = AsyncMock()
             await sink._handle_voice_command(777, "Rater", Mock())
             # Prompt is called twice: start + done
             sink.audio_service._play_voice_command_prompt.assert_awaited()
@@ -1624,7 +1630,7 @@ class TestAudioService:
             sink.audio_service._play_voice_command_prompt.reset_mock()
             mock_voice_service2 = Mock()
             mock_voice_service2.is_available = True
-            mock_voice_service2.transcribe = AsyncMock(return_value="bot play another")
+            mock_voice_service2.transcribe = AsyncMock(return_value="bot toca another")
             sink.audio_service._get_voice_command_service = Mock(return_value=mock_voice_service2)
             await sink._handle_voice_command(777, "Rater", Mock())
             sink.audio_service._play_voice_command_prompt.assert_not_called()
@@ -2208,15 +2214,18 @@ class TestAudioService:
         sink.audio_service._voice_command_cooldowns = {}
         sink.audio_service.voice_command_cooldown_seconds = 5
         sink.audio_service.voice_command_capture_seconds = 6
-        sink.audio_service.sound_service = AsyncMock()
+        sound_service = AsyncMock()
+        sound_service.list_repo = None
+        sound_service.play_request = AsyncMock()
+        sound_service.play_random_sound_from_list = AsyncMock()
+        sink.audio_service.sound_service = sound_service
         sink.audio_service._play_voice_command_prompt = AsyncMock(return_value=True)
         sink._record_voice_command_after_beep = AsyncMock(return_value=b"\x00\x00" * 100)
 
         mock_voice_service = Mock()
         mock_voice_service.is_available = True
-        mock_voice_service.transcribe = AsyncMock(return_value="ventura play test")
+        mock_voice_service.transcribe = AsyncMock(return_value="ventura toca test")
         sink.audio_service._get_voice_command_service = Mock(return_value=mock_voice_service)
-        sink.audio_service.sound_service.play_request = AsyncMock()
 
         # First call begins listening
         await sink._handle_voice_command(777, "UserA", Mock())
@@ -2328,8 +2337,11 @@ class TestAudioService:
         sink.audio_service._voice_command_cooldowns = {}
         sink.audio_service.voice_command_cooldown_seconds = 5
         sink.audio_service.voice_command_capture_seconds = 6
-        sink.audio_service.sound_service = AsyncMock()
-        sink.audio_service.sound_service.play_request = AsyncMock(return_value=True)
+        sound_service = AsyncMock()
+        sound_service.play_request = AsyncMock(return_value=True)
+        sound_service.play_random_sound_from_list = AsyncMock()
+        sound_service.list_repo = None  # Forces play_request path
+        sink.audio_service.sound_service = sound_service
         sink.audio_service._play_voice_command_prompt = AsyncMock(return_value=True)
 
         sink._record_voice_command_after_beep = AsyncMock(return_value=b"\x00\x00" * 100)
@@ -2337,7 +2349,7 @@ class TestAudioService:
         mock_voice_service = Mock()
         mock_voice_service.is_available = True
         # Groq returns transcript with ventura
-        mock_voice_service.transcribe = AsyncMock(return_value="ventura play air horn")
+        mock_voice_service.transcribe = AsyncMock(return_value="ventura toca air horn")
         sink.audio_service._get_voice_command_service = Mock(return_value=mock_voice_service)
 
         await sink._handle_voice_command(555, "VenturaUser", Mock())
@@ -2345,7 +2357,7 @@ class TestAudioService:
         # Prompt is called twice: start + done
         sink.audio_service._play_voice_command_prompt.assert_awaited()
         sink.audio_service.sound_service.play_request.assert_awaited_once_with(
-            "air horn", "VenturaUser", guild=sink.guild, request_note="play air horn", allow_rejected_exact_fallback=True
+            "air horn", "VenturaUser", guild=sink.guild, request_note="toca air horn", allow_rejected_exact_fallback=True
         )
 
     @pytest.mark.asyncio
@@ -2366,8 +2378,11 @@ class TestAudioService:
         sink.audio_service._voice_command_cooldowns = {}
         sink.audio_service.voice_command_cooldown_seconds = 5
         sink.audio_service.voice_command_capture_seconds = 6
-        sink.audio_service.sound_service = AsyncMock()
-        sink.audio_service.sound_service.play_request = AsyncMock(return_value=True)
+        sound_service = AsyncMock()
+        sound_service.play_request = AsyncMock(return_value=True)
+        sound_service.play_random_sound_from_list = AsyncMock()
+        sound_service.list_repo = None  # Forces play_request path
+        sink.audio_service.sound_service = sound_service
         sink.audio_service._play_voice_command_prompt = AsyncMock(return_value=True)
         # Set transcript wake words on the sink itself (runtime stores locally)
         sink.voice_command_transcript_wake_words = ["bot", "bote"]
@@ -2377,7 +2392,7 @@ class TestAudioService:
         mock_voice_service = Mock()
         mock_voice_service.is_available = True
         # Groq returns transcript with the alias form
-        mock_voice_service.transcribe = AsyncMock(return_value="bote play air horn")
+        mock_voice_service.transcribe = AsyncMock(return_value="bote toca air horn")
         sink.audio_service._get_voice_command_service = Mock(return_value=mock_voice_service)
 
         await sink._handle_voice_command(555, "AliasUser", Mock())
@@ -2385,8 +2400,275 @@ class TestAudioService:
         # Prompt is called twice: start + done
         sink.audio_service._play_voice_command_prompt.assert_awaited()
         sink.audio_service.sound_service.play_request.assert_awaited_once_with(
-            "air horn", "AliasUser", guild=sink.guild, request_note="play air horn", allow_rejected_exact_fallback=True
+            "air horn", "AliasUser", guild=sink.guild, request_note="toca air horn", allow_rejected_exact_fallback=True
         )
+
+    # ------------------------------------------------------------------ #
+    # Voice-command list playback tests
+    # ------------------------------------------------------------------ #
+
+    @pytest.mark.asyncio
+    async def test_handle_voice_command_play_list_by_name(self):
+        """When transcript has ``toca <list_name>`` and a list with that name exists,
+        ``play_random_sound_from_list`` is called instead of ``play_request``."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        sink.guild = Mock()
+        sink.guild.id = 666
+        sink.voice_command_enabled = True
+        sink.voice_command_wake_words = ["ventura"]
+        sink.voice_command_vosk_wake_words = []
+
+        sink.audio_service = Mock()
+        sink.audio_service._voice_command_cooldowns = {}
+        sink.audio_service.voice_command_cooldown_seconds = 5
+        sink.audio_service.voice_command_capture_seconds = 6
+        sink.audio_service.sound_service = AsyncMock()
+        sink.audio_service.sound_service.play_request = AsyncMock(return_value=True)
+        sink.audio_service.sound_service.play_random_sound_from_list = AsyncMock()
+        sink.audio_service._play_voice_command_prompt = AsyncMock(return_value=True)
+
+        # Mock list_repo to return a list for "memes"
+        from unittest.mock import PropertyMock
+        mock_list_repo = Mock()
+        mock_list_repo.get_by_name = Mock(return_value=(1, "memes", "creator"))
+        type(sink.audio_service.sound_service).list_repo = PropertyMock(return_value=mock_list_repo)
+
+        sink._record_voice_command_after_beep = AsyncMock(return_value=b"\x00\x00" * 100)
+
+        mock_voice_service = Mock()
+        mock_voice_service.is_available = True
+        mock_voice_service.transcribe = AsyncMock(return_value="ventura toca memes")
+        sink.audio_service._get_voice_command_service = Mock(return_value=mock_voice_service)
+
+        await sink._handle_voice_command(666, "ListUser", Mock())
+
+        # Prompt called twice: start + done
+        assert sink.audio_service._play_voice_command_prompt.await_count == 2
+        # list_repo.get_by_name was called to check for the list
+        mock_list_repo.get_by_name.assert_called_once_with("memes", guild_id=666)
+        # play_random_sound_from_list was called, NOT play_request
+        sink.audio_service.sound_service.play_random_sound_from_list.assert_awaited_once_with(
+            "memes", "ListUser", guild=sink.guild, request_note="toca memes"
+        )
+        sink.audio_service.sound_service.play_request.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_handle_voice_command_play_list_explicit_marker(self):
+        """Transcript ``ventura toca lista memes`` strips the marker and uses list ``memes``."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        sink.guild = Mock()
+        sink.guild.id = 667
+        sink.voice_command_enabled = True
+        sink.voice_command_wake_words = ["ventura"]
+        sink.voice_command_vosk_wake_words = []
+
+        sink.audio_service = Mock()
+        sink.audio_service._voice_command_cooldowns = {}
+        sink.audio_service.voice_command_cooldown_seconds = 5
+        sink.audio_service.voice_command_capture_seconds = 6
+        sink.audio_service.sound_service = AsyncMock()
+        sink.audio_service.sound_service.play_request = AsyncMock(return_value=True)
+        sink.audio_service.sound_service.play_random_sound_from_list = AsyncMock()
+        sink.audio_service._play_voice_command_prompt = AsyncMock(return_value=True)
+
+        from unittest.mock import PropertyMock
+        mock_list_repo = Mock()
+        mock_list_repo.get_by_name = Mock(return_value=(1, "memes", "creator"))
+        type(sink.audio_service.sound_service).list_repo = PropertyMock(return_value=mock_list_repo)
+
+        sink._record_voice_command_after_beep = AsyncMock(return_value=b"\x00\x00" * 100)
+
+        mock_voice_service = Mock()
+        mock_voice_service.is_available = True
+        mock_voice_service.transcribe = AsyncMock(return_value="ventura toca lista memes")
+        sink.audio_service._get_voice_command_service = Mock(return_value=mock_voice_service)
+
+        await sink._handle_voice_command(667, "ListExplicitUser", Mock())
+
+        # list_repo was called with "memes" (after stripping "lista " prefix)
+        mock_list_repo.get_by_name.assert_called_once_with("memes", guild_id=667)
+        sink.audio_service.sound_service.play_random_sound_from_list.assert_awaited_once_with(
+            "memes", "ListExplicitUser", guild=sink.guild, request_note="toca lista memes"
+        )
+
+    @pytest.mark.asyncio
+    async def test_handle_voice_command_play_list_case_insensitive(self):
+        """Transcript with mixed-case argument routes to the canonical stored list name."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        sink.guild = Mock()
+        sink.guild.id = 669
+        sink.voice_command_enabled = True
+        sink.voice_command_wake_words = ["ventura"]
+        sink.voice_command_vosk_wake_words = []
+
+        sink.audio_service = Mock()
+        sink.audio_service._voice_command_cooldowns = {}
+        sink.audio_service.voice_command_cooldown_seconds = 5
+        sink.audio_service.voice_command_capture_seconds = 6
+        sink.audio_service.sound_service = AsyncMock()
+        sink.audio_service.sound_service.play_request = AsyncMock(return_value=True)
+        sink.audio_service.sound_service.play_random_sound_from_list = AsyncMock()
+        sink.audio_service._play_voice_command_prompt = AsyncMock(return_value=True)
+
+        from unittest.mock import PropertyMock
+        mock_list_repo = Mock()
+        # get_by_name is called with the transcript-cased argument "GAY" but the
+        # repo (already case-insensitive) returns the canonical stored name "gay".
+        mock_list_repo.get_by_name = Mock(return_value=(1, "gay", "creator"))
+        type(sink.audio_service.sound_service).list_repo = PropertyMock(return_value=mock_list_repo)
+
+        sink._record_voice_command_after_beep = AsyncMock(return_value=b"\x00\x00" * 100)
+
+        mock_voice_service = Mock()
+        mock_voice_service.is_available = True
+        mock_voice_service.transcribe = AsyncMock(return_value="ventura TOCA GAY")
+        sink.audio_service._get_voice_command_service = Mock(return_value=mock_voice_service)
+
+        await sink._handle_voice_command(669, "CIUser", Mock())
+
+        # get_by_name was called with the transcript-cased candidate "GAY"
+        mock_list_repo.get_by_name.assert_called_once_with("GAY", guild_id=669)
+        # play_random_sound_from_list was called with the canonical stored "gay"
+        sink.audio_service.sound_service.play_random_sound_from_list.assert_awaited_once_with(
+            "gay", "CIUser", guild=sink.guild, request_note="toca GAY"
+        )
+        sink.audio_service.sound_service.play_request.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_handle_voice_command_play_list_explicit_marker_a_lista_upper(self):
+        """Transcript ``ventura toca A LISTA Memes`` strips the marker and routes to canonical stored name."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        sink.guild = Mock()
+        sink.guild.id = 670
+        sink.voice_command_enabled = True
+        sink.voice_command_wake_words = ["ventura"]
+        sink.voice_command_vosk_wake_words = []
+
+        sink.audio_service = Mock()
+        sink.audio_service._voice_command_cooldowns = {}
+        sink.audio_service.voice_command_cooldown_seconds = 5
+        sink.audio_service.voice_command_capture_seconds = 6
+        sink.audio_service.sound_service = AsyncMock()
+        sink.audio_service.sound_service.play_request = AsyncMock(return_value=True)
+        sink.audio_service.sound_service.play_random_sound_from_list = AsyncMock()
+        sink.audio_service._play_voice_command_prompt = AsyncMock(return_value=True)
+
+        from unittest.mock import PropertyMock
+        mock_list_repo = Mock()
+        mock_list_repo.get_by_name = Mock(return_value=(1, "Memes", "creator"))
+        type(sink.audio_service.sound_service).list_repo = PropertyMock(return_value=mock_list_repo)
+
+        sink._record_voice_command_after_beep = AsyncMock(return_value=b"\x00\x00" * 100)
+
+        mock_voice_service = Mock()
+        mock_voice_service.is_available = True
+        mock_voice_service.transcribe = AsyncMock(return_value="ventura toca A LISTA Memes")
+        sink.audio_service._get_voice_command_service = Mock(return_value=mock_voice_service)
+
+        await sink._handle_voice_command(670, "MarkerUser", Mock())
+
+        # After stripping "A LISTA ", get_by_name is called with "Memes"
+        mock_list_repo.get_by_name.assert_called_once_with("Memes", guild_id=670)
+        # play_random_sound_from_list is called with the canonical stored name "Memes"
+        sink.audio_service.sound_service.play_random_sound_from_list.assert_awaited_once_with(
+            "Memes", "MarkerUser", guild=sink.guild, request_note="toca A LISTA Memes"
+        )
+        sink.audio_service.sound_service.play_request.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_handle_voice_command_play_list_explicit_marker_lista_upper(self):
+        """Transcript ``ventura toca LISTA GAY`` strips the uppercase marker and routes to canonical stored name."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        sink.guild = Mock()
+        sink.guild.id = 671
+        sink.voice_command_enabled = True
+        sink.voice_command_wake_words = ["ventura"]
+        sink.voice_command_vosk_wake_words = []
+
+        sink.audio_service = Mock()
+        sink.audio_service._voice_command_cooldowns = {}
+        sink.audio_service.voice_command_cooldown_seconds = 5
+        sink.audio_service.voice_command_capture_seconds = 6
+        sink.audio_service.sound_service = AsyncMock()
+        sink.audio_service.sound_service.play_request = AsyncMock(return_value=True)
+        sink.audio_service.sound_service.play_random_sound_from_list = AsyncMock()
+        sink.audio_service._play_voice_command_prompt = AsyncMock(return_value=True)
+
+        from unittest.mock import PropertyMock
+        mock_list_repo = Mock()
+        mock_list_repo.get_by_name = Mock(return_value=(1, "gay", "creator"))
+        type(sink.audio_service.sound_service).list_repo = PropertyMock(return_value=mock_list_repo)
+
+        sink._record_voice_command_after_beep = AsyncMock(return_value=b"\x00\x00" * 100)
+
+        mock_voice_service = Mock()
+        mock_voice_service.is_available = True
+        mock_voice_service.transcribe = AsyncMock(return_value="ventura toca LISTA GAY")
+        sink.audio_service._get_voice_command_service = Mock(return_value=mock_voice_service)
+
+        await sink._handle_voice_command(671, "MarkerUpperUser", Mock())
+
+        # After stripping "LISTA " (prefix check is case-insensitive), get_by_name is called with "GAY"
+        mock_list_repo.get_by_name.assert_called_once_with("GAY", guild_id=671)
+        # play_random_sound_from_list is called with the canonical stored name "gay"
+        sink.audio_service.sound_service.play_random_sound_from_list.assert_awaited_once_with(
+            "gay", "MarkerUpperUser", guild=sink.guild, request_note="toca LISTA GAY"
+        )
+        sink.audio_service.sound_service.play_request.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_handle_voice_command_play_not_list_falls_to_play_request(self):
+        """When no list matches, voice command falls back to SoundService.play_request."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        sink.guild = Mock()
+        sink.guild.id = 668
+        sink.voice_command_enabled = True
+        sink.voice_command_wake_words = ["ventura"]
+        sink.voice_command_vosk_wake_words = []
+
+        sink.audio_service = Mock()
+        sink.audio_service._voice_command_cooldowns = {}
+        sink.audio_service.voice_command_cooldown_seconds = 5
+        sink.audio_service.voice_command_capture_seconds = 6
+        sink.audio_service.sound_service = AsyncMock()
+        sink.audio_service.sound_service.play_request = AsyncMock(return_value=True)
+        sink.audio_service.sound_service.play_random_sound_from_list = AsyncMock()
+        sink.audio_service._play_voice_command_prompt = AsyncMock(return_value=True)
+
+        from unittest.mock import PropertyMock
+        mock_list_repo = Mock()
+        mock_list_repo.get_by_name = Mock(return_value=None)  # No list found
+        type(sink.audio_service.sound_service).list_repo = PropertyMock(return_value=mock_list_repo)
+
+        sink._record_voice_command_after_beep = AsyncMock(return_value=b"\x00\x00" * 100)
+
+        mock_voice_service = Mock()
+        mock_voice_service.is_available = True
+        mock_voice_service.transcribe = AsyncMock(return_value="ventura toca nonexistentsound")
+        sink.audio_service._get_voice_command_service = Mock(return_value=mock_voice_service)
+
+        await sink._handle_voice_command(668, "FallbackUser", Mock())
+
+        list_repo = sink.audio_service.sound_service.list_repo
+        list_repo.get_by_name.assert_called_once_with("nonexistentsound", guild_id=668)
+        # Falls back to play_request since no list exists
+        sink.audio_service.sound_service.play_request.assert_awaited_once_with(
+            "nonexistentsound", "FallbackUser", guild=sink.guild,
+            request_note="toca nonexistentsound", allow_rejected_exact_fallback=True,
+        )
+        sink.audio_service.sound_service.play_random_sound_from_list.assert_not_called()
 
     def test_default_silence_timeout_is_one_second(self):
         """Verify the voice command silence timeout default value is 1.0."""

@@ -3588,12 +3588,47 @@ class KeywordDetectionSink(sinks.Sink):
                 if sound_service is None:
                     print("[VoiceCommand] SoundService not available; cannot play")
                     return
-                print(f"[VoiceCommand] Executing play request for '{argument}' by {requester_name}")
-                await sound_service.play_request(
-                    argument, requester_name, guild=self.guild,
-                    request_note=f"play {argument}",
-                    allow_rejected_exact_fallback=True,
-                )
+
+                # ---- resolve list vs. sound name --------------------------
+                # Support explicit list markers.
+                list_candidate: Optional[str] = None
+                stripped = argument.strip().lower()
+                for prefix in ("lista ", "a lista ", "da lista "):
+                    if stripped.startswith(prefix):
+                        list_candidate = argument[len(prefix):].strip()
+                        break
+
+                if list_candidate is None:
+                    # No explicit marker — try the raw argument as a list name.
+                    list_candidate = argument.strip()
+
+                # Check if the candidate matches a sound list in this guild.
+                existing_list = None
+                if sound_service.list_repo is not None:
+                    existing_list = sound_service.list_repo.get_by_name(
+                        list_candidate, guild_id=self.guild.id,
+                    )
+
+                if existing_list is not None:
+                    resolved_list_name = existing_list[1]
+                    print(
+                        f"[VoiceCommand] Playing random sound from list "
+                        f"'{resolved_list_name}' by {requester_name}"
+                    )
+                    await sound_service.play_random_sound_from_list(
+                        resolved_list_name, requester_name, guild=self.guild,
+                        request_note=f"toca {argument}",
+                    )
+                else:
+                    print(
+                        f"[VoiceCommand] Executing play request for "
+                        f"'{argument}' by {requester_name}"
+                    )
+                    await sound_service.play_request(
+                        argument, requester_name, guild=self.guild,
+                        request_note=f"toca {argument}",
+                        allow_rejected_exact_fallback=True,
+                    )
                 return
 
             elif command == "mute":

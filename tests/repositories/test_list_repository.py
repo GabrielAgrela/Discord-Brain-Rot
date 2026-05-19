@@ -161,6 +161,56 @@ class TestListRepository:
         assert sound is not None
         assert sound[2] in ["sound1.mp3", "sound2.mp3"]  # Filename is third column
 
+    def test_get_by_name_case_insensitive(self, list_repository):
+        """get_by_name should match list names case-insensitively."""
+        list_repository.create("CaseList", "creator")
+
+        result_lower = list_repository.get_by_name("caselist")
+        assert result_lower is not None
+        assert result_lower[1] == "CaseList"  # Returns stored canonical name
+
+        result_upper = list_repository.get_by_name("CASELIST")
+        assert result_upper is not None
+        assert result_upper[1] == "CaseList"
+
+        result_mixed = list_repository.get_by_name("cAsElIsT")
+        assert result_mixed is not None
+        assert result_mixed[1] == "CaseList"
+
+    def test_get_by_name_case_insensitive_not_found(self, list_repository):
+        """Non-matching case-insensitive query should return None."""
+        list_repository.create("existinglist", "creator")
+        result = list_repository.get_by_name("nonexistent")
+        assert result is None
+
+    def test_get_by_name_case_insensitive_with_creator(self, list_repository):
+        """get_by_name with creator should match list names case-insensitively."""
+        list_repository.create("MyList", "user1")
+        list_repository.create("MyList", "user2")
+
+        result = list_repository.get_by_name("mylist", creator="user2")
+        assert result is not None
+        assert result[1] == "MyList"
+        assert result[2] == "user2"
+
+        result = list_repository.get_by_name("MYLIST", creator="user1")
+        assert result is not None
+        assert result[1] == "MyList"
+        assert result[2] == "user1"
+
+    def test_get_random_sound_from_list_case_insensitive(self, list_repository, sample_sounds):
+        """get_random_sound_from_list should match list names case-insensitively."""
+        list_id = list_repository.create("RandomList", "user")
+        list_repository.add_sound(list_id, "sound1.mp3")
+
+        sound_lower = list_repository.get_random_sound_from_list("randomlist")
+        assert sound_lower is not None
+        assert sound_lower[2] == "sound1.mp3"
+
+        sound_upper = list_repository.get_random_sound_from_list("RANDOMLIST")
+        assert sound_upper is not None
+        assert sound_upper[2] == "sound1.mp3"
+
 
 class TestListRepositoryEdgeCases:
     """Edge case tests for ListRepository."""

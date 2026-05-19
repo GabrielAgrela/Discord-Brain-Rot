@@ -31,24 +31,34 @@ class TestParseVoiceCommand:
         return parse_voice_command(transcript, wake_words=["bot"])
 
     def test_wake_word_play(self):
-        """``bot play air horn`` → (play, air horn)."""
-        result = self._parse("bot play air horn")
+        """``bot toca air horn`` → (play, air horn)."""
+        result = self._parse("bot toca air horn")
         assert result == ("play", "air horn")
 
     def test_wake_word_with_comma(self):
-        """``bot, play sad trombone`` → (play, sad trombone)."""
-        result = self._parse("bot, play sad trombone")
+        """``bot, toca sad trombone`` → (play, sad trombone)."""
+        result = self._parse("bot, toca sad trombone")
         assert result == ("play", "sad trombone")
 
     def test_wake_word_with_punctuation(self):
-        """``bot play music.`` → (play, music)."""
-        result = self._parse("bot play music.")
+        """``bot toca music.`` → (play, music)."""
+        result = self._parse("bot toca music.")
         assert result == ("play", "music")
 
     def test_play_without_wake_word(self):
-        """``play something`` → (play, something) even without wake word."""
-        result = self._parse("play something")
+        """``toca something`` → (play, something) even without wake word."""
+        result = self._parse("toca something")
         assert result == ("play", "something")
+
+    def test_english_play_not_recognised(self):
+        """English ``play`` is not recognised as a Ventura voice command verb."""
+        from bot.services.voice_command import parse_voice_command
+        # Without wake word
+        assert self._parse("play something") is None
+        # With wake word
+        assert parse_voice_command("ventura play air horn", wake_words=["ventura"]) is None
+        # With wake word and comma
+        assert parse_voice_command("ventura, play air horn", wake_words=["ventura"]) is None
 
     def test_empty_transcript(self):
         """Empty / whitespace-only → None."""
@@ -61,29 +71,29 @@ class TestParseVoiceCommand:
         assert self._parse("hello world") is None
 
     def test_play_without_argument(self):
-        """``bot play`` with nothing after → None."""
-        assert self._parse("bot play") is None
-        assert self._parse("play") is None
+        """``bot toca`` with nothing after → None."""
+        assert self._parse("bot toca") is None
+        assert self._parse("toca") is None
 
     def test_excessively_long_name(self):
         """Excessively long sound name → None."""
         long_name = "a" * 300
-        assert self._parse(f"bot play {long_name}") is None
+        assert self._parse(f"bot toca {long_name}") is None
 
     def test_case_insensitive(self):
-        """``Bot PLAY Air Horn`` → (play, Air Horn) — original case preserved in sound name."""
-        result = self._parse("Bot PLAY Air Horn")
+        """``Bot TOCA Air Horn`` → (play, Air Horn) — original case preserved in sound name."""
+        result = self._parse("Bot TOCA Air Horn")
         # Sound-name casing is preserved (not lowercased) so actual filenames match.
         assert result == ("play", "Air Horn")
 
     def test_strips_quotes(self):
-        """``bot play "my sound"`` → (play, my sound)."""
-        result = self._parse('bot play "my sound"')
+        """``bot toca "my sound"`` → (play, my sound)."""
+        result = self._parse('bot toca "my sound"')
         assert result == ("play", "my sound")
 
     def test_strips_smart_quotes(self):
-        """``bot play \u201cmy sound\u201d`` → (play, my sound)."""
-        result = self._parse("bot play \u201cmy sound\u201d")
+        """``bot toca \u201cmy sound\u201d`` → (play, my sound)."""
+        result = self._parse("bot toca \u201cmy sound\u201d")
         assert result == ("play", "my sound")
 
     def test_wake_word_only(self):
@@ -91,27 +101,27 @@ class TestParseVoiceCommand:
         assert self._parse("bot") is None
 
     def test_alias_wake_word_parse(self):
-        """Vosk alias ``bote play air horn`` → (play, air horn)."""
+        """Vosk alias ``bote toca air horn`` → (play, air horn)."""
         from bot.services.voice_command import parse_voice_command
-        result = parse_voice_command("bote play air horn", wake_words=["bot", "bote"])
+        result = parse_voice_command("bote toca air horn", wake_words=["bot", "bote"])
         assert result == ("play", "air horn")
 
     def test_alias_wake_word_with_comma(self):
-        """``bote, play sad trombone`` → (play, sad trombone)."""
+        """``bote, toca sad trombone`` → (play, sad trombone)."""
         from bot.services.voice_command import parse_voice_command
-        result = parse_voice_command("bote, play sad trombone", wake_words=["bot", "bote"])
+        result = parse_voice_command("bote, toca sad trombone", wake_words=["bot", "bote"])
         assert result == ("play", "sad trombone")
 
     def test_ventura_wake_word_parse(self):
-        """``ventura play air horn`` → (play, air horn)."""
+        """``ventura toca air horn`` → (play, air horn)."""
         from bot.services.voice_command import parse_voice_command
-        result = parse_voice_command("ventura play air horn", wake_words=["ventura"])
+        result = parse_voice_command("ventura toca air horn", wake_words=["ventura"])
         assert result == ("play", "air horn")
 
     def test_ventura_wake_word_with_comma(self):
-        """``ventura, play sad trombone`` → (play, sad trombone)."""
+        """``ventura, toca sad trombone`` → (play, sad trombone)."""
         from bot.services.voice_command import parse_voice_command
-        result = parse_voice_command("ventura, play sad trombone", wake_words=["ventura"])
+        result = parse_voice_command("ventura, toca sad trombone", wake_words=["ventura"])
         assert result == ("play", "sad trombone")
 
 
@@ -120,13 +130,13 @@ class TestParseVoiceCommand:
     # ------------------------------------------------------------------
 
     def test_wake_word_anywhere_with_preamble(self):
-        """Exact user log sample: preamble before wake word is ignored.
+        """Preamble before wake word is ignored.
 
-        ``What the fuck was that? Ventura, play das páginas.``
+        ``What the fuck was that? Ventura, toca das páginas.``
         """
         from bot.services.voice_command import parse_voice_command
         result = parse_voice_command(
-            "What the fuck was that? Ventura, play das páginas.",
+            "What the fuck was that? Ventura, toca das páginas.",
             wake_words=["ventura"],
         )
         assert result == ("play", "das páginas")
@@ -162,17 +172,17 @@ class TestParseVoiceCommand:
         """When multiple wake words appear, use text after the last one."""
         from bot.services.voice_command import parse_voice_command
         result = parse_voice_command(
-            "ventura bot play air horn",
+            "ventura bot toca air horn",
             wake_words=["ventura", "bot"],
         )
-        # After last wake "bot" → "play air horn"
+        # After last wake "bot" → "toca air horn"
         assert result == ("play", "air horn")
 
     def test_all_portuguese_verbs(self):
         """All supported Portuguese verbs map to ``play``."""
         from bot.services.voice_command import parse_voice_command
 
-        verbs = ["toca", "tocar", "mete", "meter", "põe", "poe", "reproduz", "reproduzir"]
+        verbs = ["toca", "tocar", "toque", "mete", "meter", "põe", "poe", "reproduz", "reproduzir"]
         for verb in verbs:
             result = parse_voice_command(
                 f"ventura {verb} alguma coisa",
@@ -181,9 +191,9 @@ class TestParseVoiceCommand:
             assert result == ("play", "alguma coisa"), f"Failed for verb '{verb}'"
 
     def test_play_without_wake_words_list(self):
-        """``play something`` when wake_words=None still works."""
+        """``toca something`` when wake_words=None still works."""
         from bot.services.voice_command import parse_voice_command
-        result = parse_voice_command("play something", wake_words=None)
+        result = parse_voice_command("toca something", wake_words=None)
         assert result == ("play", "something")
 
     def test_wake_word_not_found_falls_through(self):
@@ -191,7 +201,7 @@ class TestParseVoiceCommand:
         If the full text starts with a command verb, it should match."""
         from bot.services.voice_command import parse_voice_command
         result = parse_voice_command(
-            "play something",
+            "toca something",
             wake_words=["ventura"],  # ventura not in transcript
         )
         assert result == ("play", "something")
@@ -320,16 +330,61 @@ class TestParseVoiceCommand:
         assert result == ("mute", "")
 
     def test_play_still_works_with_mute_alias_sound_name(self):
-        """``ventura play cala-te`` → (play, cala-te), not mute."""
+        """``ventura toca cala-te`` → (play, cala-te), not mute."""
         from bot.services.voice_command import parse_voice_command
-        result = parse_voice_command("ventura play cala-te", wake_words=["ventura"])
+        result = parse_voice_command("ventura toca cala-te", wake_words=["ventura"])
         assert result == ("play", "cala-te")
 
     def test_play_still_works_with_silencio_sound_name(self):
-        """``ventura play silêncio`` → (play, silêncio), not mute."""
+        """``ventura toca silêncio`` → (play, silêncio), not mute."""
         from bot.services.voice_command import parse_voice_command
-        result = parse_voice_command("ventura play silêncio", wake_words=["ventura"])
+        result = parse_voice_command("ventura toca silêncio", wake_words=["ventura"])
         assert result == ("play", "silêncio")
+
+    def test_english_play_not_recognised_even_as_verb_context(self):
+        """``ventura play cala-te`` should NOT parse (English play not recognised)."""
+        from bot.services.voice_command import parse_voice_command
+        result = parse_voice_command("ventura play cala-te", wake_words=["ventura"])
+        assert result is None
+
+    # ------------------------------------------------------------------
+    #  toque (Whisper variant of toca)
+    # ------------------------------------------------------------------
+
+    def test_toque_verb(self):
+        """``ventura toque farts`` → (play, farts) — Whisper variant."""
+        from bot.services.voice_command import parse_voice_command
+        result = parse_voice_command("ventura toque farts", wake_words=["ventura"])
+        assert result == ("play", "farts")
+
+    def test_toque_punctuation(self):
+        """``ventura toque farts.`` → (play, farts)."""
+        from bot.services.voice_command import parse_voice_command
+        result = parse_voice_command("ventura toque farts.", wake_words=["ventura"])
+        assert result == ("play", "farts")
+
+    def test_toque_case_insensitive(self):
+        """``ventura Toque Farts`` → (play, Farts)."""
+        from bot.services.voice_command import parse_voice_command
+        result = parse_voice_command("ventura Toque Farts", wake_words=["ventura"])
+        assert result == ("play", "Farts")
+
+    def test_toque_without_wake_word(self):
+        """``toque something`` → (play, something) even without wake word."""
+        from bot.services.voice_command import parse_voice_command
+        result = parse_voice_command("toque something", wake_words=None)
+        assert result == ("play", "something")
+
+    def test_toque_with_wake_word_not_present(self):
+        """``toque something`` with a non-present wake word still works."""
+        from bot.services.voice_command import parse_voice_command
+        result = parse_voice_command("toque something", wake_words=["ventura"])
+        assert result == ("play", "something")
+
+    def test_english_play_still_not_recognised_with_toque(self):
+        """English ``play`` remains not recognised alongside ``toque``."""
+        from bot.services.voice_command import parse_voice_command
+        assert parse_voice_command("ventura play air horn", wake_words=["ventura"]) is None
 
 
 # ====================================================================

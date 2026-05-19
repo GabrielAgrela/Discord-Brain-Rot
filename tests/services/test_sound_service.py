@@ -91,13 +91,57 @@ class TestSoundService:
 
         await sound_service.play_random_sound_from_list("mix", "user", guild=guild)
 
-        sound_service.audio_service.play_audio.assert_awaited_once_with(channel, "clip.mp3", "user")
+        sound_service.audio_service.play_audio.assert_awaited_once_with(
+            channel, "clip.mp3", "user", request_note=None,
+        )
         sound_service.action_repo.insert.assert_called_once_with(
             "user",
             "play_from_list",
             7,
             guild_id=321,
         )
+
+    @pytest.mark.asyncio
+    async def test_play_random_sound_from_list_forwards_request_note(self, sound_service):
+        """request_note is forwarded from play_random_sound_from_list to audio_service.play_audio."""
+        guild = Mock(id=321)
+        channel = Mock()
+        sound_service.audio_service.get_user_voice_channel.return_value = channel
+        sound_service.list_repo.get_random_sound_from_list = Mock(
+            return_value=(7, "orig.mp3", "clip.mp3", 0, 0, 0, 0)
+        )
+        sound_service.audio_service.play_audio = AsyncMock()
+        sound_service.action_repo.insert = Mock()
+
+        await sound_service.play_random_sound_from_list(
+            "mix", "user", guild=guild, request_note="toca mix"
+        )
+
+        sound_service.audio_service.play_audio.assert_awaited_once()
+        call_kwargs = sound_service.audio_service.play_audio.call_args.kwargs
+        assert call_kwargs.get("request_note") == "toca mix"
+        # Action should remain play_from_list regardless of request_note
+        sound_service.action_repo.insert.assert_called_once_with(
+            "user", "play_from_list", 7, guild_id=321,
+        )
+
+    @pytest.mark.asyncio
+    async def test_play_random_sound_from_list_without_request_note(self, sound_service):
+        """When request_note is not provided, play_audio is called without it (or with None)."""
+        guild = Mock(id=321)
+        channel = Mock()
+        sound_service.audio_service.get_user_voice_channel.return_value = channel
+        sound_service.list_repo.get_random_sound_from_list = Mock(
+            return_value=(7, "orig.mp3", "clip.mp3", 0, 0, 0, 0)
+        )
+        sound_service.audio_service.play_audio = AsyncMock()
+        sound_service.action_repo.insert = Mock()
+
+        await sound_service.play_random_sound_from_list("mix", "user", guild=guild)
+
+        sound_service.audio_service.play_audio.assert_awaited_once()
+        call_kwargs = sound_service.audio_service.play_audio.call_args.kwargs
+        assert call_kwargs.get("request_note") is None
 
     @pytest.mark.asyncio
     async def test_play_request_forwards_request_note_to_play_audio(self, sound_service):
