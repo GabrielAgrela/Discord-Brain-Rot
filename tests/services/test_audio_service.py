@@ -795,13 +795,14 @@ class TestAudioService:
 
         # Test case 1: preroll > 0 (e.g. 50ms)
         audio_service.el_tts_live_preroll_ms = 50
-        await AudioService.play_tts_live_stream(
-            audio_service,
-            fifo_path="/tmp/fake_fifo",
-            audio_file="test_live.mp3",
-            channel=channel,
-            user="tester",
-        )
+        with patch.dict(os.environ, {"EL_TTS_LIVE_LOW_LATENCY_FFMPEG": "false"}):
+            await AudioService.play_tts_live_stream(
+                audio_service,
+                fifo_path="/tmp/fake_fifo",
+                audio_file="test_live.mp3",
+                channel=channel,
+                user="tester",
+            )
         mock_ffmpeg_pcm.assert_called_with(
             "/tmp/fake_fifo",
             executable="/usr/bin/ffmpeg",
@@ -813,19 +814,48 @@ class TestAudioService:
 
         # Test case 2: preroll == 0
         audio_service.el_tts_live_preroll_ms = 0
-        await AudioService.play_tts_live_stream(
-            audio_service,
-            fifo_path="/tmp/fake_fifo",
-            audio_file="test_live.mp3",
-            channel=channel,
-            user="tester",
-        )
+        with patch.dict(os.environ, {"EL_TTS_LIVE_LOW_LATENCY_FFMPEG": "false"}):
+            await AudioService.play_tts_live_stream(
+                audio_service,
+                fifo_path="/tmp/fake_fifo",
+                audio_file="test_live.mp3",
+                channel=channel,
+                user="tester",
+            )
         mock_ffmpeg_pcm.assert_called_with(
             "/tmp/fake_fifo",
             executable="/usr/bin/ffmpeg",
             before_options="-nostdin",
             options='-filter:a "volume=1.0"',
         )
+
+    def test_build_live_tts_ffmpeg_before_options(self, audio_service):
+        """Test build_live_tts_ffmpeg_before_options output under different env settings."""
+        # Defaults: low latency false, assume mp3 true.
+        with patch.dict(os.environ, {}, clear=True):
+            opts = audio_service._build_live_tts_ffmpeg_before_options("mp3")
+            assert opts == "-nostdin -f mp3"
+            assert "nobuffer" not in opts
+
+        # Low latency explicit true, assume mp3 default true.
+        with patch.dict(os.environ, {"EL_TTS_LIVE_LOW_LATENCY_FFMPEG": "true", "EL_TTS_LIVE_ASSUME_MP3_FORMAT": "true"}):
+            opts = audio_service._build_live_tts_ffmpeg_before_options("mp3")
+            assert "-nostdin" in opts
+            assert "-fflags nobuffer -flags low_delay" in opts
+            assert "-f mp3" in opts
+
+        # Non-mp3 format
+        with patch.dict(os.environ, {"EL_TTS_LIVE_LOW_LATENCY_FFMPEG": "true", "EL_TTS_LIVE_ASSUME_MP3_FORMAT": "true"}):
+            opts = audio_service._build_live_tts_ffmpeg_before_options(None)
+            assert "-nostdin" in opts
+            assert "-fflags nobuffer -flags low_delay" in opts
+            assert "-f mp3" not in opts
+
+        # Low latency disabled
+        with patch.dict(os.environ, {"EL_TTS_LIVE_LOW_LATENCY_FFMPEG": "false", "EL_TTS_LIVE_ASSUME_MP3_FORMAT": "true"}):
+            opts = audio_service._build_live_tts_ffmpeg_before_options("mp3")
+            assert "-fflags nobuffer" not in opts
+            assert "-f mp3" in opts
 
     # ------------------------------------------------------------------ #
     # AFK channel detection guards

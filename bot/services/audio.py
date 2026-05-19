@@ -222,13 +222,13 @@ class AudioService:
             0, int(os.getenv("LOW_LATENCY_MP3_START_PREROLL_MS", "650"))
         )
         # ElevenLabs TTS live streaming preroll (delay in ms before playback starts, to buffer some chunks)
-        # Default is 25ms.
+        # Default is 120ms to protect the first decoded packets from being clipped.
         try:
-            val = os.getenv("EL_TTS_LIVE_PREROLL_MS", "25").strip()
+            val = os.getenv("EL_TTS_LIVE_PREROLL_MS", "120").strip()
             self.el_tts_live_preroll_ms = max(0, int(val))
         except Exception as e:
-            logger.warning("[AudioService] Invalid EL_TTS_LIVE_PREROLL_MS, using default 25: %s", e)
-            self.el_tts_live_preroll_ms = 25
+            logger.warning("[AudioService] Invalid EL_TTS_LIVE_PREROLL_MS, using default 120: %s", e)
+            self.el_tts_live_preroll_ms = 120
         self.entrance_playback_start_delay_seconds = float(
             os.getenv("ENTRANCE_PLAYBACK_START_DELAY_SECONDS", "1.0")
         )
@@ -1489,6 +1489,24 @@ class AudioService:
         non_bot_members = [m for m in channel.members if not m.bot]
         return len(non_bot_members) == 0
 
+    def _build_live_tts_ffmpeg_before_options(self, input_format: Optional[str] = None) -> str:
+        """Build ffmpeg before-options specifically for live TTS playback to optimize latency.
+
+        Uses low latency flags if enabled by EL_TTS_LIVE_LOW_LATENCY_FFMPEG,
+        and bypasses format probing using -f if format matches.
+        """
+        low_latency = os.getenv("EL_TTS_LIVE_LOW_LATENCY_FFMPEG", "false").strip().lower() in ("true", "1", "yes")
+        assume_mp3 = os.getenv("EL_TTS_LIVE_ASSUME_MP3_FORMAT", "true").strip().lower() in ("true", "1", "yes")
+
+        parts = ["-nostdin"]
+        if low_latency:
+            parts.extend(["-fflags", "nobuffer", "-flags", "low_delay"])
+
+        if assume_mp3 and input_format == "mp3":
+            parts.extend(["-f", "mp3"])
+
+        return " ".join(parts)
+
     async def play_tts_live_stream(
         self,
         fifo_path: str,
@@ -1504,6 +1522,7 @@ class AudioService:
         ready_event: 'asyncio.Event' = None,
         interrupt_event: 'threading.Event' = None,
         request_note: Optional[str] = None,
+        input_format: Optional[str] = None,
     ) -> bool:
         """Play a live-streaming TTS from a POSIX FIFO (named pipe).
 
@@ -1591,7 +1610,7 @@ class AudioService:
             if preroll_ms > 0:
                 live_filters += f',adelay={preroll_ms}:all=1'
             ffmpeg_options = f'-filter:a "{live_filters}"'
-            ffmpeg_before_options = '-nostdin'
+            ffmpeg_before_options = self._build_live_tts_ffmpeg_before_options(input_format)
 
             source = discord.FFmpegPCMAudio(
                 fifo_path,

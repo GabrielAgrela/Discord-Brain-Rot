@@ -404,8 +404,12 @@ class TestSaveAsMp3ELLive:
         # play_tts_live_stream mock: set ready_event and return True
         play_tts_live_kwargs = {}
 
-        async def _fake_play_live(**kwargs):
+        async def _fake_play_live(fifo_path, audio_file, channel, user, **kwargs):
             play_tts_live_kwargs.update(kwargs)
+            play_tts_live_kwargs["fifo_path"] = fifo_path
+            play_tts_live_kwargs["audio_file"] = audio_file
+            play_tts_live_kwargs["channel"] = channel
+            play_tts_live_kwargs["user"] = user
             re = kwargs.get("ready_event")
             if re is not None:
                 re.set()
@@ -417,6 +421,7 @@ class TestSaveAsMp3ELLive:
 
         mock_db().insert_sound.assert_called_once()
         tts.behavior.play_audio.assert_not_called()
+        assert play_tts_live_kwargs.get("input_format") == "mp3"
 
         # request_note should be forwarded through to play_tts_live_stream
         assert play_tts_live_kwargs.get("request_note") is None

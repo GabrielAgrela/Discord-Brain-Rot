@@ -279,6 +279,9 @@ class BotBehavior:
     async def play_audio(self, channel, audio_file, user, **kwargs):
         return await self._audio_service.play_audio(channel, audio_file, user, **kwargs)
 
+    async def play_tts_live_stream(self, fifo_path, audio_file, channel, user, **kwargs):
+        return await self._audio_service.play_tts_live_stream(fifo_path, audio_file, channel, user, **kwargs)
+
     async def update_progress_bar(self, sound_message, duration):
         return await self._audio_service.update_progress_bar(sound_message, duration)
 

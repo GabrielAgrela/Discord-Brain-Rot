@@ -754,6 +754,9 @@ class TTS:
                 live_ready_event = asyncio.Event()
                 live_interrupt_event = threading.Event()
                 logger.info("EL_TTS early live setup start for guild_id=%s filename=%s", guild_id, filename)
+                
+                live_input_format = 'mp3' if self.el_tts_output_format.lower().startswith('mp3_') else None
+                
                 ctx.live_task = asyncio.create_task(
                     self.behavior.play_tts_live_stream(
                         fifo_path=ctx.fifo_path,
@@ -768,6 +771,7 @@ class TTS:
                         ready_event=live_ready_event,
                         interrupt_event=live_interrupt_event,
                         request_note=request_note,
+                        input_format=live_input_format,
                     )
                 )
                 # Yield to the event loop so the live task starts running immediately
@@ -802,6 +806,12 @@ class TTS:
                         # optionally live-stream to a FIFO for concurrent playback.
                         os.makedirs(os.path.dirname(path), exist_ok=True)
 
+                        live_ready_time = None
+                        fifo_open_time = None
+                        first_chunk_time = None
+                        first_fifo_write_start = None
+                        first_fifo_write_end = None
+
                         if should_live and ctx.live_task is not None:
                             try:
                                 # Wait for FFmpeg to open the FIFO read end
@@ -811,6 +821,7 @@ class TTS:
                                     await asyncio.wait_for(
                                         live_ready_event.wait(), timeout=15.0
                                     )
+                                    live_ready_time = time.time()
                                 except asyncio.TimeoutError:
                                     logger.warning(
                                         "EL_TTS live playback setup timed out"
@@ -842,6 +853,7 @@ class TTS:
                                 ctx.live_fifo_fd = os.open(
                                     ctx.fifo_path, open_flags
                                 )
+                                fifo_open_time = time.time()
                                 # Bump pipe buffer to ~256 KB so short
                                 # connection races do not stall the event loop.
                                 try:
@@ -915,11 +927,15 @@ class TTS:
                                 # and keyword actions.
                                 if ctx.live_fifo_fd is not None:
                                     try:
+                                        if first_fifo_write_start is None:
+                                            first_fifo_write_start = time.time()
                                         await asyncio.to_thread(
                                             _write_all_to_fd,
                                             ctx.live_fifo_fd, chunk,
                                             live_interrupt_event,
                                         )
+                                        if first_fifo_write_end is None:
+                                            first_fifo_write_end = time.time()
                                     except (BrokenPipeError, OSError) as e:
                                         logger.debug(
                                             "EL_TTS FIFO write error, "
@@ -992,6 +1008,17 @@ class TTS:
                     )
 
                     perf_end = time.time()
+                    if ctx.live_playback_started:
+                        ready_s = (live_ready_time - perf_start) if live_ready_time else 0.0
+                        open_s = (fifo_open_time - perf_start) if fifo_open_time else 0.0
+                        first_chunk_s = (first_chunk_time - perf_start) if first_chunk_time else 0.0
+                        first_write_start_s = (first_fifo_write_start - perf_start) if first_fifo_write_start else 0.0
+                        first_write_end_s = (first_fifo_write_end - perf_start) if first_fifo_write_end else 0.0
+                        logger.info(
+                            "EL_TTS live timing | guild_id=%s ready=%.3fs open=%.3fs first_chunk=%.3fs first_write_start=%.3fs first_write_end=%.3fs total=%.3fs",
+                            guild_id, ready_s, open_s, first_chunk_s, first_write_start_s, first_write_end_s, perf_end - perf_start
+                        )
+
                     self._log_el_tts_perf(
                         perf_start, first_chunk_time, perf_end,
                         url, model_id, self.el_tts_output_format,
