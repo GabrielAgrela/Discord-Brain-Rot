@@ -139,7 +139,7 @@ class AudioService:
         self.voice_command_cooldown_seconds = max(1, int(os.getenv("VOICE_COMMAND_COOLDOWN_SECONDS", "5")))
         # Seconds of silence after the beep before considering the user done speaking.
         self.voice_command_silence_seconds = max(
-            0.5, min(5.0, float(os.getenv("VOICE_COMMAND_SILENCE_SECONDS", "0.5")))
+            0.5, min(5.0, float(os.getenv("VOICE_COMMAND_SILENCE_SECONDS", "1.0")))
         )
         self._voice_command_service = None
         self._ventura_chat_service = None
@@ -161,6 +161,13 @@ class AudioService:
                 "16-05-26-20-11-24-672100-Diz.mp3",
                 "16-05-26-20-12-44-779160-whispers O que que queres.mp3",
                 "16-05-26-20-13-18-557980-Frustrated sharp Foda-se q.mp3",
+                "19-05-26-18-25-29-767591-impatient O que é que queres.mp3",
+                "19-05-26-18-25-42-020903-cheerful Fala campeão.mp3",
+                "19-05-26-18-26-21-035113-casual Fala campeão.mp3",
+                "19-05-26-18-28-18-619313-excited Vai estou a gravar .mp3",
+                "19-05-26-18-28-34-628591-challenging Força surpreend.mp3",
+                "19-05-26-18-28-57-441240-curious Diz lá chefe.mp3",
+                "19-05-26-18-29-18-588546-stern Tens seis segundos par.mp3",
             ]),
         )
         self.voice_command_start_sounds = [
@@ -176,6 +183,11 @@ class AudioService:
                 "16-05-26-20-14-36-595803-Sim senhor.mp3",
                 "16-05-26-20-15-00-686598-Ok já toco essa merda.mp3",
                 "16-05-26-20-15-34-525805-shouts aggressive Ok já ag.mp3",
+                "19-05-26-18-29-47-016743-nodding Ok já trato disso.mp3",
+                "19-05-26-18-29-59-198767-sarcastic Ok seu animal.mp3",
+                "19-05-26-18-30-10-622881-sighs Já ouvi essa merda.mp3",
+                "19-05-26-18-30-25-238017-sarcastic Ok vou fingir que.mp3",
+                "19-05-26-18-30-43-231662-frustrated Foda-se sighs .mp3",
             ]),
         )
         self.voice_command_done_sounds = [

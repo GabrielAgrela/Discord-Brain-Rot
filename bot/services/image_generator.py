@@ -110,6 +110,34 @@ class ImageGeneratorService:
         rows = max(1, (tile_count + max(1, grid_columns) - 1) // max(1, grid_columns))
         return 280 + (rows * 360) + 120
 
+    def _estimate_sound_card_canvas_height(
+        self,
+        display_name: str,
+        title_font_size: int,
+        has_stats: bool,
+        has_footer: bool,
+        request_note: Optional[str],
+    ) -> int:
+        """Return initial viewport height with headroom for wrapped card text."""
+        canvas_height = 640
+        if has_stats:
+            canvas_height = 820
+        if has_stats and has_footer:
+            canvas_height = 900
+
+        title_chars_per_line = max(12, int(470 / max(1, title_font_size * 0.58)))
+        title_lines = max(1, (len(display_name) + title_chars_per_line - 1) // title_chars_per_line)
+        if title_lines > 2:
+            canvas_height += (title_lines - 2) * int(title_font_size * 1.35)
+
+        if request_note:
+            note_chars_per_line = 48
+            note_lines = max(1, (len(request_note) + note_chars_per_line - 1) // note_chars_per_line)
+            if note_lines > 1:
+                canvas_height += (note_lines - 1) * 18
+
+        return min(canvas_height, 1800)
+
     def _measure_selector_capture_bounds(
         self,
         driver: Any,
@@ -684,11 +712,13 @@ class ImageGeneratorService:
 
             html_content = self._render_template(self._template_content, data)
 
-            canvas_height = 640
-            if has_stats:
-                canvas_height = 820
-            if has_stats and show_footer:
-                canvas_height = 900
+            canvas_height = self._estimate_sound_card_canvas_height(
+                display_name=display_name,
+                title_font_size=title_font_size,
+                has_stats=has_stats,
+                has_footer=show_footer or bool(request_note),
+                request_note=request_note,
+            )
             rendered = self._render_html_to_png(
                 html_content,
                 size=(900, canvas_height),

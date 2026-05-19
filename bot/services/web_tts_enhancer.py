@@ -21,6 +21,8 @@ class WebTtsEnhancerService:
         api_url: str | None = None,
         timeout_seconds: float = 20.0,
         max_tokens: int | None = None,
+        reasoning_enabled: bool | None = None,
+        provider_sort: str | None = None,
     ) -> None:
         """
         Initialize the enhancer service.
@@ -28,14 +30,20 @@ class WebTtsEnhancerService:
         Args:
             api_key: OpenRouter API key. Defaults to OPENROUTER_API_KEY.
             model: OpenRouter model ID to use.
+                Defaults to WEB_TTS_ENHANCER_MODEL env var or deepseek/deepseek-v4-flash.
             api_url: Chat completions endpoint URL.
             timeout_seconds: HTTP request timeout.
             max_tokens: Maximum tokens for the model response.
                 Defaults to WEB_TTS_ENHANCER_MAX_TOKENS env var or 8192.
                 Minimum enforced floor is 256.
+            reasoning_enabled: Whether to enable OpenRouter model reasoning.
+                Defaults to WEB_TTS_ENHANCER_REASONING_ENABLED env var (true).
+            provider_sort: OpenRouter provider sort order for routing.
+                Defaults to WEB_TTS_ENHANCER_PROVIDER_SORT env var (throughput).
+                Set to empty string to omit the provider field.
         """
         self.api_key = api_key if api_key is not None else os.getenv("OPENROUTER_API_KEY", "")
-        self.model = model or os.getenv("WEB_TTS_ENHANCER_MODEL", "qwen/qwen3-coder-next")
+        self.model = model or os.getenv("WEB_TTS_ENHANCER_MODEL", "deepseek/deepseek-v4-flash")
         self.api_url = api_url or os.getenv(
             "OPENROUTER_API_URL",
             "https://openrouter.ai/api/v1/chat/completions",
@@ -47,6 +55,19 @@ class WebTtsEnhancerService:
             if max_tokens is not None
             else int(os.getenv("WEB_TTS_ENHANCER_MAX_TOKENS", "8192")),
         )
+        if reasoning_enabled is not None:
+            self.reasoning_enabled = reasoning_enabled
+        else:
+            self.reasoning_enabled = (
+                os.getenv("WEB_TTS_ENHANCER_REASONING_ENABLED", "true").strip().lower()
+                not in {"0", "false", "off", "no"}
+            )
+        if provider_sort is not None:
+            self.provider_sort = provider_sort
+        else:
+            self.provider_sort = os.getenv(
+                "WEB_TTS_ENHANCER_PROVIDER_SORT", "throughput"
+            ).strip()
 
     def enhance(self, text: str) -> str:
         """
@@ -94,6 +115,7 @@ class WebTtsEnhancerService:
                 "shorter response than the input. Try a different model or reduce "
                 "the input length."
             )
+        enhanced_text = self._fix_wrapped_original_output(normalized_text, enhanced_text)
         if len(enhanced_text) > 20000:
             enhanced_text = enhanced_text[:20000].rstrip()
         return enhanced_text
@@ -109,9 +131,30 @@ class WebTtsEnhancerService:
         """
         return len(original) > 500 and len(enhanced) < len(original) * 0.25
 
+    @staticmethod
+    def _fix_wrapped_original_output(original: str, enhanced: str) -> str:
+        """
+        Detect and fix a model output that wraps the original text as a bracket tag.
+
+        When the model returns *only* a bracketed segment whose inner text equals
+        the normalized original (e.g. input ``hãn?`` -> output ``[hãn?]``),
+        unwrap it to a safe tagged form such as ``[curious] hãn?``.
+
+        Only applies when the entire output is a single bracketed segment with
+        no spoken text outside the brackets. Leaves legitimate multi-tag or
+        outside-text outputs unchanged.
+        """
+        stripped = enhanced.strip()
+        # Match exactly one bracketed segment: [<content>] with optional leading/trailing space
+        if stripped.startswith("[") and stripped.endswith("]"):
+            inner = stripped[1:-1].strip()
+            if inner and inner.lower() == original.strip().lower():
+                return f"[curious] {original.strip()}"
+        return enhanced
+
     def _build_request_payload(self, text: str) -> dict[str, Any]:
         """Build the OpenRouter chat completions payload."""
-        return {
+        payload: dict[str, Any] = {
             "model": self.model,
             "temperature": 0.35,
             "max_tokens": self.max_tokens,
@@ -127,6 +170,17 @@ class WebTtsEnhancerService:
                         "Do not summarize, omit, truncate, or cut off any part of the text. "
                         "If the text is long, keep every single word. Add tags sparingly "
                         "— one or two per sentence at most.\n\n"
+                        "IMPORTANT TAG RULES:\n"
+                        "1. Square-bracket text MUST be a short performance tag, "
+                        "never the user's spoken words.\n"
+                        "2. Do NOT wrap the user's original message or parts of it "
+                        "inside brackets. Original words must remain outside brackets "
+                        "and be spoken.\n"
+                        "3. Every original word must appear in the output, outside brackets.\n\n"
+                        "Good: [confused] hãn?\n"
+                        "Good: [curious] hãn?\n"
+                        "Bad: [hãn?]\n"
+                        "Bad: [hmm] [what's that]\n\n"
                         "Do not add new dialogue. Do not explain. "
                         "Return only the enhanced TTS text."
                     ),
@@ -137,6 +191,11 @@ class WebTtsEnhancerService:
                 },
             ],
         }
+        if not self.reasoning_enabled:
+            payload["reasoning"] = {"enabled": False}
+        if self.provider_sort:
+            payload["provider"] = {"sort": self.provider_sort}
+        return payload
 
     def _extract_response_text(self, payload: Mapping[str, Any]) -> str:
         """Extract assistant text from an OpenRouter chat completion response."""

@@ -52,6 +52,7 @@ Read this when changing `WebPage.py`, `bot/web/`, web repositories/services, tem
 - Web TTS should mirror Discord `/tts`: default modal profile `ventura`, send a loading GIF/card to the bot channel before generation, pass it as `loading_message`, and pass ElevenLabs profile thumbnails as `sts_thumbnail_url`.
 - `AudioService.play_audio()` deletes the loading message and sends the final character card.
 - Web TTS enhancement is a pre-send transform, not playback queue execution. Keep `/api/tts/enhance` authenticated, route OpenRouter calls through `WebTtsEnhancerService`, and treat `OPENROUTER_API_KEY` as optional.
+- `WebTtsEnhancerService` uses DeepSeek v4 flash with reasoning enabled by default (unlike Ventura chat which keeps reasoning disabled for speed), provider routing sort `throughput`. Keep the model and provider sort in sync with `VenturaChatService` in `voice_command.py` when changing OpenRouter model/routing defaults. The reasoning default divergence is intentional: web TTS enhancement benefits from reasoning quality while Ventura voice chat prioritizes low latency.
 
 ## Soundboard Layout
 

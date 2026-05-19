@@ -30,7 +30,7 @@ def test_web_tts_enhancer_uses_openrouter_chat_completion(monkeypatch):
     assert result == "[excited] hello there!"
     assert captured["url"] == "https://openrouter.ai/api/v1/chat/completions"
     assert captured["headers"]["Authorization"] == "Bearer test-key"
-    assert captured["json"]["model"] == "qwen/qwen3-coder-next"
+    assert captured["json"]["model"] == "deepseek/deepseek-v4-flash"
     assert captured["json"]["max_tokens"] == 8192
     assert captured["json"]["messages"][1]["content"] == "hello there!"
     assert captured["timeout"] == 3
@@ -40,6 +40,34 @@ def test_web_tts_enhancer_uses_openrouter_chat_completion(monkeypatch):
     assert "CRITICAL: Preserve" in system_content
     assert "Do not summarize" in system_content
     assert "omit" in system_content
+    assert "Square-bracket text MUST be a short performance tag" in system_content
+    assert "Good: [confused] hãn?" in system_content
+    assert "Bad: [hãn?]" in system_content
+
+
+def test_web_tts_enhancer_default_payload_reasoning_enabled(monkeypatch):
+    """Default payload has reasoning enabled (omitted from payload) and provider throughput."""
+    captured = {}
+
+    def fake_post(url, headers, json, timeout):
+        captured["json"] = json
+        return SimpleNamespace(
+            status_code=200,
+            json=lambda: {
+                "choices": [
+                    {"message": {"content": "hi"}},
+                ],
+            },
+        )
+
+    monkeypatch.setattr("bot.services.web_tts_enhancer.requests.post", fake_post)
+    service = WebTtsEnhancerService(api_key="test-key", timeout_seconds=3)
+    service.enhance("hello")
+
+    assert service.reasoning_enabled is True
+    assert service.provider_sort == "throughput"
+    assert "reasoning" not in captured["json"]
+    assert captured["json"].get("provider") == {"sort": "throughput"}
 
 
 def test_web_tts_enhancer_requires_api_key(monkeypatch):
@@ -129,6 +157,74 @@ def test_web_tts_enhancer_rejects_truncated_long_output(monkeypatch):
         service.enhance("x" * 600)
 
 
+def test_web_tts_enhancer_reasoning_sent_when_explicitly_disabled(monkeypatch):
+    """Explicit reasoning_enabled=False includes reasoning: {enabled: False}."""
+    captured = {}
+
+    def fake_post(url, headers, json, timeout):
+        captured["json"] = json
+        return SimpleNamespace(
+            status_code=200,
+            json=lambda: {
+                "choices": [
+                    {"message": {"content": "hi"}},
+                ],
+            },
+        )
+
+    monkeypatch.setattr("bot.services.web_tts_enhancer.requests.post", fake_post)
+    service = WebTtsEnhancerService(
+        api_key="test-key", timeout_seconds=3, reasoning_enabled=False
+    )
+    assert service.reasoning_enabled is False
+    payload = service._build_request_payload("hello")
+    assert payload.get("reasoning") == {"enabled": False}
+
+
+def test_web_tts_enhancer_reasoning_omitted_when_enabled(monkeypatch):
+    """Reasoning field is excluded from payload when enabled."""
+
+    def fake_post(url, headers, json, timeout):
+        return SimpleNamespace(
+            status_code=200,
+            json=lambda: {
+                "choices": [
+                    {"message": {"content": "hi"}},
+                ],
+            },
+        )
+
+    monkeypatch.setattr("bot.services.web_tts_enhancer.requests.post", fake_post)
+    service = WebTtsEnhancerService(
+        api_key="test-key", timeout_seconds=3, reasoning_enabled=True
+    )
+    assert service.reasoning_enabled is True
+    payload = service._build_request_payload("hello")
+    assert "reasoning" not in payload
+
+
+def test_web_tts_enhancer_provider_omitted_when_sort_empty(monkeypatch):
+    """Provider field is excluded from payload when sort is empty."""
+
+    def fake_post(url, headers, json, timeout):
+        return SimpleNamespace(
+            status_code=200,
+            json=lambda: {
+                "choices": [
+                    {"message": {"content": "hi"}},
+                ],
+            },
+        )
+
+    monkeypatch.setattr("bot.services.web_tts_enhancer.requests.post", fake_post)
+    service = WebTtsEnhancerService(
+        api_key="test-key", timeout_seconds=3, provider_sort=""
+    )
+    assert service.provider_sort == ""
+    payload = service._build_request_payload("hello")
+    assert "provider" not in payload
+
+
 def test_web_tts_enhancer_custom_max_tokens(monkeypatch):
     captured = {}
 
@@ -149,6 +245,82 @@ def test_web_tts_enhancer_custom_max_tokens(monkeypatch):
     )
     service.enhance("hi")
     assert captured["json"]["max_tokens"] == 4096
+
+
+def test_web_tts_enhancer_fix_wrapped_output_unchanged_normal():
+    """Normal enhanced output is left unchanged."""
+    service = WebTtsEnhancerService(api_key="test-key")
+    assert service._fix_wrapped_original_output("hãn?", "[confused] hãn?") == "[confused] hãn?"
+    assert service._fix_wrapped_original_output("hello", "[happy] hello there!") == "[happy] hello there!"
+    assert service._fix_wrapped_original_output("hi", "") == ""
+
+
+def test_web_tts_enhancer_fix_wrapped_output_bracket_mismatch():
+    """Output with different inner content than original is left unchanged."""
+    service = WebTtsEnhancerService(api_key="test-key")
+    assert service._fix_wrapped_original_output("hãn?", "[happy]") == "[happy]"
+    assert service._fix_wrapped_original_output("hello", "[happy] hello [laughs]") == "[happy] hello [laughs]"
+
+
+def test_web_tts_enhancer_fix_wrapped_output_detects_miswrapped():
+    """Output that wraps the original text as a bracket tag is fixed."""
+    service = WebTtsEnhancerService(api_key="test-key")
+    result = service._fix_wrapped_original_output("hãn?", "[hãn?]")
+    assert result == "[curious] hãn?"
+
+
+def test_web_tts_enhancer_fix_wrapped_output_case_insensitive():
+    """Fix is case-insensitive when matching inner text."""
+    service = WebTtsEnhancerService(api_key="test-key")
+    result = service._fix_wrapped_original_output("HÃN?", "[hãn?]")
+    assert result == "[curious] HÃN?"
+
+
+def test_web_tts_enhancer_system_prompt_includes_tag_rules(monkeypatch):
+    """System prompt includes tag-rules guard language."""
+    captured = {}
+
+    def fake_post(url, headers, json, timeout):
+        captured["json"] = json
+        return SimpleNamespace(
+            status_code=200,
+            json=lambda: {
+                "choices": [
+                    {"message": {"content": "[curious] hãn?"}},
+                ],
+            },
+        )
+
+    monkeypatch.setattr("bot.services.web_tts_enhancer.requests.post", fake_post)
+    service = WebTtsEnhancerService(api_key="test-key", timeout_seconds=3)
+    service.enhance("hãn?")
+
+    system_content = captured["json"]["messages"][0]["content"]
+    assert "Good: [confused] hãn?" in system_content
+    assert "Bad: [hãn?]" in system_content
+    assert "Square-bracket text MUST be a short performance tag" in system_content
+    assert "Do NOT wrap the user's original message" in system_content
+
+
+def test_web_tts_enhancer_mocked_wrapped_output_fixed(monkeypatch):
+    """Mocked API returning [original] is fixed by the guard."""
+    captured = {}
+
+    def fake_post(url, headers, json, timeout):
+        captured["json"] = json
+        return SimpleNamespace(
+            status_code=200,
+            json=lambda: {
+                "choices": [
+                    {"message": {"content": "[hãn?]"}},
+                ],
+            },
+        )
+
+    monkeypatch.setattr("bot.services.web_tts_enhancer.requests.post", fake_post)
+    service = WebTtsEnhancerService(api_key="test-key", timeout_seconds=3)
+    result = service.enhance("hãn?")
+    assert result == "[curious] hãn?"
 
 
 def test_web_tts_enhancer_max_tokens_floor(monkeypatch):

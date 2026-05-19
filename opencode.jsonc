@@ -1,6 +1,6 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["opencode-notificator", "opencode-antigravity-auth@latest"],
+  "plugin": ["opencode-notificator"],
   "mcp": {
     "playwright": {
       "type": "local",

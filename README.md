@@ -312,8 +312,10 @@ This README is based on the current codebase behavior (not historical README ass
 - `DISCORD_OAUTH_REDIRECT_URI` (recommended public callback URL for Discord OAuth; falls back to Flask external URL generation if unset)
 - `PLAYBACK_QUEUE_INTERVAL` (internal web request bridge polling interval in seconds, default `0.25`)
 - `OPENROUTER_API_KEY` (optional; enables the web TTS Enhance button)
-- `WEB_TTS_ENHANCER_MODEL` (optional; OpenRouter model for web TTS enhancement, default `qwen/qwen3-coder-next`)
+- `WEB_TTS_ENHANCER_MODEL` (optional; OpenRouter model for web TTS enhancement, default `deepseek/deepseek-v4-flash`)
 - `WEB_TTS_ENHANCER_MAX_TOKENS` (optional; max tokens for the enhance response, default `8192`, minimum `256`)
+- `WEB_TTS_ENHANCER_REASONING_ENABLED` (optional; enables OpenRouter model reasoning for enhancements, default `true`)
+- `WEB_TTS_ENHANCER_PROVIDER_SORT` (optional; OpenRouter provider sort order for routing, default `throughput`)
 - `OPENROUTER_API_URL` (optional; OpenRouter-compatible chat completions endpoint)
 - `OWNER_USER_IDS` (comma-separated Discord user IDs allowed to run admin-only commands)
 - `AUDIO_LATENCY_MODE` (`low_latency` default, or `balanced` / `high_quality`)
@@ -364,13 +366,13 @@ This README is based on the current codebase behavior (not historical README ass
 - `VOICE_COMMAND_WAKE_WORDS` (optional; comma-separated wake words for voice commands, default `ventura`)
  - `VOICE_COMMAND_CAPTURE_SECONDS` (optional; max duration of post-prompt command recording sent to Whisper, default `6`, max `15`)
 - `VOICE_COMMAND_COOLDOWN_SECONDS` (optional; per-user rate limit between voice command transcriptions, default `5`)
-  - `VOICE_COMMAND_SILENCE_SECONDS` (optional; silence timeout after start prompt before voice command is considered complete, default `0.5`, range `0.5`-`5.0`)
+  - `VOICE_COMMAND_SILENCE_SECONDS` (optional; silence timeout after start prompt before voice command is considered complete, default `1.0`, range `0.5`-`5.0`)
 
  - `VOICE_COMMAND_BEEP_ENABLED` (optional; set `false` to disable voice command prompt clips entirely, default `true`)
 
- - `VOICE_COMMAND_START_SOUND` (optional; comma-separated prompt MP3 filenames under `Sounds/` — one is chosen at random when wake word is accepted. A single filename also works for backward compatibility. Default: `"16-05-26-19-52-51-637928-Sim.mp3,16-05-26-20-11-24-672100-Diz.mp3,16-05-26-20-12-44-779160-whispers O que que queres.mp3,16-05-26-20-13-18-557980-Frustrated sharp Foda-se q.mp3"`)
+ - `VOICE_COMMAND_START_SOUND` (optional; comma-separated prompt MP3 filenames under `Sounds/` — one is chosen at random when wake word is accepted. A single filename also works for backward compatibility. Default: `"16-05-26-19-52-51-637928-Sim.mp3,16-05-26-20-11-24-672100-Diz.mp3,16-05-26-20-12-44-779160-whispers O que que queres.mp3,16-05-26-20-13-18-557980-Frustrated sharp Foda-se q.mp3,19-05-26-18-25-29-767591-impatient O que é que queres.mp3,19-05-26-18-25-42-020903-cheerful Fala campeão.mp3,19-05-26-18-26-21-035113-casual Fala campeão.mp3,19-05-26-18-28-18-619313-excited Vai estou a gravar .mp3,19-05-26-18-28-34-628591-challenging Força surpreend.mp3,19-05-26-18-28-57-441240-curious Diz lá chefe.mp3,19-05-26-18-29-18-588546-stern Tens seis segundos par.mp3"`)
 
- - `VOICE_COMMAND_DONE_SOUND` (optional; comma-separated prompt MP3 filenames under `Sounds/` — one is chosen at random after command audio capture completes. A single filename also works for backward compatibility. Default: `"16-05-26-19-54-41-416014-Ok fica bem.mp3,16-05-26-20-14-36-595803-Sim senhor.mp3,16-05-26-20-15-00-686598-Ok já toco essa merda.mp3,16-05-26-20-15-34-525805-shouts aggressive Ok já ag.mp3"`)
+ - `VOICE_COMMAND_DONE_SOUND` (optional; comma-separated prompt MP3 filenames under `Sounds/` — one is chosen at random after command audio capture completes. A single filename also works for backward compatibility. Default: `"16-05-26-19-54-41-416014-Ok fica bem.mp3,16-05-26-20-14-36-595803-Sim senhor.mp3,16-05-26-20-15-00-686598-Ok já toco essa merda.mp3,16-05-26-20-15-34-525805-shouts aggressive Ok já ag.mp3,19-05-26-18-29-47-016743-nodding Ok já trato disso.mp3,19-05-26-18-29-59-198767-sarcastic Ok seu animal.mp3,19-05-26-18-30-10-622881-sighs Já ouvi essa merda.mp3,19-05-26-18-30-25-238017-sarcastic Ok vou fingir que.mp3,19-05-26-18-30-43-231662-frustrated Foda-se sighs .mp3"`)
 - `VOICE_COMMAND_WAKE_ALIASES` (optional; comma-separated Vosk grammar words injected into the keyword map, default `ventura`; overrides `VOICE_COMMAND_WAKE_WORDS` for Vosk injection; falls back to wake words when empty, range `0.0`-`1.0`)
 - `VOICE_COMMAND_WAKE_CONFIDENCE_THRESHOLD` (optional; confidence threshold for voice-command wake detection, default `0.85`, range `0.0`-`1.0`; normal keywords still use `0.95`)
 - `OPENROUTER_API_KEY` (required for non-play Ventura voice command chat branch; enables OpenRouter model)

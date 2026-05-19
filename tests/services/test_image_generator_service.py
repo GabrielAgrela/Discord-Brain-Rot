@@ -225,14 +225,51 @@ class TestImageGeneratorService:
         # Footer should appear with space-between layout
         assert "justify-content: space-between" in html, "Footer should use space-between"
 
+        footer_pill_css = html.split(".footer-note-pill {", 1)[1].split("}", 1)[0]
+        footer_text_css = html.split(".footer-note-text {", 1)[1].split("}", 1)[0]
+        assert "overflow: hidden" not in footer_pill_css, "Footer pill should not clip wrapped text"
+        assert "white-space: normal" in footer_text_css, "Footer note should wrap instead of staying on one line"
+        assert "overflow-wrap: anywhere" in footer_text_css, "Footer note should break long words if needed"
+        assert "text-overflow" not in footer_text_css, "Footer note should not ellipsize"
+        assert "white-space: nowrap" not in footer_text_css, "Footer note should not force one-line text"
+
         # Old standalone request-note-pill should be gone
         assert "request-note-pill" not in html, "Old standalone pill class should not appear"
 
-        # Canvas height should NOT include the old +60 bump for request_note
-        # Stats + footer → 900; request_note should not inflate it further
+        # Short footer notes should preserve the existing stats + footer canvas height.
         assert captured["size"] == (900, 900), (
-            f"Expected canvas 900x900 (no +60 for request_note), got {captured['size']}"
+            f"Expected canvas 900x900 for a short request_note, got {captured['size']}"
         )
+
+    def test_generate_sound_card_sync_long_request_note_increases_canvas_height(self):
+        """Long TTS footer text should get extra render headroom instead of being cropped."""
+        from bot.services.image_generator import ImageGeneratorService
+
+        service = ImageGeneratorService()
+        rendered = _create_png_bytes(580, 180)
+        captured: dict[str, tuple[int, int]] = {}
+
+        def _capture_render(html_content, size, selector):
+            captured["size"] = size
+            return rendered
+
+        long_note = "play " + "an extremely long generated TTS request " * 8
+
+        with patch.object(service, "_render_html_to_png", side_effect=_capture_render):
+            result = service._generate_sound_card_sync(
+                sound_name="test.mp3",
+                requester="tester",
+                duration="0:15",
+                play_count=42,
+                request_note=long_note,
+                download_date="Aug 12, 2025",
+                show_footer=True,
+                show_sound_icon=True,
+            )
+
+        assert result is not None
+        assert captured["size"][0] == 900
+        assert captured["size"][1] > 900
 
     def test_generate_sound_card_sync_renders_request_note_without_download_date(self):
         """request_note should still appear in footer even when download_date is missing."""
