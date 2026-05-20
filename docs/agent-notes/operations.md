@@ -73,5 +73,11 @@ docker-compose logs --tail=120 bot
 ## Repository Cleanliness
 
 - Browser automation (Playwright MCP, Selenium) can leave debug screenshots, `.playwright-mcp/`, root `*.png`, `*.webm`, and other artifacts in the repo root. **Before finalizing any task that used browser automation**, remove these from the project root and configure Playwright MCP output to `/tmp/opencode-playwright-mcp/` (set in `opencode.jsonc`).
-- Do not commit `.playwright-mcp/`, `/*.png`, `/playwright-report/`, `/test-results/`, `/screenshots/`, or `/debug-screenshots/`.
+- Use the cleanup helper to safely remove root-level browser artifacts at any time:
+  ```bash
+  ./scripts/clean_browser_artifacts.sh          # remove artifacts
+  ./scripts/clean_browser_artifacts.sh --dry-run  # preview only
+  ```
+  It is also invoked automatically at the end of `./scripts/verify_and_deploy.sh`.
+- Do not commit `.playwright-mcp/`, `/*.png`, `/*.jpg`, `/*.jpeg`, `/*.webp`, `/*.webm`, `/playwright-report/`, `/test-results/`, `/screenshots/`, or `/debug-screenshots/`. These are now covered by `.gitignore`.
 - Root `__pycache__/` and `.pytest_cache/` should be cleaned before finalizing to avoid accidental tracking.

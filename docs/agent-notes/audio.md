@@ -62,6 +62,7 @@ Read this when changing uploads, sound ingest, playback, generated sound cards, 
 - `KeywordDetectionSink` runs in a background thread. Guard `asyncio.run_coroutine_threadsafe()` with `if not loop.is_closed():`.
 - Startup auto-join is owned by `BackgroundService._auto_join_channels()`. Do not add a second `on_ready` auto-join in `personal_greeter.py`.
 - Final keyword latency is driven by `KeywordDetectionSink.silence_flush_seconds` / `KEYWORD_SILENCE_FLUSH_SECONDS` plus worker queue timeout. Partials are faster but less stable.
+- After voice moves/reconnects (e.g. `move_to` in `ensure_voice_connected` or AutoFollow), keyword detection start failures schedule a short retry loop via `AudioService.schedule_keyword_detection_restart()` instead of waiting for the 30-second health check in `BackgroundService.keyword_detection_health_check`. The retry loop uses exponential backoff (2 s, 4 s, 8 s cap) for up to 5 attempts. Use `reason="auto_follow_move"` or similar labels to distinguish log origins. Pass `schedule_retry=False` to `start_keyword_detection` to suppress retry nesting (done automatically by the restart loop).
 
 ## Voice Commands (Wake Word + Groq Whisper)
 

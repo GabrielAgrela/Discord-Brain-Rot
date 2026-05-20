@@ -338,8 +338,11 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
                     await behavior._audio_service.stop_keyword_detection(voice_client.guild)
                     # Move to new channel
                     await voice_client.move_to(after.channel)
-                    await behavior._audio_service.start_keyword_detection(after.channel.guild)
-                    print(f"[AutoFollow] Successfully moved to {after.channel.name}")
+                    result = await behavior._audio_service.start_keyword_detection(after.channel.guild)
+                    if result:
+                        print(f"[AutoFollow] Successfully moved to {after.channel.name} and started keyword detection")
+                    else:
+                        print(f"[AutoFollow] Moved to {after.channel.name} but keyword detection did not start (retry scheduled)")
                 except Exception as e:
                     print(f"[AutoFollow] Error moving to {after.channel.name}: {e}")
 

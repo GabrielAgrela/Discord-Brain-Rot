@@ -465,6 +465,14 @@ It runs:
 2. `docker-compose restart`
 3. `docker-compose ps`
 4. recent bot logs
+5. `scripts/clean_browser_artifacts.sh` (removes any browser/test artifacts from the repo root)
+
+To clean browser artifacts without deploying:
+
+```bash
+./scripts/clean_browser_artifacts.sh
+./scripts/clean_browser_artifacts.sh --dry-run  # preview only
+```
 
 ## Local Development (Without Docker)
 

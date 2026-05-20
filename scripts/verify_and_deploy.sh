@@ -129,4 +129,9 @@ if docker-compose ps -a -q web 2>/dev/null | grep -q .; then
   fi
 fi
 
+echo "[verify_and_deploy] Cleaning browser/test artifacts..."
+if [[ -x "$REPO_ROOT/scripts/clean_browser_artifacts.sh" ]]; then
+    "$REPO_ROOT/scripts/clean_browser_artifacts.sh" || true
+fi
+
 echo "[verify_and_deploy] Completed successfully."

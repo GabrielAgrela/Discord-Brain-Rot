@@ -79,12 +79,24 @@ class TestAudioService:
             "16-05-26-20-14-36-595803-Sim senhor.mp3",
             "16-05-26-20-15-00-686598-Ok já toco essa merda.mp3",
             "16-05-26-20-15-34-525805-shouts aggressive Ok já ag.mp3",
+            "19-05-26-18-25-29-767591-impatient O que é que queres.mp3",
+            "19-05-26-18-25-42-020903-cheerful Fala campeão.mp3",
+            "19-05-26-18-26-21-035113-casual Fala campeão.mp3",
+            "19-05-26-18-26-48-994281-tired Ok já tou a tratar.mp3",
+            "19-05-26-18-27-11-419376-enthusiastic Tou a tratar disso.mp3",
+            "19-05-26-18-27-27-071872-assertive Vai mas é para o car.mp3",
+            "19-05-26-18-27-52-261545-calm Ok já toco essa merda.mp3",
+            "19-05-26-18-28-17-316184-casual Tás a brincar Ok já to.mp3",
             "19-05-26-18-29-47-016743-nodding Ok já trato disso.mp3",
             "19-05-26-18-29-59-198767-sarcastic Ok seu animal.mp3",
             "19-05-26-18-30-10-622881-sighs Já ouvi essa merda.mp3",
             "19-05-26-18-30-25-238017-sarcastic Ok vou fingir que.mp3",
             "19-05-26-18-30-43-231662-frustrated Foda-se sighs .mp3",
         ]
+        # Per-guild keyword detection state (normally set in __init__)
+        service.keyword_sinks = {}
+        service._keyword_detection_restart_tasks = {}
+        # bot set by individual tests that need it (e.g. keyword detection retry tests)
         return service
 
     @pytest.mark.asyncio
@@ -2669,6 +2681,157 @@ class TestAudioService:
             request_note="toca nonexistentsound", allow_rejected_exact_fallback=True,
         )
         sink.audio_service.sound_service.play_random_sound_from_list.assert_not_called()
+
+    # ---- Keyword detection retry / self-healing tests ----
+
+    @pytest.mark.asyncio
+    async def test_start_keyword_detection_schedules_retry_when_no_voice_client(self, audio_service):
+        """Ensure start_keyword_detection schedules a restart when there is no voice client."""
+        from bot.services.audio import AudioService
+
+        audio_service.keyword_sinks = {}
+        # No _behavior set → _is_stt_enabled_for_guild defaults True
+        # Need bot.loop for schedule_keyword_detection_restart
+        audio_service.bot = Mock()
+        audio_service.bot.loop = asyncio.get_running_loop()
+        guild = Mock(id=999, name="Guild NoVoice")
+        guild.voice_client = None  # No voice client at all
+
+        with patch.object(audio_service, 'schedule_keyword_detection_restart') as mock_schedule:
+            result = await AudioService.start_keyword_detection(audio_service, guild)
+
+        assert result is False
+        mock_schedule.assert_called_once()
+        args, kwargs = mock_schedule.call_args
+        assert args[0] is guild  # First positional arg is guild
+        assert 'start_no_voice' in str(kwargs.get('reason', ''))
+
+    @pytest.mark.asyncio
+    async def test_start_keyword_detection_schedules_retry_when_voice_lost_after_delay(self, audio_service):
+        """Ensure start_keyword_detection schedules a restart when voice is lost after the stabilize delay."""
+        from bot.services.audio import AudioService
+
+        audio_service.keyword_sinks = {}
+        audio_service.bot = Mock()
+        audio_service.bot.loop = asyncio.get_running_loop()
+        guild = Mock(id=1000, name="Guild LostVoice")
+        # Voice client: first is_connected() returns True, second returns False (after delay)
+        voice_client = Mock()
+        voice_client.is_connected.side_effect = [True, False]
+        guild.voice_client = voice_client
+
+        with patch.object(audio_service, 'schedule_keyword_detection_restart') as mock_schedule:
+            with patch('asyncio.sleep'):
+                result = await AudioService.start_keyword_detection(audio_service, guild)
+
+        assert result is False
+        mock_schedule.assert_called_once()
+        args, kwargs = mock_schedule.call_args
+        assert args[0] is guild
+        assert 'start_voice_lost' in str(kwargs.get('reason', ''))
+
+    @pytest.mark.asyncio
+    async def test_start_keyword_detection_schedules_retry_on_recording_failure(self, audio_service):
+        """Ensure start_keyword_detection schedules a restart when start_recording raises."""
+        from bot.services.audio import AudioService
+
+        audio_service.keyword_sinks = {}
+        audio_service.bot = Mock()
+        audio_service.bot.loop = asyncio.get_running_loop()
+        guild = Mock(id=1001, name="Guild RecordFail")
+        voice_client = Mock()
+        voice_client.is_connected.return_value = True
+        voice_client.start_recording.side_effect = RuntimeError("boom")
+        guild.voice_client = voice_client
+
+        with patch.object(audio_service, 'schedule_keyword_detection_restart') as mock_schedule:
+            with patch('asyncio.sleep'):
+                result = await AudioService.start_keyword_detection(audio_service, guild)
+
+        assert result is False
+        mock_schedule.assert_called_once()
+        args, kwargs = mock_schedule.call_args
+        assert args[0] is guild
+        assert 'start_recording_failed' in str(kwargs.get('reason', ''))
+
+    @pytest.mark.asyncio
+    async def test_start_keyword_detection_does_not_schedule_retry_when_disabled(self, audio_service):
+        """Ensure schedule_retry=False suppresses the retry scheduling."""
+        from bot.services.audio import AudioService
+
+        audio_service.keyword_sinks = {}
+        guild = Mock(id=1002, name="Guild NoRetry")
+        guild.voice_client = None
+
+        with patch.object(audio_service, 'schedule_keyword_detection_restart') as mock_schedule:
+            result = await AudioService.start_keyword_detection(audio_service, guild, schedule_retry=False)
+
+        assert result is False
+        mock_schedule.assert_not_called()
+
+    def test_schedule_keyword_detection_restart_noops_when_stt_disabled(self, audio_service):
+        """Ensure schedule_keyword_detection_restart does nothing when STT is disabled."""
+        audio_service._keyword_detection_restart_tasks = {}
+        audio_service._behavior = SimpleNamespace(
+            _guild_settings_service=SimpleNamespace(
+                get=Mock(return_value=SimpleNamespace(stt_enabled=False))
+            )
+        )
+        guild = Mock(id=1003, name="Guild STTOff")
+        guild.voice_client = Mock()
+
+        # If STT disabled, early return — no task stored
+        audio_service.schedule_keyword_detection_restart(guild, reason="test")
+
+        assert 1003 not in audio_service._keyword_detection_restart_tasks
+
+    def test_schedule_keyword_detection_restart_noop_when_already_running(self, audio_service):
+        """Ensure schedule_keyword_detection_restart skips when detection is healthy."""
+        from bot.services.audio import KeywordDetectionSink
+
+        audio_service._keyword_detection_restart_tasks = {}
+        audio_service.bot = Mock()
+        audio_service.bot.loop = asyncio.new_event_loop()
+        guild = Mock(id=1004, name="Guild AlreadyRunning")
+
+        # Create a healthy sink with an alive thread
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        sink.worker_thread = Mock()
+        sink.worker_thread.is_alive.return_value = True
+        audio_service.keyword_sinks[1004] = sink
+
+        with patch.object(audio_service, '_is_stt_enabled_for_guild', return_value=True):
+            audio_service.schedule_keyword_detection_restart(guild, reason="test")
+
+        # No task should be stored
+        assert 1004 not in audio_service._keyword_detection_restart_tasks
+
+    @pytest.mark.asyncio
+    async def test_schedule_keyword_detection_restart_noop_when_duplicate_task(self, audio_service):
+        """Ensure schedule_keyword_detection_restart does not duplicate an active restart task."""
+        audio_service._keyword_detection_restart_tasks = {}
+        audio_service.bot = Mock()
+        audio_service.bot.loop = asyncio.get_running_loop()
+        guild = Mock(id=1005, name="Guild Duplicate")
+
+        with patch.object(audio_service, '_is_stt_enabled_for_guild', return_value=True):
+            # First call should create a task
+            audio_service.schedule_keyword_detection_restart(guild, reason="first")
+            assert 1005 in audio_service._keyword_detection_restart_tasks
+            first_task = audio_service._keyword_detection_restart_tasks[1005]
+            assert not first_task.done()
+
+            # Second call should be a no-op (task already exists)
+            audio_service.schedule_keyword_detection_restart(guild, reason="second")
+            assert 1005 in audio_service._keyword_detection_restart_tasks
+            assert audio_service._keyword_detection_restart_tasks[1005] is first_task
+
+        # Clean up
+        first_task.cancel()
+        try:
+            await first_task
+        except (asyncio.CancelledError, Exception):
+            pass
 
     def test_default_silence_timeout_is_one_second(self):
         """Verify the voice command silence timeout default value is 1.0."""

@@ -36,6 +36,14 @@ database copy.db
 htmlcov/
 .playwright-mcp/
 /*.png
+/*.jpg
+/*.jpeg
+/*.webp
+/*.webm
+/playwright-report/
+/test-results/
+/screenshots/
+/debug-screenshots/
 
 # Trailer (Remotion)
 trailer/node_modules/

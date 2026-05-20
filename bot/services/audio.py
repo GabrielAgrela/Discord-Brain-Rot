@@ -86,6 +86,8 @@ class AudioService:
         
         # Keyword detection state
         self.keyword_sinks: Dict[int, 'KeywordDetectionSink'] = {}
+        # Per-guild keyword detection restart tasks (self-healing retries)
+        self._keyword_detection_restart_tasks: Dict[int, asyncio.Task] = {}
         
         # Per-guild connection locks to prevent race conditions
         self._connection_locks: Dict[int, asyncio.Lock] = {}
@@ -1339,7 +1341,8 @@ class AudioService:
                             # Successfully moved
                             self._clear_reconnection_state(guild_id)
                             self._connection_timestamps[guild_id] = time.time()
-                            # start_keyword_detection called below outside lock
+                            # Attempt to start keyword detection (schedules retry on failure)
+                            await self.start_keyword_detection(channel.guild)
                             return voice_client
                     else:
                         # Already connected to the right channel
@@ -1356,7 +1359,8 @@ class AudioService:
                         if is_socket_healthy:
                              # Current connection is good
                              self._clear_reconnection_state(guild_id)
-                             # start_keyword_detection called below outside lock
+                             # Attempt to start keyword detection (schedules retry on failure)
+                             await self.start_keyword_detection(channel.guild)
                              return voice_client
                         else:
                              print(f"[AudioService] Voice client has invalid socket (fd=-1) in {channel.guild.name}, reconnecting...")
@@ -2648,8 +2652,15 @@ class AudioService:
                 if self._progress_update_task is current_task:
                     self._progress_update_task = None
 
-    async def start_keyword_detection(self, guild: discord.Guild):
-        """Start background keyword detection in the specified guild."""
+    async def start_keyword_detection(self, guild: discord.Guild, schedule_retry: bool = True):
+        """Start background keyword detection in the specified guild.
+        
+        Args:
+            guild: The guild to start keyword detection for.
+            schedule_retry: If True and detection fails due to transient
+                reasons, schedule a short-term retry loop via
+                ``schedule_keyword_detection_restart`` (default True).
+        """
         try:
             if not self._is_stt_enabled_for_guild(guild):
                 print(f"[AudioService] STT disabled for {guild.name}; skipping keyword detection start")
@@ -2657,6 +2668,8 @@ class AudioService:
 
             voice_client = guild.voice_client
             if not voice_client or not voice_client.is_connected():
+                if schedule_retry:
+                    self.schedule_keyword_detection_restart(guild, reason="start_no_voice")
                 return False
 
             # Check if we already have a sink
@@ -2679,6 +2692,8 @@ class AudioService:
             voice_client = guild.voice_client
             if not voice_client or not voice_client.is_connected():
                 print(f"[AudioService] Voice connection lost during delay, skipping keyword detection")
+                if schedule_retry:
+                    self.schedule_keyword_detection_restart(guild, reason="start_voice_lost")
                 return False
 
             print(f"[AudioService] Starting keyword detection in {guild.name}")
@@ -2690,9 +2705,13 @@ class AudioService:
             except Exception as e:
                 print(f"[AudioService] Failed to start recording: {e}")
                 sink.stop()
+                if schedule_retry:
+                    self.schedule_keyword_detection_restart(guild, reason="start_recording_failed")
                 return False
         except Exception as e:
             print(f"[AudioService] Error starting keyword detection: {e}")
+            if schedule_retry:
+                self.schedule_keyword_detection_restart(guild, reason="start_exception")
             return False
 
     async def stop_keyword_detection(self, guild: discord.Guild):
@@ -2720,6 +2739,105 @@ class AudioService:
         except Exception as e:
             print(f"[AudioService] Error stopping keyword detection: {e}")
             return False
+
+    def schedule_keyword_detection_restart(
+        self,
+        guild: discord.Guild,
+        reason: str = "",
+        *,
+        attempts: int = 5,
+        initial_delay: float = 2.0,
+    ) -> None:
+        """Schedule a short-term retry loop for transient keyword detection start failures.
+
+        No-op if STT is disabled, the bot loop is closed, or an active
+        restart task for the guild already exists.
+
+        The retry loop checks whether a connected voice client exists and
+        keyword sinks are healthy.  It calls ``start_keyword_detection``
+        (with ``schedule_retry=False`` to avoid nested retries) when the
+        voice client is ready.  Delays start at *initial_delay* and are
+        doubled each attempt until capped at 8 seconds.
+
+        Args:
+            guild: The guild whose keyword detection should be retried.
+            reason: Short label for log messages (e.g. ``"auto_follow_move"``).
+            attempts: Maximum retry attempts (default 5).
+            initial_delay: Initial delay in seconds (default 2.0), doubled
+                each attempt and capped at 8.0 s.
+        """
+        if not self._is_stt_enabled_for_guild(guild):
+            print(f"[AudioService] STT disabled for {guild.name}; not scheduling keyword detection restart"
+                  + (f" ({reason})" if reason else ""))
+            return
+
+        if self.bot.loop.is_closed():
+            return
+
+        # Don't duplicate an active restart task for the same guild
+        existing = self._keyword_detection_restart_tasks.get(guild.id)
+        if existing and not existing.done():
+            print(f"[AudioService] Keyword detection restart already scheduled for {guild.name}"
+                  + (f" ({reason})" if reason else ""))
+            return
+
+        # If keyword detection is already running and healthy, no restart needed
+        if guild.id in self.keyword_sinks:
+            sink = self.keyword_sinks[guild.id]
+            if hasattr(sink, 'worker_thread') and sink.worker_thread.is_alive():
+                print(f"[AudioService] Keyword detection already running in {guild.name}; skipping scheduled restart"
+                      + (f" ({reason})" if reason else ""))
+                return
+
+        reason_tag = f" ({reason})" if reason else ""
+
+        async def _restart_loop() -> None:
+            delay = initial_delay
+            for attempt in range(1, attempts + 1):
+                try:
+                    await asyncio.sleep(delay)
+
+                    if self.bot.loop.is_closed():
+                        return
+
+                    # Check if already healthy (e.g. a concurrent path started it)
+                    if guild.id in self.keyword_sinks:
+                        sink = self.keyword_sinks[guild.id]
+                        if hasattr(sink, 'worker_thread') and sink.worker_thread.is_alive():
+                            print(f"[AudioService] Keyword detection became healthy during restart retry{reason_tag}")
+                            return
+
+                    voice_client = guild.voice_client
+                    if not voice_client or not voice_client.is_connected():
+                        next_delay = min(delay * 2, 8.0)
+                        print(f"[AudioService] Retry {attempt}/{attempts}: No voice client yet{reason_tag}, next check in {next_delay}s")
+                        delay = next_delay
+                        continue
+
+                    print(f"[AudioService] Retry {attempt}/{attempts}: Starting keyword detection{reason_tag}")
+                    result = await self.start_keyword_detection(guild, schedule_retry=False)
+                    if result:
+                        print(f"[AudioService] Keyword detection started on retry {attempt}{reason_tag}")
+                        return
+
+                    # Failed — increase delay for next attempt
+                    delay = min(delay * 2, 8.0)
+                except asyncio.CancelledError:
+                    return
+                except Exception as e:
+                    print(f"[AudioService] Error in keyword detection restart retry {attempt}{reason_tag}: {e}")
+                    delay = min(delay * 2, 8.0)
+
+            print(f"[AudioService] Keyword detection restart failed after {attempts} attempts{reason_tag}")
+
+        task = asyncio.create_task(_restart_loop())
+        self._keyword_detection_restart_tasks[guild.id] = task
+
+        def _cleanup(_task: asyncio.Task) -> None:
+            if self._keyword_detection_restart_tasks.get(guild.id) is _task:
+                del self._keyword_detection_restart_tasks[guild.id]
+
+        task.add_done_callback(_cleanup)
 
     async def _on_detection_finished(self, sink, guild):
         """Cleanup when detection recording is stopped."""
