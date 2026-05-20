@@ -111,8 +111,8 @@ class TestBackupService:
         (project_root / "venv").mkdir()
         (project_root / ".git").mkdir()
         (project_root / "__pycache__").mkdir()
-        (project_root / "Logs").mkdir()
-        (project_root / "Downloads").mkdir()
+        (project_root / "logs").mkdir()
+        (project_root / "downloads").mkdir()
         (project_root / ".gemini").mkdir()
         # Regular file and file inside a previously-excluded dir
         (project_root / "keep_me.py").write_text("code", encoding="utf-8")

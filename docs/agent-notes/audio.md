@@ -11,7 +11,7 @@ Read this when changing uploads, sound ingest, playback, generated sound cards, 
 - Normalization uses compression plus peak-safe gain: `compress_dynamic_range` first, then gain clamped by `SOUND_INGEST_PEAK_CEILING_DBFS`.
 - Defaults are tuned for audible but controlled ingest: `SOUND_INGEST_TARGET_DBFS=-18.0`, `SOUND_INGEST_PEAK_CEILING_DBFS=-2.0`, `SOUND_INGEST_COMPRESS_ENABLED=true`, `SOUND_INGEST_COMPRESS_THRESHOLD_DBFS=-14.0`, `SOUND_INGEST_COMPRESS_RATIO=6.0`.
 - Keep normalization best-effort: log failures and continue saving so ffmpeg/pydub edge cases do not block uploads/imports.
-- TikTok/YouTube/Instagram downloads passing through `Downloads/` are normalized in `SoundDownloader.move_sounds`; keep env knobs consistent with `SoundService`.
+- TikTok/YouTube/Instagram downloads passing through `downloads/` are normalized in `SoundDownloader.move_sounds`; keep env knobs consistent with `SoundService`.
 - TikTok collection favorite watchers use `FavoriteWatcherService` and `SoundService.import_sound_from_video()` to import directly into the guild-scoped sound library. Adding a watcher seeds current collection videos as already seen so only future additions import, then each successful future import posts a `DownloadedSoundView` image-card notification.
 - All sound import notifications (scraper `move_sounds`, favorite watcher, web upload, manual Discord upload) share the same `SoundImportNotificationService.send_notification()` method. Each source has a default title template, requester label, and accent colour. Web uploads and favorite watchers use blue (`#5865F2`); scraper/manual use red (`#ED4245`). Cross-process web upload notifications are queued in `sound_import_notifications` and drained by `BackgroundService.sound_import_notification_drain_loop`.
 
@@ -54,13 +54,13 @@ Read this when changing uploads, sound ingest, playback, generated sound cards, 
 
 ## Vosk Keyword Detection
 
-- Vosk keyword detection remains supported for configured trigger words. Do not remove `Data/models/vosk-model-small-pt-0.3`, `KeywordCog`, `KeywordRepository`, the `AudioService` recording sink, or DAVE inbound decrypt unless explicitly asked.
+- Vosk keyword detection remains supported for configured trigger words. Do not remove `data/models/vosk-model-small-pt-0.3`, `KeywordCog`, `KeywordRepository`, the `AudioService` recording sink, or DAVE inbound decrypt unless explicitly asked.
 - The removed feature is only ambient Ventura LLM/commentary: no LLM provider/profile stack, no `_ai_commentary_service`, and no `/ventura` admin toggle. Manual Ventura `/tts` and `/sts` remains.
 - `AudioService.start_keyword_detection` must enforce guild-level `stt_enabled` from `GuildSettingsService`.
 - `ensure_voice_connected` can be invoked multiple times during join/event playback; guard against starting keyword detection when STT is disabled.
 - If Vosk starts and stops within seconds, verify `guild_settings.stt_enabled` first.
 - `KeywordDetectionSink` runs in a background thread. Guard `asyncio.run_coroutine_threadsafe()` with `if not loop.is_closed():`.
-- Startup auto-join is owned by `BackgroundService._auto_join_channels()`. Do not add a second `on_ready` auto-join in `PersonalGreeter.py`.
+- Startup auto-join is owned by `BackgroundService._auto_join_channels()`. Do not add a second `on_ready` auto-join in `personal_greeter.py`.
 - Final keyword latency is driven by `KeywordDetectionSink.silence_flush_seconds` / `KEYWORD_SILENCE_FLUSH_SECONDS` plus worker queue timeout. Partials are faster but less stable.
 
 ## Voice Commands (Wake Word + Groq Whisper)
@@ -74,7 +74,7 @@ Read this when changing uploads, sound ingest, playback, generated sound cards, 
 - All injection happens in-memory only — no DB migration or `/keyword add` is required. DB keywords that collide with a reserved wake word/alias are overridden with a log warning.
  - When `action == "voice_command"` in `trigger_action`, `_handle_voice_command` is called:
    1. Applies a per-user rate limit (configurable via `VOICE_COMMAND_COOLDOWN_SECONDS`, default 5 s).
-   2. **Plays a start prompt clip** by filename from `Sounds/` (no DB lookup) via `AudioService._play_voice_command_prompt(channel, start_sound, wait=True)`. The clip is decoded to 48 kHz stereo 16-bit PCM using pydub and cached by `(filepath, mtime)` in `_voice_command_prompt_pcm_cache`. Playback uses direct `discord.PCMAudio(io.BytesIO(pcm))` — no FFmpeg. Waits for completion before proceeding to recording. Silently skipped when prompts disabled, voice client busy/disconnected, or file missing.
+   2. **Plays a start prompt clip** by filename from `sounds/` (no DB lookup) via `AudioService._play_voice_command_prompt(channel, start_sound, wait=True)`. The clip is decoded to 48 kHz stereo 16-bit PCM using pydub and cached by `(filepath, mtime)` in `_voice_command_prompt_pcm_cache`. Playback uses direct `discord.PCMAudio(io.BytesIO(pcm))` — no FFmpeg. Waits for completion before proceeding to recording. Silently skipped when prompts disabled, voice client busy/disconnected, or file missing.
     3. **Fresh post-prompt command recording** via `_record_voice_command_after_beep()`. A capture entry is registered in `_active_captures[user_id]`, and the next incoming per-user PCM chunks (from `write()`) are appended to it. The method polls until the user stops speaking (configurable silence timeout via `VOICE_COMMAND_SILENCE_SECONDS`, default 1.0 s) or reaches the max duration (`VOICE_COMMAND_CAPTURE_SECONDS`, default 6 s). Only the triggering user's audio is captured — other users' audio is ignored. Capture state is cleaned up in a ``finally`` block.
    4. Wraps PCM as WAV via `pcm_to_wav()` from `bot/services/voice_command.py`.
    5. Sends the WAV to `GroqWhisperService.transcribe()` which POSTs to `https://api.groq.com/openai/v1/audio/transcriptions` with model `whisper-large-v3` (accuracy-optimised; override with `GROQ_WHISPER_MODEL` for speed).
@@ -123,7 +123,7 @@ Read this when changing uploads, sound ingest, playback, generated sound cards, 
     3. **``trigger_action()``** – silently discards non-``voice_command`` actions that arrive from already-queued items.
     - The helpers (``_is_voice_command_listening``, ``_begin_voice_command_listening``, ``_end_voice_command_listening``) use ``getattr`` fallbacks so they work on instances created with ``__new__()`` during tests.
   - **Fresh post-prompt capture**: `KeywordDetectionSink._record_voice_command_after_beep()` sets up an active capture entry in `_active_captures[user_id]`. Incoming PCM chunks for that user (from ``write()``) are appended to the capture under ``self.buffer_lock``. A polling loop detects silence once at least one chunk has arrived. The capture dict stores ``chunks``, ``last_audio_time``, and ``total_bytes``. Cleanup happens in a ``finally`` block.
- - **Debug save**: `GroqWhisperService` can persist a copy of every WAV sent to the API when `GROQ_WHISPER_DEBUG_SAVE_AUDIO=true` (disabled by default). Files go to `GROQ_WHISPER_DEBUG_AUDIO_DIR` (default `Debug/groq_whisper/` under the project root) as timestamped `groq-whisper-<ISO8601>.wav` plus an overwritten `latest.wav`. Retention (`GROQ_WHISPER_DEBUG_AUDIO_KEEP`, default 25) prunes only timestamped files; `latest.wav` is never pruned. Failures are logged as warnings and never block transcription. The save happens inside `GroqWhisperService.transcribe()`, after the API key check and before the HTTP POST.
+   - **Debug save**: `GroqWhisperService` can persist a copy of every WAV sent to the API when `GROQ_WHISPER_DEBUG_SAVE_AUDIO=true` (disabled by default). Files go to `GROQ_WHISPER_DEBUG_AUDIO_DIR` (default `debug/groq_whisper/` under the project root) as timestamped `groq-whisper-<ISO8601>.wav` plus an overwritten `latest.wav`. Retention (`GROQ_WHISPER_DEBUG_AUDIO_KEEP`, default 25) prunes only timestamped files; `latest.wav` is never pruned. Failures are logged as warnings and never block transcription. The save happens inside `GroqWhisperService.transcribe()`, after the API key check and before the HTTP POST.
  - With fresh post-prompt capture, the saved debug WAV contains only the command speech after the start prompt (e.g., "play despacito"), not several pre-wake seconds.
 
 ## PCM And DAVE
@@ -190,6 +190,6 @@ Read this when changing uploads, sound ingest, playback, generated sound cards, 
 - `AudioService.is_afk_channel(channel)` is the canonical check: compares `channel.guild.afk_channel.id` first, then falls back to `channel.name.lower().startswith('afk')`.
 - `ensure_voice_connected` refuses AFK channels by returning `None` immediately with a log message. This is the last-resort defense.
 - `get_largest_voice_channel` and `get_user_voice_channel` both skip AFK channels via `is_afk_channel`.
-- In `PersonalGreeter.on_voice_state_update`, a user auto-moved to the guild AFK channel is treated as a **leave** event from their previous channel. The immediate auto-disconnect is skipped for AFK redirects so the leave sound can play in the now-empty previous channel.
+- In `personal_greeter.on_voice_state_update`, a user auto-moved to the guild AFK channel is treated as a **leave** event from their previous channel. The immediate auto-disconnect is skipped for AFK redirects so the leave sound can play in the now-empty previous channel.
 - `play_audio_for_event` accepts `afk_redirect=False`. When `True`: (1) the `is_channel_empty` skip is bypassed, and (2) the bot disconnects after the event if it is alone in the previous channel.
 - Leave events without a custom sound no longer connect to voice at all; they just log the analytics action.

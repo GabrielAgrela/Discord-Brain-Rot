@@ -357,7 +357,7 @@ class TTS:
         filename = f"tts-{self._timestamp_token()}-{safe_text}.mp3"
         self.filename = filename
         
-        path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", filename))
+        path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "sounds", filename))
         tts.save(path)
         # Apply configurable loudness normalization for consistent perceived volume
         self._apply_loudnorm_if_enabled(path)
@@ -403,7 +403,7 @@ class TTS:
             await self.behavior.send_error_message("No matching source sound found for speech-to-speech.")
             return
 
-        audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", filename))
+        audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "sounds", filename))
         source_stem = os.path.splitext(os.path.basename(filename))[0]
         output_filename = f"{source_stem}-{char}-{self._timestamp_token()}.mp3"
         self.filename = output_filename
@@ -472,7 +472,7 @@ class TTS:
                             audio = AudioSegment.from_mp3(io.BytesIO(audio_data))
                             final_audio = audio
 
-                            path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", output_filename))
+                            path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "sounds", output_filename))
                             Database().insert_sound(
                                 os.path.basename(output_filename),
                                 os.path.basename(output_filename),
@@ -520,7 +520,7 @@ class TTS:
             await self.behavior.send_error_message("No matching source sound found for isolation.")
             return
 
-        audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", filename))
+        audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "sounds", filename))
         source_stem = os.path.splitext(os.path.basename(filename))[0]
         output_filename = f"{source_stem}-isolated-{self._timestamp_token()}.mp3"
         self.filename = output_filename
@@ -578,7 +578,7 @@ class TTS:
                             louder_audio = audio + boost_volume
                             final_audio = louder_audio
 
-                            path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", output_filename))
+                            path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "sounds", output_filename))
                             Database().insert_sound(
                                 os.path.basename(output_filename),
                                 os.path.basename(output_filename),
@@ -731,7 +731,7 @@ class TTS:
         }
 
         perf_start = time.time()
-        path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Sounds", filename))
+        path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "sounds", filename))
         timeout = aiohttp.ClientTimeout(total=self.el_tts_timeout_seconds)
         first_chunk_time: Optional[float] = None
         http_status = None

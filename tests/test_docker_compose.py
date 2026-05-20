@@ -17,8 +17,8 @@ def _extract_service_block(compose_text: str, service_name: str) -> str:
 
 
 def test_web_service_shares_sounds_volume_with_bot() -> None:
-    """Web uploads must land in the same Sounds directory consumed by the bot."""
+    """Web uploads must land in the same sounds directory consumed by the bot."""
     compose_text = Path("docker-compose.yml").read_text(encoding="utf-8")
     web_block = _extract_service_block(compose_text, "web")
 
-    assert "/home/gabi/github/Discord-Brain-Rot/Sounds:/app/Sounds" in web_block
+    assert "/home/gabi/github/Discord-Brain-Rot/sounds:/app/sounds" in web_block

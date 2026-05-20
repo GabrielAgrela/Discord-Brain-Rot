@@ -46,7 +46,7 @@ This README is based on the current codebase behavior (not historical README ass
 - Periodic MyInstants scraping (background task).
 
 ### Voice Commands (Wake Word + Groq Whisper + Ventura Chat)
-- When Vosk detects the configured wake word, the bot plays a **start prompt clip** from `Sounds/` (no DB lookup), then **records fresh per-user PCM audio after the prompt** (not a rolling buffer). Recording stops when the user stops talking (silence timeout) or a max duration is reached. The captured audio is wrapped as WAV and sent to Groq Whisper (`whisper-large-v3`) for transcription. This avoids sending pre-wake conversation/silence.
+- When Vosk detects the configured wake word, the bot plays a **start prompt clip** from `sounds/` (no DB lookup), then **records fresh per-user PCM audio after the prompt** (not a rolling buffer). Recording stops when the user stops talking (silence timeout) or a max duration is reached. The captured audio is wrapped as WAV and sent to Groq Whisper (`whisper-large-v3`) for transcription. This avoids sending pre-wake conversation/silence.
 - **Keyword suppression during listening**: While the start prompt plays and fresh command audio is being captured, all other Vosk keyword detections (slap, list, second wake word) are suppressed. This prevents the bot from triggering slap/list actions or starting a second voice-command session during the voice-command listening window. Suppression ends as soon as the capture completes, before Groq/Ventura/TTS processing begins.
 - **Three-way branching** after transcription:
      1. **Play command** (e.g. "ventura toca air horn"): the bot plays a **done prompt clip** (acknowledgment), then fuzzy-matches and plays the requested sound, like `/toca`. If the argument matches an existing sound list name (case-insensitively), a random sound from that list is played instead (e.g. "ventura toca MEMES" when a "memes" list exists). You can also explicitly say "ventura toca lista <list name>" to use a list. Command verbs (`toca`, `tocar`, `toque`, etc.) are matched case-insensitively.
@@ -59,11 +59,11 @@ This README is based on the current codebase behavior (not historical README ass
    - `<wake word/alias> toca/tocar/toque/mete/meter/põe/poe/reproduz/reproduzir <sound name>` — fuzzy-matches and plays the requested sound, like `/toca` but with an important difference: if the exact name match is blacklisted/rejected, voice commands **skip it and fall back** to the nearest non-blacklisted fuzzy match (since voice has no autocomplete). English `play` is not supported; use Portuguese verbs.
    - `<wake word/alias> toca <list name>` — if a sound list with that name exists, plays a random sound from that list. Use the explicit marker `lista` to avoid ambiguity (e.g. "ventura toca lista memes").
    - `<wake word/alias> mute` / `cala-te` / `cala te` / `calate` / `silêncio` / `silencio` / `shut up` / `shutup` / `quiet` — activates the 30-minute mute (same behavior as the mute button: plays a random slap sound if available, then prevents sound playback for 30 minutes).
-- Pre-decoded prompt MP3 clips from `Sounds/` (no FFmpeg, no DB lookup) are played as wake acknowledgement (start prompt) and capture-complete indication (done prompt, play path only) without interrupting current audio playback. Both prompts randomly select from a configurable pool of filenames (single or comma-separated). The done prompt is only played **after** Groq transcription when a play command is detected.
+- Pre-decoded prompt MP3 clips from `sounds/` (no FFmpeg, no DB lookup) are played as wake acknowledgement (start prompt) and capture-complete indication (done prompt, play path only) without interrupting current audio playback. Both prompts randomly select from a configurable pool of filenames (single or comma-separated). The done prompt is only played **after** Groq transcription when a play command is detected.
 - Voice-command-initiated playback includes a "Heard: <command>" footer pill on the generated sound card image (and in the embed fallback): for play commands this shows "toca <sound>" (or "toca lista <name>" for list playback), and for non-play Ventura chat commands this shows the user's transcript after the wake word (e.g. "what time is it").
 - Requires `GROQ_API_KEY` for transcription. Additionally requires `OPENROUTER_API_KEY` for the non-play Ventura chat branch (OpenRouter DeepSeek model, default `deepseek/deepseek-v4-flash` with reasoning disabled for fastest replies) and `EL_key`/`EL_voice_id_pt` for ElevenLabs Ventura TTS playback.
 - Configurable capture duration, silence timeout, cooldown, model, wake words, Vosk aliases, confidence threshold, prompt clips, and prompt enable/disable via environment variables.
- - Debug save of the exact WAV bytes sent to Groq is disabled by default. Set ``GROQ_WHISPER_DEBUG_SAVE_AUDIO=true`` to enable saving WAV files to ``Debug/groq_whisper/`` with timestamped names plus a ``latest.wav`` overwrite for quick inspection. With the fresh post-prompt capture, debug WAV files contain only the command speech (e.g., "play despacito"), not several pre-wake seconds.
+   - Debug save of the exact WAV bytes sent to Groq is disabled by default. Set ``GROQ_WHISPER_DEBUG_SAVE_AUDIO=true`` to enable saving WAV files to ``debug/groq_whisper/`` with timestamped names plus a ``latest.wav`` overwrite for quick inspection. With the fresh post-prompt capture, debug WAV files contain only the command speech (e.g., "play despacito"), not several pre-wake seconds.
 - Non-play Ventura chat keeps **up to the last 3 successful exchanges from the last 5 minutes** per user/guild in memory as context, so follow-up queries ("you said X, but what about Y?") include prior conversation. Expired entries older than the retention window are automatically pruned. Context is scoped by guild + user ID (``guild:{id}:user:{id}``). Only successful model replies are appended to history — API errors, timeouts, or empty responses are not stored.
 - Before each OpenRouter request, the bot logs the **full request payload** at INFO level with the ``[VenturaChat] Request payload`` prefix, including the system prompt, historical user/assistant messages, and the current user transcript — formatted as readable pretty-printed JSON (``ensure_ascii=False`` so Portuguese/accented text is legible). API keys, auth headers, and other secrets are never included in these log entries.
 
@@ -151,7 +151,7 @@ This README is based on the current codebase behavior (not historical README ass
 - Bot background task consumes web playback/control requests from the internal transport table.
 
 ### Operations and Admin
-- Daily rotating logs in `Logs/YYYY-MM-DD.log` (+ `Logs/errors.log`).
+- Daily rotating logs in `logs/YYYY-MM-DD.log` (+ `logs/errors.log`).
 - Admin slash commands:
   - `/lastlogs`
   - `/commands`
@@ -296,7 +296,7 @@ This README is based on the current codebase behavior (not historical README ass
 - FFmpeg
 - Node.js/npm (for Remotion year-review and weekly-wrapped rendering)
 - Chromium + chromedriver (image rendering/scraping)
-- Vosk model at `Data/models/vosk-model-small-pt-0.3`
+- Vosk model at `data/models/vosk-model-small-pt-0.3`
 
 ## Environment Variables
 
@@ -361,7 +361,7 @@ This README is based on the current codebase behavior (not historical README ass
 - `GROQ_WHISPER_LANGUAGE` (optional; language hint for Whisper transcription, default `pt` — prevents Whisper from translating Portuguese utterances to English; set to empty string to restore auto-detect for strongly mixed-language deployments)
 - `GROQ_WHISPER_TIMEOUT_SECONDS` (optional; Groq API timeout, default `20`)
 - `GROQ_WHISPER_DEBUG_SAVE_AUDIO` (optional; set `true` to enable saving WAV files sent to Groq Whisper for debugging, default `false`)
-- `GROQ_WHISPER_DEBUG_AUDIO_DIR` (optional; directory for saved debug WAVs; default `Debug/groq_whisper/` under the project root; absolute paths are used as-is)
+- `GROQ_WHISPER_DEBUG_AUDIO_DIR` (optional; directory for saved debug WAVs; default `debug/groq_whisper/` under the project root; absolute paths are used as-is)
 - `GROQ_WHISPER_DEBUG_AUDIO_KEEP` (optional; max number of timestamped debug WAVs to retain, default `25`; `latest.wav` is not counted)
 - `VOICE_COMMAND_ENABLED` (optional; set `false` to disable wake-word voice commands while keeping STT enabled, default `true`)
 - `VOICE_COMMAND_WAKE_WORDS` (optional; comma-separated wake words for voice commands, default `ventura`)
@@ -371,9 +371,9 @@ This README is based on the current codebase behavior (not historical README ass
 
  - `VOICE_COMMAND_BEEP_ENABLED` (optional; set `false` to disable voice command prompt clips entirely, default `true`)
 
- - `VOICE_COMMAND_START_SOUND` (optional; comma-separated prompt MP3 filenames under `Sounds/` — one is chosen at random when wake word is accepted. A single filename also works for backward compatibility. Default: `"16-05-26-19-52-51-637928-Sim.mp3,16-05-26-20-11-24-672100-Diz.mp3,16-05-26-20-12-44-779160-whispers O que que queres.mp3,16-05-26-20-13-18-557980-Frustrated sharp Foda-se q.mp3,19-05-26-18-25-29-767591-impatient O que é que queres.mp3,19-05-26-18-25-42-020903-cheerful Fala campeão.mp3,19-05-26-18-26-21-035113-casual Fala campeão.mp3,19-05-26-18-28-18-619313-excited Vai estou a gravar .mp3,19-05-26-18-28-34-628591-challenging Força surpreend.mp3,19-05-26-18-28-57-441240-curious Diz lá chefe.mp3,19-05-26-18-29-18-588546-stern Tens seis segundos par.mp3"`)
+ - `VOICE_COMMAND_START_SOUND` (optional; comma-separated prompt MP3 filenames under `sounds/` — one is chosen at random when wake word is accepted. A single filename also works for backward compatibility. Default: `"16-05-26-19-52-51-637928-Sim.mp3,16-05-26-20-11-24-672100-Diz.mp3,16-05-26-20-12-44-779160-whispers O que que queres.mp3,16-05-26-20-13-18-557980-Frustrated sharp Foda-se q.mp3,19-05-26-18-25-29-767591-impatient O que é que queres.mp3,19-05-26-18-25-42-020903-cheerful Fala campeão.mp3,19-05-26-18-26-21-035113-casual Fala campeão.mp3,19-05-26-18-28-18-619313-excited Vai estou a gravar .mp3,19-05-26-18-28-34-628591-challenging Força surpreend.mp3,19-05-26-18-28-57-441240-curious Diz lá chefe.mp3,19-05-26-18-29-18-588546-stern Tens seis segundos par.mp3"`)
 
- - `VOICE_COMMAND_DONE_SOUND` (optional; comma-separated prompt MP3 filenames under `Sounds/` — one is chosen at random after command audio capture completes. A single filename also works for backward compatibility. Default: `"16-05-26-19-54-41-416014-Ok fica bem.mp3,16-05-26-20-14-36-595803-Sim senhor.mp3,16-05-26-20-15-00-686598-Ok já toco essa merda.mp3,16-05-26-20-15-34-525805-shouts aggressive Ok já ag.mp3,19-05-26-18-29-47-016743-nodding Ok já trato disso.mp3,19-05-26-18-29-59-198767-sarcastic Ok seu animal.mp3,19-05-26-18-30-10-622881-sighs Já ouvi essa merda.mp3,19-05-26-18-30-25-238017-sarcastic Ok vou fingir que.mp3,19-05-26-18-30-43-231662-frustrated Foda-se sighs .mp3"`)
+ - `VOICE_COMMAND_DONE_SOUND` (optional; comma-separated prompt MP3 filenames under `sounds/` — one is chosen at random after command audio capture completes. A single filename also works for backward compatibility. Default: `"16-05-26-19-54-41-416014-Ok fica bem.mp3,16-05-26-20-14-36-595803-Sim senhor.mp3,16-05-26-20-15-00-686598-Ok já toco essa merda.mp3,16-05-26-20-15-34-525805-shouts aggressive Ok já ag.mp3,19-05-26-18-29-47-016743-nodding Ok já trato disso.mp3,19-05-26-18-29-59-198767-sarcastic Ok seu animal.mp3,19-05-26-18-30-10-622881-sighs Já ouvi essa merda.mp3,19-05-26-18-30-25-238017-sarcastic Ok vou fingir que.mp3,19-05-26-18-30-43-231662-frustrated Foda-se sighs .mp3"`)
 - `VOICE_COMMAND_WAKE_ALIASES` (optional; comma-separated Vosk grammar words injected into the keyword map, default `ventura`; overrides `VOICE_COMMAND_WAKE_WORDS` for Vosk injection; falls back to wake words when empty, range `0.0`-`1.0`)
 - `VOICE_COMMAND_WAKE_CONFIDENCE_THRESHOLD` (optional; confidence threshold for voice-command wake detection, default `0.85`, range `0.0`-`1.0`; normal keywords still use `0.95`)
 - `OPENROUTER_API_KEY` (required for non-play Ventura voice command chat branch; enables OpenRouter model)
@@ -450,7 +450,7 @@ docker-compose restart
 docker-compose down
 ```
 
-The optional web service shares the same `Sounds/` and `Data/` mounts as the bot, so web uploads are written where bot playback can read them.
+The optional web service shares the same `sounds/` and `data/` mounts as the bot, so web uploads are written where bot playback can read them.
 
 ## Verify, Test, Deploy
 
@@ -470,17 +470,17 @@ It runs:
 
 ```bash
 ./venv/bin/python -m pytest -q tests/
-./venv/bin/python PersonalGreeter.py
+./venv/bin/python personal_greeter.py
 # Optional web dashboard:
-./venv/bin/python WebPage.py
+./venv/bin/python web_page.py
 ```
 
 ## Project Layout
 
 ```text
 Discord-Brain-Rot/
-├── PersonalGreeter.py
-├── WebPage.py
+├── personal_greeter.py
+├── web_page.py
 ├── config.py
 ├── bot/
 │   ├── commands/
@@ -491,11 +491,11 @@ Discord-Brain-Rot/
 │   ├── web/
 │   └── downloaders/
 ├── templates/
-├── Data/
-├── Sounds/
-├── Downloads/
-├── Logs/
-├── Debug/
+├── data/
+├── sounds/
+├── downloads/
+├── logs/
+├── debug/
 └── tests/
 ```
 

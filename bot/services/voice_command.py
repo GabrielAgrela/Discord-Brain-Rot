@@ -91,7 +91,7 @@ _GROQ_WHISPER_DEBUG_SAVE: bool = (
 
 _GROQ_WHISPER_DEBUG_DIR: str = os.getenv("GROQ_WHISPER_DEBUG_AUDIO_DIR", "")
 if not _GROQ_WHISPER_DEBUG_DIR:
-    _GROQ_WHISPER_DEBUG_DIR = str(PROJECT_ROOT / "Debug" / "groq_whisper")
+    _GROQ_WHISPER_DEBUG_DIR = str(PROJECT_ROOT / "debug" / "groq_whisper")
 
 GROQ_WHISPER_DEBUG_KEEP: int = max(1, int(os.getenv("GROQ_WHISPER_DEBUG_AUDIO_KEEP", "25")))
 

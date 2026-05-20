@@ -28,16 +28,19 @@ def _env_float(name: str, default: float) -> float:
 PROJECT_ROOT = Path(__file__).parent.absolute()
 
 # Sound files directory
-SOUNDS_DIR = PROJECT_ROOT / "Sounds"
+SOUNDS_DIR = PROJECT_ROOT / "sounds"
 
 # Downloads directory (for temporary downloads)
-DOWNLOADS_DIR = PROJECT_ROOT / "Downloads"
+DOWNLOADS_DIR = PROJECT_ROOT / "downloads"
 
 # Data directory
-DATA_DIR = PROJECT_ROOT / "Data"
+DATA_DIR = PROJECT_ROOT / "data"
 
 # Logs directory
-LOGS_DIR = PROJECT_ROOT / "Logs"
+LOGS_DIR = PROJECT_ROOT / "logs"
+
+# Debug directory
+DEBUG_DIR = PROJECT_ROOT / "debug"
 
 # Database path
 DATABASE_PATH = DATA_DIR / "database.db"

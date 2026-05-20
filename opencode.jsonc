@@ -9,7 +9,7 @@
         "-y",
         "@playwright/mcp",
         "--output-dir",
-        ".playwright-mcp",
+        "/tmp/opencode-playwright-mcp/Discord-Brain-Rot",
         "--output-mode",
         "file",
         "--image-responses",

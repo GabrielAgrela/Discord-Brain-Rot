@@ -1,13 +1,13 @@
 # Web Soundboard Agent Notes
 
-Read this when changing `WebPage.py`, `bot/web/`, web repositories/services, templates/static assets for the soundboard, Flask auth, web uploads, web playback, web TTS, or the web control room.
+Read this when changing `web_page.py`, `bot/web/`, web repositories/services, templates/static assets for the soundboard, Flask auth, web uploads, web playback, web TTS, or the web control room.
 
 ## Architecture
 
-- The Flask app is layered like the bot: `WebPage.py` is only the entrypoint, `bot/web/app.py` builds the app, `bot/web/routes.py` registers focused route modules (`*_routes.py`), and shared route helpers live in `bot/web/route_helpers.py`.
+- The Flask app is layered like the bot: `web_page.py` is only the entrypoint, `bot/web/app.py` builds the app, `bot/web/routes.py` registers focused route modules (`*_routes.py`), and shared route helpers live in `bot/web/route_helpers.py`.
 - Flask-owned page templates and static assets live under `bot/web/templates/` and `bot/web/static/`. Root `templates/sound_card.html` and `templates/rl_store_card.html` are image-card templates used by `ImageGeneratorService`, not Flask page templates.
 - SQL/business logic belongs in `bot/repositories/web_*.py` and `bot/services/web_*.py`; route modules should stay thin request/response adapters.
-- Web routes should read SQLite through `app.config["DATABASE_PATH"]`, not a hardcoded `Data/database.db`, so tests and alternate DB configs use the same paths.
+- Web routes should read SQLite through `app.config["DATABASE_PATH"]`, not a hardcoded `data/database.db`, so tests and alternate DB configs use the same paths.
 - The web control-room panel is backed by `web_bot_status`, written by `BackgroundService.web_control_room_status_loop()` every 2 seconds. Flask reads it through `WebControlRoomRepository`/`WebControlRoomService`; do not inspect live Discord objects from Flask.
 
 ## Guilds And Auth
@@ -15,7 +15,7 @@ Read this when changing `WebPage.py`, `bot/web/`, web repositories/services, tem
 - Omitted `guild_id` is allowed only when exactly one non-null guild can be inferred from stable persisted data: `guild_settings`, `sounds`, `actions`, or `web_bot_status`. `playback_queue` is only a last-resort fallback when those tables are empty.
 - Multi-guild web callers must send `guild_id` explicitly or `/api/play_sound` returns `400`.
 - The soundboard has a guild selector backed by persisted guild data. Keep selected `guild_id` flowing through table endpoints, control-room status, play/control requests, and web uploads.
-- Web playback requires Discord OAuth login. `WebPage.py` expects `DISCORD_OAUTH_CLIENT_ID`, `DISCORD_OAUTH_CLIENT_SECRET`, and stable `WEB_SESSION_SECRET`; set `DISCORD_OAUTH_REDIRECT_URI` explicitly in production if Flask cannot infer the public callback URL.
+- Web playback requires Discord OAuth login. `web_page.py` expects `DISCORD_OAUTH_CLIENT_ID`, `DISCORD_OAUTH_CLIENT_SECRET`, and stable `WEB_SESSION_SECRET`; set `DISCORD_OAUTH_REDIRECT_URI` explicitly in production if Flask cannot infer the public callback URL.
 - Web upload moderation should mirror `BotBehavior.is_admin_or_mod`: OAuth requests `identify guilds`, stores `DiscordWebUser.admin_guild_ids`, and treats users as web admins for a selected guild when they are owners or Discord reports Administrator / Manage Server / Manage Channels. If a known admin cannot see the inbox, have them log out/in to refresh scopes and admin guild IDs.
 
 ## Playback Queue Transport
@@ -25,7 +25,7 @@ Read this when changing `WebPage.py`, `bot/web/`, web repositories/services, tem
 - Web Slap and mute-toggle controls are sent through `playback_queue` using `request_type`/`control_action`, not executed directly in Flask.
 - Web "Play similar" uses `request_type='play_sound'` and `playback_queue.play_action='play_similar_sound'` so analytics match the Discord similar-sound select.
 - Web TTS uses control action `tts`; `sound_filename` is JSON with `message` and `profile`. Bot-side dispatch routes Google profiles to `VoiceTransformationService.tts()` and ElevenLabs character profiles to `tts_EL()`.
-- Web play-button latency is dominated by the bot-side `check_playback_queue` polling loop in `PersonalGreeter.py`. Keep it driven by `config.PLAYBACK_QUEUE_INTERVAL` (default `0.25` seconds); avoid fixed sleeps after `process_playback_queue_request()` without a concrete Discord race or rate-limit reason.
+- Web play-button latency is dominated by the bot-side `check_playback_queue` polling loop in `personal_greeter.py`. Keep it driven by `config.PLAYBACK_QUEUE_INTERVAL` (default `0.25` seconds); avoid fixed sleeps after `process_playback_queue_request()` without a concrete Discord race or rate-limit reason.
 - Web playback can hit stale renamed DB rows where `sounds.Filename` is missing on disk but `sounds.originalfilename` still exists. Keep the fallback in `WebPlaybackService.process_playback_queue_request()`.
 - Web soundboard duration display has the same renamed-row issue: show `sounds.Filename` to users, but fall back to `sounds.originalfilename` when reading MP3 metadata from disk.
 
@@ -35,7 +35,7 @@ Read this when changing `WebPage.py`, `bot/web/`, web repositories/services, tem
 - Uploads are approved by default and recorded in `web_uploads`. Rejected uploads should remain auditable and should blacklist the linked sound when `sounds.blacklist` exists.
 - Web uploads are queued through in-process Flask background jobs. `/api/upload_sound` returns `202` with `job_id`; clients poll `/api/upload_sound/<job_id>` until `approved` or `error`. Keep request handlers fast.
 - Job status is in-memory; a web restart can drop active status polling even when already-started processing completed or failed.
-- Docker web uploads must write to the same host-mounted `Sounds/` directory the bot reads (`/app/Sounds` in both containers).
+- Docker web uploads must write to the same host-mounted `sounds/` directory the bot reads (`/app/sounds` in both containers).
 - Do not put `.play-button` on the web upload submit button. Soundboard JS initializes every `.play-button` as an audio control and can rewrite upload text to the play icon.
 
 ## Cross-Process Import Notifications
@@ -95,7 +95,7 @@ Only the bot container has ``pid: host`` in ``docker-compose.yml``, so **all hos
 
 ### Architecture
 
-1. **``HostSystemMonitorService``** (``bot/services/system_monitor.py``) — reads ``/proc/stat``, ``/proc/meminfo``, ``/proc/[pid]/stat``, ``/proc/[pid]/status``, and ``/proc/[pid]/cmdline`` from the **bot's** perspective (which shows real host processes because of ``pid: host``). It is two-sample: the first call warms, subsequent calls compute CPU-percent deltas. It also resolves descriptive display names via cmdline analysis (e.g. "WebPage.py" instead of "python"). Instantiated and used by ``BackgroundService.web_system_monitor_status_loop``.
+1. **``HostSystemMonitorService``** (``bot/services/system_monitor.py``) — reads ``/proc/stat``, ``/proc/meminfo``, ``/proc/[pid]/stat``, ``/proc/[pid]/status``, and ``/proc/[pid]/cmdline`` from the **bot's** perspective (which shows real host processes because of ``pid: host``). It is two-sample: the first call warms, subsequent calls compute CPU-percent deltas. It also resolves descriptive display names via cmdline analysis (e.g. "web_page.py" instead of "python"). Instantiated and used by ``BackgroundService.web_system_monitor_status_loop``.
 
 2. **``WebSystemStatusRepository``** (``bot/repositories/web_system_status.py``) — lightweight singleton table ``web_system_status`` with columns ``id`` (always 1), ``snapshot_json`` (TEXT), and ``updated_at`` (TEXT). The bot background loop writes a snapshot every 1 s. The web endpoint reads it.
 

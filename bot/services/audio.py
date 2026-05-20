@@ -105,7 +105,7 @@ class AudioService:
         try:
             # Silence internal Vosk logs to avoid spamming the console
             vosk.SetLogLevel(-1)
-            model_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Data", "models", "vosk-model-small-pt-0.3"))
+            model_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "models", "vosk-model-small-pt-0.3"))
             if os.path.exists(model_path):
                 print(f"[AudioService] Loading Vosk model from {model_path}...")
                 self.vosk_model = vosk.Model(model_path)
@@ -1082,7 +1082,7 @@ class AudioService:
             # Sanitise to basename only — no path traversal
             filename = os.path.basename(filename)
             sounds_dir = os.path.abspath(
-                os.path.join(os.path.dirname(__file__), "..", "..", "Sounds")
+                os.path.join(os.path.dirname(__file__), "..", "..", "sounds")
             )
             filepath = os.path.join(sounds_dir, filename)
 
@@ -1836,7 +1836,7 @@ class AudioService:
                     await asyncio.sleep(0.05)
 
 
-            audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Sounds", audio_file))
+            audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "sounds", audio_file))
             if not os.path.exists(audio_file_path):
                 print(f"[AudioService] Slap sound not found: {audio_file_path}")
                 return False
@@ -2040,19 +2040,19 @@ class AudioService:
             )
 
             # Resolve file path immediately to avoid pre-playback DB reads
-            audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Sounds", audio_file))
+            audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "sounds", audio_file))
             if not os.path.exists(audio_file_path):
                 # Fallback to DB lookup only if file not found directly
                 sound_info = await asyncio.to_thread(self.sound_repo.get_sound, audio_file, False, guild_id)
                 if sound_info:
-                    audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Sounds", sound_info[1]))
+                    audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "sounds", sound_info[1]))
                 
                 # Double check existence
                 if not os.path.exists(audio_file_path):
                     # Try original name lookup
                     sound_info_orig = await asyncio.to_thread(self.sound_repo.get_sound, audio_file, True, guild_id)
                     if sound_info_orig and len(sound_info_orig) > 2:
-                        audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Sounds", sound_info_orig[2]))
+                        audio_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "sounds", sound_info_orig[2]))
                     
                     if not os.path.exists(audio_file_path):
                         await self.message_service.send_error(f"Audio file not found: {audio_file}")
@@ -2795,7 +2795,7 @@ class KeywordDetectionSink(sinks.Sink):
         self._voice_command_listening_lock = threading.Lock()
         
         # Log directory for per-user transcripts
-        self.log_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Data", "vosk_logs"))
+        self.log_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "vosk_logs"))
         os.makedirs(self.log_dir, exist_ok=True)
         # Single worker thread
         self.worker_thread = threading.Thread(target=self._worker, name=f"VoskWorker-{guild.id}", daemon=True)

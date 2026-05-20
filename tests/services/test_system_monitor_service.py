@@ -251,7 +251,7 @@ def test_display_name_from_cmdline_python_script(tmp_path):
 
     _write_proc(tmp_path, "101/stat", "101 (python) R 1 2 3 4 5 6 7 8 9 10 100 50\n")
     _write_proc(tmp_path, "101/status", "Name:\tpython\nVmRSS:\t4096 kB\n")
-    _write_proc_binary(tmp_path, "101/cmdline", b"python3\x00/tmp/WebPage.py\x00--port\x008080\x00")
+    _write_proc_binary(tmp_path, "101/cmdline", b"python3\x00/tmp/web_page.py\x00--port\x008080\x00")
 
     svc = HostSystemMonitorService(proc_root=str(tmp_path))
     snap = svc.get_snapshot(top_limit=4)
@@ -267,7 +267,7 @@ def test_display_name_from_cmdline_second_call(tmp_path):
     _write_proc(tmp_path, "stat", f"cpu  {' '.join(str(v) for v in cpu1)}\n")
     _write_proc(tmp_path, "101/stat", "101 (python) R 1 2 3 4 5 6 7 8 9 10 100 50\n")
     _write_proc(tmp_path, "101/status", "Name:\tpython\nVmRSS:\t4096 kB\n")
-    _write_proc_binary(tmp_path, "101/cmdline", b"python3\x00/tmp/WebPage.py\x00--port\x008080\x00")
+    _write_proc_binary(tmp_path, "101/cmdline", b"python3\x00/tmp/web_page.py\x00--port\x008080\x00")
 
     svc = HostSystemMonitorService(proc_root=str(tmp_path))
     svc.get_snapshot()  # warm-up
@@ -281,7 +281,7 @@ def test_display_name_from_cmdline_second_call(tmp_path):
     assert snap["available"] is True
     assert len(snap["top_processes"]) == 1
     proc = snap["top_processes"][0]
-    assert proc["display_name"] == "WebPage.py"
+    assert proc["display_name"] == "web_page.py"
     assert proc["name"] == "python"
 
 
@@ -819,7 +819,7 @@ def test_web_service_returns_snapshot_from_repo(tmp_path):
         "total_cpu_percent": 23.5,
         "ram_total_bytes": 17179869184,
         "top_processes": [
-            {"pid": 101, "name": "python", "display_name": "WebPage.py", "cpu_percent": 10.5, "memory_rss_bytes": 4194304, "memory_percent": 0.02}
+            {"pid": 101, "name": "python", "display_name": "web_page.py", "cpu_percent": 10.5, "memory_rss_bytes": 4194304, "memory_percent": 0.02}
         ],
         "cpu_warming": False,
         "sample_interval_seconds": 1.0,
@@ -834,7 +834,7 @@ def test_web_service_returns_snapshot_from_repo(tmp_path):
     assert result["available"] is True
     assert result["total_cpu_percent"] == 23.5
     assert len(result["top_processes"]) == 1
-    assert result["top_processes"][0]["display_name"] == "WebPage.py"
+    assert result["top_processes"][0]["display_name"] == "web_page.py"
     assert result["cpu_fan_rpm"] == 1200
 
 

@@ -194,7 +194,7 @@ class FavoriteWatcherService:
             "noconfig": True,
         }
         cookies_file = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "..", "..", "Data", "cookies.txt")
+            os.path.join(os.path.dirname(__file__), "..", "..", "data", "cookies.txt")
         )
         if os.path.exists(cookies_file):
             ydl_opts["cookiefile"] = cookies_file

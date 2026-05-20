@@ -11,12 +11,12 @@ htmlcov/
 .gemini/
 
 # Large data folders (handled via volumes)
-Sounds/
-Data/*
-!Data/models/
-Downloads/
-Logs/
-Debug/
+sounds/
+data/*
+!data/models/
+downloads/
+logs/
+debug/
 database.db
 database.db-shm
 database.db-wal

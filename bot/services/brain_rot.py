@@ -19,7 +19,7 @@ class BrainRotService:
         self.action_repo = ActionRepository()
         self.lock = asyncio.Lock()
         self.cooldown_message: Optional[discord.Message] = None
-        self.data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Data"))
+        self.data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data"))
 
     async def run_random(self, user, guild=None):
         """Run a random brain rot function."""

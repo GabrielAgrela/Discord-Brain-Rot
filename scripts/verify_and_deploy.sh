@@ -10,7 +10,8 @@ echo "[verify_and_deploy] Running test suite..."
 TEST_LOG="$(mktemp)"
 BOT_LOG="$(mktemp)"
 RESTART_LOG="$(mktemp)"
-trap 'rm -f "$TEST_LOG" "$BOT_LOG" "$RESTART_LOG"' EXIT
+WEB_LOG=""
+trap 'rm -f "$TEST_LOG" "$BOT_LOG" "$RESTART_LOG" "$WEB_LOG"' EXIT
 
 if [[ -x "./venv/bin/python" ]]; then
   PYTHON_CMD=("./venv/bin/python")
@@ -80,6 +81,52 @@ if [[ ${#STARTUP_MARKERS[@]} -gt 0 ]]; then
   echo "[verify_and_deploy] Fresh startup markers: ${STARTUP_MARKERS[*]}"
 else
   echo "[verify_and_deploy] Fresh startup markers: none found in captured log window"
+fi
+
+# Recreate profile-gated web container if it has ever existed.
+# Stale bind mounts, entrypoints, and paths from renames (e.g. WebPage.py -> web_page.py)
+# are not picked up by `docker-compose restart` alone; --force-recreate is needed.
+if docker-compose ps -a -q web 2>/dev/null | grep -q .; then
+  # Create WEB_LOG now only if needed (already in trap; rm -f "" is safe earlier)
+  WEB_LOG="$(mktemp)"
+  echo "[verify_and_deploy] Web service container exists; recreating with --profile web..."
+  if docker-compose --profile web up -d --force-recreate web >"$WEB_LOG" 2>&1; then
+    # Check for persistent binding/startup errors that up won't surface on success exit
+    if grep -qiE '(error|traceback|cannot (bind|mount)|unable to open database)' "$WEB_LOG"; then
+      echo "[verify_and_deploy] Web recreation had warnings/errors. Recent output:"
+      tail -n 40 "$WEB_LOG"
+      exit 1
+    fi
+    echo "[verify_and_deploy] Web container recreation completed."
+  else
+    echo "[verify_and_deploy] Web container recreation FAILED. Output:"
+    tail -n 60 "$WEB_LOG"
+    exit 1
+  fi
+
+  WEB_CONTAINER_ID="$(docker-compose ps -q web 2>/dev/null || true)"
+  WEB_HEALTH="unknown"
+  if [[ -n "$WEB_CONTAINER_ID" ]]; then
+    for _ in {1..30}; do
+      WEB_HEALTH="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$WEB_CONTAINER_ID" 2>/dev/null || echo "unknown")"
+      if [[ "$WEB_HEALTH" == "healthy" || "$WEB_HEALTH" == "running" ]]; then
+        break
+      fi
+      sleep 2
+    done
+  fi
+  echo "[verify_and_deploy] Web container health: $WEB_HEALTH"
+
+  if [[ "$WEB_HEALTH" == "healthy" ]]; then
+    HTTP_STATUS="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:8080/ 2>/dev/null || echo "failed")"
+    echo "[verify_and_deploy] Web smoke test / returned HTTP $HTTP_STATUS"
+    if [[ "$HTTP_STATUS" != "200" && "$HTTP_STATUS" != "302" ]]; then
+      echo "[verify_and_deploy] Web smoke test failed (HTTP $HTTP_STATUS)"
+      exit 1
+    fi
+  elif [[ -n "$WEB_CONTAINER_ID" ]]; then
+    echo "[verify_and_deploy] Web container not healthy after 60s; skipping smoke test."
+  fi
 fi
 
 echo "[verify_and_deploy] Completed successfully."

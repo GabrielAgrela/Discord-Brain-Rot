@@ -8,7 +8,7 @@
         "-y",
         "mcp-server-sqlite",
         "--db",
-        "/home/gabi/github/Discord-Brain-Rot/Data/database.db"
+        "/home/gabi/github/Discord-Brain-Rot/data/database.db"
       ],
       "enabled": true
     },

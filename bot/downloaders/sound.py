@@ -60,7 +60,7 @@ class SoundDownloader:
             else:
                 # Fallback to auto-download
                 self.chromedriver_path = ChromeDriverManager().install()
-        self.dwdir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Downloads"))
+        self.dwdir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "downloads"))
         
     def _create_driver(self):
         """Create a new Chrome WebDriver instance."""
@@ -123,10 +123,10 @@ class SoundDownloader:
                 return (filename, False, "already exists in Downloads")
             
             # Check if file already exists in Sounds folder
-            sounds_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Sounds"))
+            sounds_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "sounds"))
             sounds_file_path = os.path.join(sounds_dir, filename)
             if os.path.exists(sounds_file_path):
-                return (filename, False, "already exists in Sounds")
+                return (filename, False, "already exists in sounds")
             
             # Re-check database right before download (thread-safe, catches race conditions)
             if self._check_sound_exists_in_db(filename):
@@ -202,7 +202,7 @@ class SoundDownloader:
 
                     if not self._check_sound_exists_in_db(filename):
                         # Also check if file already exists on disk
-                        sounds_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Sounds"))
+                        sounds_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "sounds"))
                         downloads_dir = self.dwdir
                         if os.path.exists(os.path.join(sounds_dir, filename)):
                             continue
@@ -333,7 +333,7 @@ class SoundDownloader:
         
         while True:
             downloads_path = os.path.abspath(
-                os.path.join(os.path.dirname(__file__), "..", "..", "Downloads", "*.mp3")
+                os.path.join(os.path.dirname(__file__), "..", "..", "downloads", "*.mp3")
             )
             list_of_files = glob.glob(downloads_path)
             
@@ -343,7 +343,7 @@ class SoundDownloader:
                     print(self.__class__.__name__, " MOVER: Adjusting sound volume")
                     self.adjust_volume(file, target_dbfs)
                     destination_folder = os.path.abspath(
-                        os.path.join(os.path.dirname(__file__), "..", "..", "Sounds")
+                        os.path.join(os.path.dirname(__file__), "..", "..", "sounds")
                     )
                     
                     if not self.db.get_sound(os.path.basename(file), original_filename=True):

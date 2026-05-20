@@ -57,7 +57,7 @@ class BotBehavior:
         self.ffmpeg_path = ffmpeg_path
         self.last_channel = {}
         self.script_dir = os.path.dirname(__file__)
-        self.dwdir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Downloads"))
+        self.dwdir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "downloads"))
         
         # Services - SOLID-compliant modular architecture
         self._message_service = MessageService(bot)

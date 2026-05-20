@@ -47,7 +47,7 @@ class YearReviewVideoService:
             composition_entry: Optional Remotion entrypoint path.
         """
         repo_root = Path(__file__).resolve().parents[2]
-        self.output_dir = Path(output_dir or repo_root / "Debug" / "year_reviews").resolve()
+        self.output_dir = Path(output_dir or repo_root / "debug" / "year_reviews").resolve()
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.trailer_dir = Path(trailer_dir or repo_root / "trailer").resolve()
         self.composition_entry = Path(

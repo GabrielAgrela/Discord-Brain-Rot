@@ -157,7 +157,7 @@ class DownloadSoundButton(Button):
         guild_id = interaction.guild.id if interaction.guild else None
         try:
             # Adjust path since we are now in bot/ui/buttons/
-            sound_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "Sounds", self.audio_file))
+            sound_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "sounds", self.audio_file))
             if os.path.exists(sound_path):
                 await interaction.followup.send(file=discord.File(sound_path), ephemeral=True)
                 Database().insert_action(interaction.user.name, "download_sound", self.audio_file, guild_id=guild_id)
@@ -165,7 +165,7 @@ class DownloadSoundButton(Button):
                  # Check if the sound exists with its original name (if the filename passed is the original name but renamed in DB)
                 sound = Database().get_sound(self.audio_file, False, guild_id=guild_id)
                 if sound:
-                     original_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "Sounds", sound[1]))
+                     original_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "sounds", sound[1]))
                      if os.path.exists(original_path):
                           await interaction.followup.send(file=discord.File(original_path), ephemeral=True)
                           Database().insert_action(interaction.user.name, "download_sound", self.audio_file, guild_id=guild_id)

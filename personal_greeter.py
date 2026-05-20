@@ -108,7 +108,7 @@ async def check_playback_queue():
         print(f"[Playback Queue] Found {len(pending_requests)} pending requests.")
 
         sound_folder = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "Sounds")
+            os.path.join(os.path.dirname(__file__), "sounds")
         )
         for request in pending_requests:
             await process_playback_queue_request(

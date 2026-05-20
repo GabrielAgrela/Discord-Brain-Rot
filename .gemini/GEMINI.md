@@ -71,7 +71,7 @@ Before finalizing any implemented change, include:
 - New uploads through `SoundRepository.insert_sound()` must invalidate `Database`'s in-memory sound similarity cache.
 - `playback_queue` is an internal Flask-to-bot transport, not a user-facing queue.
 - For sound play analytics, store the sound database `id` in `actions.target`; list playback should use action `play_from_list`.
-- `DailyLogFileHandler` writes `Logs/YYYY-MM-DD.log` directly. Do not replace it with `TimedRotatingFileHandler` using a date-stamped base filename.
+- `DailyLogFileHandler` writes `logs/YYYY-MM-DD.log` directly. Do not replace it with `TimedRotatingFileHandler` using a date-stamped base filename.
 
 ## Topic Notes
 

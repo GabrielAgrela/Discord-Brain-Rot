@@ -24,7 +24,7 @@ Read this when changing deployment, Docker, dependencies, logging, verification 
 docker-compose restart bot
 ```
 
-- `./scripts/verify_and_deploy.sh` uses `docker-compose restart`, which may only restart default-profile services.
+- `./scripts/verify_and_deploy.sh` uses `docker-compose restart` for default-profile services, then detects an existing web container and recreates it with `--profile web --force-recreate`. This ensures stale bind mounts, entrypoints, and paths from renames (e.g., file/folder lowercase cleanup) do not leave the web service broken.
 - The `web` service is profile-gated (`profiles: ["web"]`). Restart `web` when changing Flask Python code, web runtime configuration, dependencies, or when manual inspection shows templates/assets are not being picked up:
 
 ```bash
@@ -47,7 +47,7 @@ docker-compose up -d --force-recreate
 ## Logs
 
 - Use the project logger from `bot/logger.py`.
-- Logs go to daily files in `Logs/` named `YYYY-MM-DD.log`.
+- Logs go to daily files in `logs/` named `YYYY-MM-DD.log`.
 - `DailyLogFileHandler` writes daily log files directly. Do not replace it with `TimedRotatingFileHandler` using a date-stamped base filename, which can create doubled names like `2026-04-27.log.2026-04-27`.
 - To monitor after restart:
 
@@ -69,3 +69,9 @@ docker-compose logs --tail=120 bot
 - Keep `.gemini/GEMINI.md` short because `AGENTS.md` points to it and agents load it into context.
 - Add feature-specific guidance to the narrowest file in `docs/agent-notes/`.
 - Periodically remove duplicate, obsolete, or one-off historical notes. Keep symptoms and invariants that still prevent real regressions.
+
+## Repository Cleanliness
+
+- Browser automation (Playwright MCP, Selenium) can leave debug screenshots, `.playwright-mcp/`, root `*.png`, `*.webm`, and other artifacts in the repo root. **Before finalizing any task that used browser automation**, remove these from the project root and configure Playwright MCP output to `/tmp/opencode-playwright-mcp/` (set in `opencode.jsonc`).
+- Do not commit `.playwright-mcp/`, `/*.png`, `/playwright-report/`, `/test-results/`, `/screenshots/`, or `/debug-screenshots/`.
+- Root `__pycache__/` and `.pytest_cache/` should be cleaned before finalizing to avoid accidental tracking.

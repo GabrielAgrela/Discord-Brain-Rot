@@ -43,8 +43,8 @@ class SoundService:
         self.upload_lock = asyncio.Lock()
         
         # Base paths
-        self.sounds_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Sounds"))
-        self.downloads_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Downloads"))
+        self.sounds_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "sounds"))
+        self.downloads_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "downloads"))
         self.enable_ingest_loudness_normalization = (
             os.getenv("SOUND_INGEST_NORMALIZE_ENABLED", "true").strip().lower()
             not in {"0", "false", "off", "no"}
@@ -461,7 +461,7 @@ class SoundService:
         """
         try:
             # Save to Downloads folder so move_sounds picks it up with button view
-            downloads_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Downloads"))
+            downloads_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "downloads"))
             os.makedirs(downloads_dir, exist_ok=True)
             filename = self.manual_downloader.video_to_mp3(url, downloads_dir, custom_filename, time_limit)
             full_path = os.path.join(downloads_dir, filename)

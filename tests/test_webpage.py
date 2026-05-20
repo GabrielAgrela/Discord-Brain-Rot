@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from WebPage import app
+from web_page import app
 
 
 def _wait_for_upload_job(client, job_id: str) -> dict:
@@ -180,7 +180,7 @@ def web_client(tmp_path, monkeypatch):
     original_db_path = app.config["DATABASE_PATH"]
     original_sounds_dir = app.config["SOUNDS_DIR"]
     original_debug = app.debug
-    sounds_dir = tmp_path / "Sounds"
+    sounds_dir = tmp_path / "sounds"
     sounds_dir.mkdir()
     app.config.update(TESTING=True, DATABASE_PATH=str(db_path), SOUNDS_DIR=str(sounds_dir))
     app.debug = True  # auto_reload for Jinja test isolation

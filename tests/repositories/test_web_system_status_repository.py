@@ -122,7 +122,7 @@ def test_snapshot_with_top_processes_round_trips(repo):
             {
                 "pid": 101,
                 "name": "python",
-                "display_name": "WebPage.py",
+                "display_name": "web_page.py",
                 "cpu_percent": 10.5,
                 "memory_rss_bytes": 4194304,
                 "memory_percent": 0.02,
@@ -135,7 +135,7 @@ def test_snapshot_with_top_processes_round_trips(repo):
     assert result is not None
     assert result["total_cpu_percent"] == 23.5
     assert len(result["top_processes"]) == 1
-    assert result["top_processes"][0]["display_name"] == "WebPage.py"
+    assert result["top_processes"][0]["display_name"] == "web_page.py"
     assert result["top_processes"][0]["cpu_percent"] == 10.5
 
 

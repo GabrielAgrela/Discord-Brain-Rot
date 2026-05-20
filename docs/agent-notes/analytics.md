@@ -11,7 +11,7 @@ Read this when changing action analytics, `/top`, on-this-day/year-review querie
 
 ## Voice Activity
 
-- Voice analytics for `/top` and year-review depend on `voice_activity` session rows written from `on_voice_state_update` in `PersonalGreeter.py`.
+- Voice analytics for `/top` and year-review depend on `voice_activity` session rows written from `on_voice_state_update` in `personal_greeter.py`.
 - AFK transitions are session boundaries for active channels only; joining AFK is not counted as active voice time.
 - Voice session rows store `member.name`, not `name#discriminator`, to match existing stats queries.
 

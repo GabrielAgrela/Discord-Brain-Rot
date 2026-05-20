@@ -7,7 +7,7 @@ Provides total CPU/RAM and top per-process CPU usage by reading ``/proc/stat``,
 warms and returns ``cpu_warming: true`` with an empty process list.
 
 Process display names are improved by reading ``cmdline``: for Python processes
-the script basename is used (e.g. ``PersonalGreeter.py``) instead of the generic
+the script basename is used (e.g. ``personal_greeter.py``) instead of the generic
 ``python``; for other interpreters the script/module basename is preferred.
 Chrome-family processes (chrome, chromium, google-chrome, brave, msedge, etc.)
 get role-specific labels such as ``chrome renderer``, ``chrome GPU``,
