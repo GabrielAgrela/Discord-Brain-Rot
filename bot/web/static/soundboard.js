@@ -1240,7 +1240,8 @@
                 'unfavorite_sound': 'Unfavorited',
                 'join': 'Joined',
                 'leave': 'Left',
-                'rlstore_daily_notification_sent': 'RL Store'
+                'rlstore_daily_notification_sent': 'RL Store',
+                'favorite_watcher_import': 'Imported'
             };
             return actionMap[action] || action.replace(/_/g, ' ');
         }

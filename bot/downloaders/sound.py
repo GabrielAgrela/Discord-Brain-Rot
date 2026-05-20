@@ -328,7 +328,7 @@ class SoundDownloader:
         """
         # Import here to avoid circular imports
         from bot.database import Database
-        from bot.ui import DownloadedSoundView
+        from bot.services.sound_import_notifications import SoundImportNotificationService
         target_dbfs = float(os.getenv("SOUND_INGEST_TARGET_DBFS", "-18.0"))
         
         while True:
@@ -348,14 +348,11 @@ class SoundDownloader:
                     
                     if not self.db.get_sound(os.path.basename(file), original_filename=True):
                         print(self.__class__.__name__, " MOVER: Moving file to " + destination_folder)
-                        sound_view = DownloadedSoundView(self.bot, os.path.basename(file))
-                        await self.bot.send_message(
-                            title=f"🦝 I stole {os.path.basename(file)}",
-                            view=sound_view,
-                            message_format="image",
-                            image_requester="Sound Thief",
-                            image_show_footer=False,
-                            image_show_sound_icon=False
+                        notif_service = SoundImportNotificationService()
+                        await notif_service.send_notification(
+                            behavior=self.bot,
+                            filename=os.path.basename(file),
+                            source="scraper",
                         )
                         shutil.move(file, os.path.join(destination_folder, os.path.basename(file)))
                         self.db.insert_sound(os.path.basename(file), os.path.basename(file))

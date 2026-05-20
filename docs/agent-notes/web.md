@@ -38,6 +38,13 @@ Read this when changing `WebPage.py`, `bot/web/`, web repositories/services, tem
 - Docker web uploads must write to the same host-mounted `Sounds/` directory the bot reads (`/app/Sounds` in both containers).
 - Do not put `.play-button` on the web upload submit button. Soundboard JS initializes every `.play-button` as an audio control and can rewrite upload text to the play icon.
 
+## Cross-Process Import Notifications
+
+- Web upload background workers cannot use BotBehavior directly (Flask vs bot process). After a successful upload, `_run_web_upload_job` enqueues a row in the `sound_import_notifications` table via `SoundImportNotificationRepository`.
+- `BackgroundService.sound_import_notification_drain_loop` polls this table every 3 seconds and dispatches the Discord image-card notification using `SoundImportNotificationService.send_notification()`.
+- All import paths (scraper `move_sounds`, favorite watcher, web upload, manual Discord upload) use the same `SoundImportNotificationService` so notifications are consistent. Each source has a default title template, requester label, and accent colour — see `SoundImportNotificationService` docstring.
+- The repository/fixture combines `ensure_schema()` (safe for both bot and web processes) with `Database._run_schema_migrations()` so the table always exists.
+
 ## Sound Rows And Options
 
 - All-sounds rows include `favorite`; keep `WebContentRepository.get_all_sounds_page()`, `WebContentService.get_all_sounds()`, and row `data-favorite` rendering in sync.

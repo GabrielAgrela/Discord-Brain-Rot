@@ -262,6 +262,31 @@ class Database:
                 "CREATE INDEX IF NOT EXISTS idx_favorite_watcher_videos_watcher "
                 "ON favorite_watcher_videos(watcher_id)"
             )
+
+            # Sound import notification outbox (cross-process web upload notifications).
+            self.conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS sound_import_notifications (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id TEXT,
+                    filename TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    requester_username TEXT NOT NULL,
+                    title TEXT,
+                    accent_color TEXT,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    sent_at DATETIME,
+                    last_error TEXT,
+                    attempts INTEGER NOT NULL DEFAULT 0
+                )
+                """
+            )
+            self.conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_sound_import_notifications_pending
+                ON sound_import_notifications(sent_at, attempts, created_at)
+                """
+            )
             self.conn.commit()
         except sqlite3.Error as e:
             print(f"[Database] Schema migration warning: {e}")

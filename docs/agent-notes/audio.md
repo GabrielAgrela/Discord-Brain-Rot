@@ -13,6 +13,7 @@ Read this when changing uploads, sound ingest, playback, generated sound cards, 
 - Keep normalization best-effort: log failures and continue saving so ffmpeg/pydub edge cases do not block uploads/imports.
 - TikTok/YouTube/Instagram downloads passing through `Downloads/` are normalized in `SoundDownloader.move_sounds`; keep env knobs consistent with `SoundService`.
 - TikTok collection favorite watchers use `FavoriteWatcherService` and `SoundService.import_sound_from_video()` to import directly into the guild-scoped sound library. Adding a watcher seeds current collection videos as already seen so only future additions import, then each successful future import posts a `DownloadedSoundView` image-card notification.
+- All sound import notifications (scraper `move_sounds`, favorite watcher, web upload, manual Discord upload) share the same `SoundImportNotificationService.send_notification()` method. Each source has a default title template, requester label, and accent colour. Web uploads and favorite watchers use blue (`#5865F2`); scraper/manual use red (`#ED4245`). Cross-process web upload notifications are queued in `sound_import_notifications` and drained by `BackgroundService.sound_import_notification_drain_loop`.
 
 ## Generated Sound Cards
 

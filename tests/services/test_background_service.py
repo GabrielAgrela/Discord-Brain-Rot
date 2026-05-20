@@ -143,6 +143,99 @@ class TestBackgroundService:
     @pytest.mark.asyncio
     @patch("bot.services.background.ActionRepository")
     @patch("bot.services.background.SoundRepository")
+    async def test_sound_import_notification_drain_sends_pending_and_marks_sent(
+        self, _mock_sound_repo, _mock_action_repo
+    ):
+        """Drain loop should send pending outbox rows and mark them sent."""
+        from bot.services.background import BackgroundService
+
+        behavior = Mock()
+        behavior.send_message = AsyncMock()
+
+        service = BackgroundService(
+            bot=Mock(),
+            audio_service=Mock(),
+            sound_service=Mock(),
+            behavior=behavior,
+        )
+
+        # Set up a mock repo with one pending notification.
+        mock_repo = Mock()
+        mock_notification = {
+            "id": 1,
+            "filename": "web-up.mp3",
+            "guild_id": "42",
+            "source": "web_upload",
+            "requester_username": "Web User",
+            "title": None,
+            "accent_color": "#5865F2",
+        }
+        mock_repo.get_pending.return_value = [mock_notification]
+        mock_repo.mark_sent = Mock()
+        service._sound_import_notification_repo = mock_repo
+
+        # Mock the notification service to avoid actual Discord calls.
+        service._sound_import_notification_service.send_notification = AsyncMock()
+
+        await service.sound_import_notification_drain_loop()
+
+        service._sound_import_notification_service.send_notification.assert_awaited_once_with(
+            behavior=behavior,
+            filename="web-up.mp3",
+            guild_id=42,
+            source="web_upload",
+            requester="Web User",
+            title=None,
+            accent_color="#5865F2",
+        )
+        mock_repo.mark_sent.assert_called_once_with(1)
+
+    @pytest.mark.asyncio
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    async def test_sound_import_notification_drain_marks_failed_on_error(
+        self, _mock_sound_repo, _mock_action_repo
+    ):
+        """Drain loop should mark failed when the notification service raises."""
+        from bot.services.background import BackgroundService
+
+        behavior = Mock()
+        behavior.send_message = AsyncMock()
+
+        service = BackgroundService(
+            bot=Mock(),
+            audio_service=Mock(),
+            sound_service=Mock(),
+            behavior=behavior,
+        )
+
+        mock_repo = Mock()
+        mock_notification = {
+            "id": 2,
+            "filename": "bad.mp3",
+            "guild_id": None,
+            "source": "web_upload",
+            "requester_username": "User",
+            "title": None,
+            "accent_color": "#5865F2",
+        }
+        mock_repo.get_pending.return_value = [mock_notification]
+        mock_repo.mark_failed = Mock()
+        mock_repo.mark_sent = Mock()
+        service._sound_import_notification_repo = mock_repo
+
+        service._sound_import_notification_service.send_notification = AsyncMock(
+            side_effect=RuntimeError("Discord send failed")
+        )
+
+        await service.sound_import_notification_drain_loop()
+
+        mock_repo.mark_sent.assert_not_called()
+        mock_repo.mark_failed.assert_called_once_with(2, "Discord send failed")
+
+    @pytest.mark.asyncio
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
     async def test_controls_normalizer_adds_controls_on_newest_bot_message_without_rewriting_others(
         self, _mock_sound_repo, _mock_action_repo
     ):

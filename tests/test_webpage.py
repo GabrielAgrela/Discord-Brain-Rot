@@ -558,6 +558,27 @@ def test_web_upload_approves_by_default_and_records_inbox(web_client, monkeypatc
     )
     assert action == ("Discord User", "upload_sound", "web drop.mp3", "359077662742020107")
 
+    # A cross-process import notification should be queued for the bot to drain.
+    conn = sqlite3.connect(db_path)
+    try:
+        notification = conn.execute(
+            """
+            SELECT filename, source, requester_username, accent_color, guild_id,
+                   sent_at, attempts
+            FROM sound_import_notifications
+            """
+        ).fetchone()
+    finally:
+        conn.close()
+    assert notification is not None
+    assert notification[0] == "web drop.mp3"
+    assert notification[1] == "web_upload"
+    assert notification[2] == "Discord User"
+    assert notification[3] == "#5865F2"
+    assert notification[4] == "359077662742020107"
+    assert notification[5] is None  # sent_at must be null (pending)
+    assert notification[6] == 0  # attempts
+
 
 def test_web_upload_accepts_bot_modal_url_fields(web_client, monkeypatch):
     client, db_path = web_client
@@ -610,6 +631,23 @@ def test_web_upload_accepts_bot_modal_url_fields(web_client, monkeypatch):
     assert sound[1:] == ("url drop.mp3", "359077662742020107")
     assert upload == ("url drop.mp3", "source.mp3", "approved", "359077662742020107")
     assert action == ("Discord User", "upload_sound", "url drop.mp3", "359077662742020107")
+
+    conn = sqlite3.connect(db_path)
+    try:
+        notification = conn.execute(
+            """
+            SELECT filename, source, requester_username, accent_color, guild_id
+            FROM sound_import_notifications
+            """
+        ).fetchone()
+    finally:
+        conn.close()
+    assert notification is not None
+    assert notification[0] == "url drop.mp3"
+    assert notification[1] == "web_upload"
+    assert notification[2] == "Discord User"
+    assert notification[3] == "#5865F2"
+    assert notification[4] == "359077662742020107"
 
 
 def test_web_upload_inbox_is_admin_only(web_client, monkeypatch):
@@ -1299,6 +1337,51 @@ def test_soundboard_page_renders_shared_redesign(web_client):
     assert "What just happened, who triggered it, and how fresh it is." not in html
     assert "The shortlist for when you already know the bit you want." not in html
     assert "The full catalog, including older uploads and new arrivals." not in html
+
+
+def test_favorite_watcher_import_uses_concise_badge_label(web_client):
+    """favorite_watcher_import must render as 'Imported' badge, not the
+    verbose fallback 'favorite watcher import' (the original bug)."""
+    client, db_path = web_client
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            INSERT INTO sounds (id, originalfilename, Filename, favorite, slap, is_elevenlabs, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (1, "tiktok_clip.mp3", "tiktok_clip.mp3", 0, 0, 0, "2026-05-01 12:00:00"),
+        )
+        conn.execute(
+            """
+            INSERT INTO actions (username, action, target, timestamp, guild_id)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            ("alice", "favorite_watcher_import", "1", "2026-05-01 12:01:00", "111"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    response = client.get("/")
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+
+    # The badge's visible label must be "Imported" (not the fallback)
+    assert ">Imported<" in html, "Expected 'Imported' as the badge visible text"
+
+    # Filter dropdown option must also use the concise label
+    assert (
+        '<option value="favorite_watcher_import">Imported</option>' in html
+    ), "Filter dropdown should use 'Imported' label"
+
+    # The raw action value should still appear in the title attribute (preserved for detail)
+    assert 'title="favorite_watcher_import"' in html, "Raw action value preserved in title"
+
+    # Verify the JS formatAction map also includes the concise label
+    script = client.get("/static/soundboard.js").get_data(as_text=True)
+    assert "'favorite_watcher_import': 'Imported'" in script, "JS actionMap must include the concise label"
 
 
 def test_analytics_page_renders_shared_redesign(web_client):

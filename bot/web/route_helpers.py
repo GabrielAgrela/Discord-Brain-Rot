@@ -27,6 +27,7 @@ from bot.repositories.web_analytics import WebAnalyticsRepository
 from bot.repositories.web_content import WebContentRepository
 from bot.repositories.web_control_room import WebControlRoomRepository
 from bot.repositories.web_guild import WebGuildRepository
+from bot.repositories.sound_import_notification import SoundImportNotificationRepository
 from bot.repositories.web_upload import WebUploadRepository
 from bot.repositories.web_user_access import WebUserAccessRepository
 from bot.services.web_analytics import WebAnalyticsService
@@ -261,6 +262,9 @@ def _run_web_upload_job(
             sound_repository=SoundRepository(db_path=db_path, use_shared=False),
             action_repository=ActionRepository(db_path=db_path, use_shared=False),
             sounds_dir=sounds_dir,
+            notification_repository=SoundImportNotificationRepository(
+                db_path=db_path, use_shared=False
+            ),
         )
         current_user = DiscordWebUser.from_session_payload(current_user_payload)
         if current_user is None:

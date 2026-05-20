@@ -152,7 +152,7 @@ async def test_poll_once_imports_only_videos_missing_from_baseline():
     assert kwargs["title"] == "🎵 New favorite sound imported: new sound.mp3"
     assert kwargs["message_format"] == "image"
     assert kwargs["image_requester"] == "Favorite Watcher"
-    assert kwargs["image_border_color"] == "#ED4245"
+    assert kwargs["image_border_color"] == "#5865F2"
     assert kwargs["view"].children
 
 

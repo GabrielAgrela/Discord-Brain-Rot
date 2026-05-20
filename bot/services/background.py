@@ -16,10 +16,12 @@ from bot.repositories import (
     ActionRepository,
     WebControlRoomRepository,
     WebSystemStatusRepository,
+    SoundImportNotificationRepository,
 )
 from bot.downloaders.sound import SoundDownloader
 from bot.services.guild_settings import GuildSettingsService
 from bot.services.system_monitor import HostSystemMonitorService
+from bot.services.sound_import_notifications import SoundImportNotificationService
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +52,12 @@ class BackgroundService:
         self.guild_settings_service = GuildSettingsService()
 
         # Host system monitor (collects host CPU/RAM/top processes)
+        # Notification outbox for cross-process import notifications.
+        # Lazily initialized in the drain loop so that existing tests that
+        # do not expect this dependency are not affected.
+        self._sound_import_notification_repo: SoundImportNotificationRepository | None = None
+        self._sound_import_notification_service = SoundImportNotificationService()
+
         self._host_system_monitor = HostSystemMonitorService()
         self._host_monitor_warmed = False
         
@@ -131,6 +139,8 @@ class BackgroundService:
                 self.favorite_watcher_loop.start()
             if self._self_heal_enabled and not self.bot_self_heal_watchdog_loop.is_running():
                 self.bot_self_heal_watchdog_loop.start()
+            if not self.sound_import_notification_drain_loop.is_running():
+                self.sound_import_notification_drain_loop.start()
             
             asyncio.create_task(self._auto_join_channels())
             print("[BackgroundService] Background tasks started.")
@@ -1294,6 +1304,64 @@ class BackgroundService:
                 e,
                 exc_info=True,
             )
+
+    @tasks.loop(seconds=3)
+    async def sound_import_notification_drain_loop(self) -> None:
+        """
+        Drain the cross-process sound import notification outbox.
+
+        Web upload background workers cannot use BotBehavior directly, so they
+        insert rows into the ``sound_import_notifications`` table instead. This
+        loop picks up pending rows and sends the Discord image-card notification
+        using the shared notification service.
+        """
+        if self.behavior is None:
+            return
+        if self._sound_import_notification_repo is None:
+            self._sound_import_notification_repo = SoundImportNotificationRepository()
+        try:
+            pending = self._sound_import_notification_repo.get_pending(limit=5)
+            for notification in pending:
+                nid = int(notification["id"])
+                try:
+                    raw_title = notification.get("title")
+                    raw_accent = notification.get("accent_color")
+                    await self._sound_import_notification_service.send_notification(
+                        behavior=self.behavior,
+                        filename=str(notification["filename"]),
+                        guild_id=self._parse_guild_id(notification.get("guild_id")),
+                        source=str(notification["source"]),
+                        requester=str(notification.get("requester_username") or None),
+                        title=str(raw_title) if raw_title is not None else None,
+                        accent_color=str(raw_accent) if raw_accent is not None else None,
+                    )
+                    self._sound_import_notification_repo.mark_sent(nid)
+                except Exception as exc:
+                    logger.error(
+                        "[BackgroundService] Failed to send import notification %s: %s",
+                        nid,
+                        exc,
+                        exc_info=True,
+                    )
+                    self._sound_import_notification_repo.mark_failed(
+                        nid, str(exc)
+                    )
+        except Exception as exc:
+            logger.error(
+                "[BackgroundService] Error in import notification drain loop: %s",
+                exc,
+                exc_info=True,
+            )
+
+    @staticmethod
+    def _parse_guild_id(raw: object) -> int | None:
+        """Parse a guild_id value from a repository row, returning ``None`` when absent."""
+        if raw is None:
+            return None
+        try:
+            return int(str(raw).strip())
+        except (ValueError, TypeError):
+            return None
 
     @tasks.loop(seconds=30)
     async def keyword_detection_health_check(self):

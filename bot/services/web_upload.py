@@ -23,6 +23,7 @@ from bot.downloaders.manual import ManualSoundDownloader
 from bot.models.web import DiscordWebUser
 from bot.repositories.action import ActionRepository
 from bot.repositories.sound import SoundRepository
+from bot.repositories.sound_import_notification import SoundImportNotificationRepository
 from bot.repositories.web_upload import WebUploadRepository
 
 
@@ -37,6 +38,7 @@ class WebUploadService:
         sound_repository: SoundRepository,
         action_repository: ActionRepository,
         sounds_dir: str | Path,
+        notification_repository: SoundImportNotificationRepository | None = None,
     ) -> None:
         """
         Initialize the service.
@@ -46,11 +48,15 @@ class WebUploadService:
             sound_repository: Repository for sound insertion.
             action_repository: Repository for action audit logging.
             sounds_dir: Destination folder for approved sound files.
+            notification_repository: Optional outbox for cross-process Discord
+                import notifications. When provided, a notification row is
+                enqueued after each successful upload.
         """
         self.upload_repository = upload_repository
         self.sound_repository = sound_repository
         self.action_repository = action_repository
         self.sounds_dir = Path(sounds_dir)
+        self.notification_repository = notification_repository
         self.sounds_dir.mkdir(parents=True, exist_ok=True)
         self.manual_downloader = ManualSoundDownloader()
         self.enable_ingest_loudness_normalization = (
@@ -148,6 +154,23 @@ class WebUploadService:
             filename,
             guild_id=guild_id,
         )
+        # Enqueue cross-process Discord notification when the outbox is available.
+        if self.notification_repository is not None:
+            try:
+                self.notification_repository.enqueue(
+                    guild_id=guild_id,
+                    filename=filename,
+                    source="web_upload",
+                    requester_username=current_user.global_name
+                    or current_user.username,
+                    accent_color="#5865F2",
+                )
+            except Exception:
+                import logging
+
+                logging.getLogger(__name__).exception(
+                    "[WebUploadService] Failed to enqueue import notification"
+                )
         return {
             "upload_id": upload_id,
             "sound_id": sound_id,

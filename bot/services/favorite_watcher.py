@@ -15,6 +15,7 @@ from typing import Optional
 import yt_dlp
 
 from bot.repositories import ActionRepository, FavoriteWatcherRepository
+from bot.services.sound_import_notifications import SoundImportNotificationService
 
 logger = logging.getLogger(__name__)
 
@@ -162,23 +163,13 @@ class FavoriteWatcherService:
         if self.behavior is None:
             return
 
-        guild = None
-        if guild_id is not None:
-            bot = getattr(self.behavior, "bot", None)
-            guild = bot.get_guild(guild_id) if bot and hasattr(bot, "get_guild") else None
-
+        notif_service = SoundImportNotificationService()
         try:
-            from bot.ui import DownloadedSoundView
-
-            await self.behavior.send_message(
-                title=f"🎵 New favorite sound imported: {filename}",
-                view=DownloadedSoundView(self.behavior, filename),
-                guild=guild,
-                message_format="image",
-                image_requester="Favorite Watcher",
-                image_show_footer=False,
-                image_show_sound_icon=False,
-                image_border_color="#ED4245",
+            await notif_service.send_notification(
+                behavior=self.behavior,
+                filename=filename,
+                guild_id=guild_id,
+                source="favorite_watcher",
             )
         except Exception as exc:
             logger.error(
