@@ -79,14 +79,26 @@ class VoiceTransformationService:
             guild_id=guild_id,
         ))
 
-    async def tts_EL(self, user, speech: str, lang: str = "en", region: str = "", send_controls=True,
-                     loading_message=None, requester_avatar_url=None, sts_thumbnail_url=None,
-                     request_note: Optional[str] = None):
+    async def tts_EL(
+        self,
+        user,
+        speech: str,
+        lang: str = "en",
+        region: str = "",
+        send_controls=True,
+        loading_message=None,
+        requester_avatar_url=None,
+        sts_thumbnail_url=None,
+        request_note: Optional[str] = None,
+        playback_channel: Optional[discord.VoiceChannel] = None,
+    ):
         """ElevenLabs text-to-speech.
 
         Args:
             request_note: Optional text shown as a "TTS:" footer pill on the
                 sound card (e.g. the user's original voice-command transcript).
+            playback_channel: Optional voice channel override for scheduled
+                TTS that should play where a target user currently is.
         """
         guild_id = self._resolve_guild_id(user)
         self.action_repo.insert(user.name, "tts_EL", speech, guild_id=guild_id)
@@ -99,6 +111,7 @@ class VoiceTransformationService:
             requester_name=requester_name,
             guild_id=guild_id,
             request_note=request_note,
+            playback_channel=playback_channel,
         ))
 
     async def sts_EL(self, user, sound: str, char: str = "ventura", region: str = "",

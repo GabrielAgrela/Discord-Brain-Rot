@@ -1134,6 +1134,196 @@ class TestAutoJoinChannels:
         behavior._rocket_league_store_service.fetch_store_snapshot.assert_not_awaited()
 
 
+class TestPickyPromptScheduler:
+    """Tests for the hourly Ventura picky prompt scheduler."""
+
+    @pytest.mark.asyncio
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    async def test_refresh_online_people_cache_keeps_non_bot_voice_members(
+        self, _mock_sound_repo, _mock_action_repo
+    ):
+        """Online cache should include non-bot voice members and skip bots."""
+        from bot.services.background import BackgroundService
+
+        guild = Mock(id=42, name="Guild", afk_channel=None)
+        member = Mock(id=1001, bot=False, name="ze", display_name="Zé Teste")
+        member.display_avatar.url = "https://cdn.example/avatar.png"
+        bot_member = Mock(id=1002, bot=True, name="bot", display_name="Bot")
+        voice_channel = Mock(id=555, name="Geral", guild=guild, members=[member, bot_member])
+        guild.voice_channels = [voice_channel]
+
+        audio_service = Mock()
+        audio_service.is_afk_channel = Mock(return_value=False)
+        service = BackgroundService(
+            bot=Mock(guilds=[guild]),
+            audio_service=audio_service,
+            sound_service=Mock(),
+            behavior=Mock(),
+        )
+
+        snapshots = service._refresh_online_people_cache(guild)
+
+        assert len(snapshots) == 1
+        assert snapshots[0].member_id == 1001
+        assert snapshots[0].display_name == "Zé Teste"
+        assert snapshots[0].channel_id == 555
+        assert service._get_cached_online_people(guild) == snapshots
+
+    @pytest.mark.asyncio
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    @patch("bot.services.background.random.choice", side_effect=lambda items: items[0])
+    async def test_run_picky_prompt_tick_plays_ventura_tts_for_cached_online_member(
+        self, _mock_choice, _mock_sound_repo, _mock_action_repo
+    ):
+        """Hourly tick should pick an online member and play Ventura PT-PT TTS."""
+        from bot.services.background import BackgroundService
+
+        guild = Mock(id=42, name="Guild", afk_channel=None)
+        member = Mock(id=1001, bot=False, name="ze", display_name="Zé Teste")
+        member.display_avatar.url = "https://cdn.example/avatar.png"
+        voice_channel = Mock(id=555, name="Geral", guild=guild, members=[member])
+        guild.voice_channels = [voice_channel]
+        guild.get_channel = Mock(return_value=voice_channel)
+
+        vt_service = Mock()
+        vt_service.tts_EL = AsyncMock()
+        audio_service = Mock(voice_transformation_service=vt_service)
+        audio_service.is_afk_channel = Mock(return_value=False)
+
+        service = BackgroundService(
+            bot=Mock(guilds=[guild]),
+            audio_service=audio_service,
+            sound_service=Mock(),
+            behavior=Mock(),
+        )
+        service.guild_settings_service = Mock()
+        service.guild_settings_service.get = Mock(return_value=Mock(periodic_enabled=True))
+        service.action_repo.insert = Mock()
+
+        sent_count = await service._run_picky_prompt_tick()
+
+        assert sent_count == 1
+        vt_service.tts_EL.assert_awaited_once()
+        args = vt_service.tts_EL.await_args.args
+        kwargs = vt_service.tts_EL.await_args.kwargs
+        assert args[1].startswith("[scoffs] Zé Teste")
+        assert any(word in args[1].lower() for word in ("foda-se", "caralho", "merda", "porra"))
+        assert kwargs["lang"] == "pt"
+        assert kwargs["playback_channel"] is voice_channel
+        assert kwargs["request_note"] == "Pica: Zé Teste"
+        service.action_repo.insert.assert_called_once_with(
+            "scheduler",
+            BackgroundService.PICKY_PROMPT_ACTION,
+            "1001",
+            guild_id=42,
+        )
+
+    @pytest.mark.asyncio
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    async def test_run_picky_prompt_tick_uses_periodic_feature_gate(
+        self, _mock_sound_repo, _mock_action_repo
+    ):
+        """Picky prompts should stay behind the existing periodic guild toggle."""
+        from bot.services.background import BackgroundService
+
+        vt_service = Mock()
+        vt_service.tts_EL = AsyncMock()
+        audio_service = Mock(voice_transformation_service=vt_service)
+
+        service = BackgroundService(
+            bot=Mock(guilds=[Mock(id=42, name="Guild")]),
+            audio_service=audio_service,
+            sound_service=Mock(),
+            behavior=Mock(),
+        )
+        service.guild_settings_service = Mock()
+        service.guild_settings_service.get = Mock(return_value=Mock(periodic_enabled=False))
+
+        sent_count = await service._run_picky_prompt_tick()
+
+        assert sent_count == 0
+        vt_service.tts_EL.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    @patch("bot.services.background.random.choice", side_effect=lambda items: items[0])
+    async def test_run_picky_prompt_tick_roasts_target_reply(
+        self, _mock_choice, _mock_sound_repo, _mock_action_repo
+    ):
+        """After the first roast, the scheduler should capture and answer the target's reply."""
+        from bot.services.background import BackgroundService
+
+        guild = Mock(id=42, name="Guild", afk_channel=None)
+        member = Mock(id=1001, bot=False, name="ze", display_name="Zé Teste")
+        member.display_avatar.url = "https://cdn.example/avatar.png"
+        voice_channel = Mock(id=555, name="Geral", guild=guild, members=[member])
+        guild.voice_channels = [voice_channel]
+        guild.get_channel = Mock(return_value=voice_channel)
+
+        sink = Mock()
+        sink._begin_voice_command_listening = Mock(return_value=True)
+        sink._end_voice_command_listening = Mock()
+        sink._record_voice_command_after_beep = AsyncMock(return_value=b"\x00" * 19200)
+
+        voice_service = Mock(is_available=True)
+        voice_service.transcribe = AsyncMock(return_value="Não tens moral nenhuma")
+        ventura_service = Mock(is_available=True)
+        ventura_service.reply = AsyncMock(
+            return_value="[angry] Não tenho moral? Tu nem tens microfone decente, caralho."
+        )
+
+        vt_service = Mock()
+        vt_service.tts_EL = AsyncMock()
+        audio_service = Mock(voice_transformation_service=vt_service)
+        audio_service.is_afk_channel = Mock(return_value=False)
+        audio_service.keyword_sinks = {42: sink}
+        audio_service._get_voice_command_service = Mock(return_value=voice_service)
+        audio_service._get_ventura_chat_service = Mock(return_value=ventura_service)
+
+        service = BackgroundService(
+            bot=Mock(guilds=[guild]),
+            audio_service=audio_service,
+            sound_service=Mock(),
+            behavior=Mock(),
+        )
+        service.guild_settings_service = Mock()
+        service.guild_settings_service.get = Mock(return_value=Mock(periodic_enabled=True))
+        service.action_repo.insert = Mock()
+
+        sent_count = await service._run_picky_prompt_tick()
+
+        assert sent_count == 1
+        assert vt_service.tts_EL.await_count == 2
+        sink._record_voice_command_after_beep.assert_awaited_once_with(
+            1001,
+            "Zé Teste",
+            max_seconds=60,
+            silence_seconds=2.0,
+        )
+        voice_service.transcribe.assert_awaited_once()
+        ventura_service.reply.assert_awaited_once()
+        model_prompt = ventura_service.reply.await_args.args[0]
+        assert "Resposta real do Zé Teste" in model_prompt
+        assert "Não tens moral nenhuma" in model_prompt
+
+        second_tts_args = vt_service.tts_EL.await_args_list[1].args
+        second_tts_kwargs = vt_service.tts_EL.await_args_list[1].kwargs
+        assert "microfone decente" in second_tts_args[1]
+        assert "caralho" in second_tts_args[1]
+        assert second_tts_kwargs["request_note"] == "Resposta: Não tens moral nenhuma"
+        assert second_tts_kwargs["playback_channel"] is voice_channel
+        service.action_repo.insert.assert_any_call(
+            "scheduler",
+            BackgroundService.PICKY_PROMPT_REPLY_ACTION,
+            "1001",
+            guild_id=42,
+        )
+
+
 class TestBackupScheduler:
     """Tests for BackgroundService backup scheduler."""
 

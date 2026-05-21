@@ -1,12 +1,14 @@
 import asyncio
 import gc
-import json
 import logging
 import os
 import random
+import re
 import resource
 import shutil
 import time
+import types
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Tuple
 import discord
@@ -26,6 +28,18 @@ from bot.services.sound_import_notifications import SoundImportNotificationServi
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True)
+class OnlineMemberSnapshot:
+    """Cached snapshot of a non-bot member currently in a voice channel."""
+
+    member_id: int
+    name: str
+    display_name: str
+    channel_id: int
+    channel_name: str
+    avatar_url: Optional[str] = None
+
+
 class BackgroundService:
     """
     Service for background tasks like status updates, periodic sound playback,
@@ -35,6 +49,8 @@ class BackgroundService:
     RLSTORE_NOTIFY_ACTION = "rlstore_daily_notification_sent"
     RLSTORE_CHANNEL_NAME = "botrl"
     BACKUP_SCHEDULER_ACTION = "scheduled_backup_created"
+    PICKY_PROMPT_ACTION = "hourly_picky_prompt"
+    PICKY_PROMPT_REPLY_ACTION = "hourly_picky_prompt_reply"
     # Discord allows 5 presence updates per 20 seconds, so 4s is the fastest safe cadence.
     STATUS_UPDATE_INTERVAL_SECONDS = 4
     
@@ -88,6 +104,22 @@ class BackgroundService:
         self._backup_scheduler_hour_utc = self._env_int("BACKUP_SCHEDULER_HOUR_UTC", 18, 0, 23)
         self._backup_scheduler_minute_utc = self._env_int("BACKUP_SCHEDULER_MINUTE_UTC", 0, 0, 59)
         self._backup_scheduler_running = False
+        self._picky_prompt_enabled = self._env_flag("PICKY_PROMPT_ENABLED", True)
+        self._picky_prompt_interval_seconds = self._env_int(
+            "PICKY_PROMPT_INTERVAL_SECONDS", 3600, 60, 86400
+        )
+        self._picky_prompt_reply_enabled = self._env_flag(
+            "PICKY_PROMPT_REPLY_ENABLED", True
+        )
+        self._picky_prompt_reply_wait_seconds = self._env_int(
+            "PICKY_PROMPT_REPLY_WAIT_SECONDS", 60, 5, 300
+        )
+        self._picky_prompt_reply_silence_seconds = self._env_float(
+            "PICKY_PROMPT_REPLY_SILENCE_SECONDS", 2.0, 0.5, 10.0
+        )
+        self._online_people_cache: Dict[
+            int, Tuple[float, list[OnlineMemberSnapshot]]
+        ] = {}
         self._self_heal_enabled = self._env_flag("BOT_SELF_HEAL_RESTART_ENABLED", True)
         self._gateway_unready_restart_seconds = self._env_int(
             "BOT_GATEWAY_UNREADY_RESTART_SECONDS", 300, 60, 3600
@@ -141,6 +173,8 @@ class BackgroundService:
                 self.bot_self_heal_watchdog_loop.start()
             if not self.sound_import_notification_drain_loop.is_running():
                 self.sound_import_notification_drain_loop.start()
+            if self._picky_prompt_enabled and not self.picky_prompt_loop.is_running():
+                self.picky_prompt_loop.start()
             
             asyncio.create_task(self._auto_join_channels())
             print("[BackgroundService] Background tasks started.")
@@ -197,6 +231,18 @@ class BackgroundService:
             return default
         try:
             parsed = int(raw.strip())
+        except ValueError:
+            return default
+        return max(minimum, min(parsed, maximum))
+
+    @staticmethod
+    def _env_float(name: str, default: float, minimum: float, maximum: float) -> float:
+        """Parse a bounded float environment variable."""
+        raw = os.getenv(name)
+        if raw is None:
+            return default
+        try:
+            parsed = float(raw.strip())
         except ValueError:
             return default
         return max(minimum, min(parsed, maximum))
@@ -1534,6 +1580,519 @@ class BackgroundService:
                 await self.bot.change_presence(activity=activity)
         except Exception as e:
             print(f"[BackgroundService] Error updating status: {e}")
+
+    @staticmethod
+    def _string_attr(obj: Any, attr_name: str) -> str:
+        """Read a string attribute without letting test mocks become spoken names."""
+        value = getattr(obj, attr_name, "")
+        return value if isinstance(value, str) else ""
+
+    @staticmethod
+    def _sanitize_spoken_member_name(raw_name: str) -> str:
+        """Keep Discord display names usable in generated speech."""
+        name = raw_name if isinstance(raw_name, str) else ""
+        name = re.sub(r"<@!?\d+>", "", name)
+        name = re.sub(r"[@#`*_~|<>\\/\[\](){}]", "", name)
+        name = " ".join(name.split())
+        return name[:40] or "campeão"
+
+    @staticmethod
+    def _member_avatar_url(member: Any) -> Optional[str]:
+        """Return a member avatar URL if one is available."""
+        avatar = getattr(member, "display_avatar", None)
+        url = getattr(avatar, "url", None)
+        return url if isinstance(url, str) else None
+
+    @staticmethod
+    def _contains_explicit_pt_swearing(text: str) -> bool:
+        """Return True when generated PT text includes clear profanity."""
+        lower = (text or "").lower()
+        return any(
+            swear in lower
+            for swear in ("foda", "caralho", "merda", "porra", "puta", "cabrão", "sacana", "paneleiro", "Foda-se", "Foder", "Piroca", "Cona", "Piça", "Pissa", "Culhão", "Culhões")
+        )
+
+    @classmethod
+    def _ensure_explicit_pt_swearing(cls, text: str) -> str:
+        """Ensure a generated roast keeps the explicit-swearing requirement."""
+        cleaned = (text or "").strip()
+        if not cleaned:
+            return ""
+        if cls._contains_explicit_pt_swearing(cleaned):
+            return cleaned
+        return f"[scoffs] Foda-se, {cleaned}"
+
+    @staticmethod
+    def _compact_reply_text(text: str, *, limit: int = 160) -> str:
+        """Make a reply transcript safe to embed in a short roast prompt."""
+        compact = " ".join(str(text or "").split())
+        compact = re.sub(r"<@!?\d+>", "", compact)
+        compact = compact.strip()
+        if len(compact) <= limit:
+            return compact
+        return f"{compact[: limit - 3].rstrip()}..."
+
+    def _is_afk_voice_channel(self, channel: discord.VoiceChannel) -> bool:
+        """Return True only when the audio service positively identifies AFK."""
+        checker = getattr(self.audio_service, "is_afk_channel", None)
+        if not callable(checker):
+            return False
+        try:
+            return checker(channel) is True
+        except Exception:
+            return False
+
+    def _resolve_snapshot_channel(
+        self,
+        guild: discord.Guild,
+        snapshot: OnlineMemberSnapshot,
+    ) -> Optional[discord.VoiceChannel]:
+        """Resolve a cached member snapshot back to its voice channel."""
+        get_channel = getattr(guild, "get_channel", None)
+        if callable(get_channel):
+            try:
+                channel = get_channel(snapshot.channel_id)
+                if channel is not None:
+                    return channel
+            except Exception:
+                pass
+
+        for channel in getattr(guild, "voice_channels", []) or []:
+            if getattr(channel, "id", None) == snapshot.channel_id:
+                return channel
+        return None
+
+    def _snapshot_member_is_still_online(
+        self,
+        guild: discord.Guild,
+        snapshot: OnlineMemberSnapshot,
+    ) -> bool:
+        """Check that a cached target is still present in the cached channel."""
+        channel = self._resolve_snapshot_channel(guild, snapshot)
+        if channel is None:
+            return False
+        for member in getattr(channel, "members", []) or []:
+            if getattr(member, "bot", False):
+                continue
+            if getattr(member, "id", None) == snapshot.member_id:
+                return True
+        return False
+
+    def _refresh_online_people_cache(
+        self,
+        guild: discord.Guild,
+    ) -> list[OnlineMemberSnapshot]:
+        """Refresh and cache non-bot voice-channel members for a guild."""
+        try:
+            guild_id = int(getattr(guild, "id"))
+        except (TypeError, ValueError):
+            return []
+
+        snapshots: list[OnlineMemberSnapshot] = []
+        seen_member_ids: set[int] = set()
+
+        for channel in getattr(guild, "voice_channels", []) or []:
+            if self._is_afk_voice_channel(channel):
+                continue
+
+            try:
+                channel_id = int(getattr(channel, "id"))
+            except (TypeError, ValueError):
+                continue
+
+            channel_name = self._string_attr(channel, "name") or "voice"
+            for member in getattr(channel, "members", []) or []:
+                if getattr(member, "bot", False):
+                    continue
+
+                try:
+                    member_id = int(getattr(member, "id"))
+                except (TypeError, ValueError):
+                    continue
+
+                if member_id in seen_member_ids:
+                    continue
+                seen_member_ids.add(member_id)
+
+                raw_display = (
+                    self._string_attr(member, "display_name")
+                    or self._string_attr(member, "global_name")
+                    or self._string_attr(member, "name")
+                )
+                display_name = self._sanitize_spoken_member_name(raw_display)
+                name = self._sanitize_spoken_member_name(
+                    self._string_attr(member, "name") or display_name
+                )
+                snapshots.append(
+                    OnlineMemberSnapshot(
+                        member_id=member_id,
+                        name=name,
+                        display_name=display_name,
+                        channel_id=channel_id,
+                        channel_name=channel_name,
+                        avatar_url=self._member_avatar_url(member),
+                    )
+                )
+
+        self._online_people_cache[guild_id] = (time.time(), snapshots)
+        return snapshots
+
+    def _get_cached_online_people(
+        self,
+        guild: discord.Guild,
+        *,
+        force_refresh: bool = False,
+    ) -> list[OnlineMemberSnapshot]:
+        """Return cached online people, refreshing when stale or requested."""
+        try:
+            guild_id = int(getattr(guild, "id"))
+        except (TypeError, ValueError):
+            return []
+
+        cached = self._online_people_cache.get(guild_id)
+        if cached and not force_refresh:
+            cached_at, snapshots = cached
+            if time.time() - cached_at < self._picky_prompt_interval_seconds:
+                return snapshots
+
+        return self._refresh_online_people_cache(guild)
+
+    @staticmethod
+    def _build_picky_prompt(
+        target: OnlineMemberSnapshot,
+        online_count: int,
+    ) -> str:
+        """Build a short PT-PT Ventura-style line with explicit profanity."""
+        name = target.display_name
+        count = max(1, online_count)
+        templates = (
+            "[scoffs] {name}, foda-se, estás online e mesmo assim consegues ter menos impacto que uma cadeira vazia. Mexe-te, caralho.",
+            "[sarcastic] Olha o {name}, todo online. Grande merda, pá: até parado fazes barulho a mais.",
+            "[angry] {name}, porra, acorda para a vida. Estás aí há uma hora e a tua contribuição é zero, caralho.",
+            "[laughs] {name}, foste escolhido entre {count} pessoas online. Parabéns, que puta de azar, agora faz qualquer coisa de jeito.",
+            "[grumbling] {name}, com essa energia toda online, a sala continua na merda. Impressionante, caralho.",
+        )
+        return random.choice(templates).format(name=name, count=count)
+
+    @classmethod
+    def _build_local_picky_reply_prompt(
+        cls,
+        target: OnlineMemberSnapshot,
+        reply_transcript: str,
+    ) -> str:
+        """Fallback follow-up roast that quotes the target's reply directly."""
+        name = target.display_name
+        excerpt = cls._compact_reply_text(reply_transcript, limit=100)
+        templates = (
+            '[scoffs] {name}, disseste "{excerpt}"? Foda-se, isso foi a tua defesa? Até o silêncio tinha mais coluna, caralho.',
+            '[laughs] "{excerpt}", {name}? Que puta de resposta fraca. Obrigado por cavares o buraco sozinho.',
+            '[angry] {name}, depois de ouvires a boca ainda mandas "{excerpt}"? Porra, era para responderes, não para confirmar a merda.',
+        )
+        return random.choice(templates).format(name=name, excerpt=excerpt)
+
+    @classmethod
+    def _build_picky_reply_model_prompt(
+        cls,
+        target: OnlineMemberSnapshot,
+        original_roast: str,
+        reply_transcript: str,
+    ) -> str:
+        """Build the user prompt sent to VenturaChat for a live-feeling reply."""
+        original = cls._compact_reply_text(original_roast, limit=220)
+        reply = cls._compact_reply_text(reply_transcript, limit=260)
+        return (
+            f"Acabaste de gozar com {target.display_name}. "
+            f"Roast original: \"{original}\". "
+            f"Resposta real do {target.display_name}: \"{reply}\". "
+            "Responde agora diretamente ao que ele disse, como se estivesses "
+            "numa chamada em tempo real. Usa PT-PT, 1-2 frases curtas, "
+            "palavrões explícitos, e goza especificamente com a resposta dele. "
+            "Não expliques nada."
+        )
+
+    def _get_keyword_sink_for_guild(self, guild: discord.Guild):
+        """Return the active keyword sink for a guild when recording is available."""
+        sinks = getattr(self.audio_service, "keyword_sinks", None)
+        if not isinstance(sinks, dict):
+            return None
+        return sinks.get(getattr(guild, "id", None))
+
+    async def _wait_for_picky_roast_playback(self, guild: discord.Guild) -> None:
+        """Wait briefly for the first roast audio to finish before listening."""
+        ensure_state = getattr(self.audio_service, "_ensure_guild_playback_state", None)
+        if callable(ensure_state):
+            try:
+                ensure_state(guild.id)
+            except Exception:
+                pass
+
+        events = getattr(self.audio_service, "_guild_playback_done", None)
+        if not isinstance(events, dict):
+            return
+
+        event = events.get(guild.id)
+        if event is None or event.is_set():
+            return
+
+        try:
+            await asyncio.wait_for(event.wait(), timeout=45.0)
+        except asyncio.TimeoutError:
+            print(
+                f"[BackgroundService] Timed out waiting for picky roast "
+                f"playback in {guild.name}; listening anyway"
+            )
+
+    async def _capture_picky_reply_pcm(
+        self,
+        guild: discord.Guild,
+        target: OnlineMemberSnapshot,
+    ) -> bytes:
+        """Capture up to one reply from the target user using the active sink."""
+        sink = self._get_keyword_sink_for_guild(guild)
+        if sink is None:
+            print(
+                f"[BackgroundService] Cannot capture picky reply in {guild.name} "
+                "- no active keyword detection sink"
+            )
+            return bytes()
+
+        recorder = getattr(sink, "_record_voice_command_after_beep", None)
+        if not callable(recorder):
+            return bytes()
+
+        begin_listening = getattr(sink, "_begin_voice_command_listening", None)
+        end_listening = getattr(sink, "_end_voice_command_listening", None)
+        acquired = False
+        if callable(begin_listening):
+            acquired = bool(begin_listening(target.member_id))
+            if not acquired:
+                print(
+                    f"[BackgroundService] Skipping picky reply capture for "
+                    f"{target.display_name} - another capture is active"
+                )
+                return bytes()
+
+        try:
+            print(
+                f"[BackgroundService] Waiting up to "
+                f"{self._picky_prompt_reply_wait_seconds}s for "
+                f"{target.display_name}'s reply"
+            )
+            return await recorder(
+                target.member_id,
+                target.display_name,
+                max_seconds=self._picky_prompt_reply_wait_seconds,
+                silence_seconds=self._picky_prompt_reply_silence_seconds,
+            )
+        finally:
+            if acquired and callable(end_listening):
+                end_listening(target.member_id)
+
+    async def _transcribe_picky_reply(
+        self,
+        target: OnlineMemberSnapshot,
+        pcm_data: bytes,
+    ) -> str:
+        """Transcribe captured target audio with the existing Groq service."""
+        if not pcm_data:
+            return ""
+        voice_service = self.audio_service._get_voice_command_service()
+        if not getattr(voice_service, "is_available", False):
+            print("[BackgroundService] Groq Whisper unavailable; skipping picky reply")
+            return ""
+
+        from bot.services.voice_command import pcm_to_wav
+
+        print(
+            f"[BackgroundService] Transcribing picky reply from "
+            f"{target.display_name} ({len(pcm_data)} bytes)"
+        )
+        transcript = await voice_service.transcribe(pcm_to_wav(pcm_data))
+        return (transcript or "").strip()
+
+    async def _generate_picky_reply_roast(
+        self,
+        guild: discord.Guild,
+        target: OnlineMemberSnapshot,
+        original_roast: str,
+        reply_transcript: str,
+    ) -> str:
+        """Generate a follow-up roast grounded in the target's transcript."""
+        ventura_service = self.audio_service._get_ventura_chat_service()
+        model_prompt = self._build_picky_reply_model_prompt(
+            target,
+            original_roast,
+            reply_transcript,
+        )
+        reply = None
+        if getattr(ventura_service, "is_available", False):
+            reply = await ventura_service.reply(
+                model_prompt,
+                requester_name=target.display_name,
+                conversation_key=f"guild:{guild.id}:picky:{target.member_id}",
+            )
+        if not reply:
+            reply = self._build_local_picky_reply_prompt(target, reply_transcript)
+        return self._ensure_explicit_pt_swearing(reply)
+
+    async def _handle_picky_prompt_reply(
+        self,
+        guild: discord.Guild,
+        target: OnlineMemberSnapshot,
+        channel: discord.VoiceChannel,
+        original_roast: str,
+        vt_service,
+    ) -> bool:
+        """Wait for the target's reply, transcribe it, and play a direct roast."""
+        if not self._picky_prompt_reply_enabled:
+            return False
+
+        await self._wait_for_picky_roast_playback(guild)
+        pcm_data = await self._capture_picky_reply_pcm(guild, target)
+        if not pcm_data:
+            return False
+
+        transcript = await self._transcribe_picky_reply(target, pcm_data)
+        if not transcript:
+            print(
+                f"[BackgroundService] No transcript for picky reply from "
+                f"{target.display_name}"
+            )
+            return False
+
+        follow_up = await self._generate_picky_reply_roast(
+            guild,
+            target,
+            original_roast,
+            transcript,
+        )
+        if not follow_up:
+            return False
+
+        user_obj = types.SimpleNamespace(
+            name="scheduler",
+            display_name="Ventura",
+            guild=guild,
+        )
+
+        from config import TTS_PROFILES
+
+        ventura_profile = TTS_PROFILES.get("ventura", {})
+        await vt_service.tts_EL(
+            user_obj,
+            follow_up,
+            lang="pt",
+            send_controls=True,
+            requester_avatar_url=target.avatar_url,
+            sts_thumbnail_url=ventura_profile.get("thumbnail"),
+            request_note=f"Resposta: {self._compact_reply_text(transcript, limit=80)}",
+            playback_channel=channel,
+        )
+        self.action_repo.insert(
+            "scheduler",
+            self.PICKY_PROMPT_REPLY_ACTION,
+            str(target.member_id),
+            guild_id=guild.id,
+        )
+        return True
+
+    async def _run_picky_prompt_tick(self) -> int:
+        """
+        Pick a cached online voice member per guild and play a Ventura roast.
+
+        The feature shares the existing per-guild ``periodic_enabled`` gate used
+        by random periodic sound playback, plus the global
+        ``PICKY_PROMPT_ENABLED`` environment kill switch.
+        """
+        if not self._picky_prompt_enabled:
+            return 0
+
+        vt_service = getattr(self.audio_service, "voice_transformation_service", None)
+        if vt_service is None:
+            return 0
+
+        sent_count = 0
+        for guild in getattr(self.bot, "guilds", []) or []:
+            try:
+                settings = self.guild_settings_service.get(guild.id)
+                if not settings.periodic_enabled:
+                    continue
+
+                online_people = self._get_cached_online_people(guild, force_refresh=True)
+                eligible_people = [
+                    snapshot
+                    for snapshot in online_people
+                    if self._snapshot_member_is_still_online(guild, snapshot)
+                ]
+                if not eligible_people:
+                    print(
+                        f"[BackgroundService] Skipping picky prompt in "
+                        f"{guild.name} - no online voice users"
+                    )
+                    continue
+
+                target = random.choice(eligible_people)
+                channel = self._resolve_snapshot_channel(guild, target)
+                if channel is None:
+                    continue
+
+                speech = self._build_picky_prompt(target, len(eligible_people))
+                user_obj = types.SimpleNamespace(
+                    name="scheduler",
+                    display_name="Ventura",
+                    guild=guild,
+                )
+
+                from config import TTS_PROFILES
+                ventura_profile = TTS_PROFILES.get("ventura", {})
+                await vt_service.tts_EL(
+                    user_obj,
+                    speech,
+                    lang="pt",
+                    send_controls=True,
+                    requester_avatar_url=target.avatar_url,
+                    sts_thumbnail_url=ventura_profile.get("thumbnail"),
+                    request_note=f"Pica: {target.display_name}",
+                    playback_channel=channel,
+                )
+                self.action_repo.insert(
+                    "scheduler",
+                    self.PICKY_PROMPT_ACTION,
+                    str(target.member_id),
+                    guild_id=guild.id,
+                )
+                sent_count += 1
+                print(
+                    f"[BackgroundService] Played picky prompt for "
+                    f"{target.display_name} in {guild.name}/{target.channel_name}"
+                )
+                await self._handle_picky_prompt_reply(
+                    guild,
+                    target,
+                    channel,
+                    speech,
+                    vt_service,
+                )
+            except Exception as e:
+                guild_name = getattr(guild, "name", "guild")
+                print(f"[BackgroundService] Error in picky prompt for {guild_name}: {e}")
+
+        return sent_count
+
+    @tasks.loop(count=1)
+    async def picky_prompt_loop(self):
+        """Play a random Ventura roast for one online voice member every hour."""
+        await self.bot.wait_until_ready()
+
+        while not self.bot.is_closed():
+            try:
+                sleep_time = self._picky_prompt_interval_seconds
+                self.bot.next_picky_prompt_time = time.time() + sleep_time
+                await asyncio.sleep(sleep_time)
+                await self._run_picky_prompt_tick()
+            except Exception as e:
+                print(f"[BackgroundService] Error in picky prompt loop: {e}")
+                await asyncio.sleep(60)
 
     @tasks.loop(count=1)
     async def play_sound_periodically_loop(self):

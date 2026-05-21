@@ -166,6 +166,7 @@ This README is based on the current codebase behavior (not historical README ass
 
 ### Background Automations
 - Random periodic sound playback loop (feature-flagged per guild; disabled by default).
+- Hourly Ventura picky prompt loop: when periodic playback is enabled for a guild, caches non-bot users currently in voice channels and roasts one random online target with the Ventura ElevenLabs voice. If voice recording is active, it then listens up to one minute for that target's reply, transcribes it with Groq, and plays a direct follow-up roast based on the reply.
 - MyInstants scraping loop.
 - TikTok collection favorite watcher loop (every 10 seconds; imports only videos added after a watcher URL was configured and posts an image-card notification with a play button).
 - Weekly wrapped scheduler loop (UTC-based, default Friday 18:00, deduped per guild/week).
@@ -336,6 +337,11 @@ This README is based on the current codebase behavior (not historical README ass
 - `WEEKLY_WRAPPED_GIF_MAX_MB` (optional upload cap override for generated `/weeklywrapped` GIFs)
 - `YEAR_REVIEW_RENDER_TIMEOUT_SECONDS` (optional timeout for Remotion MP4 rendering before GIF conversion, default `180`)
 - `TTS_MAX_CONCURRENT_JOBS` (global TTS/STS concurrency cap)
+- `PICKY_PROMPT_ENABLED` (`true` default; global kill switch for the hourly Ventura picky prompt loop; still requires the guild `periodic_enabled` setting)
+- `PICKY_PROMPT_INTERVAL_SECONDS` (default `3600`; interval for refreshing the cached online voice-user list and choosing one target, clamped to `60`-`86400`)
+- `PICKY_PROMPT_REPLY_ENABLED` (`true` default; after the first roast, listen for the selected target and generate one direct follow-up roast when transcription is available)
+- `PICKY_PROMPT_REPLY_WAIT_SECONDS` (default `60`; maximum time to wait for the target's reply, clamped to `5`-`300`)
+- `PICKY_PROMPT_REPLY_SILENCE_SECONDS` (default `2.0`; silence duration that ends reply capture after the target starts speaking, clamped to `0.5`-`10.0`)
 - `SOUND_PLAYBACK_EAR_PROTECTION_ENABLED` (`true` default; enables playback-time anti-earrape filtering)
 - `SOUND_PLAYBACK_EAR_PROTECTION_GAIN_DB` (default `-3.0`; baseline playback attenuation)
 - `SOUND_PLAYBACK_EAR_PROTECTION_THRESHOLD_DBFS` (default `-16.0`; playback compressor threshold)

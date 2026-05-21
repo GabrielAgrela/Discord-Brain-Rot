@@ -656,13 +656,13 @@ class TTS:
     async def save_as_mp3_EL(self, text, lang="pt", region="", send_controls=True,
                              loading_message=None, requester_avatar_url=None, sts_thumbnail_url=None,
                              requester_name="admin", guild_id: Optional[int] = None,
-                             request_note: Optional[str] = None):
+                             request_note: Optional[str] = None, playback_channel=None):
         ctx = EarlyLiveContext()
         try:
             return await self._save_as_mp3_EL_impl(
                 text, lang, region, send_controls,
                 loading_message, requester_avatar_url, sts_thumbnail_url,
-                requester_name, guild_id, request_note, ctx
+                requester_name, guild_id, request_note, ctx, playback_channel
             )
         finally:
             if not ctx.live_playback_started and ctx.live_task is not None:
@@ -686,7 +686,8 @@ class TTS:
     async def _save_as_mp3_EL_impl(self, text, lang="pt", region="", send_controls=True,
                                   loading_message=None, requester_avatar_url=None, sts_thumbnail_url=None,
                                   requester_name="admin", guild_id: Optional[int] = None,
-                                  request_note: Optional[str] = None, ctx: Optional[EarlyLiveContext] = None):
+                                  request_note: Optional[str] = None, ctx: Optional[EarlyLiveContext] = None,
+                                  playback_channel=None):
         if ctx is None:
             ctx = EarlyLiveContext()
         boost_volume = 0
@@ -717,7 +718,7 @@ class TTS:
         # Resolve channel early for live-stream eligibility check
         live_channel = None
         if self.el_tts_live_playback_enabled:
-            live_channel = self._get_default_voice_channel(guild_id=guild_id)
+            live_channel = playback_channel or self._get_default_voice_channel(guild_id=guild_id)
 
         # ElevenLabs TTS API accepts up to 5000 characters per request.
         text = text[:5000]
@@ -1040,7 +1041,7 @@ class TTS:
                     # Playback: if live-stream was started, it is already
                     # playing.  Otherwise fall back to save-then-play.
                     if not ctx.live_playback_started:
-                        channel = self._get_default_voice_channel(guild_id=guild_id)
+                        channel = playback_channel or self._get_default_voice_channel(guild_id=guild_id)
                         if channel is None:
                             await self.behavior.send_error_message(
                                 "No available voice channel for TTS playback."
