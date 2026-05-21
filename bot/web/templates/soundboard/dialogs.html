@@ -165,6 +165,27 @@
                 </div>
             </label>
 
+            {% if web_user_is_admin %}
+            <details class="web-upload-admin">
+                <summary>Ventura Chat LLM (admin debug)</summary>
+                <label class="web-upload-field">
+                    <span>Model</span>
+                    <input id="webTtsAdminModelInput" class="web-upload-input" type="text"
+                        maxlength="128" placeholder="deepseek/deepseek-v4-flash">
+                </label>
+                <label class="web-upload-field">
+                    <span>Provider</span>
+                    <input id="webTtsAdminProviderInput" class="web-upload-input" type="text"
+                        maxlength="128" placeholder="crucible">
+                </label>
+                <div class="web-tts-admin-model-row">
+                    <button type="button" id="webTtsAdminSettingsSave" class="web-upload-secondary">Save</button>
+                    <button type="button" id="webTtsAdminSettingsReset" class="web-upload-secondary">Reset</button>
+                </div>
+                <p id="webTtsAdminSettingsStatus" class="web-tts-admin-model-status"></p>
+            </details>
+            {% endif %}
+
             <div class="web-upload-modal-actions">
                 <button type="button" class="web-upload-secondary" id="webTtsCancelButton">Cancel</button>
                 <button id="webTtsSubmit" class="web-upload-submit{% if not discord_user %} login-required{% endif %}"

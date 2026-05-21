@@ -46,7 +46,7 @@ import time
 import wave
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import aiohttp
 
@@ -274,7 +274,7 @@ VENTURA_SYSTEM_EXTRA: str = os.getenv(
     "VENTURA_SYSTEM_EXTRA",
 )
 VENTURA_CHAT_PROVIDER_SORT: str = os.getenv(
-    "VENTURA_CHAT_PROVIDER_SORT", "throughput"
+    "VENTURA_CHAT_PROVIDER_SORT", ""
 ).strip()
 VENTURA_CHAT_LOG_PAYLOAD: bool = (
     os.getenv("VENTURA_CHAT_LOG_PAYLOAD", "true").strip().lower()
@@ -301,7 +301,7 @@ class VenturaChatService:
     # Maximum number of prior exchanges to include in the prompt.
     _MAX_HISTORY_EXCHANGES: int = 3
 
-    def __init__(self) -> None:
+    def __init__(self, settings_service: Any = None) -> None:
         self.api_key: str = OPENROUTER_API_KEY
         self.model: str = VENTURA_CHAT_MODEL
         self.api_url: str = OPENROUTER_API_URL
@@ -312,6 +312,7 @@ class VenturaChatService:
         self.provider_sort: str = VENTURA_CHAT_PROVIDER_SORT
         self.log_payload: bool = VENTURA_CHAT_LOG_PAYLOAD
         self.history_retention_seconds: float = VENTURA_CHAT_HISTORY_RETENTION_SECONDS
+        self._settings_service = settings_service
 
         # Per-conversation history: key -> list of (monotonic_ts, user_text, assistant_text)
         self._history: dict[str, list[tuple[float, str, str]]] = {}
@@ -363,17 +364,21 @@ class VenturaChatService:
             )
         else:
             reasoning_status = "disabled" if not self.reasoning_enabled else "enabled"
+            effective_provider = self._get_effective_provider()
+            provider_display = effective_provider or (
+                self.provider_sort if self.provider_sort else "none"
+            )
             logger.info(
                 "[VenturaChat] Request summary — conversation_key=%s "
                 "context_exchanges=%d message_count=%d model=%s max_tokens=%d "
-                "reasoning=%s provider_sort=%s",
+                "reasoning=%s provider=%s",
                 effective_key,
                 ctx_count,
                 len(payload.get("messages", [])),
-                self.model,
+                payload.get("model", self.model),
                 self.max_tokens,
                 reasoning_status,
-                self.provider_sort or "none",
+                provider_display,
             )
 
         start_time = time.perf_counter()
@@ -427,6 +432,39 @@ class VenturaChatService:
                 exc,
             )
             return None
+
+    def _get_effective_model(self) -> str:
+        """Return the effective model from DB settings or env fallback.
+
+        Checks the optional ``settings_service`` for a stored override,
+        then falls back to ``self.model`` (from env / constructor).
+        """
+        if self._settings_service is not None:
+            try:
+                settings = self._settings_service.get_ventura_chat_settings()
+                db_model = settings.get("model")
+                if db_model:
+                    return db_model
+            except Exception:
+                pass
+        return self.model
+
+    def _get_effective_provider(self) -> str:
+        """Return the effective provider from DB settings or empty string.
+
+        Checks the optional ``settings_service`` for a stored override,
+        then falls back to empty (no provider routing).  The legacy
+        ``provider_sort`` is handled separately in ``_build_request_payload``.
+        """
+        if self._settings_service is not None:
+            try:
+                settings = self._settings_service.get_ventura_chat_settings()
+                db_provider = settings.get("provider")
+                if db_provider:
+                    return db_provider
+            except Exception:
+                pass
+        return ""
 
     def _format_user_transcript(self, transcript: str, requester_name: Optional[str]) -> str:
         """Format the transcript with the speaker's name as a prefix if provided."""
@@ -506,14 +544,22 @@ class VenturaChatService:
         messages.append({"role": "user", "content": formatted})
 
         payload = {
-            "model": self.model,
+            "model": self._get_effective_model(),
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
             "messages": messages,
         }
         if not self.reasoning_enabled:
             payload["reasoning"] = {"enabled": False}
-        if self.provider_sort:
+        effective_provider = self._get_effective_provider()
+        if effective_provider:
+            # DB/UI provider override → use order + allow_fallbacks (no sort).
+            payload["provider"] = {
+                "order": [effective_provider],
+                "allow_fallbacks": False,
+            }
+        elif self.provider_sort:
+            # Legacy env var VENTURA_CHAT_PROVIDER_SORT → use sort.
             payload["provider"] = {"sort": self.provider_sort}
         return payload
 

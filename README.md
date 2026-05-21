@@ -141,6 +141,7 @@ This README is based on the current codebase behavior (not historical README ass
 - The web soundboard and analytics dashboard replace matched racist/hateful usernames and sound titles with `******` unless the logged-in Discord user has prior tracked voice activity.
 - Send playback requests from web via `POST /api/play_sound`; `playback_queue` remains the internal Flask-to-bot transport table.
 - The web soundboard also exposes authenticated TTS, Slap, and mute-toggle controls via `POST /api/web_control`; TTS opens a modal with the same voice/language profile choices as `/tts`, includes an Enhance button that can add ElevenLabs audio tags through OpenRouter, the mute-on path plays a slap before muting, the bot consumes controls through the same internal polling path, and the mute toggle icon refreshes from `/api/web_control_state`.
+- Admin users see an expandable "Ventura Chat LLM (admin debug)" section in the TTS modal that allows overriding the OpenRouter model ID and provider used by the bot-side Ventura voice chat (and the web TTS enhancer). The overrides are stored in the `app_settings` DB table under `ventura_chat_model` and `ventura_chat_provider` keys (with fallback to legacy `web_tts_enhancer_*` keys), persistent across restarts. When no override is set, the Ventura Chat uses `VENTURA_CHAT_MODEL` env var (default `deepseek/deepseek-v4-flash`) and the web enhancer uses `WEB_TTS_ENHANCER_MODEL` env var (same default). When a provider is configured (e.g. `parasail/fp8`), it is sent to OpenRouter as `{"order": [provider], "allow_fallbacks": false}` — not as a `sort` parameter. Use `GET /api/tts/enhancer-settings` (admin-only) to read current settings and `POST /api/tts/enhancer-settings` with `{"model": "...", "provider": "..."}` to set or `{"model": "", "provider": ""}` to reset to defaults.
 - Unauthenticated web play/control buttons use a red locked state to prompt Discord login before sending bot actions.
 - Web sound playback now requires Discord login; web requests carry the authenticated Discord user so playback is logged as that user instead of a bot/system account.
 - Web play buttons use `sound_id` under the hood so censored labels still play the real sound correctly.
@@ -314,9 +315,12 @@ This README is based on the current codebase behavior (not historical README ass
 - `PLAYBACK_QUEUE_INTERVAL` (internal web request bridge polling interval in seconds, default `0.25`)
 - `OPENROUTER_API_KEY` (optional; enables the web TTS Enhance button)
 - `WEB_TTS_ENHANCER_MODEL` (optional; OpenRouter model for web TTS enhancement, default `deepseek/deepseek-v4-flash`)
+- `WEB_TTS_ENHANCER_PROVIDER` (optional; OpenRouter provider name to pin, e.g. `crucible` or `parasail/fp8`. No default — when unset, no provider routing is applied)
 - `WEB_TTS_ENHANCER_MAX_TOKENS` (optional; max tokens for the enhance response, default `8192`, minimum `256`)
 - `WEB_TTS_ENHANCER_REASONING_ENABLED` (optional; enables OpenRouter model reasoning for enhancements, default `true`)
-- `WEB_TTS_ENHANCER_PROVIDER_SORT` (optional; OpenRouter provider sort order for routing, default `throughput`)
+- `VENTURA_CHAT_MODEL` (optional; OpenRouter model for Ventura voice chat LLM, default `deepseek/deepseek-v4-flash`)
+- `VENTURA_CHAT_PROVIDER` (optional; OpenRouter provider name to pin for Ventura voice chat, e.g. `crucible` or `parasail/fp8`. No default — when unset and no DB override, no provider routing is applied)
+- `VENTURA_CHAT_PROVIDER_SORT` (optional; legacy OpenRouter provider sort strategy, e.g. `throughput`. Only used when no provider override is configured via DB or `VENTURA_CHAT_PROVIDER` env. Default: none)
 - `OPENROUTER_API_URL` (optional; OpenRouter-compatible chat completions endpoint)
 - `OWNER_USER_IDS` (comma-separated Discord user IDs allowed to run admin-only commands)
 - `AUDIO_LATENCY_MODE` (`low_latency` default, or `balanced` / `high_quality`)

@@ -2331,6 +2331,24 @@ html.theme-dark .web-upload-queue-item {
     font-weight: 800;
 }
 
+.web-tts-admin-model-row {
+    display: flex;
+    gap: 0.45rem;
+    align-items: center;
+    margin-top: 0.3rem;
+}
+
+.web-tts-admin-model-row .web-upload-input {
+    flex: 1;
+    min-width: 0;
+}
+
+.web-tts-admin-model-status {
+    margin: 0.35rem 0 0;
+    font-size: 0.72rem;
+    color: var(--ink-muted);
+}
+
 .web-upload-inbox {
     margin-top: 0.65rem;
     max-height: min(58vh, 29rem);

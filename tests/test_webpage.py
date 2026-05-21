@@ -962,12 +962,293 @@ def test_tts_enhance_endpoint_returns_enhanced_message(web_client):
     assert response.get_json() == {"message": "[excited] hello from the soundboard"}
 
 
+def test_tts_enhance_endpoint_uses_db_provider_override(web_client, monkeypatch):
+    """Provider set through the admin settings API is used in the enhance payload."""
+    from types import SimpleNamespace
+
+    client, _ = web_client
+    monkeypatch.setenv("WEB_TTS_ENHANCER_MODEL", "default-model")
+    monkeypatch.setenv("WEB_TTS_ENHANCER_PROVIDER", "")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    _login_web_user(client, username="admin", admin_guild_ids=["111"])
+
+    # 1. Set provider through admin settings
+    resp = client.post(
+        "/api/tts/enhancer-settings",
+        json={"provider": "parasail/fp8"},
+    )
+    assert resp.status_code == 200
+
+    # 2. Monkey-patch requests.post to capture the payload
+    captured: dict = {}
+
+    def fake_post(url, headers, json, timeout):
+        captured["json"] = json
+        return SimpleNamespace(
+            status_code=200,
+            json=lambda: {
+                "choices": [{"message": {"content": "[excited] hello there!"}}],
+            },
+        )
+
+    monkeypatch.setattr("bot.services.web_tts_enhancer.requests.post", fake_post)
+
+    # 3. Call the enhance endpoint
+    response = client.post(
+        "/api/tts/enhance",
+        json={"message": "hello there!"},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json() == {"message": "[excited] hello there!"}
+
+    # 4. Verify the DB provider override is used and no sort is present
+    provider = captured["json"].get("provider")
+    assert provider == {"order": ["parasail/fp8"], "allow_fallbacks": False}
+    assert "sort" not in provider
+
+
 def test_tts_enhance_endpoint_requires_discord_login(web_client):
     client, _ = web_client
 
     response = client.post("/api/tts/enhance", json={"message": "hello"})
 
     assert response.status_code == 401
+
+
+# ============================================================================
+# TTS Enhancer LLM Settings admin API
+# ============================================================================
+
+
+def test_enhancer_settings_get_requires_discord_login(web_client):
+    """Unauthenticated users should be rejected with 401."""
+    client, _ = web_client
+    response = client.get("/api/tts/enhancer-settings")
+    assert response.status_code == 401
+
+
+def test_enhancer_settings_get_requires_admin(web_client):
+    """Authenticated non-admin users should be rejected with 403."""
+    client, _ = web_client
+    _login_web_user(client, username="regular-user", global_name="Regular User")
+    response = client.get("/api/tts/enhancer-settings")
+    assert response.status_code == 403
+
+
+def test_enhancer_settings_get_returns_defaults(web_client, monkeypatch):
+    """Admin user should get the current settings with default values."""
+    client, _ = web_client
+    monkeypatch.setenv("WEB_TTS_ENHANCER_MODEL", "deepseek/deepseek-v4-flash")
+    monkeypatch.setenv("WEB_TTS_ENHANCER_PROVIDER", "crucible")
+    _login_web_user(client, username="admin", admin_guild_ids=["111"])
+    response = client.get("/api/tts/enhancer-settings")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["model"] == "deepseek/deepseek-v4-flash"
+    assert payload["provider"] == "crucible"
+    assert payload["stored_model"] is None
+    assert payload["stored_provider"] is None
+    assert payload["default_model"] == "deepseek/deepseek-v4-flash"
+    assert payload["default_provider"] == "crucible"
+
+
+def test_enhancer_settings_get_returns_stored_override(web_client, monkeypatch):
+    """When an override is stored, GET should return it."""
+    client, _ = web_client
+    monkeypatch.setenv("WEB_TTS_ENHANCER_MODEL", "default-model")
+    monkeypatch.setenv("WEB_TTS_ENHANCER_PROVIDER", "")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    _login_web_user(client, username="admin", admin_guild_ids=["111"])
+
+    # Set overrides first
+    client.post(
+        "/api/tts/enhancer-settings",
+        json={"model": "anthropic/claude-3.5-sonnet", "provider": "deepinfra"},
+    )
+
+    response = client.get("/api/tts/enhancer-settings")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["model"] == "anthropic/claude-3.5-sonnet"
+    assert payload["stored_model"] == "anthropic/claude-3.5-sonnet"
+    assert payload["provider"] == "deepinfra"
+    assert payload["stored_provider"] == "deepinfra"
+
+
+def test_enhancer_settings_post_requires_discord_login(web_client):
+    """Unauthenticated POST should be rejected."""
+    client, _ = web_client
+    response = client.post(
+        "/api/tts/enhancer-settings",
+        json={"model": "openai/gpt-4o"},
+    )
+    assert response.status_code == 401
+
+
+def test_enhancer_settings_post_requires_admin(web_client):
+    """Non-admin POST should be rejected."""
+    client, _ = web_client
+    _login_web_user(client, username="regular-user")
+    response = client.post(
+        "/api/tts/enhancer-settings",
+        json={"model": "openai/gpt-4o"},
+    )
+    assert response.status_code == 403
+
+
+def test_enhancer_settings_post_sets_model(web_client, monkeypatch):
+    """Admin POST with valid model should store the model override."""
+    client, _ = web_client
+    monkeypatch.setenv("WEB_TTS_ENHANCER_MODEL", "default-model")
+    monkeypatch.setenv("WEB_TTS_ENHANCER_PROVIDER", "")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    _login_web_user(client, username="admin", admin_guild_ids=["111"])
+
+    response = client.post(
+        "/api/tts/enhancer-settings",
+        json={"model": "anthropic/claude-3.5-sonnet"},
+    )
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["model"] == "anthropic/claude-3.5-sonnet"
+    assert payload["stored_model"] == "anthropic/claude-3.5-sonnet"
+
+
+def test_enhancer_settings_post_sets_provider(web_client, monkeypatch):
+    """Admin POST with valid provider should store the provider override."""
+    client, _ = web_client
+    monkeypatch.setenv("WEB_TTS_ENHANCER_MODEL", "default-model")
+    monkeypatch.setenv("WEB_TTS_ENHANCER_PROVIDER", "")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    _login_web_user(client, username="admin", admin_guild_ids=["111"])
+
+    response = client.post(
+        "/api/tts/enhancer-settings",
+        json={"provider": "crucible"},
+    )
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["provider"] == "crucible"
+    assert payload["stored_provider"] == "crucible"
+
+
+def test_enhancer_settings_post_sets_both(web_client, monkeypatch):
+    """Admin POST with both fields should store both overrides."""
+    client, _ = web_client
+    monkeypatch.setenv("WEB_TTS_ENHANCER_MODEL", "default-model")
+    monkeypatch.setenv("WEB_TTS_ENHANCER_PROVIDER", "")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    _login_web_user(client, username="admin", admin_guild_ids=["111"])
+
+    response = client.post(
+        "/api/tts/enhancer-settings",
+        json={"model": "o3-mini", "provider": "together"},
+    )
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["model"] == "o3-mini"
+    assert payload["provider"] == "together"
+    assert payload["stored_model"] == "o3-mini"
+    assert payload["stored_provider"] == "together"
+
+
+def test_enhancer_settings_post_empty_resets_both(web_client, monkeypatch):
+    """Admin POST with both fields empty should clear both overrides."""
+    client, _ = web_client
+    monkeypatch.setenv("WEB_TTS_ENHANCER_MODEL", "default-model")
+    monkeypatch.setenv("WEB_TTS_ENHANCER_PROVIDER", "default-provider")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    _login_web_user(client, username="admin", admin_guild_ids=["111"])
+
+    # Set overrides first
+    client.post(
+        "/api/tts/enhancer-settings",
+        json={"model": "o3-mini", "provider": "together"},
+    )
+    # Reset both
+    response = client.post(
+        "/api/tts/enhancer-settings",
+        json={"model": "", "provider": ""},
+    )
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["model"] == "default-model"
+    assert payload["stored_model"] is None
+    assert payload["provider"] == "default-provider"
+    assert payload["stored_provider"] is None
+
+
+def test_enhancer_settings_post_empty_model_resets_model_only(web_client, monkeypatch):
+    """Admin POST with empty model should clear only model override."""
+    client, _ = web_client
+    monkeypatch.setenv("WEB_TTS_ENHANCER_MODEL", "default-model")
+    monkeypatch.setenv("WEB_TTS_ENHANCER_PROVIDER", "default-provider")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    _login_web_user(client, username="admin", admin_guild_ids=["111"])
+
+    client.post(
+        "/api/tts/enhancer-settings",
+        json={"model": "o3-mini", "provider": "together"},
+    )
+    response = client.post(
+        "/api/tts/enhancer-settings",
+        json={"model": ""},
+    )
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["model"] == "default-model"
+    assert payload["stored_model"] is None
+    assert payload["provider"] == "together"
+    assert payload["stored_provider"] == "together"
+
+
+def test_enhancer_settings_post_rejects_invalid_model(web_client, monkeypatch):
+    """Admin POST with invalid model should return 400."""
+    client, _ = web_client
+    monkeypatch.setenv("WEB_TTS_ENHANCER_MODEL", "default-model")
+    monkeypatch.setenv("WEB_TTS_ENHANCER_PROVIDER", "")
+    _login_web_user(client, username="admin", admin_guild_ids=["111"])
+
+    response = client.post(
+        "/api/tts/enhancer-settings",
+        json={"model": "invalid model!"},
+    )
+    assert response.status_code == 400
+    assert "Invalid model ID" in response.get_json()["error"]
+
+
+def test_enhancer_settings_post_rejects_invalid_provider(web_client, monkeypatch):
+    """Admin POST with invalid provider should return 400."""
+    client, _ = web_client
+    monkeypatch.setenv("WEB_TTS_ENHANCER_MODEL", "default-model")
+    monkeypatch.setenv("WEB_TTS_ENHANCER_PROVIDER", "")
+    _login_web_user(client, username="admin", admin_guild_ids=["111"])
+
+    response = client.post(
+        "/api/tts/enhancer-settings",
+        json={"provider": "my provider"},
+    )
+    assert response.status_code == 400
+    assert "Invalid provider name" in response.get_json()["error"]
+
+
+def test_enhancer_settings_post_accepts_slash_in_provider(web_client, monkeypatch):
+    """Admin POST with provider containing forward slash (e.g. parasail/fp8) should succeed."""
+    client, _ = web_client
+    monkeypatch.setenv("WEB_TTS_ENHANCER_MODEL", "default-model")
+    monkeypatch.setenv("WEB_TTS_ENHANCER_PROVIDER", "")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    _login_web_user(client, username="admin", admin_guild_ids=["111"])
+
+    response = client.post(
+        "/api/tts/enhancer-settings",
+        json={"provider": "parasail/fp8"},
+    )
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["provider"] == "parasail/fp8"
+    assert payload["stored_provider"] == "parasail/fp8"
 
 
 def test_web_control_endpoint_requires_discord_login(web_client):

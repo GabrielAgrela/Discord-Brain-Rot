@@ -145,15 +145,19 @@ class TTS:
             return None
         return val
 
-    def _effective_el_tts_streaming_latency(self) -> Optional[int]:
+    def _effective_el_tts_streaming_latency(self, model_id: Optional[str] = None) -> Optional[int]:
         """Return the latency param to send.
 
         The ``eleven_v3`` model does **not** support
         ``optimize_streaming_latency`` and returns a 400 error if it receives
         the parameter.  Returns ``None`` for ``eleven_v3`` (case-insensitive)
         and the configured value otherwise.
+
+        Args:
+            model_id: Optional model ID to check.  Uses
+                ``self.el_tts_model_id`` when not provided.
         """
-        model = (self.el_tts_model_id or "").strip().lower()
+        model = (model_id or self.el_tts_model_id or "").strip().lower()
         if model == "eleven_v3":
             return None
         return self.el_tts_optimize_streaming_latency
@@ -602,8 +606,12 @@ class TTS:
         finally:
             self._set_locked(False, guild_id=guild_id)
 
-    def _build_el_tts_url(self) -> str:
+    def _build_el_tts_url(self, model_id: Optional[str] = None) -> str:
         """Build the ElevenLabs TTS endpoint URL based on streaming configuration.
+
+        Args:
+            model_id: Optional model ID for latency decision.  Uses
+                ``self.el_tts_model_id`` when not provided.
 
         Returns:
             Full URL string for the ElevenLabs TTS API.
@@ -616,7 +624,7 @@ class TTS:
         # non-streaming endpoints. The streaming endpoint also accepts an
         # optional optimize_streaming_latency parameter (0-4, default 0).
         params["output_format"] = self.el_tts_output_format
-        effective_latency = self._effective_el_tts_streaming_latency()
+        effective_latency = self._effective_el_tts_streaming_latency(model_id=model_id)
         if effective_latency is not None:
             params["optimize_streaming_latency"] = str(effective_latency)
         return f"{base}?{urllib.parse.urlencode(params)}"
@@ -696,6 +704,9 @@ class TTS:
             self.voice_id = self.voice_id_en
             boost_volume = 0
 
+        # All profiles use the same environment-configured ElevenLabs model.
+        effective_model_id = self.el_tts_model_id
+
         if self.is_on_cooldown(guild_id=guild_id):
             print("Cooldown active. Please wait before making another request.")
             cooldown_message = await self.behavior.send_message(view=None, title="Cooldown Active", description="Please wait before making another request.")
@@ -710,13 +721,13 @@ class TTS:
 
         # ElevenLabs TTS API accepts up to 5000 characters per request.
         text = text[:5000]
-        url = self._build_el_tts_url()
+        url = self._build_el_tts_url(model_id=effective_model_id)
         headers = {
             "Accept": "audio/mpeg",
             "Content-Type": "application/json",
             "xi-api-key": self.api_key
         }
-        model_id = self.el_tts_model_id
+        model_id = effective_model_id
         data = {
             "text": text,
             "model_id": model_id,
@@ -1022,7 +1033,7 @@ class TTS:
                     self._log_el_tts_perf(
                         perf_start, first_chunk_time, perf_end,
                         url, model_id, self.el_tts_output_format,
-                        self._effective_el_tts_streaming_latency(),
+                        self._effective_el_tts_streaming_latency(model_id=model_id),
                         len(text), file_size,
                     )
 

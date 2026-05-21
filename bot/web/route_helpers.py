@@ -30,6 +30,7 @@ from bot.repositories.web_guild import WebGuildRepository
 from bot.repositories.sound_import_notification import SoundImportNotificationRepository
 from bot.repositories.web_upload import WebUploadRepository
 from bot.repositories.web_user_access import WebUserAccessRepository
+from bot.repositories.web_tts_settings import WebTtsSettingsRepository
 from bot.services.web_analytics import WebAnalyticsService
 from bot.services.web_auth import WebAuthService
 from bot.services.web_content import WebContentService
@@ -38,6 +39,7 @@ from bot.services.web_guild import WebGuildService
 from bot.services.web_playback import WebPlaybackService
 from bot.services.web_sound_options import WebSoundOptionsService
 from bot.services.web_tts_enhancer import WebTtsEnhancerService
+from bot.services.web_tts_settings import WebTtsSettingsService
 from bot.services.web_upload import WebUploadService
 
 logger = logging.getLogger(__name__)
@@ -322,10 +324,23 @@ def _get_web_system_monitor_service() -> WebSystemMonitorService:
 
 
 def _get_web_tts_enhancer_service() -> WebTtsEnhancerService:
-    """Return the shared web TTS enhancer service."""
+    """Return the shared web TTS enhancer service with DB-backed settings.
+
+    If the cached service is a bare ``WebTtsEnhancerService`` with no
+    ``settings_service`` (e.g. from an older eager initialisation), it is
+    replaced with a fully DB-backed instance so that admin-configured model
+    and provider overrides are honoured.
+    """
     service = current_app.extensions.get("web_tts_enhancer_service")
-    if service is None:
-        service = WebTtsEnhancerService()
+    if service is None or (
+        isinstance(service, WebTtsEnhancerService)
+        and service._settings_service is None
+    ):
+        db_path = current_app.config["DATABASE_PATH"]
+        repo = WebTtsSettingsRepository(db_path=db_path, use_shared=False)
+        settings_service = WebTtsSettingsService(repo)
+        settings_service.ensure_schema()
+        service = WebTtsEnhancerService(settings_service=settings_service)
         current_app.extensions["web_tts_enhancer_service"] = service
     return service
 
@@ -581,6 +596,15 @@ def _remember_selected_guild_id(guild_id: Any) -> None:
         return
     if parsed > 0:
         session["selected_guild_id"] = str(parsed)
+
+
+def _get_web_tts_settings_service() -> WebTtsSettingsService:
+    """Return a TTS settings service for the current request config."""
+    db_path = current_app.config["DATABASE_PATH"]
+    repo = WebTtsSettingsRepository(db_path=db_path, use_shared=False)
+    svc = WebTtsSettingsService(repo)
+    svc.ensure_schema()
+    return svc
 
 
 def _current_web_user_is_admin() -> bool:

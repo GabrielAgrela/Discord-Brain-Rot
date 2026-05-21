@@ -1055,10 +1055,24 @@ class AudioService:
         return self._voice_command_service
 
     def _get_ventura_chat_service(self):
-        """Return the lazily-initialised Ventura Chat service."""
+        """Return the lazily-initialised Ventura Chat service with DB-backed settings."""
         if self._ventura_chat_service is None:
             from bot.services.voice_command import VenturaChatService
-            self._ventura_chat_service = VenturaChatService()
+            from bot.repositories.web_tts_settings import WebTtsSettingsRepository
+            from bot.services.web_tts_settings import WebTtsSettingsService
+            try:
+                repo = WebTtsSettingsRepository()
+                settings_service = WebTtsSettingsService(repo)
+                settings_service.ensure_schema()
+                self._ventura_chat_service = VenturaChatService(
+                    settings_service=settings_service
+                )
+            except Exception:
+                logger.exception(
+                    "[AudioService] Failed to init DB-backed settings for VenturaChat; "
+                    "falling back to env-only"
+                )
+                self._ventura_chat_service = VenturaChatService()
         return self._ventura_chat_service
 
     def set_behavior(self, behavior):

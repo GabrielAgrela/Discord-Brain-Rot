@@ -2828,6 +2828,11 @@
         const webTtsMessage = document.getElementById('webTtsMessage');
         const webTtsProfile = document.getElementById('webTtsProfile');
         const webTtsEnhanceButton = document.getElementById('webTtsEnhanceButton');
+        const webTtsAdminModelInput = document.getElementById('webTtsAdminModelInput');
+        const webTtsAdminProviderInput = document.getElementById('webTtsAdminProviderInput');
+        const webTtsAdminSettingsSave = document.getElementById('webTtsAdminSettingsSave');
+        const webTtsAdminSettingsReset = document.getElementById('webTtsAdminSettingsReset');
+        const webTtsAdminSettingsStatus = document.getElementById('webTtsAdminSettingsStatus');
         const soundRenameDialog = document.getElementById('soundRenameDialog');
         const soundRenameForm = document.getElementById('soundRenameForm');
         const soundRenameTitle = document.getElementById('soundRenameTitle');
@@ -2903,6 +2908,10 @@
                 webTtsDialog.setAttribute('open', '');
             }
             webTtsMessage?.focus();
+            // Load admin enhancer settings when modal opens (silently fails if not admin).
+            if (webTtsAdminModelInput) {
+                loadAdminEnhancerSettings();
+            }
         }
 
         function closeTtsModal() {
@@ -3031,6 +3040,112 @@
                 if (webTtsEnhanceButton) {
                     updateTtsEnhanceButtonState();
                 }
+            }
+        }
+
+        function setAdminSettingsStatus(message, kind) {
+            if (!webTtsAdminSettingsStatus) return;
+            webTtsAdminSettingsStatus.textContent = message || '';
+            webTtsAdminSettingsStatus.style.color = kind === 'error' ? 'var(--error)' : kind === 'success' ? 'var(--success)' : '';
+        }
+
+        async function loadAdminEnhancerSettings() {
+            if (!webTtsAdminModelInput) return;
+            try {
+                setAdminSettingsStatus('Loading...', '');
+                const response = await fetch('/api/tts/enhancer-settings?t=' + Date.now());
+                if (!response.ok) {
+                    const payload = await response.json().catch(() => ({}));
+                    setAdminSettingsStatus(payload.error || 'Failed to load settings.', 'error');
+                    return;
+                }
+                const payload = await response.json();
+                if (webTtsAdminModelInput) {
+                    webTtsAdminModelInput.value = payload.model || '';
+                }
+                if (webTtsAdminProviderInput) {
+                    webTtsAdminProviderInput.value = payload.provider || '';
+                }
+                const modelPart = payload.model ? 'model=' + payload.model : '';
+                const providerPart = payload.provider ? ' provider=' + payload.provider : '';
+                const overrideLabel = (payload.stored_model || payload.stored_provider) ? 'Override active.' : 'Using defaults.';
+                setAdminSettingsStatus(overrideLabel, (payload.stored_model || payload.stored_provider) ? 'success' : '');
+            } catch (error) {
+                console.error('Failed to load enhancer settings:', error);
+                setAdminSettingsStatus('Network error.', 'error');
+            }
+        }
+
+        async function handleAdminSettingsSave() {
+            if (!webTtsAdminModelInput || !webTtsAdminProviderInput) return;
+            const modelValue = webTtsAdminModelInput.value.trim();
+            const providerValue = webTtsAdminProviderInput.value.trim();
+            setAdminSettingsStatus('Saving...', '');
+            try {
+                const body = {};
+                if (modelValue !== '') {
+                    body.model = modelValue;
+                } else {
+                    body.model = '';
+                }
+                if (providerValue !== '') {
+                    body.provider = providerValue;
+                } else {
+                    body.provider = '';
+                }
+                const response = await fetch('/api/tts/enhancer-settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                const payload = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    setAdminSettingsStatus(payload.error || 'Failed to save.', 'error');
+                    return;
+                }
+                if (webTtsAdminModelInput) {
+                    webTtsAdminModelInput.value = payload.model || '';
+                }
+                if (webTtsAdminProviderInput) {
+                    webTtsAdminProviderInput.value = payload.provider || '';
+                }
+                setAdminSettingsStatus(
+                    'Saved. model=' + payload.model + (payload.provider ? ' provider=' + payload.provider : ''),
+                    'success'
+                );
+            } catch (error) {
+                console.error('Failed to save enhancer settings:', error);
+                setAdminSettingsStatus('Network error.', 'error');
+            }
+        }
+
+        async function handleAdminSettingsReset() {
+            if (!webTtsAdminModelInput || !webTtsAdminProviderInput) return;
+            setAdminSettingsStatus('Resetting...', '');
+            try {
+                const response = await fetch('/api/tts/enhancer-settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ model: '', provider: '' })
+                });
+                const payload = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    setAdminSettingsStatus(payload.error || 'Failed to reset.', 'error');
+                    return;
+                }
+                if (webTtsAdminModelInput) {
+                    webTtsAdminModelInput.value = payload.model || '';
+                }
+                if (webTtsAdminProviderInput) {
+                    webTtsAdminProviderInput.value = payload.provider || '';
+                }
+                setAdminSettingsStatus(
+                    'Reset to defaults. model=' + payload.default_model + (payload.default_provider ? ' provider=' + payload.default_provider : ''),
+                    'success'
+                );
+            } catch (error) {
+                console.error('Failed to reset enhancer settings:', error);
+                setAdminSettingsStatus('Network error.', 'error');
             }
         }
 
@@ -3423,6 +3538,12 @@
         }
         if (webTtsEnhanceButton) {
             webTtsEnhanceButton.addEventListener('click', handleWebTtsEnhance);
+        }
+        if (webTtsAdminSettingsSave) {
+            webTtsAdminSettingsSave.addEventListener('click', handleAdminSettingsSave);
+        }
+        if (webTtsAdminSettingsReset) {
+            webTtsAdminSettingsReset.addEventListener('click', handleAdminSettingsReset);
         }
         if (soundRenameCloseButton) {
             soundRenameCloseButton.addEventListener('click', closeSoundRenameModal);

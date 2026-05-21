@@ -45,8 +45,8 @@ def test_web_tts_enhancer_uses_openrouter_chat_completion(monkeypatch):
     assert "Bad: [hãn?]" in system_content
 
 
-def test_web_tts_enhancer_default_payload_reasoning_enabled(monkeypatch):
-    """Default payload has reasoning enabled (omitted from payload) and provider throughput."""
+def test_web_tts_enhancer_default_payload_no_provider(monkeypatch):
+    """Default payload has no provider field when no provider configured."""
     captured = {}
 
     def fake_post(url, headers, json, timeout):
@@ -61,13 +61,64 @@ def test_web_tts_enhancer_default_payload_reasoning_enabled(monkeypatch):
         )
 
     monkeypatch.setattr("bot.services.web_tts_enhancer.requests.post", fake_post)
+    monkeypatch.delenv("WEB_TTS_ENHANCER_PROVIDER", raising=False)
     service = WebTtsEnhancerService(api_key="test-key", timeout_seconds=3)
     service.enhance("hello")
 
     assert service.reasoning_enabled is True
-    assert service.provider_sort == "throughput"
     assert "reasoning" not in captured["json"]
-    assert captured["json"].get("provider") == {"sort": "throughput"}
+    # No provider configured → no provider field in payload
+    assert "provider" not in captured["json"]
+
+
+def test_web_tts_enhancer_provider_in_payload_when_configured(monkeypatch):
+    """When a provider is configured, payload includes order + allow_fallbacks."""
+    captured = {}
+
+    def fake_post(url, headers, json, timeout):
+        captured["json"] = json
+        return SimpleNamespace(
+            status_code=200,
+            json=lambda: {
+                "choices": [
+                    {"message": {"content": "hi"}},
+                ],
+            },
+        )
+
+    monkeypatch.setattr("bot.services.web_tts_enhancer.requests.post", fake_post)
+    service = WebTtsEnhancerService(
+        api_key="test-key", timeout_seconds=3, provider="crucible"
+    )
+    service.enhance("hello")
+
+    assert captured["json"].get("provider") == {
+        "order": ["crucible"],
+        "allow_fallbacks": False,
+    }
+
+
+def test_web_tts_enhancer_provider_omitted_when_empty(monkeypatch):
+    """Provider field is excluded from payload when provider is empty."""
+    captured = {}
+
+    def fake_post(url, headers, json, timeout):
+        captured["json"] = json
+        return SimpleNamespace(
+            status_code=200,
+            json=lambda: {
+                "choices": [
+                    {"message": {"content": "hi"}},
+                ],
+            },
+        )
+
+    monkeypatch.setattr("bot.services.web_tts_enhancer.requests.post", fake_post)
+    service = WebTtsEnhancerService(
+        api_key="test-key", timeout_seconds=3, provider=""
+    )
+    payload = service._build_request_payload("hello")
+    assert "provider" not in payload
 
 
 def test_web_tts_enhancer_requires_api_key(monkeypatch):
@@ -203,28 +254,6 @@ def test_web_tts_enhancer_reasoning_omitted_when_enabled(monkeypatch):
     assert "reasoning" not in payload
 
 
-def test_web_tts_enhancer_provider_omitted_when_sort_empty(monkeypatch):
-    """Provider field is excluded from payload when sort is empty."""
-
-    def fake_post(url, headers, json, timeout):
-        return SimpleNamespace(
-            status_code=200,
-            json=lambda: {
-                "choices": [
-                    {"message": {"content": "hi"}},
-                ],
-            },
-        )
-
-    monkeypatch.setattr("bot.services.web_tts_enhancer.requests.post", fake_post)
-    service = WebTtsEnhancerService(
-        api_key="test-key", timeout_seconds=3, provider_sort=""
-    )
-    assert service.provider_sort == ""
-    payload = service._build_request_payload("hello")
-    assert "provider" not in payload
-
-
 def test_web_tts_enhancer_custom_max_tokens(monkeypatch):
     captured = {}
 
@@ -341,3 +370,113 @@ def test_web_tts_enhancer_max_tokens_floor(monkeypatch):
         api_key="test-key", timeout_seconds=3, max_tokens=50
     )
     assert service.max_tokens == 256
+
+
+def test_web_tts_enhancer_effective_model_from_settings_service(monkeypatch):
+    """When settings_service provides a model override, it should be used."""
+    captured = {}
+
+    class FakeSettingsService:
+        def get_enhancer_settings(self):
+            return {
+                "model": "override-model",
+                "provider": "",
+                "stored_model": "override-model",
+                "stored_provider": None,
+                "default_model": "deepseek/deepseek-v4-flash",
+                "default_provider": "",
+            }
+
+    def fake_post(url, headers, json, timeout):
+        captured["json"] = json
+        return SimpleNamespace(
+            status_code=200,
+            json=lambda: {
+                "choices": [
+                    {"message": {"content": "hi"}},
+                ],
+            },
+        )
+
+    monkeypatch.setattr("bot.services.web_tts_enhancer.requests.post", fake_post)
+    service = WebTtsEnhancerService(
+        api_key="test-key",
+        timeout_seconds=3,
+        settings_service=FakeSettingsService(),
+    )
+    service.enhance("hello")
+    assert captured["json"]["model"] == "override-model"
+    assert "provider" not in captured["json"]
+
+
+def test_web_tts_enhancer_effective_provider_from_settings_service(monkeypatch):
+    """When settings_service provides a provider override, payload uses it."""
+    captured = {}
+
+    class FakeSettingsService:
+        def get_enhancer_settings(self):
+            return {
+                "model": "deepseek/deepseek-v4-flash",
+                "provider": "crucible",
+                "stored_model": None,
+                "stored_provider": "crucible",
+                "default_model": "deepseek/deepseek-v4-flash",
+                "default_provider": "",
+            }
+
+    def fake_post(url, headers, json, timeout):
+        captured["json"] = json
+        return SimpleNamespace(
+            status_code=200,
+            json=lambda: {
+                "choices": [
+                    {"message": {"content": "hi"}},
+                ],
+            },
+        )
+
+    monkeypatch.setattr("bot.services.web_tts_enhancer.requests.post", fake_post)
+    service = WebTtsEnhancerService(
+        api_key="test-key",
+        timeout_seconds=3,
+        settings_service=FakeSettingsService(),
+    )
+    service.enhance("hello")
+    assert captured["json"].get("provider") == {
+        "order": ["crucible"],
+        "allow_fallbacks": False,
+    }
+
+
+def test_web_tts_enhancer_settings_service_fallback_on_error(monkeypatch):
+    """When settings_service raises, fall back to constructor defaults."""
+    captured = {}
+
+    class BrokenSettingsService:
+        def get_enhancer_settings(self):
+            raise RuntimeError("DB error")
+
+    def fake_post(url, headers, json, timeout):
+        captured["json"] = json
+        return SimpleNamespace(
+            status_code=200,
+            json=lambda: {
+                "choices": [
+                    {"message": {"content": "hi"}},
+                ],
+            },
+        )
+
+    monkeypatch.setattr("bot.services.web_tts_enhancer.requests.post", fake_post)
+    service = WebTtsEnhancerService(
+        api_key="test-key",
+        timeout_seconds=3,
+        provider="fallback-provider",
+        settings_service=BrokenSettingsService(),
+    )
+    service.enhance("hello")
+    # Falls back to constructor-provided provider
+    assert captured["json"].get("provider") == {
+        "order": ["fallback-provider"],
+        "allow_fallbacks": False,
+    }

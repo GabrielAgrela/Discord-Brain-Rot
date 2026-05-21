@@ -155,6 +155,43 @@ class TestBuildElTtsUrl:
         url = tts._build_el_tts_url()
         assert "output_format=mp3_44100_64" in url
 
+    def test_url_accepts_optional_model_id(self):
+        """_build_el_tts_url should use provided model_id for latency logic."""
+        tts = make_tts(el_tts_streaming_enabled=True,
+                       el_tts_optimize_streaming_latency=3,
+                       el_tts_output_format="mp3_44100_128",
+                       el_tts_model_id="eleven_turbo_v2")
+        # With v3 model_id passed explicitly, latency should be omitted.
+        url = tts._build_el_tts_url(model_id="eleven_v3")
+        assert "optimize_streaming_latency" not in url
+        # With non-v3 model_id, latency should be included.
+        url2 = tts._build_el_tts_url(model_id="eleven_turbo_v2")
+        assert "optimize_streaming_latency=3" in url2
+
+
+# ============================================================================
+# _effective_el_tts_streaming_latency (optional model_id)
+# ============================================================================
+
+
+class TestEffectiveStreamingLatency:
+    def test_uses_instance_model_by_default(self):
+        tts = make_tts(el_tts_model_id="eleven_v3",
+                       el_tts_optimize_streaming_latency=3)
+        assert tts._effective_el_tts_streaming_latency() is None
+
+    def test_accepts_override_model_id(self):
+        tts = make_tts(el_tts_model_id="eleven_v3",
+                       el_tts_optimize_streaming_latency=3)
+        # Override with a non-v3 model should include latency.
+        assert tts._effective_el_tts_streaming_latency(model_id="eleven_turbo_v2") == 3
+
+    def test_v3_override_omits_latency(self):
+        tts = make_tts(el_tts_model_id="eleven_turbo_v2",
+                       el_tts_optimize_streaming_latency=3)
+        # Even though instance model is non-v3, passing v3 should omit latency.
+        assert tts._effective_el_tts_streaming_latency(model_id="eleven_v3") is None
+
 
 # ============================================================================
 # _log_el_tts_perf (smoke test — just ensures no crash and log output)

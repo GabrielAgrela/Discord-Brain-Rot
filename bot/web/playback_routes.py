@@ -15,8 +15,10 @@ from bot.web.route_helpers import (
     _get_web_control_room_service,
     _get_web_playback_service,
     _get_web_tts_enhancer_service,
+    _get_web_tts_settings_service,
     _remember_selected_guild_id,
     _require_discord_login_api,
+    _require_web_admin_api,
 )
 
 logger = logging.getLogger(__name__)
@@ -111,6 +113,63 @@ def register_playback_routes(app: Flask) -> None:
             return jsonify({"error": "TTS enhancement failed"}), 502
         except Exception:
             logger.exception("Unexpected error enhancing TTS message")
+            return jsonify({"error": "Internal server error"}), 500
+
+    @app.route("/api/tts/enhancer-settings")
+    @_require_discord_login_api
+    @_require_web_admin_api
+    def get_tts_enhancer_settings() -> Any:
+        """Return the current Ventura Chat (and web enhancer) LLM model and provider."""
+
+        try:
+            settings = _get_web_tts_settings_service().get_ventura_chat_settings()
+            return jsonify(settings), 200
+        except sqlite3.Error:
+            logger.exception("Database error reading LLM settings")
+            return jsonify({"error": "Database error"}), 500
+        except Exception:
+            logger.exception("Unexpected error reading LLM settings")
+            return jsonify({"error": "Internal server error"}), 500
+
+    @app.route("/api/tts/enhancer-settings", methods=["POST"])
+    @_require_discord_login_api
+    @_require_web_admin_api
+    def set_tts_enhancer_settings() -> Any:
+        """Set or clear the Ventura Chat (and web enhancer) LLM model/provider overrides.
+
+        JSON body:
+            ``model`` (str): Model ID to store.  Empty string clears the
+            model override, reverting to the env/default.  Omitted/None
+            leaves the model unchanged.
+            ``provider`` (str): Provider name to store.  Empty string
+            clears the provider override, reverting to the env/default.
+            Omitted/None leaves the provider unchanged.
+        """
+        data = request.get_json(silent=True) or {}
+        current_user = _get_current_discord_user()
+        updated_by = current_user.global_name if current_user else "web-admin"
+        settings_service = _get_web_tts_settings_service()
+
+        try:
+            # Convert values: present key but empty string → empty string
+            # (which the service interprets as "clear that field").
+            # Absent key → None (service leaves unchanged).
+            model = str(data["model"]).strip() if "model" in data else None
+            provider = str(data["provider"]).strip() if "provider" in data else None
+
+            settings = settings_service.set_ventura_chat_settings(
+                model=model,
+                provider=provider,
+                updated_by=updated_by,
+            )
+            return jsonify(settings), 200
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except sqlite3.Error:
+            logger.exception("Database error writing LLM settings")
+            return jsonify({"error": "Database error"}), 500
+        except Exception:
+            logger.exception("Unexpected error writing LLM settings")
             return jsonify({"error": "Internal server error"}), 500
 
     @app.route("/api/control_room/status")

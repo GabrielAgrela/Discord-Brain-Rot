@@ -18,19 +18,28 @@ class WebTtsEnhancerService:
         self,
         api_key: str | None = None,
         model: str | None = None,
+        provider: str | None = None,
         api_url: str | None = None,
         timeout_seconds: float = 20.0,
         max_tokens: int | None = None,
         reasoning_enabled: bool | None = None,
-        provider_sort: str | None = None,
+        settings_service: Any | None = None,
     ) -> None:
         """
         Initialize the enhancer service.
 
+        When *settings_service* is provided, ``model`` and ``provider``
+        constructor arguments become fallback defaults only; the effective
+        values are read from the DB at request time.
+
         Args:
             api_key: OpenRouter API key. Defaults to OPENROUTER_API_KEY.
-            model: OpenRouter model ID to use.
-                Defaults to WEB_TTS_ENHANCER_MODEL env var or deepseek/deepseek-v4-flash.
+            model: Default model ID.  Used only when no *settings_service*
+                provides a DB override.  Falls back to
+                ``WEB_TTS_ENHANCER_MODEL`` env or ``deepseek/deepseek-v4-flash``.
+            provider: Default provider name.  Used only when no
+                *settings_service* provides a DB override.  Falls back to
+                ``WEB_TTS_ENHANCER_PROVIDER`` env or empty (no provider routing).
             api_url: Chat completions endpoint URL.
             timeout_seconds: HTTP request timeout.
             max_tokens: Maximum tokens for the model response.
@@ -38,12 +47,13 @@ class WebTtsEnhancerService:
                 Minimum enforced floor is 256.
             reasoning_enabled: Whether to enable OpenRouter model reasoning.
                 Defaults to WEB_TTS_ENHANCER_REASONING_ENABLED env var (true).
-            provider_sort: OpenRouter provider sort order for routing.
-                Defaults to WEB_TTS_ENHANCER_PROVIDER_SORT env var (throughput).
-                Set to empty string to omit the provider field.
+            settings_service: Optional ``WebTtsSettingsService`` instance.
+                When provided, model and provider are read from DB at
+                request time, with constructor/env values as fallbacks.
         """
         self.api_key = api_key if api_key is not None else os.getenv("OPENROUTER_API_KEY", "")
-        self.model = model or os.getenv("WEB_TTS_ENHANCER_MODEL", "deepseek/deepseek-v4-flash")
+        self._default_model = model or os.getenv("WEB_TTS_ENHANCER_MODEL", "deepseek/deepseek-v4-flash")
+        self._default_provider = provider or os.getenv("WEB_TTS_ENHANCER_PROVIDER", "")
         self.api_url = api_url or os.getenv(
             "OPENROUTER_API_URL",
             "https://openrouter.ai/api/v1/chat/completions",
@@ -62,12 +72,50 @@ class WebTtsEnhancerService:
                 os.getenv("WEB_TTS_ENHANCER_REASONING_ENABLED", "true").strip().lower()
                 not in {"0", "false", "off", "no"}
             )
-        if provider_sort is not None:
-            self.provider_sort = provider_sort
-        else:
-            self.provider_sort = os.getenv(
-                "WEB_TTS_ENHANCER_PROVIDER_SORT", "throughput"
-            ).strip()
+        self._settings_service = settings_service
+
+    # -- Attributes kept for backward compat in tests that access them --
+    @property
+    def model(self) -> str:
+        """Return the effective model (from DB settings or default)."""
+        return self._get_effective_model()
+
+    @model.setter
+    def model(self, value: str) -> None:
+        """Override the default model (used in tests)."""
+        self._default_model = value
+
+    @property
+    def provider_sort(self) -> str:
+        """Deprecated: return the effective provider for backward compat."""
+        return self._get_effective_provider()
+
+    @provider_sort.setter
+    def provider_sort(self, value: str) -> None:
+        """Deprecated: set the default provider (used in tests)."""
+        self._default_provider = value
+
+    # ------------------------------------------------------------------
+
+    def _get_effective_model(self) -> str:
+        """Return the effective model from DB settings or default."""
+        if self._settings_service is not None:
+            try:
+                settings = self._settings_service.get_enhancer_settings()
+                return settings["model"] or self._default_model
+            except Exception:
+                pass
+        return self._default_model
+
+    def _get_effective_provider(self) -> str:
+        """Return the effective provider from DB settings or default."""
+        if self._settings_service is not None:
+            try:
+                settings = self._settings_service.get_enhancer_settings()
+                return settings["provider"] or self._default_provider
+            except Exception:
+                pass
+        return self._default_provider
 
     def enhance(self, text: str) -> str:
         """
@@ -155,7 +203,7 @@ class WebTtsEnhancerService:
     def _build_request_payload(self, text: str) -> dict[str, Any]:
         """Build the OpenRouter chat completions payload."""
         payload: dict[str, Any] = {
-            "model": self.model,
+            "model": self._get_effective_model(),
             "temperature": 0.35,
             "max_tokens": self.max_tokens,
             "messages": [
@@ -193,8 +241,9 @@ class WebTtsEnhancerService:
         }
         if not self.reasoning_enabled:
             payload["reasoning"] = {"enabled": False}
-        if self.provider_sort:
-            payload["provider"] = {"sort": self.provider_sort}
+        provider = self._get_effective_provider()
+        if provider:
+            payload["provider"] = {"order": [provider], "allow_fallbacks": False}
         return payload
 
     def _extract_response_text(self, payload: Mapping[str, Any]) -> str:

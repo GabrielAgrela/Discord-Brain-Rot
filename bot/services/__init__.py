@@ -13,6 +13,7 @@ from bot.services.year_review_video import YearReviewVideoService
 from bot.services.guild_settings import GuildSettingsService
 from bot.services.rl_store import RocketLeagueStoreService
 from bot.services.weekly_wrapped import WeeklyWrappedService
+from bot.services.web_tts_settings import WebTtsSettingsService
 
 __all__ = [
     "MessageService",
@@ -23,4 +24,5 @@ __all__ = [
     "GuildSettingsService",
     "RocketLeagueStoreService",
     "WeeklyWrappedService",
+    "WebTtsSettingsService",
 ]

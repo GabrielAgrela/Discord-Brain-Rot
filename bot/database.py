@@ -264,6 +264,19 @@ class Database:
             )
 
             # Sound import notification outbox (cross-process web upload notifications).
+            # App-level settings key-value store (web TTS model override, etc.).
+            self.conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS app_settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updated_by TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+
             self.conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS sound_import_notifications (

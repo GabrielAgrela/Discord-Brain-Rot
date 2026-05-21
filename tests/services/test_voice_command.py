@@ -889,15 +889,98 @@ class TestVenturaChatService:
     def test_default_speed_settings(self, service):
         """Verify new defaults tailored for fast responses."""
         assert service.max_tokens == 250
-        assert service.provider_sort == "throughput"
+        assert service.provider_sort == ""
         assert service.log_payload is True
 
-    def test_payload_includes_provider_sort(self, service):
-        """Payload includes provider sorting options when configured."""
+    def test_payload_includes_provider_sort_when_no_db_settings(self, service):
+        """Payload includes sort when provider_sort is set but no DB settings."""
         service.provider_sort = "throughput"
         payload = service._build_request_payload("hello", None)
         assert "provider" in payload
         assert payload["provider"] == {"sort": "throughput"}
+
+    def test_payload_has_no_provider_when_no_settings(self, service):
+        """Payload has no provider field when no DB provider and no provider_sort."""
+        service.provider_sort = ""
+        payload = service._build_request_payload("hello", None)
+        assert "provider" not in payload
+
+    def test_payload_includes_provider_order_from_settings_service(self):
+        """When settings_service provides a provider, use order + allow_fallbacks."""
+        from bot.services.voice_command import VenturaChatService
+
+        class FakeSettingsService:
+            def get_ventura_chat_settings(self):
+                return {
+                    "model": "deepseek/deepseek-v4-flash",
+                    "provider": "crucible",
+                    "stored_model": None,
+                    "stored_provider": "crucible",
+                    "default_model": "deepseek/deepseek-v4-flash",
+                    "default_provider": "",
+                }
+
+        srv = VenturaChatService(settings_service=FakeSettingsService())
+        srv.api_key = "test-openrouter-key"
+        payload = srv._build_request_payload("hello", None)
+        assert payload["provider"] == {"order": ["crucible"], "allow_fallbacks": False}
+
+    def test_payload_includes_model_from_settings_service(self):
+        """When settings_service provides a model override, it is used."""
+        from bot.services.voice_command import VenturaChatService
+
+        class FakeSettingsService:
+            def get_ventura_chat_settings(self):
+                return {
+                    "model": "override-model",
+                    "provider": "",
+                    "stored_model": "override-model",
+                    "stored_provider": None,
+                    "default_model": "deepseek/deepseek-v4-flash",
+                    "default_provider": "",
+                }
+
+        srv = VenturaChatService(settings_service=FakeSettingsService())
+        srv.api_key = "test-openrouter-key"
+        payload = srv._build_request_payload("hello", None)
+        assert payload["model"] == "override-model"
+        assert "provider" not in payload
+
+    def test_payload_settings_service_provider_takes_precedence_over_sort(self):
+        """When settings_service provides a provider, sort is not used even if set."""
+        from bot.services.voice_command import VenturaChatService
+
+        class FakeSettingsService:
+            def get_ventura_chat_settings(self):
+                return {
+                    "model": "some-model",
+                    "provider": "deepinfra",
+                    "stored_model": None,
+                    "stored_provider": "deepinfra",
+                    "default_model": "deepseek/deepseek-v4-flash",
+                    "default_provider": "",
+                }
+
+        srv = VenturaChatService(settings_service=FakeSettingsService())
+        srv.api_key = "test-openrouter-key"
+        srv.provider_sort = "throughput"  # legacy sort also set
+        payload = srv._build_request_payload("hello", None)
+        # provider order must be used, not sort
+        assert "sort" not in payload.get("provider", {})
+        assert payload["provider"] == {"order": ["deepinfra"], "allow_fallbacks": False}
+
+    def test_payload_settings_service_error_falls_back(self, service):
+        """When settings_service raises, fall back to constructor defaults."""
+        class BrokenSettingsService:
+            def get_ventura_chat_settings(self):
+                raise RuntimeError("DB error")
+
+        from bot.services.voice_command import VenturaChatService
+        srv = VenturaChatService(settings_service=BrokenSettingsService())
+        srv.api_key = "test-openrouter-key"
+        # No sort by default (provider_sort is "")
+        payload = srv._build_request_payload("hello", None)
+        assert "provider" not in payload
 
     @pytest.mark.asyncio
     async def test_compact_logging(self, service):
@@ -925,7 +1008,8 @@ class TestVenturaChatService:
                 log_fmt = summary_call[0][0]
                 assert "Request summary" in log_fmt
                 assert "max_tokens" in log_fmt
-                assert "provider_sort" in log_fmt
+                assert "provider" in log_fmt
+                assert "provider_sort" not in log_fmt
 
     def test_payload_includes_no_reasoning_when_disabled(self, service):
         """Payload includes reasoning={"enabled": False} when reasoning is disabled (default)."""
