@@ -523,7 +523,7 @@ class VenturaChatService:
             f"{VENTURA_SYSTEM_EXTRA}\n"
             "Roast ideas, bureaucracy, politicians, opponents, or the situation. "
             "Be brainrot but not cliche. Be creative, angry, and entertaining. "
-            "Return ONLY the spoken text with tags, no explanations."
+            "Return ONLY the spoken text with tags, no explanations. Do not use abreviations like 'crl' or 'fds', use the whole word instead. "
         )
 
         messages: list[dict] = [

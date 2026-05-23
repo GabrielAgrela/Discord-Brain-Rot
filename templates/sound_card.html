@@ -39,8 +39,24 @@
             flex-direction: column;
         }
 
+        .card.summary-notification {
+            border-radius: 24px;
+            border-width: 3px;
+            padding: 18px 22px 14px 22px;
+        }
+
         .card.summary-notification .row-name {
-            margin-bottom: 24px;
+            margin-bottom: 16px;
+        }
+
+        .card.summary-notification .row-name.no-leading-icon {
+            justify-content: flex-start;
+        }
+
+        .card.summary-notification .row-name.no-leading-icon .sound-name {
+            text-align: left;
+            flex: 1;
+            max-width: 100%;
         }
 
         .card.summary-notification .sound-name {
@@ -50,6 +66,19 @@
 
         .card.summary-notification .row-stats {
             margin-bottom: 0;
+        }
+
+        .card.summary-notification .summary-pill {
+            background: rgba(var(--accent-rgb), 0.12);
+            border-color: rgba(var(--accent-rgb), 0.30);
+            padding: 10px 14px;
+        }
+
+        .card.summary-notification .summary-item {
+            background: transparent;
+            border: none;
+            padding: 0;
+            min-height: auto;
         }
 
         .card.has-requester-avatar .row-name {
@@ -229,6 +258,18 @@
             width: 100%;
         }
 
+        .summary-grid.summary-single {
+            grid-template-columns: 1fr;
+            gap: 0;
+        }
+
+        .summary-grid.summary-single .summary-item {
+            justify-content: flex-start;
+            text-align: left;
+            font-size: 14px;
+            line-height: 1.45;
+        }
+
         .summary-item {
             display: flex;
             align-items: center;
@@ -392,7 +433,7 @@
             {% if event_data %}
             <div class="summary-pill">
                 <img src="data:image/svg+xml;base64,{{icon_event}}" class="icon">
-                <div class="summary-grid">
+                <div class="summary-grid{% if is_single_summary %} summary-single{% endif %}">
                     {% for raw_part in event_data.split('|') %}
                     {% set metric = raw_part.strip() %}
                     {% if metric %}

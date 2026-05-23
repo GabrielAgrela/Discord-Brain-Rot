@@ -86,7 +86,7 @@ class TestImageGeneratorService:
         assert "summary-pill" in captured["html"]
         assert "summary-grid" in captured["html"]
         assert "summary-item" in captured["html"]
-        assert "margin-bottom: 24px;" in captured["html"]
+        assert "margin-bottom: 16px;" in captured["html"]
         assert "justify-content: center;" in captured["html"]
         assert "align-items: center;" in captured["html"]
         assert "summary-notification" in captured["html"]
@@ -96,6 +96,47 @@ class TestImageGeneratorService:
         assert "0 downloaded" in captured["html"]
         assert "0 skipped/invalid" in captured["html"]
         assert "1.2s" in captured["html"]
+
+    def test_single_summary_notification_renders_full_width(self):
+        """A single-message notification should render full-width, not in a cramped half-column."""
+        from bot.services.image_generator import ImageGeneratorService
+
+        service = ImageGeneratorService()
+        rendered = _create_png_bytes(580, 180)
+        captured: dict[str, str] = {}
+
+        def _capture_render(html_content, size, selector):
+            captured["html"] = html_content
+            return rendered
+
+        with patch.object(service, "_render_html_to_png", side_effect=_capture_render):
+            result = service._generate_sound_card_sync(
+                sound_name="ElevenLabs TTS Unavailable",
+                requester="TestUser",
+                event_data=(
+                    "ElevenLabs quota is exhausted, so Ventura TTS is "
+                    "temporarily disabled. Wake commands will be ignored "
+                    "for up to 60 minutes to avoid wasting STT and "
+                    "OpenRouter tokens."
+                ),
+                show_footer=False,
+                show_sound_icon=False,
+                accent_color="#ED4245",
+            )
+
+        assert result is not None
+        html = captured["html"]
+        assert "summary-single" in html
+        assert "summary-grid" in html
+        assert "summary-item" in html
+        assert "summary-notification" in html
+        # Single item should not force two-column grid
+        assert 'grid-template-columns: 1fr;' in html
+        # Body text should be left-aligned and full-width
+        assert "justify-content: flex-start;" in html
+        assert "text-align: left;" in html
+        assert "ElevenLabs quota is exhausted" in html
+        assert "60 minutes" in html
 
     def test_generate_rl_store_card_sync_renders_item_images(self):
         """RL store cards should include every item tile image in the rendered HTML."""

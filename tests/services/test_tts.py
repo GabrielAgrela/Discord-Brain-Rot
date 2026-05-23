@@ -6,6 +6,7 @@ These tests use mocked aiohttp and file I/O to avoid real API calls and real Dis
 
 import asyncio
 import io
+import json
 import os
 import sys
 import time
@@ -16,7 +17,11 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 import bot.tts as bot_tts_module
-from bot.tts import TTS, _write_all_to_fd
+from bot.tts import (
+    TTS, _write_all_to_fd,
+    ElevenLabsAPIError, ElevenLabsQuotaExceededError,
+    _check_el_quota_exceeded, _build_el_error,
+)
 
 
 # ============================================================================
@@ -324,8 +329,8 @@ class TestSaveAsMp3EL:
         mock_db().insert_sound.assert_called_once()
 
     def test_http_error_no_db_insert(self, mock_open, mock_makedirs,
-                                      mock_getsize, mock_db, mock_session_cls):
-        """Non-200 response should raise and not insert DB row."""
+                                       mock_getsize, mock_db, mock_session_cls):
+        """Non-200 response should raise ElevenLabsAPIError and not insert DB row."""
         resp = mock_response(status=400)
         tts, sess = self._setup_tts(
             resp, mock_session_cls,
@@ -334,7 +339,7 @@ class TestSaveAsMp3EL:
             voice_id="pt_voice",
         )
 
-        with pytest.raises(Exception, match="ElevenLabs API Error"):
+        with pytest.raises(ElevenLabsAPIError, match="ElevenLabs API Error"):
             asyncio.run(tts.save_as_mp3_EL("hello error", lang="pt"))
 
         mock_db().insert_sound.assert_not_called()
@@ -359,6 +364,130 @@ class TestSaveAsMp3EL:
         # ClientSession should NOT have been created
         mock_session_cls.assert_not_called()
         mock_db().insert_sound.assert_not_called()
+
+    def test_http_quota_exceeded_401_raises_quota_error(self, mock_open, mock_makedirs,
+                                                         mock_getsize, mock_db, mock_session_cls):
+        """401 with quota_exceeded detail raises ElevenLabsQuotaExceededError and sets block."""
+        mock_getsize.return_value = 9999
+        quota_body = json.dumps({
+            "detail": {
+                "type": "invalid_request",
+                "code": "quota_exceeded",
+                "message": "This request exceeds your quota",
+                "status": "quota_exceeded",
+            }
+        })
+        resp = mock_response(status=401, content_bytes=quota_body.encode())
+        # Override resp.text to return the JSON body (mock_response returns static "fake error body")
+        resp.text = AsyncMock(return_value=quota_body)
+
+        tts, sess = self._setup_tts(
+            resp, mock_session_cls,
+            el_tts_streaming_enabled=True,
+            el_tts_timeout_seconds=30,
+            voice_id="pt_voice",
+            el_tts_quota_cooldown_seconds=3600,
+        )
+
+        with pytest.raises(ElevenLabsQuotaExceededError, match="quota_exceeded"):
+            asyncio.run(tts.save_as_mp3_EL("hello quota", lang="pt"))
+
+        # Quota block should be set
+        assert tts.is_elevenlabs_quota_blocked() is True
+        mock_db().insert_sound.assert_not_called()
+
+    def test_http_quota_exceeded_429_body_text_raises_quota(self, mock_open, mock_makedirs,
+                                                            mock_getsize, mock_db, mock_session_cls):
+        """429 with plain-text quota_exceeded raises quota error."""
+        mock_getsize.return_value = 9999
+        body_text = '{"detail":{"code":"quota_exceeded","message":"Quota exceeded"}}'
+        resp = mock_response(status=429, content_bytes=body_text.encode())
+        resp.text = AsyncMock(return_value=body_text)
+
+        tts, sess = self._setup_tts(
+            resp, mock_session_cls,
+            el_tts_streaming_enabled=True,
+            el_tts_timeout_seconds=30,
+            voice_id="pt_voice",
+            el_tts_quota_cooldown_seconds=3600,
+        )
+
+        with pytest.raises(ElevenLabsQuotaExceededError, match="quota_exceeded"):
+            asyncio.run(tts.save_as_mp3_EL("hello quota 429", lang="pt"))
+
+        assert tts.is_elevenlabs_quota_blocked() is True
+        mock_db().insert_sound.assert_not_called()
+
+    def test_quota_blocked_skips_http_call(self, mock_open, mock_makedirs,
+                                            mock_getsize, mock_db, mock_session_cls):
+        """When quota block is active, save_as_mp3_EL raises without making HTTP request."""
+        tts, sess = self._setup_tts(
+            None, mock_session_cls,  # No response needed - HTTP should not be called
+            el_tts_streaming_enabled=True,
+            el_tts_timeout_seconds=30,
+            voice_id="pt_voice",
+            el_tts_quota_cooldown_seconds=3600,
+        )
+        tts.behavior.send_message = AsyncMock()
+        tts.behavior.play_audio = AsyncMock()
+        tts.behavior.send_error_message = AsyncMock()
+
+        # Activate quota block
+        tts._set_elevenlabs_quota_blocked()
+        assert tts.is_elevenlabs_quota_blocked() is True
+
+        with pytest.raises(ElevenLabsQuotaExceededError, match="quota blocked"):
+            asyncio.run(tts.save_as_mp3_EL("hello blocked", lang="pt"))
+
+        # ClientSession should NOT have been created (no HTTP call)
+        mock_session_cls.assert_not_called()
+        mock_db().insert_sound.assert_not_called()
+
+
+# ============================================================================
+# ElevenLabs error parsing helpers
+# ============================================================================
+
+
+class TestElErrorParsing:
+    """Tests for _check_el_quota_exceeded and _build_el_error."""
+
+    def test_check_401_returns_true(self):
+        assert _check_el_quota_exceeded(401, "") is True
+
+    def test_check_402_returns_true(self):
+        assert _check_el_quota_exceeded(402, "") is True
+
+    def test_check_429_returns_true(self):
+        assert _check_el_quota_exceeded(429, "") is True
+
+    def test_check_400_normal_error_returns_false(self):
+        assert _check_el_quota_exceeded(400, '{"detail":"bad request"}') is False
+
+    def test_check_json_detail_code_quota_exceeded(self):
+        body = '{"detail":{"code":"quota_exceeded"}}'
+        assert _check_el_quota_exceeded(400, body) is True
+
+    def test_check_json_detail_status_quota_exceeded(self):
+        body = '{"detail":{"status":"quota_exceeded"}}'
+        assert _check_el_quota_exceeded(400, body) is True
+
+    def test_check_json_detail_string_quota(self):
+        body = '{"detail":"quota_exceeded"}'
+        assert _check_el_quota_exceeded(400, body) is True
+
+    def test_check_body_text_fallback(self):
+        body = "some error with quota_exceeded in it"
+        assert _check_el_quota_exceeded(403, body) is True
+
+    def test_build_el_error_quota_returns_specific(self):
+        exc = _build_el_error(401, '{"detail":{"code":"quota_exceeded"}}')
+        assert isinstance(exc, ElevenLabsQuotaExceededError)
+
+    def test_build_el_error_generic_returns_base(self):
+        exc = _build_el_error(400, '{"detail":"bad request"}')
+        assert isinstance(exc, ElevenLabsAPIError)
+        assert not isinstance(exc, ElevenLabsQuotaExceededError)
 
 
 # ============================================================================
@@ -475,7 +604,7 @@ class TestSaveAsMp3ELLive:
     @patch("bot.tts.os.close")
     @patch("bot.tts.os.unlink")
     @patch("bot.tts.os.rmdir")
-    async def test_early_live_setup_starts_before_post(
+    async def test_live_setup_starts_after_http_200(
         self,
         mock_rmdir,
         mock_unlink,
@@ -489,7 +618,7 @@ class TestSaveAsMp3ELLive:
         mock_db,
         mock_session_cls,
     ):
-        """Verify that play_tts_live_stream is started BEFORE the aiohttp ClientSession post call occurs."""
+        """Verify that play_tts_live_stream is started AFTER the aiohttp ClientSession post call (status 200) occurs."""
         mock_getsize.return_value = 9999
         mock_mkdtemp.return_value = "/tmp/el_tts_live_abc123"
         mock_os_open.return_value = 42
@@ -534,10 +663,10 @@ class TestSaveAsMp3ELLive:
 
         await tts.save_as_mp3_EL("hello early", lang="pt")
 
-        # "play_live" should be initiated before "http_post"!
+        # "http_post" should happen before "play_live" (FIFO setup is now gated behind 200 response)
         assert "play_live" in call_order
         assert "http_post" in call_order
-        assert call_order.index("play_live") < call_order.index("http_post")
+        assert call_order.index("http_post") < call_order.index("play_live")
 
     @pytest.mark.asyncio
     @patch("bot.tts.aiohttp.ClientSession")
@@ -600,6 +729,77 @@ class TestSaveAsMp3ELLive:
         tts.behavior.play_audio.assert_called_once()
         # Should have attempted cleanup of directory and FIFO
         mock_unlink.assert_called()
+
+    @pytest.mark.asyncio
+    @patch("bot.tts.aiohttp.ClientSession")
+    @patch("bot.tts.Database")
+    @patch("bot.tts.os.path.getsize")
+    @patch("bot.tts.os.makedirs")
+    @patch("builtins.open", new_callable=MagicMock)
+    @patch("bot.tts.tempfile.mkdtemp")
+    @patch("bot.tts.os.mkfifo")
+    @patch("bot.tts.os.open")
+    @patch("bot.tts.os.close")
+    @patch("bot.tts.os.unlink")
+    @patch("bot.tts.os.rmdir")
+    async def test_quota_401_no_live_setup(
+        self,
+        mock_rmdir,
+        mock_unlink,
+        mock_close,
+        mock_os_open,
+        mock_mkfifo,
+        mock_mkdtemp,
+        mock_open,
+        mock_makedirs,
+        mock_getsize,
+        mock_db,
+        mock_session_cls,
+    ):
+        """Quota 401 with live enabled should NOT create FIFO or start live playback."""
+        mock_getsize.return_value = 9999
+
+        quota_body = json.dumps({
+            "detail": {"code": "quota_exceeded", "status": "quota_exceeded"}
+        })
+        resp = mock_response(status=401, content_bytes=quota_body.encode())
+        resp.text = AsyncMock(return_value=quota_body)
+        sess = mock_session(post_response=resp)
+        mock_session_cls.return_value = sess
+
+        fake_channel = MagicMock()
+        fake_channel.guild.id = 12345
+
+        tts = self._make_tts(
+            el_tts_live_playback_enabled=True,
+            el_tts_streaming_enabled=True,
+            el_tts_timeout_seconds=30,
+            loudnorm_mode="off",
+            voice_id="pt_voice",
+        )
+        tts._get_default_voice_channel = MagicMock(return_value=fake_channel)
+
+        live_called = False
+
+        async def _fake_play_live(**kwargs):
+            nonlocal live_called
+            live_called = True
+            return True
+
+        tts.behavior.play_tts_live_stream = _fake_play_live
+        tts.behavior.play_audio = AsyncMock()
+
+        with pytest.raises(ElevenLabsQuotaExceededError, match="quota_exceeded"):
+            await tts.save_as_mp3_EL("hello quota no live", lang="pt")
+
+        # Live playback should NOT have been started
+        assert live_called is False, "play_tts_live_stream should not be called on quota error"
+        # No FIFO should have been created
+        mock_mkfifo.assert_not_called()
+        # No DB insert
+        mock_db().insert_sound.assert_not_called()
+        # Quota block should be set
+        assert tts.is_elevenlabs_quota_blocked() is True
 
 
 # ============================================================================

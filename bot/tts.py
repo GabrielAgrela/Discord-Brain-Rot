@@ -21,6 +21,73 @@ from bot.database import Database
 logger = logging.getLogger(__name__)
 
 
+class ElevenLabsAPIError(Exception):
+    """Generic ElevenLabs API error (non-200 response).
+
+    Attributes:
+        status: HTTP status code from ElevenLabs.
+        body: Raw response body text (may contain JSON error detail).
+    """
+
+    def __init__(self, status: int, body: str, message: str = "") -> None:
+        self.status = status
+        self.body = body
+        super().__init__(message or f"ElevenLabs API Error: status={status}")
+
+
+class ElevenLabsQuotaExceededError(ElevenLabsAPIError):
+    """ElevenLabs quota exhausted.
+
+    Raised when ElevenLabs returns a 401/402/429 or any response whose
+    ``detail.code`` or ``detail.status`` is ``"quota_exceeded"``.
+    After raising this exception the :class:`TTS` class sets an
+    in-memory circuit breaker so that further calls are blocked for
+    ``EL_TTS_QUOTA_COOLDOWN_SECONDS``.
+    """
+    pass
+
+
+# ---------------------------------------------------------------------------
+# ElevenLabs error parsing helpers
+# ---------------------------------------------------------------------------
+
+
+def _check_el_quota_exceeded(status: int, body: str) -> bool:
+    """Return ``True`` when the ElevenLabs response signals quota exhaustion.
+
+    Checks:
+        - HTTP status 401, 402, or 429.
+        - ``detail.code == "quota_exceeded"`` (JSON).
+        - ``detail.status == "quota_exceeded"`` (JSON).
+        - Plain-text fallback: ``"quota_exceeded"`` appears anywhere in
+          the response body.
+    """
+    if status in (401, 402, 429):
+        return True
+    try:
+        data = json.loads(body)
+        detail = data.get("detail")
+        if isinstance(detail, dict):
+            if detail.get("code") == "quota_exceeded" or detail.get("status") == "quota_exceeded":
+                return True
+        elif isinstance(detail, str) and "quota_exceeded" in detail:
+            return True
+    except (json.JSONDecodeError, TypeError):
+        pass
+    if "quota_exceeded" in body:
+        return True
+    return False
+
+
+def _build_el_error(status: int, body: str) -> ElevenLabsAPIError:
+    """Factory: build :class:`ElevenLabsQuotaExceededError` or
+    :class:`ElevenLabsAPIError` depending on the response payload."""
+    msg = f"ElevenLabs API Error: status={status} body={body}"
+    if _check_el_quota_exceeded(status, body):
+        return ElevenLabsQuotaExceededError(status, body, msg)
+    return ElevenLabsAPIError(status, body, msg)
+
+
 class EarlyLiveContext:
     def __init__(self):
         self.live_task = None
@@ -117,6 +184,15 @@ class TTS:
             self.el_tts_timeout_seconds = int(os.getenv("EL_TTS_TIMEOUT_SECONDS", "30"))
         except Exception:
             self.el_tts_timeout_seconds = 30
+
+        # --- ElevenLabs quota circuit breaker ---
+        try:
+            self.el_tts_quota_cooldown_seconds = int(os.getenv("EL_TTS_QUOTA_COOLDOWN_SECONDS", "3600"))
+        except Exception:
+            self.el_tts_quota_cooldown_seconds = 3600
+        self._el_tts_quota_block_until: float = 0.0
+        # Load persisted quota block expiry so the block survives bot restarts.
+        self._load_elevenlabs_quota_block()
 
     @staticmethod
     def _parse_optimize_latency(raw: Optional[str]) -> Optional[int]:
@@ -314,6 +390,92 @@ class TTS:
         self.last_request_time = now
         if guild_id is not None:
             self.last_request_time_by_guild[int(guild_id)] = now
+
+    # ------------------------------------------------------------------ #
+    # ElevenLabs quota circuit breaker
+    # ------------------------------------------------------------------ #
+
+    def is_elevenlabs_quota_blocked(self, guild_id: Optional[int] = None) -> bool:
+        """Return ``True`` when the quota circuit breaker is active.
+
+        Once set (:meth:`_set_elevenlabs_quota_blocked`), all further
+        ElevenLabs TTS requests are rejected with
+        :class:`ElevenLabsQuotaExceededError` for
+        ``el_tts_quota_cooldown_seconds``.  The block is global (account
+        wide), so *guild_id* is accepted for API consistency but ignored.
+        """
+        return time.time() < self._el_tts_quota_block_until
+
+    def _set_elevenlabs_quota_blocked(self) -> None:
+        """Activate the quota circuit breaker.
+
+        Sets the block expiry to ``now + el_tts_quota_cooldown_seconds``,
+        logs a warning at ``WARNING`` level, and persists the expiry to the
+        ``app_settings`` table so the block survives bot restarts.
+        """
+        self._el_tts_quota_block_until = time.time() + self.el_tts_quota_cooldown_seconds
+        logger.warning(
+            "ElevenLabs quota exceeded; blocking further TTS requests "
+            "for %d seconds",
+            self.el_tts_quota_cooldown_seconds,
+        )
+        self._persist_quota_block()
+
+    def _load_elevenlabs_quota_block(self) -> None:
+        """Load persisted quota block expiry from the database.
+
+        Called once during :meth:`__init__` so that a previously-set quota
+        block survives a bot restart.
+
+        Uses ``Database().conn`` directly so that
+        ``@patch("bot.tts.Database")`` in unittests catches the call.
+        """
+        try:
+            db = Database()
+            db.conn.execute(
+                "CREATE TABLE IF NOT EXISTS app_settings ("
+                "  key TEXT PRIMARY KEY,"
+                "  value TEXT NOT NULL,"
+                "  updated_by TEXT,"
+                "  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
+                "  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP"
+                ")"
+            )
+            cursor = db.conn.execute(
+                "SELECT value FROM app_settings WHERE key = ?",
+                ("el_tts_quota_block_until",),
+            )
+            row = cursor.fetchone()
+            if row is not None:
+                saved = row[0]
+                parsed = float(saved)
+                if time.time() < parsed:
+                    self._el_tts_quota_block_until = parsed
+                    remaining = int(parsed - time.time())
+                    logger.info(
+                        "Restored ElevenLabs quota block from DB; "
+                        "%d seconds remaining",
+                        remaining,
+                    )
+        except Exception:
+            logger.debug("Failed to load persisted ElevenLabs quota block (harmless)")
+
+    def _persist_quota_block(self) -> None:
+        """Persist the current quota block expiry to the database."""
+        try:
+            db = Database()
+            db.conn.execute(
+                "INSERT INTO app_settings (key, value, updated_by, updated_at) "
+                "VALUES (?, ?, ?, CURRENT_TIMESTAMP) "
+                "ON CONFLICT(key) DO UPDATE SET "
+                "  value = excluded.value,"
+                "  updated_by = excluded.updated_by,"
+                "  updated_at = CURRENT_TIMESTAMP",
+                ("el_tts_quota_block_until", str(self._el_tts_quota_block_until), "system"),
+            )
+            db.conn.commit()
+        except Exception:
+            logger.debug("Failed to persist ElevenLabs quota block (harmless)")
 
     def _is_locked(self, guild_id: Optional[int] = None) -> bool:
         """Check lock for guild-scoped TTS processing."""
@@ -714,6 +876,14 @@ class TTS:
             await cooldown_message.delete()
             return
 
+        # ---- ElevenLabs quota circuit breaker ----------------------------
+        if self.is_elevenlabs_quota_blocked(guild_id=guild_id):
+            raise ElevenLabsQuotaExceededError(
+                401,
+                "quota_exceeded",
+                "ElevenLabs TTS quota blocked; requests will resume after cooldown",
+            )
+
         # Resolve channel early for live-stream eligibility check
         live_channel = None
         if self.el_tts_live_playback_enabled:
@@ -756,50 +926,6 @@ class TTS:
             and live_channel is not None
         )
 
-        if should_live:
-            try:
-                fifo_dir = tempfile.mkdtemp(prefix="el_tts_live_")
-                ctx.fifo_path = os.path.join(fifo_dir, "stream.mp3")
-                os.mkfifo(ctx.fifo_path)
-
-                live_ready_event = asyncio.Event()
-                live_interrupt_event = threading.Event()
-                logger.info("EL_TTS early live setup start for guild_id=%s filename=%s", guild_id, filename)
-                
-                live_input_format = 'mp3' if self.el_tts_output_format.lower().startswith('mp3_') else None
-                
-                ctx.live_task = asyncio.create_task(
-                    self.behavior.play_tts_live_stream(
-                        fifo_path=ctx.fifo_path,
-                        audio_file=filename,
-                        channel=live_channel,
-                        user=requester_name,
-                        original_message=text,
-                        send_controls=send_controls,
-                        loading_message=loading_message,
-                        requester_avatar_url=requester_avatar_url,
-                        sts_thumbnail_url=sts_thumbnail_url,
-                        ready_event=live_ready_event,
-                        interrupt_event=live_interrupt_event,
-                        request_note=request_note,
-                        input_format=live_input_format,
-                    )
-                )
-                # Yield to the event loop so the live task starts running immediately
-                await asyncio.sleep(0)
-            except Exception as e:
-                logger.warning(
-                    "EL_TTS early live setup failed: %s", e,
-                )
-                if ctx.fifo_path is not None:
-                    try:
-                        os.unlink(ctx.fifo_path)
-                        os.rmdir(os.path.dirname(ctx.fifo_path))
-                    except Exception:
-                        pass
-                ctx.fifo_path = None
-                ctx.live_task = None
-
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.post(url, json=data, headers=headers) as response:
                 http_status = response.status
@@ -822,6 +948,53 @@ class TTS:
                         first_chunk_time = None
                         first_fifo_write_start = None
                         first_fifo_write_end = None
+
+                        # ---- Live FIFO setup (gated behind successful HTTP response) ----
+                        # Start the play_tts_live_stream task now so voice connection
+                        # and FFmpeg startup overlap with the chunk write loop below.
+                        if should_live:
+                            try:
+                                fifo_dir = tempfile.mkdtemp(prefix="el_tts_live_")
+                                ctx.fifo_path = os.path.join(fifo_dir, "stream.mp3")
+                                os.mkfifo(ctx.fifo_path)
+
+                                live_ready_event = asyncio.Event()
+                                live_interrupt_event = threading.Event()
+                                logger.info("EL_TTS live setup start for guild_id=%s filename=%s", guild_id, filename)
+
+                                live_input_format = 'mp3' if self.el_tts_output_format.lower().startswith('mp3_') else None
+
+                                ctx.live_task = asyncio.create_task(
+                                    self.behavior.play_tts_live_stream(
+                                        fifo_path=ctx.fifo_path,
+                                        audio_file=filename,
+                                        channel=live_channel,
+                                        user=requester_name,
+                                        original_message=text,
+                                        send_controls=send_controls,
+                                        loading_message=loading_message,
+                                        requester_avatar_url=requester_avatar_url,
+                                        sts_thumbnail_url=sts_thumbnail_url,
+                                        ready_event=live_ready_event,
+                                        interrupt_event=live_interrupt_event,
+                                        request_note=request_note,
+                                        input_format=live_input_format,
+                                    )
+                                )
+                                # Yield to the event loop so the live task starts running immediately
+                                await asyncio.sleep(0)
+                            except Exception as e:
+                                logger.warning(
+                                    "EL_TTS live setup failed: %s", e,
+                                )
+                                if ctx.fifo_path is not None:
+                                    try:
+                                        os.unlink(ctx.fifo_path)
+                                        os.rmdir(os.path.dirname(ctx.fifo_path))
+                                    except Exception:
+                                        pass
+                                ctx.fifo_path = None
+                                ctx.live_task = None
 
                         if should_live and ctx.live_task is not None:
                             try:
@@ -1065,4 +1238,7 @@ class TTS:
                     error_body = await response.text()
                     error_msg = f"ElevenLabs API Error: status={http_status} body={error_body}"
                     logger.error(error_msg)
-                    raise Exception(error_msg)
+                    exc = _build_el_error(http_status, error_body)
+                    if isinstance(exc, ElevenLabsQuotaExceededError):
+                        self._set_elevenlabs_quota_blocked()
+                    raise exc

@@ -101,6 +101,13 @@ class VoiceTransformationService:
             request_note=request_note,
         ))
 
+    def is_elevenlabs_quota_blocked(self, guild_id: Optional[int] = None) -> bool:
+        """Check if ElevenLabs TTS quota circuit breaker is active.
+
+        Delegates to :meth:`TTS.is_elevenlabs_quota_blocked`.
+        """
+        return self.tts_engine.is_elevenlabs_quota_blocked(guild_id=guild_id)
+
     async def sts_EL(self, user, sound: str, char: str = "ventura", region: str = "",
                      loading_message=None, requester_avatar_url=None, sts_thumbnail_url=None):
         """ElevenLabs speech-to-speech voice transformation."""

@@ -22,6 +22,7 @@ from mutagen.mp3 import MP3
 import speech_recognition as sr
 import vosk
 from discord import sinks
+from bot.tts import ElevenLabsQuotaExceededError
 from bot.repositories import (
     SoundRepository, ActionRepository, ListRepository, 
     StatsRepository, KeywordRepository
@@ -147,6 +148,15 @@ class AudioService:
         self._ventura_chat_service = None
         # Per-user cooldown tracking: key = f"{guild_id}:{user_id}" -> timestamp
         self._voice_command_cooldowns: Dict[str, float] = {}
+        # Per-user quota cooldown tracking: stores absolute deadlines.
+        # Key = f"{guild_id}:{user_id}" -> absolute expiry timestamp.
+        self._voice_command_quota_cooldowns: Dict[str, float] = {}
+        # Cooldown for quota-blocked Ventura wake words to avoid wasting STT/OpenRouter.
+        # Defaults to the same value as EL_TTS_QUOTA_COOLDOWN_SECONDS (3600s).
+        try:
+            self.voice_command_quota_cooldown_seconds = int(os.getenv("VOICE_COMMAND_QUOTA_COOLDOWN_SECONDS", "3600"))
+        except Exception:
+            self.voice_command_quota_cooldown_seconds = 3600
 
         # Voice command prompt clips (direct PCM from Sounds/, no DB lookup)
         self.voice_command_beep_enabled = (
@@ -2914,7 +2924,10 @@ class KeywordDetectionSink(sinks.Sink):
         # Active voice-command post-prompt captures: user_id -> capture dict.
         # Set up by _record_voice_command_after_beep, fed by write().
         self._active_captures: Dict[int, dict] = {}
-        
+
+        # Quota notification rate limiter: guild_id -> last notification timestamp.
+        self._quota_notification_timestamps: Dict[int, float] = {}
+
         # How long to wait for the user to stop speaking after the beep.
         self.voice_command_silence_seconds = getattr(
             audio_service, 'voice_command_silence_seconds', 0.5
@@ -3515,7 +3528,60 @@ class KeywordDetectionSink(sinks.Sink):
         elif action == "voice_command":
             if not self.voice_command_enabled:
                 return
+
             await self._handle_voice_command(user_id, requester_name, channel)
+
+    async def _send_ventura_quota_unavailable_message(
+        self,
+        guild_id: int,
+        requester_name: str,
+        cooldown_seconds: int = 3600,
+        min_notify_interval: float = 60.0,
+    ) -> None:
+        """Send an image-type error card when Ventura TTS is unavailable.
+
+        Rate-limited per guild so repeated wake words do not spam the bot
+        channel.  The card shows a red-bordered image with a concise
+        message explaining that ElevenLabs quota is exhausted and that
+        Ventura voice commands are temporarily disabled.
+
+        Args:
+            guild_id: Discord guild ID.
+            requester_name: Display name of the user who triggered it
+                (shown on the card).
+            cooldown_seconds: The remaining quota cooldown duration
+                communicated to the user.
+            min_notify_interval: Minimum seconds between notification
+                cards for the same guild (default 60).
+        """
+        now = time.time()
+        last_notify = self._quota_notification_timestamps.get(guild_id, 0.0)
+        if now - last_notify < min_notify_interval:
+            return
+
+        self._quota_notification_timestamps[guild_id] = now
+
+        message_service = getattr(self.audio_service, "message_service", None)
+        if message_service is None:
+            return
+
+        remaining_minutes = max(1, cooldown_seconds // 60)
+        await message_service.send_message(
+            title="ElevenLabs TTS Unavailable",
+            description=(
+                "ElevenLabs quota is exhausted, so Ventura TTS is "
+                "temporarily disabled.\n\n"
+                "Wake commands will be ignored for up to "
+                f"{remaining_minutes} minutes to avoid wasting "
+                "STT and OpenRouter tokens."
+            ),
+            message_format="image",
+            image_show_sound_icon=False,
+            image_border_color="#ED4245",
+            send_controls=False,
+            image_requester=requester_name,
+            guild=self.guild,
+        )
 
     async def _record_voice_command_after_beep(
         self,
@@ -3796,6 +3862,45 @@ class KeywordDetectionSink(sinks.Sink):
         # ---- Non-play: Ventura Chat + ElevenLabs TTS --------------------
         print(f"[VoiceCommand] No recognised command in transcript from {requester_name}; routing to Ventura chat")
 
+        vt_service = self.audio_service.voice_transformation_service
+        if vt_service is None:
+            print("[VoiceCommand] VoiceTransformationService not available; cannot play Ventura TTS")
+            return
+
+        # ---- Check per-user quota cooldown (only for non-play branch) ----
+        quota_cooldowns: dict = getattr(
+            self.audio_service, "_voice_command_quota_cooldowns", {}
+        )
+        quota_key = f"{self.guild.id}:{user_id}"
+        now = time.time()
+        if quota_key in quota_cooldowns:
+            if now < quota_cooldowns[quota_key]:
+                # Quota cooldown still active; skip Ventura chat/TTS silently.
+                print(
+                    f"[VoiceCommand] Quota cooldown active for "
+                    f"{requester_name}; skipping Ventura chat"
+                )
+                return
+            else:
+                # Expired — clean up
+                del quota_cooldowns[quota_key]
+
+        # Check ElevenLabs quota block early so we don't waste OpenRouter
+        # tokens when TTS is not available.
+        if vt_service.is_elevenlabs_quota_blocked(guild_id=self.guild.id):
+            print("[VoiceCommand] ElevenLabs TTS quota blocked; skipping Ventura chat to avoid wasting OpenRouter tokens")
+            # Set per-user quota cooldown + send notification.
+            cooldown_seconds = getattr(
+                self.audio_service, "voice_command_quota_cooldown_seconds", 3600
+            )
+            quota_cooldowns[quota_key] = time.time() + cooldown_seconds
+            await self._send_ventura_quota_unavailable_message(
+                guild_id=self.guild.id,
+                requester_name=requester_name,
+                cooldown_seconds=cooldown_seconds,
+            )
+            return
+
         ventura_service = self.audio_service._get_ventura_chat_service()
         if not ventura_service.is_available:
             print("[VoiceCommand] VenturaChat not available (OPENROUTER_API_KEY missing); skipping")
@@ -3818,11 +3923,6 @@ class KeywordDetectionSink(sinks.Sink):
 
         print(f"[VoiceCommand] Ventura reply for {requester_name}: \"{reply}\"")
 
-        vt_service = self.audio_service.voice_transformation_service
-        if vt_service is None:
-            print("[VoiceCommand] VoiceTransformationService not available; cannot play Ventura TTS")
-            return
-
         # Build a user-like object for tts_EL API
         import types
         member = self.guild.get_member(user_id)
@@ -3836,9 +3936,26 @@ class KeywordDetectionSink(sinks.Sink):
         ventura_profile = TTS_PROFILES.get("ventura", {})
         sts_thumbnail = ventura_profile.get("thumbnail")
 
-        await vt_service.tts_EL(
-            user_obj, reply, lang="pt", send_controls=True,
-            requester_avatar_url=avatar_url,
-            sts_thumbnail_url=sts_thumbnail,
-            request_note=request_note,
-        )
+        try:
+            await vt_service.tts_EL(
+                user_obj, reply, lang="pt", send_controls=True,
+                requester_avatar_url=avatar_url,
+                sts_thumbnail_url=sts_thumbnail,
+                request_note=request_note,
+            )
+        except ElevenLabsQuotaExceededError:
+            print("[VoiceCommand] ElevenLabs quota exceeded during Ventura TTS; reply skipped")
+            # Set per-user quota cooldown so repeated wake words skip STT.
+            quota_cooldowns: dict = getattr(
+                self.audio_service, "_voice_command_quota_cooldowns", {}
+            )
+            cooldown_seconds = getattr(
+                self.audio_service, "voice_command_quota_cooldown_seconds", 3600
+            )
+            quota_key = f"{self.guild.id}:{user_id}"
+            quota_cooldowns[quota_key] = time.time() + cooldown_seconds
+            await self._send_ventura_quota_unavailable_message(
+                guild_id=self.guild.id,
+                requester_name=requester_name,
+                cooldown_seconds=cooldown_seconds,
+            )

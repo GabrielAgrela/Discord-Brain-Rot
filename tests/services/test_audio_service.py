@@ -1227,6 +1227,7 @@ class TestAudioService:
 
         sink.audio_service = Mock()
         sink.audio_service._voice_command_cooldowns = {}
+        sink.audio_service._voice_command_quota_cooldowns = {}
         sink.audio_service.voice_command_cooldown_seconds = 5
         sink.audio_service.voice_command_capture_seconds = 6
         sink.audio_service.sound_service = AsyncMock()
@@ -1239,9 +1240,11 @@ class TestAudioService:
         mock_ventura.reply = AsyncMock(return_value="[shouts] Isto é uma vergonha!")
         sink.audio_service._get_ventura_chat_service = Mock(return_value=mock_ventura)
 
-        # Mock VT service for ElevenLabs TTS
-        sink.audio_service.voice_transformation_service = AsyncMock()
-        sink.audio_service.voice_transformation_service.tts_EL = AsyncMock()
+        # Mock VT service for ElevenLabs TTS (quota not blocked)
+        mock_vt = Mock()
+        mock_vt.is_elevenlabs_quota_blocked = Mock(return_value=False)
+        mock_vt.tts_EL = AsyncMock()
+        sink.audio_service.voice_transformation_service = mock_vt
 
         sink._record_voice_command_after_beep = AsyncMock(return_value=b"\x00\x00" * 100)
 
@@ -1284,6 +1287,7 @@ class TestAudioService:
 
         sink.audio_service = Mock()
         sink.audio_service._voice_command_cooldowns = {}
+        sink.audio_service._voice_command_quota_cooldowns = {}
         sink.audio_service.voice_command_cooldown_seconds = 5
         sink.audio_service.voice_command_capture_seconds = 6
         sink.audio_service.sound_service = AsyncMock()
@@ -1294,8 +1298,10 @@ class TestAudioService:
         mock_ventura = Mock()
         mock_ventura.is_available = False
         sink.audio_service._get_ventura_chat_service = Mock(return_value=mock_ventura)
-        # VT service not needed since Ventura chat is skipped
-        sink.audio_service.voice_transformation_service = AsyncMock()
+        # VT service not needed since Ventura chat is skipped, but must pass quota check
+        mock_vt = Mock()
+        mock_vt.is_elevenlabs_quota_blocked = Mock(return_value=False)
+        sink.audio_service.voice_transformation_service = mock_vt
 
         sink._record_voice_command_after_beep = AsyncMock(return_value=b"\x00\x00" * 100)
 
@@ -1314,6 +1320,297 @@ class TestAudioService:
         # TTS was not called
         vt = sink.audio_service.voice_transformation_service
         vt.tts_EL.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_handle_voice_command_non_play_skips_when_quota_blocked(self):
+        """When ElevenLabs quota is blocked, non-play transcript sets cooldown and sends message, skips Ventura chat."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        sink.guild = Mock()
+        sink.guild.id = 444
+        sink.voice_command_enabled = True
+        sink.voice_command_wake_words = ["ventura"]
+        sink.voice_command_vosk_wake_words = []
+        sink._quota_notification_timestamps = {}
+
+        sink.audio_service = Mock()
+        sink.audio_service._voice_command_cooldowns = {}
+        sink.audio_service._voice_command_quota_cooldowns = {}
+        sink.audio_service.voice_command_cooldown_seconds = 5
+        sink.audio_service.voice_command_quota_cooldown_seconds = 3600
+        sink.audio_service.voice_command_capture_seconds = 6
+        sink.audio_service.sound_service = AsyncMock()
+        sink.audio_service.sound_service.play_request = AsyncMock()
+        sink.audio_service._play_voice_command_prompt = AsyncMock(return_value=True)
+        sink.audio_service.message_service = AsyncMock()
+
+        # VT service exists but reports quota blocked
+        mock_vt = Mock()
+        mock_vt.is_elevenlabs_quota_blocked = Mock(return_value=True)
+        mock_vt.tts_EL = AsyncMock()
+        sink.audio_service.voice_transformation_service = mock_vt
+
+        # Ventura chat service should never be checked since quota is blocked
+        mock_ventura = Mock()
+        mock_ventura.is_available = True
+        sink.audio_service._get_ventura_chat_service = Mock(return_value=mock_ventura)
+
+        sink._record_voice_command_after_beep = AsyncMock(return_value=b"\x00\x00" * 100)
+
+        mock_voice_service = Mock()
+        mock_voice_service.is_available = True
+        mock_voice_service.transcribe = AsyncMock(return_value="ventura hello there")
+        sink.audio_service._get_voice_command_service = Mock(return_value=mock_voice_service)
+
+        await sink._handle_voice_command(777, "QuotaBlockedUser", Mock())
+
+        # Only start prompt played, no done prompt
+        assert sink.audio_service._play_voice_command_prompt.await_count == 1
+        # Ventura chat was NOT called (skipped due to quota block)
+        mock_ventura.reply.assert_not_called()
+        # TTS was not called
+        mock_vt.tts_EL.assert_not_called()
+
+        # Per-user quota cooldown should have been set
+        quota_key = "444:777"
+        import time
+        assert quota_key in sink.audio_service._voice_command_quota_cooldowns
+        deadline = sink.audio_service._voice_command_quota_cooldowns[quota_key]
+        assert deadline > time.time() + 3500  # ~3600s from now
+
+        # Quota unavailable message should have been sent
+        msg_service = sink.audio_service.message_service
+        msg_service.send_message.assert_awaited_once()
+        call_kwargs = msg_service.send_message.call_args.kwargs
+        assert call_kwargs["title"] == "ElevenLabs TTS Unavailable"
+        assert call_kwargs["message_format"] == "image"
+        assert call_kwargs["image_border_color"] == "#ED4245"
+
+    @pytest.mark.asyncio
+    async def test_handle_voice_command_non_play_quota_exceeded_during_tts(self):
+        """When tts_EL raises ElevenLabsQuotaExceededError, handler logs and continues, does not raise."""
+        from bot.services.audio import KeywordDetectionSink
+        from bot.tts import ElevenLabsQuotaExceededError
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        sink.guild = Mock()
+        sink.guild.id = 555
+        sink.guild.get_member = Mock(return_value=None)
+        sink.voice_command_enabled = True
+        sink.voice_command_wake_words = ["ventura"]
+        sink.voice_command_vosk_wake_words = []
+
+        sink.audio_service = Mock()
+        sink.audio_service._voice_command_cooldowns = {}
+        sink.audio_service._voice_command_quota_cooldowns = {}
+        sink.audio_service.voice_command_cooldown_seconds = 5
+        sink.audio_service.voice_command_quota_cooldown_seconds = 3600
+        sink.audio_service.voice_command_capture_seconds = 6
+        sink.audio_service.sound_service = AsyncMock()
+        sink.audio_service.sound_service.play_request = AsyncMock()
+        sink.audio_service._play_voice_command_prompt = AsyncMock(return_value=True)
+        sink.audio_service.message_service = AsyncMock()
+        # Set guild for _send_ventura_quota_unavailable_message
+        sink.guild.get_member = Mock(return_value=None)
+
+        # VT service exists, not blocked, but tts_EL raises quota error
+        mock_vt = Mock()
+        mock_vt.is_elevenlabs_quota_blocked = Mock(return_value=False)
+        mock_vt.tts_EL = AsyncMock(side_effect=ElevenLabsQuotaExceededError(
+            401, '{"detail":{"code":"quota_exceeded"}}'
+        ))
+        sink.audio_service.voice_transformation_service = mock_vt
+
+        # Ventura chat service returns a reply
+        mock_ventura = Mock()
+        mock_ventura.is_available = True
+        mock_ventura.reply = AsyncMock(return_value="[shouts] Quota acabou!")
+        sink.audio_service._get_ventura_chat_service = Mock(return_value=mock_ventura)
+
+        sink._quota_notification_timestamps = {}
+        sink._record_voice_command_after_beep = AsyncMock(return_value=b"\x00\x00" * 100)
+
+        mock_voice_service = Mock()
+        mock_voice_service.is_available = True
+        mock_voice_service.transcribe = AsyncMock(return_value="ventura what now")
+        sink.audio_service._get_voice_command_service = Mock(return_value=mock_voice_service)
+
+        # Should not raise — handler catches the quota error
+        await sink._handle_voice_command(888, "QuotaTTSUser", Mock())
+
+        # Ventura chat was called
+        mock_ventura.reply.assert_awaited_once()
+        # TTS was called (and raised, but caught)
+
+        # Quota unavailable notification sent with correct parameters
+        msg_service = sink.audio_service.message_service
+        msg_service.send_message.assert_awaited_once()
+        call_kwargs = msg_service.send_message.call_args.kwargs
+        assert call_kwargs["message_format"] == "image"
+        assert call_kwargs["send_controls"] is False
+        assert call_kwargs["title"] == "ElevenLabs TTS Unavailable"
+        assert call_kwargs["image_border_color"] == "#ED4245"
+        desc = call_kwargs.get("description", "")
+        assert "60 minutes" in desc
+        assert "**" not in desc, "Description must not contain markdown bold syntax"
+        mock_vt.tts_EL.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_handle_voice_command_play_works_when_quota_blocked(self):
+        """Play/toca path works even when ElevenLabs quota is blocked."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        sink.guild = Mock()
+        sink.guild.id = 446
+        sink.voice_command_enabled = True
+        sink.voice_command_wake_words = ["ventura"]
+        sink.voice_command_vosk_wake_words = []
+
+        sink.audio_service = Mock()
+        sink.audio_service._voice_command_cooldowns = {}
+        sink.audio_service._voice_command_quota_cooldowns = {}
+        sink.audio_service.voice_command_cooldown_seconds = 5
+        sink.audio_service.voice_command_capture_seconds = 6
+        sink.audio_service.sound_service = AsyncMock()
+        sink.audio_service.sound_service.play_request = AsyncMock(return_value=True)
+        sink.audio_service.sound_service.play_random_sound_from_list = AsyncMock()
+        sink.audio_service.sound_service.list_repo = None  # No list — forces play_request
+        sink.audio_service._play_voice_command_prompt = AsyncMock(return_value=True)
+
+        # VT service reports quota blocked — should NOT affect play path
+        mock_vt = Mock()
+        mock_vt.is_elevenlabs_quota_blocked = Mock(return_value=True)
+        mock_vt.tts_EL = AsyncMock()
+        sink.audio_service.voice_transformation_service = mock_vt
+
+        # Ventura chat should never be reached for play path
+        mock_ventura = Mock()
+        mock_ventura.is_available = True
+        sink.audio_service._get_ventura_chat_service = Mock(return_value=mock_ventura)
+
+        sink._record_voice_command_after_beep = AsyncMock(return_value=b"\x00\x00" * 100)
+
+        mock_voice_service = Mock()
+        mock_voice_service.is_available = True
+        mock_voice_service.transcribe = AsyncMock(return_value="ventura toca air horn")
+        sink.audio_service._get_voice_command_service = Mock(return_value=mock_voice_service)
+
+        await sink._handle_voice_command(446, "PlayQuotaUser", Mock())
+
+        # Start + done prompts played
+        assert sink.audio_service._play_voice_command_prompt.await_count == 2
+        # Play request was executed
+        sink.audio_service.sound_service.play_request.assert_awaited_once()
+        # Ventura chat NOT called (play path returned before Ventura branch)
+        mock_ventura.reply.assert_not_called()
+        # TTS NOT called
+        mock_vt.tts_EL.assert_not_called()
+        # No quota cooldown set (play path does not touch quota cooldowns)
+        assert sink.audio_service._voice_command_quota_cooldowns == {}
+
+    @pytest.mark.asyncio
+    async def test_handle_voice_command_play_works_when_quota_cooldown_active(self):
+        """Play/toca path works even when a quota cooldown is already active."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        sink.guild = Mock()
+        sink.guild.id = 447
+        sink.voice_command_enabled = True
+        sink.voice_command_wake_words = ["ventura"]
+        sink.voice_command_vosk_wake_words = []
+
+        sink.audio_service = Mock()
+        sink.audio_service._voice_command_cooldowns = {}
+        sink.audio_service.voice_command_cooldown_seconds = 5
+        sink.audio_service.voice_command_capture_seconds = 6
+        sink.audio_service.sound_service = AsyncMock()
+        sink.audio_service.sound_service.play_request = AsyncMock(return_value=True)
+        sink.audio_service.sound_service.play_random_sound_from_list = AsyncMock()
+        sink.audio_service.sound_service.list_repo = None
+        sink.audio_service._play_voice_command_prompt = AsyncMock(return_value=True)
+
+        # Set an active per-user quota cooldown
+        import time
+        sink.audio_service._voice_command_quota_cooldowns = {
+            "447:447": time.time() + 3000,
+        }
+
+        mock_vt = Mock()
+        mock_vt.is_elevenlabs_quota_blocked = Mock(return_value=False)
+        sink.audio_service.voice_transformation_service = mock_vt
+
+        sink._record_voice_command_after_beep = AsyncMock(return_value=b"\x00\x00" * 100)
+
+        mock_voice_service = Mock()
+        mock_voice_service.is_available = True
+        mock_voice_service.transcribe = AsyncMock(return_value="ventura toca air horn")
+        sink.audio_service._get_voice_command_service = Mock(return_value=mock_voice_service)
+
+        await sink._handle_voice_command(447, "CooldownPlayUser", Mock())
+
+        # Play request was executed despite active quota cooldown
+        sink.audio_service.sound_service.play_request.assert_awaited_once()
+        # No Ventura chat or TTS
+        sink.audio_service._get_ventura_chat_service.assert_not_called()
+        mock_vt.tts_EL.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_handle_voice_command_non_play_skips_when_quota_cooldown_active(self):
+        """When per-user quota cooldown is active, non-play transcript skips Ventura chat silently."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        sink.guild = Mock()
+        sink.guild.id = 448
+        sink.voice_command_enabled = True
+        sink.voice_command_wake_words = ["ventura"]
+        sink.voice_command_vosk_wake_words = []
+
+        sink.audio_service = Mock()
+        sink.audio_service._voice_command_cooldowns = {}
+        sink.audio_service.voice_command_cooldown_seconds = 5
+        sink.audio_service.voice_command_capture_seconds = 6
+        sink.audio_service.sound_service = AsyncMock()
+        sink.audio_service.sound_service.play_request = AsyncMock()
+        sink.audio_service._play_voice_command_prompt = AsyncMock(return_value=True)
+
+        # Set an active per-user quota cooldown
+        import time
+        sink.audio_service._voice_command_quota_cooldowns = {
+            "448:448": time.time() + 3000,
+        }
+
+        # VT service NOT blocked but cooldown is active
+        mock_vt = Mock()
+        mock_vt.is_elevenlabs_quota_blocked = Mock(return_value=False)
+        mock_vt.tts_EL = AsyncMock()
+        sink.audio_service.voice_transformation_service = mock_vt
+
+        mock_ventura = Mock()
+        mock_ventura.is_available = True
+        sink.audio_service._get_ventura_chat_service = Mock(return_value=mock_ventura)
+
+        sink._record_voice_command_after_beep = AsyncMock(return_value=b"\x00\x00" * 100)
+
+        mock_voice_service = Mock()
+        mock_voice_service.is_available = True
+        mock_voice_service.transcribe = AsyncMock(return_value="ventura hello there")
+        sink.audio_service._get_voice_command_service = Mock(return_value=mock_voice_service)
+
+        await sink._handle_voice_command(448, "CooldownChatUser", Mock())
+
+        # Start prompt played, Groq transcription ran
+        assert sink.audio_service._play_voice_command_prompt.await_count == 1
+        mock_voice_service.transcribe.assert_awaited_once()
+        # Ventura chat NOT called (skipped due to active quota cooldown)
+        mock_ventura.reply.assert_not_called()
+        # TTS NOT called
+        mock_vt.tts_EL.assert_not_called()
+        # Cooldown key still present (not consumed)
+        assert "448:448" in sink.audio_service._voice_command_quota_cooldowns
 
     # ------------------------------------------------------------------ #
     # Voice command prompt pools
@@ -2179,6 +2476,108 @@ class TestAudioService:
         # No play_audio or sound_service interaction
         sink.audio_service.play_audio.assert_not_called()
         sink.audio_service.sound_service.assert_not_called()
+
+    def test_trigger_action_voice_command_does_not_check_quota_at_stage(self):
+        """trigger_action no longer checks quota — always delegates to _handle_voice_command."""
+        import time as _time
+        from bot.services.audio import KeywordDetectionSink
+        with patch('bot.services.audio.KeywordDetectionSink._handle_voice_command', new_callable=AsyncMock) as mock_handle:
+            sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+            sink.guild = Mock()
+            sink.guild.id = 10001
+            sink.guild.voice_client = Mock()
+            sink.guild.voice_client.channel = Mock()
+            sink.guild.get_member = Mock(return_value=None)
+            sink.voice_command_enabled = True
+            sink._quota_notification_timestamps = {}
+
+            sink.audio_service = Mock()
+            sink.audio_service._voice_command_quota_cooldowns = {}
+            sink.audio_service.voice_command_quota_cooldown_seconds = 3600
+            sink.audio_service.message_service = AsyncMock()
+
+            # VT service reports quota blocked
+            mock_vt = Mock()
+            mock_vt.is_elevenlabs_quota_blocked = Mock(return_value=True)
+            sink.audio_service.voice_transformation_service = mock_vt
+
+            import asyncio
+            asyncio.run(sink.trigger_action(10001, "ventura", "voice_command"))
+
+            # trigger_action should have delegated to _handle_voice_command
+            mock_handle.assert_called_once()
+            assert mock_handle.call_args[0][0] == 10001
+            # No quota cooldown or message set at trigger_action stage
+            assert sink.audio_service._voice_command_quota_cooldowns == {}
+            sink.audio_service.message_service.send_message.assert_not_called()
+
+    def test_trigger_action_voice_command_delegates_when_quota_cooldown_active(self):
+        """trigger_action delegates to _handle_voice_command even when quota cooldown is active."""
+        import time as _time
+        from bot.services.audio import KeywordDetectionSink
+        with patch('bot.services.audio.KeywordDetectionSink._handle_voice_command', new_callable=AsyncMock) as mock_handle:
+            sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+            sink.guild = Mock()
+            sink.guild.id = 10002
+            sink.guild.voice_client = Mock()
+            sink.guild.voice_client.channel = Mock()
+            sink.guild.get_member = Mock(return_value=None)
+            sink.voice_command_enabled = True
+            sink._quota_notification_timestamps = {}
+
+            sink.audio_service = Mock()
+            # VT service NOT blocked (quota recovered) but cooldown still active
+            mock_vt = Mock()
+            mock_vt.is_elevenlabs_quota_blocked = Mock(return_value=False)
+            sink.audio_service.voice_transformation_service = mock_vt
+
+            # Set an active quota cooldown (deadline in the future)
+            sink.audio_service._voice_command_quota_cooldowns = {
+                "10002:10002": _time.time() + 3000,  # 50 minutes remaining
+            }
+            sink.audio_service.voice_command_quota_cooldown_seconds = 3600
+
+            import asyncio
+            asyncio.run(sink.trigger_action(10002, "ventura", "voice_command"))
+
+            # _handle_voice_command should have been called (trigger_action no longer checks cooldowns)
+            mock_handle.assert_called_once()
+            assert mock_handle.call_args[0][0] == 10002
+
+    def test_trigger_action_voice_command_delegates_with_expired_quota_cooldown(self):
+        """trigger_action delegates to _handle_voice_command even with expired cooldown (cooldown checks moved to handler)."""
+        import time as _time
+        from bot.services.audio import KeywordDetectionSink
+        with patch('bot.services.audio.KeywordDetectionSink._handle_voice_command', new_callable=AsyncMock) as mock_handle:
+            sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+            sink.guild = Mock()
+            sink.guild.id = 10003
+            sink.guild.voice_client = Mock()
+            sink.guild.voice_client.channel = Mock()
+            sink.guild.get_member = Mock(return_value=None)
+            sink.voice_command_enabled = True
+            sink._quota_notification_timestamps = {}
+
+            sink.audio_service = Mock()
+            # VT service not blocked
+            mock_vt = Mock()
+            mock_vt.is_elevenlabs_quota_blocked = Mock(return_value=False)
+            sink.audio_service.voice_transformation_service = mock_vt
+
+            # Set an expired quota cooldown (deadline in the past)
+            sink.audio_service._voice_command_quota_cooldowns = {
+                "10003:10003": _time.time() - 100,  # 100 seconds ago
+            }
+            sink.audio_service.voice_command_quota_cooldown_seconds = 3600
+
+            import asyncio
+            asyncio.run(sink.trigger_action(10003, "ventura", "voice_command"))
+
+            # trigger_action does NOT touch cooldowns — cooldown key still present
+            assert "10003:10003" in sink.audio_service._voice_command_quota_cooldowns
+            # _handle_voice_command should have been called (trigger_action always delegates)
+            assert mock_handle.call_count == 1
+            assert mock_handle.call_args[0][0] == 10003
 
     @pytest.mark.asyncio
     async def test_handle_voice_command_clears_listening_after_recording(self):

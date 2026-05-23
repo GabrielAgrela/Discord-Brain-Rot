@@ -674,6 +674,12 @@ class ImageGeneratorService:
             summary_only = bool(event_data) and not has_core_stats
             if summary_only:
                 card_class = f"{card_class} summary-notification".strip()
+            # Determine whether event_data contains a single message or multiple metrics
+            is_single_summary = False
+            if event_data:
+                raw_parts = [p.strip() for p in event_data.split("|")]
+                summary_parts = [p for p in raw_parts if p]
+                is_single_summary = len(summary_parts) == 1
             has_leading_icon = bool(sts_thumbnail_b64 or speaker_icon)
             notification_only = (not has_stats) and (not show_footer)
             resolved_accent_color = accent_color or "#5865F2"
@@ -701,6 +707,7 @@ class ImageGeneratorService:
                 "requester_avatar_b64": requester_avatar_b64,
                 "sts_thumbnail_b64": sts_thumbnail_b64,
                 "event_data": event_data,
+                "is_single_summary": is_single_summary,
                 "show_footer": show_footer,
                 "has_stats": has_stats,
                 "has_leading_icon": has_leading_icon,
