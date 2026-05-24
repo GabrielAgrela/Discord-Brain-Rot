@@ -1005,10 +1005,6 @@
                 clearScanMode();
             });
         }
-        if (scanStatus) {
-            var count = clips.length;
-            scanStatus.textContent = count + ' match' + (count !== 1 ? 'es' : '') + ' found';
-        }
     }
 
     function clearScanMode(skipReload) {
@@ -1042,7 +1038,8 @@
         cancelScanPoll();
 
         if (scanKeywordBtn) scanKeywordBtn.disabled = true;
-        if (scanStatus) scanStatus.textContent = 'Starting scan (clips \u226430s)\u2026';
+        if (scanStatus) scanStatus.textContent = '';
+        showScanToast('Starting scan (clips \u226430s)\u2026', 'info');
         if (scanProgress) {
             scanProgress.hidden = false;
             scanProgress.value = 0;
@@ -1065,15 +1062,15 @@
             var data = await safeParseJson(resp);
             if (data.job_id) {
                 state._scanJobId = data.job_id;
-                if (scanStatus) scanStatus.textContent = 'Queued\u2026';
+                showScanToast('Queued\u2026', 'info');
                 pollScanJob(data.job_id);
             } else {
-                if (scanStatus) scanStatus.textContent = data.error || 'Failed to start scan';
+                showScanToast(data.error || 'Failed to start scan', 'error');
                 if (scanKeywordBtn) scanKeywordBtn.disabled = false;
                 if (scanProgress) scanProgress.hidden = true;
             }
         } catch (e) {
-            if (scanStatus) scanStatus.textContent = 'Network error while starting scan';
+            showScanToast('Network error while starting scan', 'error');
             if (scanKeywordBtn) scanKeywordBtn.disabled = false;
             if (scanProgress) scanProgress.hidden = true;
         }
@@ -1125,11 +1122,7 @@
         var maxDur = data.max_duration_seconds ? '\u2264' + data.max_duration_seconds + 's ' : '';
 
         if (scanStatus) {
-            if (total > 0) {
-                scanStatus.textContent = 'Scanning ' + scanned + '/' + total + ' ' + maxDur + 'clips \u00b7 ' + matched + ' match' + (matched !== 1 ? 'es' : '') + ' \u00b7 ' + skipped + ' skipped';
-            } else {
-                scanStatus.textContent = 'Scanning ' + maxDur + 'unlabeled clips\u2026';
-            }
+            scanStatus.textContent = '';
         }
 
         if (scanProgress && total > 0) {
@@ -1155,15 +1148,16 @@
         loadUsers();
         loadStorage();
 
+        if (scanStatus) scanStatus.textContent = '';
+
         if (data.matched > 0) {
+            var count = data.matched;
+            var msg = count + ' match' + (count !== 1 ? 'es' : '') + ' found' + nonMatchNote;
+            showScanToast(msg, 'success');
             enterScanMode(data.matches, data.keyword, data.max_duration_seconds);
-            if (scanStatus && nonMatchNote) {
-                scanStatus.textContent = scanStatus.textContent + nonMatchNote;
-            }
         } else {
             var maxDur = data.max_duration_seconds ? ' among clips \u2264' + data.max_duration_seconds + 's' : '';
             showScanToast('No matches found' + maxDur + ' (scanned ' + data.scanned + ', skipped ' + data.skipped + ')' + nonMatchNote, 'info');
-            if (scanStatus) scanStatus.textContent = '';
             datasetTitle.textContent = 'No matches';
             clipList.innerHTML = '<p class="dataset-empty">No clips matched "' + data.keyword + '" at \u2265' + Math.round(data.min_confidence * 100) + '% confidence' + maxDur + '.</p>';
             datasetPagination.innerHTML = '<div class="pagination-inner"><button type="button" class="pagination-btn" id="clearScanBtn">Show all clips</button></div>';
@@ -1180,7 +1174,8 @@
         state._scanJobId = null;
         if (scanKeywordBtn) scanKeywordBtn.disabled = false;
         if (scanProgress) scanProgress.hidden = true;
-        if (scanStatus) scanStatus.textContent = message;
+        showScanToast(message, 'error');
+        if (scanStatus) scanStatus.textContent = '';
     }
 
     function cancelScanPoll() {
