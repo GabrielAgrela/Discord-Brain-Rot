@@ -297,6 +297,201 @@ def _run_web_upload_job(
             Path(temp_upload_path).unlink(missing_ok=True)
 
 
+def _queue_web_keyword_scan_job(
+    *,
+    keyword: str,
+    min_confidence: float,
+    guild_id: str | None,
+    user_id: str | None,
+) -> str:
+    """Persist keyword scan parameters and submit background processing.
+
+    Returns:
+        The job ID for polling status via
+        ``GET /api/speech_training/keyword_scan/<job_id>``.
+    """
+    job_id = uuid.uuid4().hex
+    created_at = datetime.now(timezone.utc).isoformat()
+    jobs: dict[str, Any] = current_app.extensions.setdefault("web_keyword_scan_jobs", {})
+    jobs[job_id] = {
+        "job_id": job_id,
+        "status": "queued",
+        "keyword": keyword,
+        "min_confidence": min_confidence,
+        "max_duration_seconds": None,
+        "total": 0,
+        "scanned": 0,
+        "matched": 0,
+        "skipped": 0,
+        "matches": [],
+        "error": None,
+        "created_at": created_at,
+        "finished_at": None,
+    }
+
+    # Keep dict bounded: remove oldest non-processing entries when over 50
+    _prune_old_keyword_scan_jobs(jobs)
+
+    db_path = current_app.config["DATABASE_PATH"]
+    data_dir = os.getenv(
+        "SPEECH_TRAINING_DATA_DIR",
+        os.path.abspath(
+            os.path.join(
+                os.path.dirname(__file__), "..", "..", "data", "speech_training"
+            )
+        ),
+    )
+    executor = current_app.extensions["web_keyword_scan_executor"]
+    executor.submit(
+        _run_web_keyword_scan_job,
+        job_id=job_id,
+        jobs=jobs,
+        db_path=db_path,
+        data_dir=data_dir,
+        keyword=keyword,
+        min_confidence=min_confidence,
+        guild_id=guild_id,
+        user_id=user_id,
+    )
+    return job_id
+
+
+def _run_web_keyword_scan_job(
+    *,
+    job_id: str,
+    jobs: dict[str, Any],
+    db_path: str,
+    data_dir: str,
+    keyword: str,
+    min_confidence: float,
+    guild_id: str | None,
+    user_id: str | None,
+) -> None:
+    """Process one queued keyword scan outside the Flask request thread."""
+    from bot.repositories.speech_training import SpeechTrainingRepository
+    from bot.services.web_speech_training import WebSpeechTrainingService
+
+    finished_at = datetime.now(timezone.utc).isoformat()
+
+    try:
+        repo = SpeechTrainingRepository(db_path=db_path, use_shared=False)
+        svc = WebSpeechTrainingService(repo, data_dir)
+        svc.ensure_schema()
+
+        initial_job_entry = jobs.get(job_id, {})
+
+        def _on_progress(progress: dict[str, Any]) -> None:
+            """Update the shared jobs dict with current scan progress."""
+            jobs[job_id] = {
+                "job_id": job_id,
+                "status": progress.get("status", "processing"),
+                "keyword": keyword,
+                "min_confidence": min_confidence,
+                "max_duration_seconds": progress.get("max_duration_seconds"),
+                "total": progress.get("total", 0),
+                "scanned": progress.get("scanned", 0),
+                "matched": progress.get("matched", 0),
+                "skipped": progress.get("skipped", 0),
+                "matches": [],
+                "error": None,
+                "created_at": initial_job_entry.get("created_at"),
+                "finished_at": None,
+            }
+
+        result = svc.scan_unlabeled_keyword(
+            keyword=keyword,
+            min_confidence=min_confidence,
+            guild_id=guild_id,
+            user_id=user_id,
+            progress_callback=_on_progress,
+        )
+
+        # Final state with matches
+        jobs[job_id] = {
+            "job_id": job_id,
+            "status": "done",
+            "keyword": keyword,
+            "min_confidence": min_confidence,
+            "max_duration_seconds": result.get("max_duration_seconds"),
+            "total": result.get("scanned", 0) + result.get("skipped", 0),
+            "scanned": result.get("scanned", 0),
+            "matched": result.get("matched", 0),
+            "skipped": result.get("skipped", 0),
+            "matches": result.get("matches", []),
+            "error": None,
+            "created_at": initial_job_entry.get("created_at"),
+            "finished_at": finished_at,
+        }
+    except ValueError as exc:
+        jobs[job_id] = {
+            "job_id": job_id,
+            "status": "error",
+            "keyword": keyword,
+            "min_confidence": min_confidence,
+            "max_duration_seconds": None,
+            "total": 0,
+            "scanned": 0,
+            "matched": 0,
+            "skipped": 0,
+            "matches": [],
+            "error": str(exc),
+            "created_at": initial_job_entry.get("created_at"),
+            "finished_at": finished_at,
+        }
+    except Exception:
+        logger.exception("Unexpected error processing keyword scan job")
+        jobs[job_id] = {
+            "job_id": job_id,
+            "status": "error",
+            "keyword": keyword,
+            "min_confidence": min_confidence,
+            "max_duration_seconds": None,
+            "total": 0,
+            "scanned": 0,
+            "matched": 0,
+            "skipped": 0,
+            "matches": [],
+            "error": "Internal server error",
+            "created_at": initial_job_entry.get("created_at"),
+            "finished_at": finished_at,
+        }
+
+
+def _prune_old_keyword_scan_jobs(jobs: dict[str, Any]) -> None:
+    """Remove oldest finished/error jobs when the dict exceeds 50 entries.
+
+    Never removes entries with status ``queued`` or ``processing``.
+    """
+    MAX_JOBS = 50
+    if len(jobs) <= MAX_JOBS:
+        return
+
+    # Separate active vs terminal entries
+    active: list[str] = []
+    terminal: list[tuple[str, str | None]] = []  # (job_id, finished_at)
+    for jid, entry in jobs.items():
+        status = entry.get("status", "")
+        if status in ("queued", "processing"):
+            active.append(jid)
+        else:
+            finished_at = entry.get("finished_at")
+            terminal.append((jid, finished_at))
+
+    # Keep all active, prune oldest terminal
+    keep_count = MAX_JOBS - len(active)
+    if keep_count <= 0:
+        # Remove all terminal entries (unlikely but handle edge case)
+        for jid, _ in terminal:
+            jobs.pop(jid, None)
+        return
+
+    # Sort terminal by finished_at (ascending = oldest first)
+    terminal.sort(key=lambda x: x[1] or "")
+    to_remove = terminal[:-keep_count] if keep_count < len(terminal) else []
+    for jid, _ in to_remove:
+        jobs.pop(jid, None)
+
+
 def _get_web_control_room_service() -> WebControlRoomService:
     """Build a control-room service for the current request config."""
     db_path = current_app.config["DATABASE_PATH"]

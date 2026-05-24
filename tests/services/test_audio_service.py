@@ -3294,6 +3294,11 @@ class TestSpeechTrainingSinkIntegration:
         sink._speech_segment_last_chunk = {}
         sink._speech_lock = threading.Lock()
 
+        # Energy-based speech detection state
+        sink._speech_last_voiced = {}
+        sink._speech_voiced_up_to = {}
+        sink._speech_preroll_pcm = {}
+
         if recorder_enabled:
             from bot.services.speech_training import SpeechTrainingRecorderService
             recorder = SpeechTrainingRecorderService.__new__(SpeechTrainingRecorderService)
@@ -3302,10 +3307,191 @@ class TestSpeechTrainingSinkIntegration:
             recorder.min_duration_seconds = 0.25
             recorder.max_duration_seconds = 10.0
             recorder.min_rms = 0  # allow all RMS
+            recorder.speech_rms_threshold = 250  # energy gate threshold
+            recorder.preroll_seconds = 0.08
+            recorder.trim_silence = True
             recorder.enqueue_segment = Mock(return_value=True)
             sink._speech_recorder = recorder
         else:
             sink._speech_recorder = None
 
         return sink
+
+    # ------------------------------------------------------------------
+    # Preroll buffer helpers
+    # ------------------------------------------------------------------
+
+    def test_store_preroll_chunk_creates_buffer(self):
+        """Preroll buffer is created on first low-energy chunk."""
+        sink = self._make_sink()
+        data = b"\x00" * 1920  # 10 ms of silence at 48k stereo
+        sink._store_preroll_chunk(111, data, 0.5)
+        assert 111 in sink._speech_preroll_pcm
+        assert bytes(sink._speech_preroll_pcm[111]) == data
+
+    def test_preroll_buffer_capped(self):
+        """Preroll buffer does not exceed max_seconds."""
+        sink = self._make_sink()
+        max_sec = 0.08
+        chunk = b"\x00" * 19200  # 100 ms of silence
+        # Feed 3 chunks = 300 ms, but cap is 80 ms
+        for _ in range(3):
+            sink._store_preroll_chunk(111, chunk, max_sec)
+        max_bytes = int(max_sec * 192000)
+        assert len(sink._speech_preroll_pcm[111]) <= max_bytes + 4  # frame-align fudge
+
+    def test_collect_preroll_returns_and_clears(self):
+        """_collect_preroll returns stored bytes and removes the buffer."""
+        sink = self._make_sink()
+        data = b"\x01\x02" * 960  # 10ms of low-amplitude signal
+        sink._store_preroll_chunk(111, data, 0.5)
+        result = sink._collect_preroll(111)
+        assert result == data
+        assert 111 not in sink._speech_preroll_pcm
+
+    def test_collect_preroll_empty_no_error(self):
+        """_collect_preroll returns empty bytes when no preroll exists."""
+        sink = self._make_sink()
+        result = sink._collect_preroll(999)
+        assert result == b""
+
+    def test_clear_preroll_removes_buffer(self):
+        """_clear_preroll removes the preroll entry if present."""
+        sink = self._make_sink()
+        sink._store_preroll_chunk(111, b"\x00" * 1920, 0.5)
+        sink._clear_preroll(111)
+        assert 111 not in sink._speech_preroll_pcm
+
+    def test_clear_preroll_no_error_when_missing(self):
+        """_clear_preroll handles missing entry without error."""
+        sink = self._make_sink()
+        sink._clear_preroll(999)  # should not raise
+
+    # ------------------------------------------------------------------
+    # Energy-gated segmenter
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _low_rms_chunk(length_bytes=19200, rms=50):
+        """Generate a low-RMS (silence-like) PCM chunk.
+
+        50 RMS is well below the default 250 speech_rms_threshold.
+        Uses a tiny sine wave at very low amplitude so _compute_rms
+        returns a deterministic small value.
+        """
+        import array
+        import math
+        samples = length_bytes // 2
+        vals = array.array("h", [int(rms * math.sin(i * 0.1)) for i in range(samples)])
+        return vals.tobytes()
+
+    @staticmethod
+    def _high_rms_chunk(length_bytes=19200, rms=500):
+        """Generate a high-RMS (voiced-like) PCM chunk.
+
+        500 RMS is well above the default 250 speech_rms_threshold.
+        """
+        import array
+        import math
+        samples = length_bytes // 2
+        vals = array.array("h", [int(rms * math.sin(i * 0.1)) for i in range(samples)])
+        return vals.tobytes()
+
+    def test_silence_only_does_not_start_segment(self):
+        """Low-energy chunks alone never start a speech segment."""
+        sink = self._make_sink()
+        now = 1000.0
+        for i in range(10):
+            sink._feed_speech_segmenter(self._low_rms_chunk(), 111, now + i * 0.1)
+        assert 111 not in sink._speech_segment_pcm
+
+    def test_voiced_chunk_starts_segment_with_preroll(self):
+        """A voiced chunk after low-energy chunks starts a segment with preroll included."""
+        sink = self._make_sink()
+        now = 1000.0
+        # Send 2 silence chunks with distinct pattern so we can identify preroll bytes
+        preroll_pattern = b"\xAB\xCD" * 960  # 10ms of unique low-RMS pattern
+        silence_chunk = self._low_rms_chunk(5760)  # 30ms
+        for i in range(2):
+            sink._feed_speech_segmenter(preroll_pattern if i == 0 else silence_chunk, 111, now + i * 0.03)
+        # Send voiced chunk (long enough > min_duration=0.25)
+        voiced = self._high_rms_chunk(57600, rms=500)
+        sink._feed_speech_segmenter(voiced, 111, now + 0.1)
+        assert 111 in sink._speech_segment_pcm
+        pcm = bytes(sink._speech_segment_pcm[111])
+        # The preroll pattern should appear at the very beginning of PCM
+        assert pcm[:len(preroll_pattern)] == preroll_pattern, \
+            f"Preroll pattern not found at start of {len(pcm)}-byte segment"
+        # Total should be preroll (2 chunks = 7680 bytes) + voiced (57600) = 65280
+        preroll_total = len(preroll_pattern) + len(silence_chunk)
+        assert len(pcm) == preroll_total + len(voiced), \
+            f"Expected {preroll_total + len(voiced)} bytes, got {len(pcm)}"
+        # Verify voiced_up_to is set (end boundary = total PCM length)
+        assert sink._speech_voiced_up_to.get(111, 0) == len(pcm)
+
+    def test_low_energy_after_voiced_does_not_finalize_immediately(self):
+        """Low-energy chunks after voiced do not immediately finalize the segment."""
+        sink = self._make_sink()
+        now = 1000.0
+        voiced = self._high_rms_chunk(57600, rms=500)  # 300ms
+        sink._feed_speech_segmenter(voiced, 111, now)
+        assert 111 in sink._speech_segment_pcm
+        # Send a few low-energy chunks (within silence_seconds=0.35)
+        silence = self._low_rms_chunk(5760)  # 30ms
+        sink._feed_speech_segmenter(silence, 111, now + 0.1)
+        sink._feed_speech_segmenter(silence, 111, now + 0.2)
+        assert 111 in sink._speech_segment_pcm  # still alive
+
+    def test_silence_after_voiced_finalizes_segment(self):
+        """Enough silence after last voiced chunk -> finalize and enqueue trimmed PCM."""
+        sink = self._make_sink()
+        now = 1000.0
+        voiced = self._high_rms_chunk(57600, rms=500)  # 300ms (> min_duration=0.25)
+        sink._feed_speech_segmenter(voiced, 111, now)
+        # Silence long enough to trigger finalization
+        silence = self._low_rms_chunk(5760)  # 30ms
+        sink._feed_speech_segmenter(silence, 111, now + 0.4)  # gap > 0.35s
+        # Segment should be finalized
+        assert 111 not in sink._speech_segment_pcm
+        assert sink._speech_recorder.enqueue_segment.called
+
+    def test_trailing_silence_is_trimmed(self):
+        """Captured PCM has trailing low-energy frames removed when trim_silence=True."""
+        sink = self._make_sink()
+        now = 1000.0
+        voiced_len = 57600  # 300ms (> min_duration=0.25)
+        voiced = self._high_rms_chunk(voiced_len, rms=500)
+        sink._feed_speech_segmenter(voiced, 111, now)
+        # Add trailing silence
+        silence = self._low_rms_chunk(38400)  # 200ms
+        sink._feed_speech_segmenter(silence, 111, now + 0.4)  # triggers finalization
+        assert sink._speech_recorder.enqueue_segment.called
+        # Get the enqueued segment
+        segment = sink._speech_recorder.enqueue_segment.call_args[0][0]
+        # Trailing silence should be trimmed - segment should be ~300ms (voiced only)
+        trimmed_dur = len(segment.pcm_data) / 192000.0
+        assert trimmed_dur <= 0.32, f"Expected ~300ms but got {trimmed_dur:.3f}s"
+
+    def test_intra_word_silence_preserved(self):
+        """Brief low-energy gaps between voiced chunks do NOT cause finalization."""
+        sink = self._make_sink()
+        now = 1000.0
+        voiced = self._high_rms_chunk(57600, rms=500)  # 300ms (> min_duration)
+        silence = self._low_rms_chunk(9600, rms=50)  # 50ms gap
+        # Voice -> 50ms pause -> voice
+        sink._feed_speech_segmenter(voiced, 111, now)
+        sink._feed_speech_segmenter(silence, 111, now + 0.1)  # 100ms gap (within 0.35s)
+        sink._feed_speech_segmenter(voiced, 111, now + 0.15)
+        assert 111 in sink._speech_segment_pcm  # still active
+
+    def test_segment_still_works_when_stt_disabled(self):
+        """Speech training segmentation works even when STT is disabled at guild level."""
+        sink = self._make_sink(stt_enabled=False, recorder_enabled=True)
+        now = 1000.0
+        voiced = self._high_rms_chunk(57600, rms=500)  # 300ms (> min_duration)
+        sink._feed_speech_segmenter(voiced, 111, now)
+        silence = self._low_rms_chunk(5760)
+        sink._feed_speech_segmenter(silence, 111, now + 0.4)
+        assert 111 not in sink._speech_segment_pcm
+        assert sink._speech_recorder.enqueue_segment.called
 

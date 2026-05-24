@@ -221,7 +221,71 @@ class TestSpeechTrainingRepository:
         unlabeled = [item for item in items if not item["label"]]
         assert len(unlabeled) == 2
 
-    def test_list_clips_sort_label_desc(self, repo):
+    # ── list_clip_ids ─────────────────────────────────────────────────
+
+    def test_list_clip_ids_all(self, repo):
+        """Test listing all clip IDs without pagination."""
+        ids = self._insert_sample_clips(repo)
+        result = repo.list_clip_ids()
+        assert sorted(result) == sorted(ids)
+        assert len(result) == len(ids)
+
+    def test_list_clip_ids_guild_filter(self, repo):
+        """Test filtering clip IDs by guild."""
+        ids = self._insert_sample_clips(repo)
+        result = repo.list_clip_ids(guild_id="100")
+        # ids[0], ids[1], ids[2] are guild 100
+        assert sorted(result) == sorted(ids[:3])
+        assert len(result) == 3
+
+    def test_list_clip_ids_user_filter(self, repo):
+        """Test filtering clip IDs by user."""
+        ids = self._insert_sample_clips(repo)
+        result = repo.list_clip_ids(user_id="1")
+        # ids[0], ids[1] are user 1
+        assert sorted(result) == sorted(ids[:2])
+        assert len(result) == 2
+
+    def test_list_clip_ids_unpaginated(self, repo):
+        """Test that list_clip_ids returns all matching IDs regardless of page size."""
+        ids = self._insert_sample_clips(repo)
+        # Add more clips to exceed any reasonable per_page boundary
+        extra_ids = []
+        for i in range(5):
+            cid = repo.insert_clip(
+                guild_id="100", user_id="1", username="user1",
+                display_name="User One", folder_name="user1_1",
+                filename=f"extra_{i}.mp3",
+                relative_path=f"100/user1_1/extra_{i}.mp3",
+                duration_seconds=1.0, byte_size=10000,
+            )
+            extra_ids.append(cid)
+        all_ids = ids + extra_ids
+        result = repo.list_clip_ids(guild_id="100")
+        assert len(result) == len(all_ids) - 1  # minus guild 200 clip
+        assert sorted(result) == sorted(all_ids[:3] + extra_ids)
+
+    def test_list_clip_ids_search(self, repo):
+        """Test searching clip IDs by filename."""
+        ids = self._insert_sample_clips(repo)
+        result = repo.list_clip_ids(search="clip1")
+        assert result == [ids[0]]
+
+    def test_list_clip_ids_no_match(self, repo):
+        """Test clip IDs returns empty list when no clips match."""
+        result = repo.list_clip_ids(search="nonexistent")
+        assert result == []
+
+    def test_list_clip_ids_sort(self, repo):
+        """Test that clip IDs respect sort order."""
+        ids = self._insert_sample_clips(repo)
+        result = repo.list_clip_ids(sort_by="duration_seconds", sort_dir="asc")
+        # durations: ids[0]=1.5, ids[1]=2.0, ids[2]=0.8, ids[3]=3.0
+        # sorted asc by duration -> ids[2], ids[0], ids[1], ids[3]
+        expected_order = [ids[2], ids[0], ids[1], ids[3]]
+        assert result == expected_order
+
+    def test_list_clip_ids_sort_label_desc(self, repo):
         """Test sorting by label descending (unlabeled first)."""
         ids = self._insert_sample_clips(repo)
         repo._execute_write(
@@ -404,3 +468,82 @@ class TestSpeechTrainingRepository:
         summary = repo.get_storage_summary(guild_id="999")
         assert summary["total_bytes"] == 0
         assert summary["clip_count"] == 0
+
+    # ── list_unlabeled_clips ──────────────────────────────────────────
+
+    def test_list_unlabeled_clips_all(self, repo):
+        """Return all unlabeled clips across guilds."""
+        ids = self._insert_sample_clips(repo)
+        clips = repo.list_unlabeled_clips()
+        # All 4 clips are inserted without labels
+        assert len(clips) == 4
+
+    def test_list_unlabeled_clips_guild_filter(self, repo):
+        """Filter unlabeled clips by guild."""
+        ids = self._insert_sample_clips(repo)
+        clips = repo.list_unlabeled_clips(guild_id="100")
+        assert len(clips) == 3
+        clips = repo.list_unlabeled_clips(guild_id="200")
+        assert len(clips) == 1
+
+    def test_list_unlabeled_clips_user_filter(self, repo):
+        """Filter unlabeled clips by user."""
+        ids = self._insert_sample_clips(repo)
+        clips = repo.list_unlabeled_clips(user_id="1")
+        assert len(clips) == 2
+        clips = repo.list_unlabeled_clips(user_id="2")
+        assert len(clips) == 1
+
+    def test_list_unlabeled_clips_excludes_labeled(self, repo):
+        """Labeled clips should not appear in unlabeled results."""
+        ids = self._insert_sample_clips(repo)
+        # Label one clip
+        repo._execute_write(
+            "UPDATE speech_training_clips SET label = 'chapada' WHERE id = ?",
+            (ids[0],),
+        )
+        clips = repo.list_unlabeled_clips()
+        assert len(clips) == 3
+
+    def test_list_unlabeled_clips_guild_and_user(self, repo):
+        """Combine guild and user filter."""
+        ids = self._insert_sample_clips(repo)
+        clips = repo.list_unlabeled_clips(guild_id="100", user_id="1")
+        assert len(clips) == 2
+        for c in clips:
+            assert c["guild_id"] == "100"
+            assert c["user_id"] == "1"
+
+    def test_list_unlabeled_clips_max_duration_inclusive(self, repo):
+        """max_duration_seconds includes clips exactly at the boundary."""
+        self._insert_sample_clips(repo)
+        # Clip durations: 1.5, 2.0, 0.8, 3.0
+        clips = repo.list_unlabeled_clips(max_duration_seconds=2.0)
+        assert len(clips) == 3  # 1.5, 2.0, 0.8
+        for c in clips:
+            assert c["duration_seconds"] <= 2.0
+
+    def test_list_unlabeled_clips_max_duration_excludes_long(self, repo):
+        """max_duration_seconds excludes clips longer than the boundary."""
+        self._insert_sample_clips(repo)
+        clips = repo.list_unlabeled_clips(max_duration_seconds=1.0)
+        assert len(clips) == 1  # only 0.8
+        assert clips[0]["duration_seconds"] == 0.8
+
+    def test_list_unlabeled_clips_max_duration_combined_with_filters(self, repo):
+        """max_duration_seconds works together with guild/user filters."""
+        self._insert_sample_clips(repo)
+        clips = repo.list_unlabeled_clips(
+            guild_id="100",
+            max_duration_seconds=2.0,
+        )
+        # Guild 100 clips: 1.5, 2.0, 0.8 → all ≤2.0
+        assert len(clips) == 3
+
+        clips = repo.list_unlabeled_clips(
+            guild_id="100",
+            max_duration_seconds=1.0,
+        )
+        # Guild 100 clips ≤1.0: only 0.8
+        assert len(clips) == 1
+        assert clips[0]["duration_seconds"] == 0.8

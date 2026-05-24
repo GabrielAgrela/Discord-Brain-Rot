@@ -197,6 +197,77 @@ class SpeechTrainingRepository(BaseRepository):
     }
     _SORT_DIR_ALLOWLIST: set[str] = {"asc", "desc"}
 
+    # ------------------------------------------------------------------
+    # Filter / order helpers (shared by list_clips and list_clip_ids)
+    # ------------------------------------------------------------------
+
+    def _build_clip_conditions(
+        self,
+        guild_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        label: Optional[str] = None,
+        search: str = "",
+    ) -> Tuple[List[str], List[Any]]:
+        """Build WHERE conditions and params for clip queries.
+
+        Args:
+            guild_id: Optional guild filter.
+            user_id: Optional user filter.
+            label: Optional label filter (``"unlabeled"`` for NULL/empty).
+            search: Optional search in username/display_name/filename.
+
+        Returns:
+            Tuple of (list of condition strings, list of parameter values).
+        """
+        conditions: List[str] = []
+        params: List[Any] = []
+
+        if guild_id:
+            conditions.append("guild_id = ?")
+            params.append(guild_id)
+        if user_id:
+            conditions.append("user_id = ?")
+            params.append(user_id)
+        if label == "unlabeled":
+            conditions.append("(label IS NULL OR label = '')")
+        elif label:
+            conditions.append("label = ?")
+            params.append(label)
+        if search:
+            conditions.append(
+                "(username LIKE ? OR display_name LIKE ? OR filename LIKE ?)"
+            )
+            like_val = f"%{search}%"
+            params.extend([like_val, like_val, like_val])
+
+        return conditions, params
+
+    def _build_clip_order(
+        self, sort_by: str = "captured_at", sort_dir: str = "desc"
+    ) -> str:
+        """Build ORDER BY clause for clip queries.
+
+        Args:
+            sort_by: Column to sort by (allowlisted). Default ``captured_at``.
+            sort_dir: Sort direction (``asc`` or ``desc``). Default ``desc``.
+
+        Returns:
+            Full ORDER BY clause string including the deterministic tiebreaker.
+        """
+        safe_sort = sort_by if sort_by in self._SORT_ALLOWLIST else "captured_at"
+        safe_dir = sort_dir.lower() if sort_dir.lower() in self._SORT_DIR_ALLOWLIST else "desc"
+        # For label sorts, treat NULL/empty as a group
+        # With asc: labeled (CASE 0) first; with desc: unlabeled (CASE 0) first
+        if safe_sort == "label":
+            if safe_dir == "asc":
+                order_expr = "CASE WHEN label IS NULL OR label = '' THEN 1 ELSE 0 END, label asc"
+            else:
+                order_expr = "CASE WHEN label IS NULL OR label = '' THEN 0 ELSE 1 END, label desc"
+        else:
+            order_expr = f"{safe_sort} {safe_dir}"
+        # Deterministic tiebreaker
+        return f"ORDER BY {order_expr}, id {safe_dir}"
+
     def list_clips(
         self,
         guild_id: Optional[str] = None,
@@ -223,26 +294,9 @@ class SpeechTrainingRepository(BaseRepository):
         Returns:
             Tuple of (list of clip dicts, total count).
         """
-        conditions: List[str] = []
-        params: List[Any] = []
-
-        if guild_id:
-            conditions.append("guild_id = ?")
-            params.append(guild_id)
-        if user_id:
-            conditions.append("user_id = ?")
-            params.append(user_id)
-        if label == "unlabeled":
-            conditions.append("(label IS NULL OR label = '')")
-        elif label:
-            conditions.append("label = ?")
-            params.append(label)
-        if search:
-            conditions.append(
-                "(username LIKE ? OR display_name LIKE ? OR filename LIKE ?)"
-            )
-            like_val = f"%{search}%"
-            params.extend([like_val, like_val, like_val])
+        conditions, params = self._build_clip_conditions(
+            guild_id=guild_id, user_id=user_id, label=label, search=search
+        )
 
         where_clause = ""
         if conditions:
@@ -254,20 +308,7 @@ class SpeechTrainingRepository(BaseRepository):
         )
         total = count_row["cnt"] if count_row else 0
 
-        # Validate sort params against allowlist
-        safe_sort = sort_by if sort_by in self._SORT_ALLOWLIST else "captured_at"
-        safe_dir = sort_dir.lower() if sort_dir.lower() in self._SORT_DIR_ALLOWLIST else "desc"
-        # For label sorts, treat NULL/empty as a group
-        # With asc: labeled (CASE 0) first; with desc: unlabeled (CASE 0) first
-        if safe_sort == "label":
-            if safe_dir == "asc":
-                order_expr = "CASE WHEN label IS NULL OR label = '' THEN 1 ELSE 0 END, label asc"
-            else:
-                order_expr = "CASE WHEN label IS NULL OR label = '' THEN 0 ELSE 1 END, label desc"
-        else:
-            order_expr = f"{safe_sort} {safe_dir}"
-        # Deterministic tiebreaker
-        order_clause = f"ORDER BY {order_expr}, id {safe_dir}"
+        order_clause = self._build_clip_order(sort_by=sort_by, sort_dir=sort_dir)
 
         offset = (page - 1) * per_page
         rows = self._execute(
@@ -280,6 +321,78 @@ class SpeechTrainingRepository(BaseRepository):
             tuple(params) + (per_page, offset),
         )
         return [dict(r) for r in rows], total
+
+    def list_clip_ids(
+        self,
+        guild_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        label: Optional[str] = None,
+        search: str = "",
+        sort_by: str = "captured_at",
+        sort_dir: str = "desc",
+    ) -> List[int]:
+        """Return IDs of all clips matching the given filters, without pagination.
+
+        Args:
+            guild_id: Optional guild filter.
+            user_id: Optional user filter.
+            label: Optional label filter (``"unlabeled"`` for NULL/empty).
+            search: Optional search in username/display_name/filename.
+            sort_by: Column to sort by (allowlisted). Default ``captured_at``.
+            sort_dir: Sort direction (``asc`` or ``desc``). Default ``desc``.
+
+        Returns:
+            List of clip IDs (integers).
+        """
+        conditions, params = self._build_clip_conditions(
+            guild_id=guild_id, user_id=user_id, label=label, search=search
+        )
+        where_clause = ""
+        if conditions:
+            where_clause = "WHERE " + " AND ".join(conditions)
+        order_clause = self._build_clip_order(sort_by=sort_by, sort_dir=sort_dir)
+
+        rows = self._execute(
+            f"SELECT id FROM speech_training_clips {where_clause} {order_clause}",
+            tuple(params),
+        )
+        return [r["id"] for r in rows]
+
+    def list_unlabeled_clips(
+        self,
+        guild_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        max_duration_seconds: Optional[float] = None,
+    ) -> List[Dict[str, Any]]:
+        """Return all clips with label IS NULL or empty, optionally scoped.
+
+        Args:
+            guild_id: Optional guild filter.
+            user_id: Optional user filter.
+            max_duration_seconds: Optional maximum duration filter (inclusive).
+
+        Returns:
+            List of clip dicts ordered by ``captured_at DESC, id DESC``.
+        """
+        conditions: List[str] = ["(label IS NULL OR label = '')"]
+        params: List[Any] = []
+
+        if guild_id:
+            conditions.append("guild_id = ?")
+            params.append(guild_id)
+        if user_id:
+            conditions.append("user_id = ?")
+            params.append(user_id)
+        if max_duration_seconds is not None:
+            conditions.append("duration_seconds <= ?")
+            params.append(max_duration_seconds)
+
+        sql = "SELECT * FROM speech_training_clips"
+        if conditions:
+            sql += " WHERE " + " AND ".join(conditions)
+        sql += " ORDER BY captured_at DESC, id DESC"
+        rows = self._execute(sql, tuple(params))
+        return [dict(r) for r in rows]
 
     def get_clip(self, clip_id: int) -> Optional[Dict[str, Any]]:
         """Return a single clip by ID.

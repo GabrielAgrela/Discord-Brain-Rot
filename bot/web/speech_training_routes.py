@@ -119,6 +119,36 @@ def register_speech_training_routes(app: Flask) -> None:
         )
 
     # ------------------------------------------------------------------
+    # API: Clip IDs (unpaginated, for "select all matching filters")
+    # ------------------------------------------------------------------
+
+    @app.route("/api/speech_training/clips/ids")
+    @_require_discord_login_api
+    @_require_web_admin_api
+    def api_speech_training_clips_ids() -> Any:
+        """Return IDs of all clips matching the current scope/filter/search/sort.
+
+        Filters are the same as ``/api/speech_training/clips`` but returns
+        IDs for **all** matching clips regardless of pagination, so the UI
+        can select them all in one operation.
+        """
+        svc = _get_web_speech_training_service()
+        guild_id = request.args.get("guild_id", "").strip() or None
+        user_id = request.args.get("user_id", "").strip() or None
+        label = request.args.get("label", "").strip() or None
+        search = request.args.get("search", "").strip()
+        sort = request.args.get("sort", "newest").strip()
+        return jsonify(
+            svc.get_clip_ids(
+                guild_id=guild_id,
+                user_id=user_id,
+                label=label,
+                search=search,
+                sort=sort,
+            )
+        )
+
+    # ------------------------------------------------------------------
     # API: Single clip audio
     # ------------------------------------------------------------------
 
@@ -241,6 +271,68 @@ def register_speech_training_routes(app: Flask) -> None:
 
         else:
             return jsonify({"error": "Unknown action. Use 'label' or 'delete'."}), 400
+
+    # ------------------------------------------------------------------
+    # API: Keyword scan (async job)
+    # ------------------------------------------------------------------
+
+    @app.route("/api/speech_training/keyword_scan", methods=["POST"])
+    @_require_discord_login_api
+    @_require_web_admin_api
+    def api_speech_training_keyword_scan() -> Any:
+        """Start an async keyword scan job.
+
+        Request body::
+
+            {"keyword": "chapada", "min_confidence": 0.5}
+
+        Optional fields ``guild_id`` and ``user_id`` scope the unlabeled
+        clips to scan.  Default keyword is ``chapada`` at 0.5 confidence.
+
+        Returns ``202`` with ``job_id`` immediately.  Poll status via
+        ``GET /api/speech_training/keyword_scan/<job_id>``.
+        """
+        try:
+            data = request.get_json(silent=True) or {}
+            keyword = (data.get("keyword") or "chapada").strip()
+            min_confidence = float(data.get("min_confidence", 0.5))
+            guild_id = (data.get("guild_id") or "").strip() or None
+            user_id = (data.get("user_id") or "").strip() or None
+
+            # Validate synchronously before queuing
+            if not keyword:
+                return jsonify({"error": "Keyword must be non-empty"}), 400
+            if not 0 <= min_confidence <= 1:
+                return jsonify({"error": "min_confidence must be between 0 and 1"}), 400
+
+            from bot.web.route_helpers import _queue_web_keyword_scan_job
+
+            job_id = _queue_web_keyword_scan_job(
+                keyword=keyword,
+                min_confidence=min_confidence,
+                guild_id=guild_id,
+                user_id=user_id,
+            )
+            return jsonify({"job_id": job_id, "status": "queued"}), 202
+        except (TypeError, ValueError):
+            return jsonify({"error": "Invalid request body"}), 400
+
+    @app.route("/api/speech_training/keyword_scan/<job_id>", methods=["GET"])
+    @_require_discord_login_api
+    @_require_web_admin_api
+    def api_speech_training_keyword_scan_status(job_id: str) -> Any:
+        """Return the current state of a keyword scan job.
+
+        Response keys include ``status`` (``queued``, ``processing``,
+        ``done``, ``error``), ``total``, ``scanned``, ``matched``,
+        ``skipped``, ``matches`` (only in ``done`` state), and
+        ``error`` (only in ``error`` state).
+        """
+        jobs = app.extensions.get("web_keyword_scan_jobs", {})
+        job = jobs.get(job_id)
+        if job is None:
+            return jsonify({"error": "Job not found"}), 404
+        return jsonify(job)
 
 
 def _redirect_to_login(route_name: str) -> Any:

@@ -2,19 +2,60 @@
 Web-facing business logic for the speech training labeling UI.
 
 Validates label values, resolves safe file paths, builds API payloads,
-and delegates persistence to ``SpeechTrainingRepository``.
+delegates persistence to ``SpeechTrainingRepository``, and provides
+offline Vosk keyword scanning for unlabeled clips.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import os
+import threading
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from bot.repositories.speech_training import SpeechTrainingRepository
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Module-level Vosk model cache (load once per process)
+# ---------------------------------------------------------------------------
+
+_vosk_model = None
+_vosk_model_lock = threading.Lock()
+_VOSK_MODEL_PATH = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "data", "models", "vosk-model-small-pt-0.3")
+)
+
+
+def _get_vosk_model():
+    """Return the cached Vosk model, loading it once per process.
+
+    Thread-safe via a module-level lock.  Returns ``None`` when the model
+    is unavailable (missing files, import error, load failure).
+    """
+    global _vosk_model
+    if _vosk_model is not None:
+        return _vosk_model
+    with _vosk_model_lock:
+        if _vosk_model is not None:
+            return _vosk_model
+        try:
+            import vosk
+
+            vosk.SetLogLevel(-1)
+            if os.path.exists(_VOSK_MODEL_PATH):
+                logger.info("Loading Vosk model for keyword scan from %s", _VOSK_MODEL_PATH)
+                _vosk_model = vosk.Model(_VOSK_MODEL_PATH)
+            else:
+                logger.warning("Vosk model not found at %s", _VOSK_MODEL_PATH)
+                _vosk_model = None
+        except Exception as exc:
+            logger.error("Failed to load Vosk model for keyword scan: %s", exc)
+            _vosk_model = None
+    return _vosk_model
 
 
 # ---------------------------------------------------------------------------
@@ -48,6 +89,8 @@ VALID_LABELS: set[str] = {"chapada", "ventura", "none", "unclear", ""}
 
 class WebSpeechTrainingService:
     """Thin service for the speech training labeling page."""
+
+    KEYWORD_SCAN_MAX_DURATION_SECONDS: float = 30.0
 
     def __init__(
         self,
@@ -160,6 +203,41 @@ class WebSpeechTrainingService:
             "per_page": per_page,
             "total_pages": total_pages,
         }
+
+    # ------------------------------------------------------------------
+    # Clip IDs (unpaginated, for "select all matching filters")
+    # ------------------------------------------------------------------
+
+    def get_clip_ids(
+        self,
+        guild_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        label: Optional[str] = None,
+        search: str = "",
+        sort: str = "newest",
+    ) -> Dict[str, Any]:
+        """Return IDs of all clips matching the current filters, without pagination.
+
+        Args:
+            guild_id: Optional guild filter.
+            user_id: Optional user filter.
+            label: Optional label filter (``"unlabeled"`` for NULL/empty).
+            search: Optional search string.
+            sort: Sort preset key (e.g. ``"newest"``, ``"oldest"``, …).
+
+        Returns:
+            Dict with ``ids`` (list of ints) and ``total`` (int).
+        """
+        sort_by, sort_dir = self._SORT_MAP.get(sort, ("captured_at", "desc"))
+        ids = self.repo.list_clip_ids(
+            guild_id=guild_id,
+            user_id=user_id,
+            label=label,
+            search=search,
+            sort_by=sort_by,
+            sort_dir=sort_dir,
+        )
+        return {"ids": ids, "total": len(ids)}
 
     # ------------------------------------------------------------------
     # Single clip
@@ -377,3 +455,186 @@ class WebSpeechTrainingService:
                     logger.warning("Could not remove audio file: %s", full)
 
         return True, "", len(clips)
+
+    # ------------------------------------------------------------------
+    # Offline keyword scanning
+    # ------------------------------------------------------------------
+
+    def scan_unlabeled_keyword(
+        self,
+        keyword: str = "chapada",
+        min_confidence: float = 0.5,
+        guild_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+    ) -> Dict[str, Any]:
+        """Scan all unlabeled clips for a keyword using offline Vosk detection.
+
+        Only clips with ``duration_seconds <= KEYWORD_SCAN_MAX_DURATION_SECONDS``
+        (default 30.0) are eligible — longer clips are excluded from the
+        unlabeled list before any Vosk decoding.
+
+        Decodes each eligible MP3 clip to 16 kHz mono PCM, feeds it to a Vosk
+        ``KaldiRecognizer``, and checks word-level confidence for the
+        requested keyword.
+
+        Args:
+            keyword: The keyword to detect (lowercased for comparison).
+            min_confidence: Minimum Vosk word confidence (0‑1) to consider a match.
+            guild_id: Optional guild scope for unlabeled clips.
+            user_id: Optional user scope for unlabeled clips.
+            progress_callback: Optional callback invoked after total is known
+                and after each clip. Receives a dict with keys ``total``,
+                ``scanned``, ``matched``, ``skipped``, ``current_clip_id``,
+                and ``status`` (``"processing"`` or ``"done"``).  The initial
+                call has ``current_clip_id=None``.
+
+        Returns:
+            Response dict with keys ``status``, ``keyword``,
+            ``min_confidence``, ``max_duration_seconds``, ``scanned``,
+            ``matched``, ``skipped``, and ``matches`` (list of clip dicts
+            augmented with ``keyword_confidence`` and ``keyword_transcript``).
+
+        Raises:
+            ValueError: When validation fails (empty keyword, bad
+                confidence).
+        """
+        # ── Validate parameters ──────────────────────────────────────
+        keyword = keyword.strip().lower()
+        if not keyword:
+            raise ValueError("Keyword must be non-empty")
+        if not 0 <= min_confidence <= 1:
+            raise ValueError("min_confidence must be between 0 and 1")
+
+        # ── Ensure Vosk model ────────────────────────────────────────
+        model = _get_vosk_model()
+        if model is None:
+            raise ValueError(
+                "Vosk model is not available. Check that "
+                "vosk-model-small-pt-0.3 exists under data/models/"
+            )
+
+        # ── Fetch unlabeled clips (≤30s only) ─────────────────────────
+        clips = self.repo.list_unlabeled_clips(
+            guild_id=guild_id,
+            user_id=user_id,
+            max_duration_seconds=self.KEYWORD_SCAN_MAX_DURATION_SECONDS,
+        )
+        total = len(clips)
+        logger.debug(
+            "Keyword scan: %d unlabeled clips ≤%ss",
+            total, self.KEYWORD_SCAN_MAX_DURATION_SECONDS,
+        )
+
+        scanned = 0
+        skipped = 0
+        matches: List[Dict[str, Any]] = []
+
+        # Notify initial progress
+        if progress_callback is not None:
+            progress_callback({
+                "total": total,
+                "scanned": 0,
+                "matched": 0,
+                "skipped": 0,
+                "current_clip_id": None,
+                "status": "processing",
+            })
+
+        # Pre-compute the grammar: keyword + distractors + [unk]
+        distractors = ["chapa", "ada", "cha", "o", "google", "jogo", "do jogo"]
+        grammar = [keyword] + distractors + ["[unk]"]
+        grammar_json = json.dumps(grammar)
+
+        for clip in clips:
+            # Resolve audio path
+            path = self.resolve_audio_path(clip)
+            if path is None:
+                skipped += 1
+                self._notify_scan_progress(progress_callback, total, scanned, matches, skipped, clip)
+                continue
+
+            try:
+                # Decode MP3 to raw PCM
+                from pydub import AudioSegment
+
+                segment = (
+                    AudioSegment.from_file(str(path), format="mp3")
+                    .set_frame_rate(16000)
+                    .set_channels(1)
+                    .set_sample_width(2)
+                )
+                raw_pcm = segment.raw_data
+
+                # Run through Vosk recognizer
+                import vosk
+
+                rec = vosk.KaldiRecognizer(model, 16000, grammar_json)
+                rec.SetWords(True)
+                rec.AcceptWaveform(raw_pcm)
+                result = json.loads(rec.FinalResult())
+
+                text = result.get("text", "").lower()
+                word_results = result.get("result", [])
+
+                # Find max confidence for exact keyword match
+                best_conf = 0.0
+                for wi in word_results:
+                    w = wi.get("word", "").lower()
+                    if w == keyword:
+                        conf = wi.get("conf", 0.0)
+                        if conf > best_conf:
+                            best_conf = conf
+
+                if best_conf >= min_confidence and keyword in text.split():
+                    match_clip = dict(clip)
+                    match_clip["keyword_confidence"] = round(best_conf, 3)
+                    match_clip["keyword_transcript"] = text
+                    matches.append(match_clip)
+
+                scanned += 1
+
+            except Exception as exc:
+                logger.warning(
+                    "Failed to scan clip %s: %s", clip.get("id"), exc
+                )
+                skipped += 1
+
+            self._notify_scan_progress(progress_callback, total, scanned, matches, skipped, clip)
+
+        logger.info(
+            "Keyword scan '%s' scanned=%d matched=%d skipped=%d (eligible clips ≤%ss=%d)",
+            keyword, scanned, len(matches), skipped,
+            self.KEYWORD_SCAN_MAX_DURATION_SECONDS, total,
+        )
+
+        return {
+            "status": "ok",
+            "keyword": keyword,
+            "min_confidence": min_confidence,
+            "max_duration_seconds": self.KEYWORD_SCAN_MAX_DURATION_SECONDS,
+            "scanned": scanned,
+            "matched": len(matches),
+            "skipped": skipped,
+            "matches": matches,
+        }
+
+    @staticmethod
+    def _notify_scan_progress(
+        progress_callback: Optional[Callable[[Dict[str, Any]], None]],
+        total: int,
+        scanned: int,
+        matches: List[Dict[str, Any]],
+        skipped: int,
+        clip: Dict[str, Any],
+    ) -> None:
+        """Invoke the progress callback with updated scan state, if set."""
+        if progress_callback is not None:
+            progress_callback({
+                "total": total,
+                "scanned": scanned,
+                "matched": len(matches),
+                "skipped": skipped,
+                "current_clip_id": clip.get("id"),
+                "status": "processing",
+            })

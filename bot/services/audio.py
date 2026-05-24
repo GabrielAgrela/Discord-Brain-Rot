@@ -31,6 +31,7 @@ from bot.services.image_generator import ImageGeneratorService
 from bot.services.speech_training import (
     SpeechTrainingRecorderService,
     SpeechTrainingSegment,
+    _compute_rms,
 )
 
 class AudioService:
@@ -2980,6 +2981,11 @@ class KeywordDetectionSink(sinks.Sink):
         self._speech_segment_last_chunk: Dict[int, float] = {} # user_id -> timestamp of latest chunk
         self._speech_lock = threading.Lock()
 
+        # Energy-based speech detection state (initialized lazily for __new__ compat)
+        self._speech_last_voiced: Dict[int, float] = {}       # user_id -> timestamp of last VOICED chunk
+        self._speech_voiced_up_to: Dict[int, int] = {}        # user_id -> byte index in pcm up to which voiced
+        self._speech_preroll_pcm: Dict[int, bytearray] = {}   # user_id -> preroll buffer (low-energy chunks)
+
         # Single worker thread
         self.worker_thread = threading.Thread(target=self._worker, name=f"VoskWorker-{guild.id}", daemon=True)
         self.worker_thread.start()
@@ -3268,12 +3274,20 @@ class KeywordDetectionSink(sinks.Sink):
     def _feed_speech_segmenter(self, data: bytes, user_id: int, receive_time: float) -> None:
         """Feed PCM data into the speech training segmenter.
 
-        Manages per-user segment accumulation and boundary detection.
-        Called from :meth:`write` for every incoming audio chunk.
+        Manages per-user segment accumulation and energy-gated boundary
+        detection.  Called from :meth:`write` for every incoming audio chunk.
 
         Segment boundaries are triggered by:
-        - A gap since the previous chunk ``>= SPEECH_TRAINING_SILENCE_SECONDS``.
+        - Silence since the **last voiced** chunk
+          ``>= SPEECH_TRAINING_SILENCE_SECONDS`` (the per-chunk RMS must be
+          below ``speech_rms_threshold`` for the chunk to be considered
+          unvoiced — segments only start on voiced chunks).
         - Accumulated duration exceeding ``SPEECH_TRAINING_MAX_DURATION_SECONDS``.
+
+        Low-energy audio before the first voiced chunk is kept in a small
+        preroll buffer (``SPEECH_TRAINING_PREROLL_SECONDS``) so word onsets
+        are not clipped.  Trailing low-energy frames are removed on
+        finalisation when ``SPEECH_TRAINING_TRIM_SILENCE`` is enabled.
 
         Args:
             data: Raw PCM data (48 kHz, stereo, 16-bit).
@@ -3287,37 +3301,154 @@ class KeywordDetectionSink(sinks.Sink):
         lock = getattr(self, '_speech_lock', None)
         if lock is None:
             return
-        with lock:
-            # Check for boundary: gap since last chunk or max duration exceeded.
-            last_chunk_time = self._speech_segment_last_chunk.get(user_id)
-            start_time = self._speech_segment_start.get(user_id)
 
-            if last_chunk_time is not None:
-                gap = receive_time - last_chunk_time
-                if gap >= recorder.silence_seconds:
+        # Lazy-init energy-gated state dicts for __new__ compat
+        for _attr in ('_speech_last_voiced', '_speech_voiced_up_to', '_speech_preroll_pcm'):
+            if not hasattr(self, _attr):
+                setattr(self, _attr, {})
+
+        # Compute per-chunk RMS for energy gating
+        try:
+            chunk_rms = _compute_rms(data, sample_width=2)
+        except Exception:
+            chunk_rms = 0
+        is_voiced = chunk_rms >= recorder.speech_rms_threshold
+
+        with lock:
+            # Preroll buffer collects low-energy frames for eventual prepend
+            # to a new segment.  During an active segment, low-energy chunks
+            # are appended directly to the PCM (intra-word pauses) so the
+            # preroll buffer is cleaned when the segment is extended.
+            if not is_voiced:
+                self._store_preroll_chunk(user_id, data, recorder.preroll_seconds)
+
+            # ---- Finalisation checks ------------------------------------
+            start_time = self._speech_segment_start.get(user_id)
+            last_voiced = self._speech_last_voiced.get(user_id)
+
+            if start_time is not None:
+                # Finalise when silence since last voiced chunk exceeds threshold
+                if last_voiced is not None and (receive_time - last_voiced) >= recorder.silence_seconds:
                     self._finalize_speech_segment(user_id)
-                    # Reset below
-                elif start_time is not None:
+                    start_time = None
+                    last_voiced = None
+                else:
+                    # Finalise when max duration exceeded
                     elapsed = receive_time - start_time
                     if elapsed >= recorder.max_duration_seconds:
                         self._finalize_speech_segment(user_id)
+                        start_time = None
+                        last_voiced = None
 
-            # Start or extend the segment
-            if user_id not in self._speech_segment_pcm:
-                self._speech_segment_pcm[user_id] = bytearray()
-                self._speech_segment_start[user_id] = receive_time
+            # ---- Start or extend the segment ----------------------------
+            if is_voiced:
+                if start_time is None:
+                    # Start new segment: consume preroll buffer for context.
+                    # _collect_preroll removes the buffer atomically.
+                    preroll = self._collect_preroll(user_id)
+                    self._speech_segment_pcm[user_id] = bytearray(preroll)
+                    # Estimate start time accounting for preroll duration
+                    preroll_dur = len(preroll) / 192000.0
+                    self._speech_segment_start[user_id] = receive_time - preroll_dur
+                else:
+                    # Extend existing segment: clean stale preroll that may
+                    # have accumulated during intra-word pauses, then mark
+                    # the voiced byte boundary for trailing trim.
+                    self._clear_preroll(user_id)
+                    self._speech_voiced_up_to[user_id] = len(self._speech_segment_pcm[user_id])
 
-            self._speech_segment_pcm[user_id].extend(data)
-            self._speech_segment_last_chunk[user_id] = receive_time
+                self._speech_segment_pcm[user_id].extend(data)
+                self._speech_voiced_up_to[user_id] = len(self._speech_segment_pcm[user_id])
+                self._speech_last_voiced[user_id] = receive_time
+                self._speech_segment_last_chunk[user_id] = receive_time
+
+            elif start_time is not None:
+                # Low-energy chunk during an active segment (intra-word pause).
+                # Append but do NOT update last_voiced or voiced_up_to.
+                self._speech_segment_pcm[user_id].extend(data)
+                self._speech_segment_last_chunk[user_id] = receive_time
+
+    # ------------------------------------------------------------------
+    # Preroll buffer helpers
+    # ------------------------------------------------------------------
+
+    _MAX_PREROLL_BYTES = int(0.5 * 192000)  # 500 ms hard cap
+
+    def _ensure_preroll_dict(self) -> Dict[int, bytearray]:
+        """Lazy-init and return the preroll PCM dict (``__new__`` compat)."""
+        d = getattr(self, '_speech_preroll_pcm', None)
+        if d is None:
+            d = {}
+            self._speech_preroll_pcm = d
+        return d
+
+    def _ensure_voiced_up_to_dict(self) -> Dict[int, int]:
+        """Lazy-init and return the voiced-up-to dict (``__new__`` compat)."""
+        d = getattr(self, '_speech_voiced_up_to', None)
+        if d is None:
+            d = {}
+            self._speech_voiced_up_to = d
+        return d
+
+    def _ensure_last_voiced_dict(self) -> Dict[int, float]:
+        """Lazy-init and return the last-voiced dict (``__new__`` compat)."""
+        d = getattr(self, '_speech_last_voiced', None)
+        if d is None:
+            d = {}
+            self._speech_last_voiced = d
+        return d
+
+    def _store_preroll_chunk(self, user_id: int, data: bytes, max_seconds: float) -> None:
+        """Store low-energy PCM in the preroll buffer for *user_id*.
+
+        The buffer is capped at *max_seconds* (with a 500 ms absolute
+        ceiling) so silent lead-in does not grow unbounded.
+        """
+        preroll = self._ensure_preroll_dict()
+        if user_id not in preroll:
+            preroll[user_id] = bytearray()
+        buf = preroll[user_id]
+        buf.extend(data)
+        max_bytes = int(max_seconds * 192000)
+        max_bytes = min(max_bytes, self._MAX_PREROLL_BYTES)
+        # Trim from the front if over capacity
+        if len(buf) > max_bytes and max_bytes > 0:
+            trim = len(buf) - max_bytes
+            trim = (trim // 4) * 4  # frame align
+            preroll[user_id] = buf[trim:]
+
+    def _clear_preroll(self, user_id: int) -> None:
+        """Clear the preroll buffer for *user_id* after it has been consumed."""
+        preroll = getattr(self, '_speech_preroll_pcm', None)
+        if preroll is not None:
+            preroll.pop(user_id, None)
+
+    def _collect_preroll(self, user_id: int) -> bytes:
+        """Return and clear the preroll buffer for *user_id*.
+
+        Returns:
+            Raw PCM bytes from the preroll buffer, or empty bytes.
+        """
+        preroll = getattr(self, '_speech_preroll_pcm', None)
+        if preroll is not None:
+            buf = preroll.pop(user_id, None)
+            if buf:
+                return bytes(buf)
+        return b""
 
     def _finalize_speech_segment(self, user_id: int) -> None:
         """Finalize the current speech segment for *user_id* and enqueue it.
 
-        Must be called while holding ``self._speech_lock``.
+        Must be called while holding ``self._speech_lock``.  Removes trailing
+        low-energy frames (after the last voiced chunk) when the recorder's
+        ``trim_silence`` is enabled.
         """
         pcm = self._speech_segment_pcm.pop(user_id, None)
         self._speech_segment_start.pop(user_id, None)
         self._speech_segment_last_chunk.pop(user_id, None)
+        voiced_up_to = self._ensure_voiced_up_to_dict().pop(user_id, None)
+        self._ensure_last_voiced_dict().pop(user_id, None)
+        self._clear_preroll(user_id)
 
         if pcm is None or not pcm:
             return
@@ -3329,6 +3460,13 @@ class KeywordDetectionSink(sinks.Sink):
         # Frame-align and compute duration.
         # 48 kHz * 2 ch * 2 bytes = 192 000 bytes/s
         FRAME_BYTES = 4  # 2 channels * 2 bytes per sample
+
+        # Trim trailing silence after the last voiced chunk
+        if recorder.trim_silence and voiced_up_to is not None and voiced_up_to > 0:
+            voiced_up_to = (voiced_up_to // 4) * 4  # frame align
+            if voiced_up_to < len(pcm) and voiced_up_to >= FRAME_BYTES:
+                pcm = pcm[:voiced_up_to]
+
         aligned_len = (len(pcm) // FRAME_BYTES) * FRAME_BYTES
         if aligned_len < FRAME_BYTES:
             return
@@ -3361,7 +3499,7 @@ class KeywordDetectionSink(sinks.Sink):
         recorder.enqueue_segment(segment)
 
     def _flush_speech_segments(self, now: float) -> None:
-        """Finalize any open speech segment whose last chunk is older than the silence threshold."""
+        """Finalize any open speech segment whose last voiced audio is older than silence threshold."""
         recorder = getattr(self, '_speech_recorder', None)
         if not recorder or not recorder.enabled:
             return
@@ -3370,8 +3508,13 @@ class KeywordDetectionSink(sinks.Sink):
         if lock is None:
             return
         with lock:
-            for user_id, last_chunk_time in list(self._speech_segment_last_chunk.items()):
-                if now - last_chunk_time >= recorder.silence_seconds:
+            last_voiced_dict = self._ensure_last_voiced_dict()
+            for user_id in list(self._speech_segment_pcm.keys()):
+                # Use last_voiced time (energy-based), fall back to last_chunk_time
+                last_voiced = last_voiced_dict.get(user_id)
+                last_chunk = self._speech_segment_last_chunk.get(user_id)
+                ref_time = last_voiced if last_voiced is not None else last_chunk
+                if ref_time is not None and (now - ref_time) >= recorder.silence_seconds:
                     self._finalize_speech_segment(user_id)
 
     def _force_finalize_all_speech_segments(self) -> None:

@@ -3,6 +3,7 @@ import io
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -3906,3 +3907,304 @@ class TestSpeechTrainingRoutes:
         assert 'href="/speech-training"' in html
         assert 'nav-link' in html
         assert 'nav-brand' in html
+
+    # ── Keyword scan API (async) ────────────────────────────────────────
+
+    def _wait_for_keyword_scan_job(self, client, job_id: str, deadline_seconds: int = 5) -> dict:
+        """Poll a keyword scan job GET endpoint until terminal state."""
+        deadline = time.time() + deadline_seconds
+        payload = {}
+        while time.time() < deadline:
+            response = client.get(f"/api/speech_training/keyword_scan/{job_id}")
+            assert response.status_code == 200
+            payload = response.get_json()
+            if payload.get("status") in {"done", "error"}:
+                return payload
+            time.sleep(0.05)
+        raise AssertionError(f"Keyword scan job did not finish: {payload}")
+
+    def test_api_keyword_scan_requires_auth(self, web_client):
+        """Keyword scan POST returns 401 when not logged in."""
+        client, _ = web_client
+        resp = client.post("/api/speech_training/keyword_scan")
+        assert resp.status_code == 401
+
+    def test_api_keyword_scan_requires_admin(self, web_client):
+        """Keyword scan POST returns 403 for non-admin."""
+        client, _ = web_client
+        _login_web_user(client, username="nonadmin", admin_guild_ids=[])
+        resp = client.post("/api/speech_training/keyword_scan")
+        assert resp.status_code == 403
+
+    def test_api_keyword_scan_status_requires_auth(self, web_client):
+        """Keyword scan GET status returns 401 when not logged in."""
+        client, _ = web_client
+        resp = client.get("/api/speech_training/keyword_scan/some-job-id")
+        assert resp.status_code == 401
+
+    def test_api_keyword_scan_status_requires_admin(self, web_client):
+        """Keyword scan GET status returns 403 for non-admin."""
+        client, _ = web_client
+        _login_web_user(client, username="nonadmin", admin_guild_ids=[])
+        resp = client.get("/api/speech_training/keyword_scan/some-job-id")
+        assert resp.status_code == 403
+
+    def test_api_keyword_scan_status_not_found(self, web_client):
+        """GET returns 404 for unknown job id."""
+        client, _ = web_client
+        _login_web_user(client, username="admin", admin_guild_ids=["111"])
+        resp = client.get("/api/speech_training/keyword_scan/nonexistent-job-id")
+        assert resp.status_code == 404
+
+    def test_api_keyword_scan_invalid_confidence(self, web_client):
+        """POST with out-of-range confidence returns JSON 400."""
+        client, db_path = web_client
+        _login_web_user(client, username="admin", admin_guild_ids=["111"])
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("INSERT OR IGNORE INTO guild_settings (guild_id) VALUES ('111')")
+            conn.commit()
+        finally:
+            conn.close()
+        resp = client.post(
+            "/api/speech_training/keyword_scan",
+            json={"keyword": "chapada", "min_confidence": 1.5},
+        )
+        assert resp.status_code == 400
+        data = resp.get_json()
+        assert "error" in data
+
+    def test_api_keyword_scan_empty_keyword_defaults(self, web_client):
+        """POST with empty keyword defaults to 'chapada' and succeeds."""
+        client, db_path = web_client
+        _login_web_user(client, username="admin", admin_guild_ids=["111"])
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("INSERT OR IGNORE INTO guild_settings (guild_id) VALUES ('111')")
+            conn.commit()
+        finally:
+            conn.close()
+        resp = client.post(
+            "/api/speech_training/keyword_scan",
+            json={"keyword": "", "min_confidence": 0.5},
+        )
+        # Empty keyword defaults to "chapada", so POST succeeds
+        assert resp.status_code == 202
+        data = resp.get_json()
+        assert "job_id" in data
+
+    @patch("bot.services.web_speech_training._get_vosk_model")
+    def test_api_keyword_scan_no_model(self, mock_get_model, web_client):
+        """POST queues job, GET returns error when Vosk model unavailable."""
+        mock_get_model.return_value = None
+        client, db_path = web_client
+        _login_web_user(client, username="admin", admin_guild_ids=["111"])
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("INSERT OR IGNORE INTO guild_settings (guild_id) VALUES ('111')")
+            conn.commit()
+        finally:
+            conn.close()
+        # Start scan (returns 202 with job_id)
+        resp = client.post("/api/speech_training/keyword_scan", json={})
+        assert resp.status_code == 202
+        data = resp.get_json()
+        assert "job_id" in data
+        assert data["status"] == "queued"
+
+        job_id = data["job_id"]
+        # Poll until error
+        payload = self._wait_for_keyword_scan_job(client, job_id)
+        assert payload["status"] == "error"
+        assert "Vosk model" in payload["error"]
+
+    @patch("bot.services.web_speech_training._get_vosk_model")
+    def test_api_keyword_scan_async(self, mock_get_model, web_client):
+        """POST starts async scan, GET polls status until done."""
+        mock_get_model.return_value = MagicMock()
+        client, db_path = web_client
+        _login_web_user(client, username="admin", admin_guild_ids=["111"])
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("INSERT OR IGNORE INTO guild_settings (guild_id) VALUES ('111')")
+            conn.commit()
+        finally:
+            conn.close()
+
+        resp = client.post(
+            "/api/speech_training/keyword_scan",
+            json={"keyword": "chapada", "min_confidence": 0.5},
+        )
+        assert resp.status_code == 202
+        data = resp.get_json()
+        assert "job_id" in data
+        assert data["status"] == "queued"
+
+        job_id = data["job_id"]
+        payload = self._wait_for_keyword_scan_job(client, job_id)
+        assert payload["status"] == "done"
+        assert payload["keyword"] == "chapada"
+        assert payload["min_confidence"] == 0.5
+        assert payload["max_duration_seconds"] == 30.0
+        assert "scanned" in payload
+        assert "matched" in payload
+        assert "matches" in payload
+
+    # ── clip IDs endpoint (unpaginated select-all) ─────────────────────
+
+    def test_api_clip_ids_requires_auth(self, web_client):
+        """GET /api/speech_training/clips/ids returns 401 when not logged in."""
+        client, _ = web_client
+        resp = client.get("/api/speech_training/clips/ids")
+        assert resp.status_code == 401
+
+    def test_api_clip_ids_requires_admin(self, web_client):
+        """GET /api/speech_training/clips/ids returns 403 for non-admin."""
+        client, _ = web_client
+        _login_web_user(client, username="nonadmin", admin_guild_ids=[])
+        resp = client.get("/api/speech_training/clips/ids")
+        assert resp.status_code == 403
+
+    def test_api_clip_ids_returns_all_ids(self, web_client):
+        """Admin can fetch all clip IDs without pagination."""
+        client, db_path = web_client
+        _login_web_user(client, username="admin", admin_guild_ids=["111"])
+
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS speech_training_clips (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id TEXT,
+                    user_id TEXT NOT NULL,
+                    username TEXT NOT NULL,
+                    display_name TEXT,
+                    folder_name TEXT NOT NULL,
+                    filename TEXT NOT NULL,
+                    relative_path TEXT NOT NULL UNIQUE,
+                    duration_seconds REAL NOT NULL,
+                    byte_size INTEGER NOT NULL DEFAULT 0,
+                    sample_rate INTEGER NOT NULL DEFAULT 48000,
+                    channels INTEGER NOT NULL DEFAULT 2,
+                    sample_width INTEGER NOT NULL DEFAULT 2,
+                    captured_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    label TEXT,
+                    transcript TEXT,
+                    notes TEXT,
+                    reviewed_by_user_id TEXT,
+                    reviewed_by_username TEXT,
+                    reviewed_at DATETIME
+                )
+                """
+            )
+            # Insert more than one page worth of clips to verify unpaginated
+            for i in range(5):
+                conn.execute(
+                    "INSERT INTO speech_training_clips "
+                    "(guild_id, user_id, username, display_name, folder_name, filename, "
+                    "relative_path, duration_seconds, byte_size) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    ("111", "1", "user1", "User One", "user1_1",
+                     f"clip{i}.mp3", f"111/user1_1/clip{i}.mp3", 1.0, 10000),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+        resp = client.get("/api/speech_training/clips/ids?guild_id=111")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert "ids" in data
+        assert "total" in data
+        assert data["total"] == 5
+        assert len(data["ids"]) == 5
+        assert all(isinstance(i, int) for i in data["ids"])
+
+    def test_api_clip_ids_honors_filters(self, web_client):
+        """Clip IDs endpoint respects search, user_id, and label filters."""
+        client, db_path = web_client
+        _login_web_user(client, username="admin", admin_guild_ids=["111"])
+
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS speech_training_clips (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id TEXT,
+                    user_id TEXT NOT NULL,
+                    username TEXT NOT NULL,
+                    display_name TEXT,
+                    folder_name TEXT NOT NULL,
+                    filename TEXT NOT NULL,
+                    relative_path TEXT NOT NULL UNIQUE,
+                    duration_seconds REAL NOT NULL,
+                    byte_size INTEGER NOT NULL DEFAULT 0,
+                    sample_rate INTEGER NOT NULL DEFAULT 48000,
+                    channels INTEGER NOT NULL DEFAULT 2,
+                    sample_width INTEGER NOT NULL DEFAULT 2,
+                    captured_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    label TEXT,
+                    transcript TEXT,
+                    notes TEXT,
+                    reviewed_by_user_id TEXT,
+                    reviewed_by_username TEXT,
+                    reviewed_at DATETIME
+                )
+                """
+            )
+            # Insert clips with different attributes
+            conn.execute(
+                "INSERT INTO speech_training_clips "
+                "(guild_id, user_id, username, display_name, folder_name, filename, "
+                "relative_path, duration_seconds, byte_size, label) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ("111", "1", "user1", "User One", "user1_1",
+                 "labeled.mp3", "111/user1_1/labeled.mp3", 1.0, 10000, "chapada"),
+            )
+            conn.execute(
+                "INSERT INTO speech_training_clips "
+                "(guild_id, user_id, username, display_name, folder_name, filename, "
+                "relative_path, duration_seconds, byte_size) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ("111", "1", "user1", "User One", "user1_1",
+                 "unlabeled.mp3", "111/user1_1/unlabeled.mp3", 1.0, 10000),
+            )
+            conn.execute(
+                "INSERT INTO speech_training_clips "
+                "(guild_id, user_id, username, display_name, folder_name, filename, "
+                "relative_path, duration_seconds, byte_size) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ("111", "2", "user2", "User Two", "user2_2",
+                 "other_user.mp3", "111/user2_2/other_user.mp3", 1.0, 10000),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        # All IDs for guild 111
+        resp = client.get("/api/speech_training/clips/ids?guild_id=111")
+        assert resp.status_code == 200
+        assert resp.get_json()["total"] == 3
+
+        # Filter by label "chapada"
+        resp = client.get("/api/speech_training/clips/ids?guild_id=111&label=chapada")
+        assert resp.status_code == 200
+        assert resp.get_json()["total"] == 1
+
+        # Filter by user
+        resp = client.get("/api/speech_training/clips/ids?guild_id=111&user_id=2")
+        assert resp.status_code == 200
+        assert resp.get_json()["total"] == 1
+
+        # Filter by search (match unique filename)
+        resp = client.get("/api/speech_training/clips/ids?guild_id=111&search=other_user")
+        assert resp.status_code == 200
+        assert resp.get_json()["total"] == 1
+
+        # No match filter
+        resp = client.get("/api/speech_training/clips/ids?guild_id=111&search=nonexistent")
+        assert resp.status_code == 200
+        assert resp.get_json()["total"] == 0
+        assert resp.get_json()["ids"] == []

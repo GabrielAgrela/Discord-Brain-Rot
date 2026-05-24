@@ -17,6 +17,12 @@
         _userReqToken: 0,
         _passiveRefreshPending: null,
         _passiveIntervalMs: 5000,
+        _scanMode: false, // true when displaying keyword scan results
+        _scanClips: [],   // cached scan match clips
+        _scanKeyword: '', // the keyword that was scanned for
+        _scanJobId: null, // pending scan job id for polling
+        _scanPollTimer: null, // setTimeout handle for polling
+        _scanConfidence: 0.5, // selected min confidence as decimal
     };
 
     // ── Passive refresh guards (module-level) ────────────────────────
@@ -43,6 +49,10 @@
     const bulkLabelSelect = $('bulkLabelSelect');
     const bulkApplyLabel = $('bulkApplyLabel');
     const bulkDelete = $('bulkDelete');
+    const scanKeywordBtn = $('scanKeywordBtn');
+    const scanStatus = $('scanStatus');
+    const scanProgress = $('scanProgress');
+    const scanConfidenceSelect = $('scanConfidenceSelect');
 
     // ── Guild selector sync ──────────────────────────────────────────
     function getSelectedGuildId() {
@@ -194,6 +204,221 @@
         return ts;
     }
 
+    // ── Progress helpers ──────────────────────────────────────────────
+    function formatTime(seconds) {
+        if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
+        var m = Math.floor(seconds / 60);
+        var s = Math.floor(seconds % 60);
+        return m + ':' + (s < 10 ? '0' : '') + s;
+    }
+
+    function getQuickProgress(clipEl) {
+        return clipEl ? clipEl.querySelector('.dataset-quick-progress') : null;
+    }
+
+    function updateQuickProgress(audio) {
+        var clipEl = audio ? audio.closest('.dataset-clip') : null;
+        var progress = getQuickProgress(clipEl);
+        if (!progress) return;
+
+        var track = progress.querySelector('.dataset-quick-progress-track');
+        var fill = progress.querySelector('.dataset-quick-progress-fill');
+        var timeLabel = progress.querySelector('.dataset-quick-progress-time');
+        if (!track || !fill || !timeLabel) return;
+
+        var ct = audio.currentTime;
+        var dur = audio.duration;
+
+        if (Number.isFinite(dur) && dur > 0) {
+            var pct = Math.min((ct / dur) * 100, 100);
+            fill.style.width = pct + '%';
+            track.setAttribute('aria-valuenow', String(Math.round(pct)));
+            track.setAttribute('aria-valuetext', formatTime(ct) + ' / ' + formatTime(dur));
+            timeLabel.textContent = formatTime(ct) + ' / ' + formatTime(dur);
+        } else {
+            fill.style.width = '0%';
+            timeLabel.textContent = formatTime(ct) + ' / --:--';
+        }
+    }
+
+    function showQuickProgress(audio) {
+        var clipEl = audio ? audio.closest('.dataset-clip') : null;
+        var progress = getQuickProgress(clipEl);
+        if (!progress) return;
+        progress.hidden = false;
+        updateQuickProgress(audio);
+    }
+
+    function resetQuickProgress(audio) {
+        var clipEl = audio ? audio.closest('.dataset-clip') : null;
+        var progress = getQuickProgress(clipEl);
+        if (!progress) return;
+
+        var track = progress.querySelector('.dataset-quick-progress-track');
+        var fill = progress.querySelector('.dataset-quick-progress-fill');
+        var timeLabel = progress.querySelector('.dataset-quick-progress-time');
+        if (track) {
+            track.setAttribute('aria-valuenow', '0');
+            track.setAttribute('aria-valuetext', '');
+        }
+        if (fill) fill.style.width = '0%';
+        if (timeLabel) timeLabel.textContent = '0:00 / 0:00';
+        progress.hidden = true;
+    }
+
+    function wireQuickProgress(audio) {
+        if (!audio || audio.dataset.progressWired) return;
+        audio.dataset.progressWired = '1';
+
+        audio.addEventListener('play', function () {
+            showQuickProgress(audio);
+            // Update quick play button to pause
+            var clipEl = audio.closest('.dataset-clip');
+            if (clipEl) {
+                var btn = clipEl.querySelector('.dataset-quick-play');
+                if (btn) {
+                    btn.innerHTML = '&#9646;&#9646;';
+                    btn.setAttribute('aria-label', 'Pause clip');
+                }
+            }
+            state.currentlyPlaying = audio;
+        });
+
+        audio.addEventListener('timeupdate', function () {
+            updateQuickProgress(audio);
+        });
+
+        audio.addEventListener('loadedmetadata', function () {
+            updateQuickProgress(audio);
+        });
+
+        audio.addEventListener('pause', function () {
+            // Keep progress visible so user sees where they paused
+            // Update quick play button to play
+            var clipEl = audio.closest('.dataset-clip');
+            if (clipEl) {
+                var btn = clipEl.querySelector('.dataset-quick-play');
+                if (btn) {
+                    btn.innerHTML = '&#9654;';
+                    btn.setAttribute('aria-label', 'Play clip');
+                }
+            }
+        });
+
+        audio.addEventListener('ended', function () {
+            resetQuickProgress(audio);
+            var clipEl = audio.closest('.dataset-clip');
+            if (clipEl) {
+                var btn = clipEl.querySelector('.dataset-quick-play');
+                if (btn) {
+                    btn.innerHTML = '&#9654;';
+                    btn.setAttribute('aria-label', 'Play clip');
+                }
+            }
+            if (state.currentlyPlaying === audio) {
+                state.currentlyPlaying = null;
+            }
+        });
+
+        audio.addEventListener('error', function () {
+            resetQuickProgress(audio);
+            var clipEl = audio.closest('.dataset-clip');
+            if (clipEl) {
+                var btn = clipEl.querySelector('.dataset-quick-play');
+                if (btn) {
+                    btn.innerHTML = '&#9654;';
+                    btn.setAttribute('aria-label', 'Play clip');
+                }
+            }
+            if (state.currentlyPlaying === audio) {
+                state.currentlyPlaying = null;
+            }
+        });
+    }
+
+    // ── Quick seek / scrub ──────────────────────────────────────────
+    function wireQuickSeek(track) {
+        if (!track || track.dataset.seekWired) return;
+        track.dataset.seekWired = '1';
+
+        var isDragging = false;
+
+        function getAudio() {
+            var clipEl = track.closest('.dataset-clip');
+            return clipEl ? clipEl.querySelector('.dataset-clip-player') : null;
+        }
+
+        function seekFromPointer(clientX) {
+            if (clientX == null) return;
+            var audio = getAudio();
+            if (!audio || !Number.isFinite(audio.duration) || audio.duration <= 0) return;
+
+            var rect = track.getBoundingClientRect();
+            var ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+            var seekTime = ratio * audio.duration;
+            audio.currentTime = seekTime;
+            updateQuickProgress(audio);
+        }
+
+        track.addEventListener('pointerdown', function (e) {
+            e.preventDefault();
+            isDragging = true;
+            track.setPointerCapture(e.pointerId);
+            track.classList.add('dragging');
+            seekFromPointer(e.clientX);
+            showQuickProgress(getAudio());
+        });
+
+        track.addEventListener('pointermove', function (e) {
+            if (!isDragging) return;
+            e.preventDefault();
+            seekFromPointer(e.clientX);
+        });
+
+        track.addEventListener('pointerup', function (e) {
+            if (!isDragging) return;
+            isDragging = false;
+            track.classList.remove('dragging');
+            try { track.releasePointerCapture(e.pointerId); } catch (_) {}
+        });
+
+        track.addEventListener('pointercancel', function () {
+            isDragging = false;
+            track.classList.remove('dragging');
+        });
+
+        track.addEventListener('keydown', function (e) {
+            var audio = getAudio();
+            if (!audio || !Number.isFinite(audio.duration) || audio.duration <= 0) return;
+
+            var step = e.shiftKey ? 5 : 1;
+            var newTime = audio.currentTime;
+
+            switch (e.key) {
+                case 'ArrowLeft':
+                    e.preventDefault();
+                    newTime = Math.max(0, newTime - step);
+                    break;
+                case 'ArrowRight':
+                    e.preventDefault();
+                    newTime = Math.min(audio.duration, newTime + step);
+                    break;
+                case 'Home':
+                    e.preventDefault();
+                    newTime = 0;
+                    break;
+                case 'End':
+                    e.preventDefault();
+                    newTime = audio.duration;
+                    break;
+                default:
+                    return;
+            }
+            audio.currentTime = newTime;
+            updateQuickProgress(audio);
+        });
+    }
+
     function renderClips(items) {
         if (!clipList) return;
         if (items.length === 0) {
@@ -229,6 +454,16 @@
             if (label) {
                 html += '<span class="dataset-clip-label-chip" data-label="' + escapeHtml(label) + '">' + escapeHtml(label) + '</span>';
             }
+            if (clip.keyword_confidence !== undefined && clip.keyword_confidence !== null) {
+                var pct = Math.round(clip.keyword_confidence * 100);
+                html += '<span class="dataset-clip-conf-chip" title="Chapada certainty: ' + pct + '% (Vosk confidence ' + clip.keyword_confidence + ')">' + pct + '% certainty</span>';
+            }
+
+            // Quick progress indicator + scrubber (hidden by default)
+            html += '<div class="dataset-quick-progress" hidden>';
+            html += '<span class="dataset-quick-progress-track" role="slider" tabindex="0" aria-label="Clip position" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-valuetext="0:00 / 0:00"><span class="dataset-quick-progress-fill"></span></span>';
+            html += '<span class="dataset-quick-progress-time">0:00 / 0:00</span>';
+            html += '</div>';
 
             // Quick action buttons
             html += '<div class="dataset-clip-actions">';
@@ -286,6 +521,16 @@
     }
 
     function bindClipEvents(container) {
+        // Wire progress events for all audio players (works for both quick play and native controls)
+        container.querySelectorAll('.dataset-clip-player').forEach(function (audio) {
+            wireQuickProgress(audio);
+        });
+
+        // Wire seek/scrub for all progress tracks
+        container.querySelectorAll('.dataset-quick-progress-track').forEach(function (track) {
+            wireQuickSeek(track);
+        });
+
         // Checkbox toggle
         container.querySelectorAll('.dataset-clip-checkbox').forEach(function (cb) {
             cb.addEventListener('change', function () {
@@ -312,17 +557,16 @@
                 const audio = details ? details.querySelector('.dataset-clip-player') : null;
                 if (!audio) return;
 
-                // Pause any other playing clip
+                // Pause any other playing clip and reset its progress
                 if (state.currentlyPlaying && state.currentlyPlaying !== audio) {
                     state.currentlyPlaying.pause();
+                    resetQuickProgress(state.currentlyPlaying);
                 }
 
                 if (audio.paused) {
                     audio.play().catch(function () {});
-                    state.currentlyPlaying = audio;
                 } else {
                     audio.pause();
-                    state.currentlyPlaying = null;
                 }
             });
         });
@@ -489,8 +733,205 @@
         }
     }
 
+    // ── Scan mode ────────────────────────────────────────────────────
+    function enterScanMode(clips, keyword, maxDurationSeconds) {
+        state._scanMode = true;
+        state._scanClips = clips;
+        state._scanKeyword = keyword;
+        state.selectedIds.clear();
+        updateBulkUI();
+        var pct = Math.round((state._scanConfidence || 0.5) * 100);
+        var durLabel = maxDurationSeconds ? ' \u2264' + maxDurationSeconds + 's' : '';
+        datasetTitle.textContent = 'Scan results: "' + keyword + '" (\u2265' + pct + '%' + durLabel + ')';
+        renderClips(clips);
+        datasetPagination.innerHTML = '<div class="pagination-inner"><button type="button" class="pagination-btn" id="clearScanBtn">Show all clips</button></div>';
+        var clearBtn = $('clearScanBtn');
+        if (clearBtn) {
+            clearBtn.addEventListener('click', function () {
+                clearScanMode();
+            });
+        }
+        if (scanStatus) {
+            var count = clips.length;
+            scanStatus.textContent = count + ' match' + (count !== 1 ? 'es' : '') + ' found';
+        }
+    }
+
+    function clearScanMode(skipReload) {
+        cancelScanPoll();
+        state._scanMode = false;
+        state._scanClips = [];
+        state._scanKeyword = '';
+        if (scanStatus) scanStatus.textContent = '';
+        if (scanProgress) {
+            scanProgress.hidden = true;
+            scanProgress.value = 0;
+        }
+        datasetTitle.textContent = state.selectedUserId
+            ? (getUserDisplayName(state.selectedUserId) || 'Selected') + '\u2019s clips'
+            : 'All clips';
+        if (!skipReload) {
+            loadClips();
+            renderPagination();
+        }
+    }
+
+    function getUserDisplayName(userId) {
+        for (var i = 0; i < state.users.length; i++) {
+            if (state.users[i].user_id === userId) {
+                return state.users[i].display_name || state.users[i].username || userId;
+            }
+        }
+        return null;
+    }
+
+    async function runKeywordScan() {
+        // Cancel any previous poll
+        cancelScanPoll();
+
+        if (scanKeywordBtn) scanKeywordBtn.disabled = true;
+        if (scanStatus) scanStatus.textContent = 'Starting scan (clips \u226430s)\u2026';
+        if (scanProgress) {
+            scanProgress.hidden = false;
+            scanProgress.value = 0;
+            scanProgress.max = 100;
+        }
+
+        // Read selected confidence
+        var minConfidence = 0.5;
+        if (scanConfidenceSelect) {
+            minConfidence = parseFloat(scanConfidenceSelect.value) || 0.5;
+        }
+        state._scanConfidence = minConfidence;
+
+        var body = { keyword: 'chapada', min_confidence: minConfidence };
+        var gid = getSelectedGuildId();
+        if (gid) body.guild_id = gid;
+        if (state.selectedUserId) body.user_id = state.selectedUserId;
+
+        try {
+            var resp = await fetch('/api/speech_training/keyword_scan', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+            var data = await safeParseJson(resp);
+            if (data.job_id) {
+                state._scanJobId = data.job_id;
+                if (scanStatus) scanStatus.textContent = 'Queued\u2026';
+                pollScanJob(data.job_id);
+            } else {
+                if (scanStatus) scanStatus.textContent = data.error || 'Failed to start scan';
+                if (scanKeywordBtn) scanKeywordBtn.disabled = false;
+                if (scanProgress) scanProgress.hidden = true;
+            }
+        } catch (e) {
+            if (scanStatus) scanStatus.textContent = 'Network error while starting scan';
+            if (scanKeywordBtn) scanKeywordBtn.disabled = false;
+            if (scanProgress) scanProgress.hidden = true;
+        }
+    }
+
+    async function safeParseJson(resp) {
+        // Parse response as JSON safely, handling non-JSON error responses
+        var text = await resp.text();
+        try {
+            return JSON.parse(text);
+        } catch (e) {
+            return { error: text || ('HTTP ' + resp.status) };
+        }
+    }
+
+    function pollScanJob(jobId) {
+        var pollInterval = 500; // ms
+
+        async function poll() {
+            if (state._scanJobId !== jobId) return; // stale poll
+
+            try {
+                var resp = await fetch('/api/speech_training/keyword_scan/' + jobId);
+                var data = await safeParseJson(resp);
+                if (data.status === 'queued' || data.status === 'processing') {
+                    updateScanProgress(data);
+                    state._scanPollTimer = setTimeout(poll, pollInterval);
+                } else if (data.status === 'done') {
+                    onScanDone(data);
+                } else if (data.status === 'error') {
+                    onScanError(data.error || 'Scan failed');
+                } else {
+                    // Unknown status - treat as error
+                    onScanError(data.error || 'Unexpected scan status: ' + data.status);
+                }
+            } catch (e) {
+                onScanError('Network error while checking scan progress');
+            }
+        }
+
+        state._scanPollTimer = setTimeout(poll, pollInterval);
+    }
+
+    function updateScanProgress(data) {
+        var total = data.total || 0;
+        var scanned = data.scanned || 0;
+        var matched = data.matched || 0;
+        var skipped = data.skipped || 0;
+        var maxDur = data.max_duration_seconds ? '\u2264' + data.max_duration_seconds + 's ' : '';
+
+        if (scanStatus) {
+            if (total > 0) {
+                scanStatus.textContent = 'Scanning ' + scanned + '/' + total + ' ' + maxDur + 'clips \u00b7 ' + matched + ' match' + (matched !== 1 ? 'es' : '') + ' \u00b7 ' + skipped + ' skipped';
+            } else {
+                scanStatus.textContent = 'Scanning ' + maxDur + 'unlabeled clips\u2026';
+            }
+        }
+
+        if (scanProgress && total > 0) {
+            var pct = Math.min(Math.round((scanned / total) * 100), 100);
+            scanProgress.value = pct;
+        }
+    }
+
+    function onScanDone(data) {
+        state._scanJobId = null;
+        if (scanKeywordBtn) scanKeywordBtn.disabled = false;
+        if (scanProgress) scanProgress.hidden = true;
+
+        if (data.matched > 0) {
+            enterScanMode(data.matches, data.keyword, data.max_duration_seconds);
+        } else {
+            var maxDur = data.max_duration_seconds ? ' among clips \u2264' + data.max_duration_seconds + 's' : '';
+            if (scanStatus) scanStatus.textContent = 'No matches found' + maxDur + ' (scanned ' + data.scanned + ', skipped ' + data.skipped + ')';
+            datasetTitle.textContent = 'No matches';
+            clipList.innerHTML = '<p class="dataset-empty">No clips matched "' + data.keyword + '" at \u2265' + Math.round(data.min_confidence * 100) + '% confidence' + maxDur + '.</p>';
+            datasetPagination.innerHTML = '<div class="pagination-inner"><button type="button" class="pagination-btn" id="clearScanBtn">Show all clips</button></div>';
+            var clearBtn = $('clearScanBtn');
+            if (clearBtn) {
+                clearBtn.addEventListener('click', function () {
+                    clearScanMode();
+                });
+            }
+        }
+    }
+
+    function onScanError(message) {
+        state._scanJobId = null;
+        if (scanKeywordBtn) scanKeywordBtn.disabled = false;
+        if (scanProgress) scanProgress.hidden = true;
+        if (scanStatus) scanStatus.textContent = message;
+    }
+
+    function cancelScanPoll() {
+        if (state._scanPollTimer) {
+            clearTimeout(state._scanPollTimer);
+            state._scanPollTimer = null;
+        }
+        state._scanJobId = null;
+    }
+
     // ── Passive refresh ──────────────────────────────────────────────
     function shouldSkipPassiveClipRefresh() {
+        // Skip while in scan mode
+        if (state._scanMode) return true;
         // Skip while user has active selections
         if (state.selectedIds.size > 0) return true;
         // Skip while audio is playing
@@ -711,6 +1152,7 @@
                 state.page = 1;
                 state.selectedIds.clear();
                 updateBulkUI();
+                clearScanMode(true);
                 loadClips();
             }, 300);
         });
@@ -725,6 +1167,7 @@
             state.page = 1;
             state.selectedIds.clear();
             updateBulkUI();
+            clearScanMode(true);
             loadClips();
         });
     });
@@ -736,20 +1179,61 @@
             state.page = 1;
             state.selectedIds.clear();
             updateBulkUI();
+            clearScanMode(true);
             loadClips();
         });
     }
 
-    // ── Bulk select all visible ──────────────────────────────────────
+    // ── Bulk select all matching filters ────────────────────────────
     if (bulkSelectAll) {
-        bulkSelectAll.addEventListener('click', function () {
+        bulkSelectAll.addEventListener('click', async function () {
+            if (state._scanMode) {
+                // In scan mode all results are rendered at once; select them all
+                for (const clip of state._scanClips) {
+                    state.selectedIds.add(clip.id);
+                }
+            } else {
+                // Fetch all matching clip IDs from the server (no pagination)
+                const btn = bulkSelectAll;
+                btn.disabled = true;
+                btn.textContent = 'Loading\u2026';
+                try {
+                    const params = new URLSearchParams();
+                    if (state.selectedUserId) params.set('user_id', state.selectedUserId);
+                    if (state.labelFilter) params.set('label', state.labelFilter);
+                    if (state.search) params.set('search', state.search);
+                    if (state.sort) params.set('sort', state.sort);
+                    const gid = getSelectedGuildId();
+                    if (gid) params.set('guild_id', gid);
+                    const resp = await fetch('/api/speech_training/clips/ids?' + params.toString());
+                    if (!resp.ok) {
+                        alert('Failed to load clip IDs');
+                        btn.disabled = false;
+                        btn.textContent = 'Select all';
+                        return;
+                    }
+                    const data = await resp.json();
+                    for (const id of data.ids) {
+                        state.selectedIds.add(id);
+                    }
+                } catch (e) {
+                    alert('Network error while selecting all clips');
+                    btn.disabled = false;
+                    btn.textContent = 'Select all';
+                    return;
+                }
+                btn.disabled = false;
+                btn.textContent = 'Select all';
+            }
+            // Sync visible checkboxes with the updated selection
             const checkboxes = clipList.querySelectorAll('.dataset-clip-checkbox');
             checkboxes.forEach(function (cb) {
-                cb.checked = true;
                 const id = parseInt(cb.dataset.id, 10);
-                state.selectedIds.add(id);
-                const clipEl = cb.closest('.dataset-clip');
-                if (clipEl) clipEl.classList.add('selected');
+                if (state.selectedIds.has(id)) {
+                    cb.checked = true;
+                    const clipEl = cb.closest('.dataset-clip');
+                    if (clipEl) clipEl.classList.add('selected');
+                }
             });
             updateBulkUI();
         });
@@ -791,6 +1275,11 @@
         bulkDelete.addEventListener('click', bulkDeleteClips);
     }
 
+    // ── Keyword scan button ──────────────────────────────────────────
+    if (scanKeywordBtn) {
+        scanKeywordBtn.addEventListener('click', runKeywordScan);
+    }
+
     // ── Guild selector change ────────────────────────────────────────
     if (guildSelector) {
         guildSelector.addEventListener('change', function () {
@@ -798,6 +1287,7 @@
             state.page = 1;
             state.selectedIds.clear();
             updateBulkUI();
+            clearScanMode(true);
             datasetTitle.textContent = 'All clips';
             loadUsers();
             loadStorage();

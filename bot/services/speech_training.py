@@ -34,6 +34,9 @@ _MAX_DURATION_VAR = "SPEECH_TRAINING_MAX_DURATION_SECONDS"
 _MIN_RMS_VAR = "SPEECH_TRAINING_MIN_RMS"
 _MP3_BITRATE_VAR = "SPEECH_TRAINING_MP3_BITRATE"
 _QUEUE_SIZE_VAR = "SPEECH_TRAINING_QUEUE_SIZE"
+_SPEECH_RMS_THRESHOLD_VAR = "SPEECH_TRAINING_SPEECH_RMS_THRESHOLD"
+_PREROLL_SECONDS_VAR = "SPEECH_TRAINING_PREROLL_SECONDS"
+_TRIM_SILENCE_VAR = "SPEECH_TRAINING_TRIM_SILENCE"
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -121,6 +124,23 @@ class SpeechTrainingRecorderService:
         self.mp3_bitrate: str = str(os.getenv(_MP3_BITRATE_VAR, "64k"))
         self.max_queue_size: int = _env_int(_QUEUE_SIZE_VAR, 200)
 
+        # Energy-based speech detection (per-chunk gating, trailing trim)
+        self.speech_rms_threshold: int = _env_int(_SPEECH_RMS_THRESHOLD_VAR, 250)
+        """Minimum per-chunk RMS to consider a frame as voiced.
+        Segments only start on voiced chunks (plus preroll context).
+        Range: 50–5000; adjust downward to make detection more sensitive."""
+        self.speech_rms_threshold = max(50, min(5000, self.speech_rms_threshold))
+
+        self.preroll_seconds: float = _env_float_clamped(
+            _PREROLL_SECONDS_VAR, 0.08, 0.0, 0.5
+        )
+        """Seconds of pre-voiced audio to include when a segment starts.
+        Provides context so word onsets are not clipped."""
+
+        self.trim_silence: bool = _env_bool(_TRIM_SILENCE_VAR, True)
+        """When True, trailing low-energy frames are removed from captured
+        segments before enqueuing for export."""
+
         # Internal write-ahead queue + daemon writer thread
         self._queue: queue.Queue = queue.Queue(maxsize=self.max_queue_size)
         self._running: bool = True
@@ -131,13 +151,17 @@ class SpeechTrainingRecorderService:
             self._start_writer()
             logger.info(
                 "[SpeechTrainingRecorder] Enabled. data_dir=%s silence=%.2fs "
-                "min_dur=%.2fs max_dur=%.2fs min_rms=%d bitrate=%s",
+                "min_dur=%.2fs max_dur=%.2fs min_rms=%d bitrate=%s "
+                "speech_rms_threshold=%d preroll=%.3fs trim_silence=%s",
                 self.data_dir,
                 self.silence_seconds,
                 self.min_duration_seconds,
                 self.max_duration_seconds,
                 self.min_rms,
                 self.mp3_bitrate,
+                self.speech_rms_threshold,
+                self.preroll_seconds,
+                self.trim_silence,
             )
 
     # ------------------------------------------------------------------

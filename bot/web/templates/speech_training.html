@@ -86,9 +86,25 @@
                         <option value="reviewed_desc">Reviewed latest</option>
                     </select>
                 </div>
+                <div class="dataset-scan-group" id="scanGroup">
+                    <label for="scanConfidenceSelect" class="dataset-scan-label">Min confidence</label>
+                    <select id="scanConfidenceSelect" class="dataset-scan-select" aria-label="Minimum confidence threshold">
+                        <option value="0.5">50%</option>
+                        <option value="0.6">60%</option>
+                        <option value="0.7">70%</option>
+                        <option value="0.8">80%</option>
+                        <option value="0.9">90%</option>
+                        <option value="0.95">95%</option>
+                    </select>
+                    <button type="button" class="dataset-scan-btn" id="scanKeywordBtn">
+                        Find Chapada
+                    </button>
+                    <span class="dataset-scan-status" id="scanStatus"></span>
+                    <progress id="scanProgress" class="dataset-scan-progress" max="100" value="0" hidden aria-label="Scan progress"></progress>
+                </div>
                 <div class="dataset-bulk-group" id="bulkGroup">
                     <span class="dataset-bulk-count" id="bulkCount">0 selected</span>
-                    <button type="button" class="dataset-bulk-btn" id="bulkSelectAll" title="Select all visible">Select all</button>
+                    <button type="button" class="dataset-bulk-btn" id="bulkSelectAll" title="Select all matching filters">Select all</button>
                     <button type="button" class="dataset-bulk-btn" id="bulkClear" title="Clear selection">Clear</button>
                     <div class="dataset-bulk-actions">
                         <select id="bulkLabelSelect" class="dataset-bulk-label-select" aria-label="Bulk label" disabled>

@@ -124,6 +124,9 @@ Create a `.env` file in the project root. Only `DISCORD_BOT_TOKEN` is strictly r
 | `SPEECH_TRAINING_MIN_DURATION_SECONDS` | `0.25` | Minimum segment duration to save |
 | `SPEECH_TRAINING_MAX_DURATION_SECONDS` | `10.0` | Max segment duration before forced split |
 | `SPEECH_TRAINING_MIN_RMS` | `120` | Minimum RMS amplitude to skip near-silent artifacts |
+| `SPEECH_TRAINING_SPEECH_RMS_THRESHOLD` | `250` | Per-chunk RMS threshold to detect voiced frames; segments only start on voiced audio (range `50`–`5000`; lower = more sensitive) |
+| `SPEECH_TRAINING_PREROLL_SECONDS` | `0.08` | Seconds of pre-voiced context included when a segment starts (range `0.0`–`0.5`) |
+| `SPEECH_TRAINING_TRIM_SILENCE` | `true` | Remove trailing low-energy frames from captured segments before enqueue |
 | `SPEECH_TRAINING_MP3_BITRATE` | `64k` | MP3 export bitrate for captured clips |
 | `SPEECH_TRAINING_QUEUE_SIZE` | `200` | Max pending export jobs before dropping |
 | `PERFORMANCE_MONITOR_TICK_SECONDS` | `0.5` | Telemetry interval (min `0.1`) |
@@ -239,6 +242,8 @@ The optional web dashboard is served by a separate `web` container (Docker profi
 | `POST /api/speech_training/clips/<id>/label` | Update label/transcript/notes (admin-only) |
 | `DELETE /api/speech_training/clips/<id>` | Delete a single clip (admin-only) |
 | `POST /api/speech_training/clips/bulk` | Bulk label or delete clips (admin-only) |
+| `POST /api/speech_training/keyword_scan` | Start async keyword scan (admin-only, returns `202` + `job_id`; poll with GET below). Only unlabeled clips ≤30s are eligible. |
+| `GET /api/speech_training/keyword_scan/<job_id>` | Poll keyword scan progress & results (admin-only). Response includes `max_duration_seconds`. |
 
 Unauthenticated buttons show a locked state prompting Discord login. Web playback requires authentication so actions are logged as the real user.
 

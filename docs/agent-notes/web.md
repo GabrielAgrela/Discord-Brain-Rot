@@ -238,13 +238,29 @@ When adding a new page, include ``shared/nav.html`` with the correct ``active_pa
 
 ### Speech Training APIs
 
-The following admin-only APIs support quick labeling and bulk operations:
+The following admin-only APIs support quick labeling, bulk operations, and keyword scanning:
 
 - ``DELETE /api/speech_training/clips/<id>`` — delete a single clip and its audio file.
 - ``POST /api/speech_training/clips/bulk`` — body ``{"action": "label", "ids": [...], "label": "chapada"}`` or ``{"action": "delete", "ids": [...]}``.  Max 200 ids.
-
-The ``GET /api/speech_training/clips`` endpoint now accepts a ``sort`` parameter (values: ``newest``, ``oldest``, ``longest``, ``shortest``, ``unlabeled_first``, ``label_asc``, ``label_desc``, ``speaker_asc``, ``speaker_desc``, ``reviewed_desc``).
+- ``POST /api/speech_training/keyword_scan`` — start an **async** keyword scan job using offline Vosk.  Accepts JSON body with optional ``keyword`` (default ``"chapada"``), ``min_confidence`` (default ``0.5``), ``guild_id``, and ``user_id``.  Returns ``202 {"job_id": ..., "status": "queued"}``.  Poll ``GET /api/speech_training/keyword_scan/<job_id>`` for progress and results.  Read-only — no labels are auto-applied.  Only unlabeled clips with ``duration_seconds <= 30`` are eligible; the response includes ``max_duration_seconds`` (always 30.0).
+- ``GET /api/speech_training/keyword_scan/<job_id>`` — poll a keyword scan job.  Terminal states are ``done`` (includes ``matches[]``, ``scanned``, ``matched``, ``skipped``, and ``max_duration_seconds``) and ``error`` (includes ``error`` message).  During processing the response includes ``total``, ``scanned``, ``matched``, ``skipped``, and ``max_duration_seconds`` for progress display.
+- ``GET /api/speech_training/clips`` — parameter ``sort`` one of ``newest``, ``oldest``, ``longest``, ``shortest``, ``unlabeled_first``, ``label_asc``, ``label_desc``, ``speaker_asc``, ``speaker_desc``, ``reviewed_desc``.
+- ``GET /api/speech_training/clips/ids`` — returns **all** clip IDs matching the current scope/filter/search/sort, without pagination.  Accepts the same parameters as ``/api/speech_training/clips`` (``guild_id``, ``user_id``, ``label``, ``search``, ``sort``) but **not** ``page``/``per_page``.  Response: ``{"ids": [1, 2, ...], "total": 42}``.  Used by the "Select all" button to select every clip in the current filter scope.
 
 ### Page UI
+
+- The dataset page toolbar has a confidence threshold select (50–95%), a ``Find Chapada`` button, a status span, and a ``<progress>`` element.  Clicking the button starts an **async** keyword scan via ``POST /api/speech_training/keyword_scan`` with the selected ``min_confidence``.
+- The JS polls ``GET /api/speech_training/keyword_scan/<job_id>`` every 500 ms and updates the progress bar and status text (e.g. ``Scanning 12/83 clips · 4 matches · 1 skipped``).  On completion, matching clips populate the clip list in scan mode (showing matches only, with a ``Show all clips`` button).  Network errors during polling show a distinct "Network error while checking scan progress" message.
+- Scan mode is cleared when the user changes any filter (label, search, sort, speaker, or guild).  While in scan mode, passive clip refresh is paused.
+- The "Select all" button now selects all clips matching the current filters (not just the visible page).  It fetches IDs from ``GET /api/speech_training/clips/ids`` with the current filter/sort scope.  In scan mode, it selects all rendered scan-match clips locally.
+- Each scan-match clip shows a confidence percentage chip (e.g. ``87%``) styled with ``--accent-olive`` colors.
+
+### Page UI
+
+- The dataset page toolbar has a confidence threshold select (50–95%), a ``Find Chapada`` button, a status span, and a ``<progress>`` element.  Clicking the button starts an **async** keyword scan via ``POST /api/speech_training/keyword_scan`` with the selected ``min_confidence``.
+- The JS polls ``GET /api/speech_training/keyword_scan/<job_id>`` every 500 ms and updates the progress bar and status text (e.g. ``Scanning 12/83 clips · 4 matches · 1 skipped``).  On completion, matching clips populate the clip list in scan mode (showing matches only, with a ``Show all clips`` button).  Network errors during polling show a distinct "Network error while checking scan progress" message.
+- Scan mode is cleared when the user changes any filter (label, search, sort, speaker, or guild).  While in scan mode, passive clip refresh is paused.
+- Each scan-match clip shows a confidence percentage chip (e.g. ``87%``) styled with ``--accent-olive`` colors.
+- Scan jobs run in a background thread pool (``WEB_KEYWORD_SCAN_WORKERS`` env var, default 2, bounded 1–8).  Job state is in-memory and lost on web restart.
 
 The control-room host metric shows ``Host CPU, Temp & RAM`` with a dropdown. CPU fan speed appears in parentheses on the CPU total row (e.g. ``CPU 12.3% (2,500 RPM)`` or ``CPU sampling… (2,500 RPM)``) when available; if fan speed is unavailable, the parentheses are omitted. The process section is labelled ``Top CPU`` (reflecting that these are the top host-wide CPU consumers). The footnote shows the bot-side sample interval (~1 s). When no snapshot is available the dropdown shows "Waiting for host monitor".

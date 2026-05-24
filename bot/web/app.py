@@ -73,6 +73,10 @@ def create_app() -> Flask:
         max_workers=_get_web_upload_worker_count()
     )
     app.extensions["web_upload_jobs"] = {}
+    app.extensions["web_keyword_scan_executor"] = ThreadPoolExecutor(
+        max_workers=_get_web_keyword_scan_worker_count()
+    )
+    app.extensions["web_keyword_scan_jobs"] = {}
 
     register_web_routes(app)
     return app
@@ -101,6 +105,21 @@ def _get_web_upload_worker_count() -> int:
         Positive worker count for async upload jobs.
     """
     raw_value = os.getenv("WEB_UPLOAD_WORKERS", "2").strip()
+    try:
+        worker_count = int(raw_value)
+    except ValueError:
+        worker_count = 2
+    return max(1, min(worker_count, 8))
+
+
+def _get_web_keyword_scan_worker_count() -> int:
+    """
+    Return the number of background workers for keyword scanning.
+
+    Returns:
+        Positive worker count for async keyword scan jobs, bounded 1‑8.
+    """
+    raw_value = os.getenv("WEB_KEYWORD_SCAN_WORKERS", "2").strip()
     try:
         worker_count = int(raw_value)
     except ValueError:
