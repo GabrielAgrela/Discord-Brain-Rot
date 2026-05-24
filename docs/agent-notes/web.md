@@ -249,7 +249,7 @@ The following admin-only APIs support quick labeling, bulk operations, and keywo
 
 ### Page UI
 
-- The dataset page toolbar has a confidence threshold select (50–95%), a ``Find Chapada`` button, a status span, and a ``<progress>`` element.  Clicking the button starts an **async** keyword scan via ``POST /api/speech_training/keyword_scan`` with the selected ``min_confidence`` and ``delete_non_matches: true``.
+- The dataset page toolbar has a ``Find Chapada`` button, a status span, and a ``<progress>`` element.  Keyword scans always use a fixed confidence threshold of ``0.5`` (50%).  Clicking the button starts an **async** keyword scan via ``POST /api/speech_training/keyword_scan`` with ``min_confidence: 0.5`` and ``delete_non_matches: true``.
 - The JS polls ``GET /api/speech_training/keyword_scan/<job_id>`` every 500 ms and updates the progress bar and status text (e.g. ``Scanning 12/83 clips · 4 matches · 1 skipped``).  On completion, matching clips populate the clip list in scan mode (showing matches only, with a ``Show all clips`` button).  If non-matches were deleted, the status text appends e.g. ``· 72 non-matches deleted``.  After deletion, the user list and storage summary are refreshed immediately.  Network errors during polling show a distinct "Network error while checking scan progress" message.
 - Scan mode is cleared when the user changes any filter (label, search, sort, speaker, or guild).  While in scan mode, passive clip refresh is paused.
 - The "Select all" button now selects all clips matching the current filters (not just the visible page).  It fetches IDs from ``GET /api/speech_training/clips/ids`` with the current filter/sort scope.  In scan mode, it selects all rendered scan-match clips locally.

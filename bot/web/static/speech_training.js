@@ -22,7 +22,7 @@
         _scanKeyword: '', // the keyword that was scanned for
         _scanJobId: null, // pending scan job id for polling
         _scanPollTimer: null, // setTimeout handle for polling
-        _scanConfidence: 0.5, // selected min confidence as decimal
+        _scanConfidence: 0.5, // fixed min confidence (always 50%)
         labelOptions: ['chapada', 'ventura', 'none'],
     };
 
@@ -52,7 +52,39 @@
     const scanKeywordBtn = $('scanKeywordBtn');
     const scanStatus = $('scanStatus');
     const scanProgress = $('scanProgress');
-    const scanConfidenceSelect = $('scanConfidenceSelect');
+
+    // ── Theme toggle ───────────────────────────────────────────────────
+    const themeToggle = document.querySelector('.theme-toggle');
+
+    function applyThemePreference(theme) {
+        const isDark = theme === 'dark';
+        document.documentElement.classList.toggle('theme-dark', isDark);
+        if (!themeToggle) {
+            return;
+        }
+        themeToggle.textContent = isDark ? '☀️' : '🌙';
+        themeToggle.setAttribute('aria-pressed', String(isDark));
+        themeToggle.setAttribute('aria-label', isDark ? 'Disable dark mode' : 'Enable dark mode');
+    }
+
+    if (themeToggle) {
+        let storedTheme = null;
+        try {
+            storedTheme = localStorage.getItem('brainrot-theme');
+        } catch (error) {
+            storedTheme = null;
+        }
+        applyThemePreference(storedTheme);
+        themeToggle.addEventListener('click', () => {
+            const nextTheme = document.documentElement.classList.contains('theme-dark') ? 'light' : 'dark';
+            try {
+                localStorage.setItem('brainrot-theme', nextTheme);
+            } catch (error) {
+                // Keep the in-page toggle usable even if storage is blocked.
+            }
+            applyThemePreference(nextTheme);
+        });
+    }
 
     // ── Guild selector sync ──────────────────────────────────────────
     function getSelectedGuildId() {
@@ -1017,14 +1049,9 @@
             scanProgress.max = 100;
         }
 
-        // Read selected confidence
-        var minConfidence = 0.5;
-        if (scanConfidenceSelect) {
-            minConfidence = parseFloat(scanConfidenceSelect.value) || 0.5;
-        }
-        state._scanConfidence = minConfidence;
+        state._scanConfidence = 0.5;
 
-        var body = { keyword: 'chapada', min_confidence: minConfidence, label_non_matches_as_none: true };
+        var body = { keyword: 'chapada', min_confidence: 0.5, label_non_matches_as_none: true };
         var gid = getSelectedGuildId();
         if (gid) body.guild_id = gid;
         if (state.selectedUserId) body.user_id = state.selectedUserId;
