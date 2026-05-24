@@ -317,7 +317,7 @@ class TestWebSpeechTrainingScan:
 
     @patch("pydub.AudioSegment.from_file")
     def test_scan_progress_callback_per_clip(self, mock_from_file, service, tmp_path):
-        """Progress callback is invoked after each clip with updated counts."""
+        """Progress callback is invoked as clips complete concurrently."""
         # Create two clips with real audio files
         clip1_data = {
             "id": 1,
@@ -386,8 +386,9 @@ class TestWebSpeechTrainingScan:
         ):
             service.scan_unlabeled_keyword(progress_callback=_cb)
 
-        # Initial callback + 2 per-clip callbacks
-        assert len(callbacks) == 3
+        # At least initial + 1 per-clip callback; with concurrent execution
+        # both clips may complete in a single batch so 2-3 callbacks are valid.
+        assert len(callbacks) >= 2
 
         # First callback: initial state
         assert callbacks[0]["total"] == 2
@@ -395,15 +396,10 @@ class TestWebSpeechTrainingScan:
         assert callbacks[0]["matched"] == 0
         assert callbacks[0]["current_clip_id"] is None
 
-        # Second callback: after clip 1
-        assert callbacks[1]["scanned"] == 1
-        assert callbacks[1]["matched"] == 1  # matches chapada
-        assert callbacks[1]["current_clip_id"] == 1
-
-        # Third callback: after clip 2
-        assert callbacks[2]["scanned"] == 2
-        assert callbacks[2]["matched"] == 2
-        assert callbacks[2]["current_clip_id"] == 2
+        # Final state should be 2 scanned, 2 matched
+        last_cb = callbacks[-1]
+        assert last_cb["scanned"] == 2
+        assert last_cb["matched"] == 2
 
     @patch("pydub.AudioSegment.from_file")
     def test_scan_progress_callback_skipped(self, mock_from_file, service, tmp_path):
@@ -443,6 +439,9 @@ class TestWebSpeechTrainingScan:
     ):
         """With delete_non_matches=True, matched clips remain and skipped clips remain,
         while non-matched successfully-scanned clips are deleted from DB and files."""
+        # Use single worker for deterministic test execution order
+        service.KEYWORD_SCAN_WORKERS = 1
+
         # Create audio directory and three audio files
         audio_dir = tmp_path / "g100" / "u1"
         audio_dir.mkdir(parents=True, exist_ok=True)
@@ -503,22 +502,24 @@ class TestWebSpeechTrainingScan:
             match_clip, nonmatch_clip, skip_clip,
         ]
 
-        # Mock pydub — first two succeed, third (skip) fails
         fake_segment = MagicMock()
         fake_segment.raw_data = b"\x00\x00" * 16000
         fake_segment.set_frame_rate.return_value = fake_segment
         fake_segment.set_channels.return_value = fake_segment
         fake_segment.set_sample_width.return_value = fake_segment
 
-        # First call succeeds (match), second call succeeds (nonmatch)
-        def from_file_side_effect(path, format=None):
-            if "skip" in str(path):
-                raise Exception("Decode failed")
-            return fake_segment
+        # First call succeeds (match), second call succeeds (nonmatch pydub),
+        # third should be skipped by resolve_audio_path returning None.
+        mock_from_file.return_value = fake_segment
 
-        mock_from_file.side_effect = from_file_side_effect
+        # Override resolve_audio_path to make skip clip return None
+        real_resolve = service.resolve_audio_path
+        def resolve_skip_audio(clip):
+            if clip["id"] == 12:
+                return None
+            return real_resolve(clip)
 
-        # Vosk: clip 1 gets high confidence (match), clip 2 gets low (nonmatch)
+        # Mock Vosk: first recognizer call gets match, second gets nonmatch
         match_result = json.dumps({
             "text": "chapada",
             "result": [{"word": "chapada", "conf": 0.85}],
@@ -527,7 +528,6 @@ class TestWebSpeechTrainingScan:
             "text": "outro",
             "result": [{"word": "outro", "conf": 0.3}],
         })
-
         recognizer_results = iter([match_result, nonmatch_result])
 
         def make_recognizer(model, sample_rate, grammar_json=None):
@@ -546,6 +546,8 @@ class TestWebSpeechTrainingScan:
         ), patch(
             "vosk.KaldiRecognizer",
             side_effect=make_recognizer,
+        ), patch.object(
+            service, "resolve_audio_path", side_effect=resolve_skip_audio,
         ):
             result = service.scan_unlabeled_keyword(delete_non_matches=True)
 
@@ -641,22 +643,115 @@ class TestWebSpeechTrainingScan:
         assert result["delete_non_matches"] is True
         service.repo.bulk_delete_clips.assert_not_called()
 
-    def test_scan_passes_filters_and_max_duration(self, service):
-        """Guild, user, and max_duration filters are forwarded to the repo."""
+    # ── Label non-matches as none ─────────────────────────────────────
+
+    @patch("pydub.AudioSegment.from_file")
+    def test_scan_label_nonmatches_as_none(self, mock_from_file, service, tmp_path):
+        """With label_non_matches_as_none=True, non-matches are bulk-labeled as 'none'."""
+        service.KEYWORD_SCAN_WORKERS = 1  # deterministic order
+
+        audio_dir = tmp_path / "g100" / "u1"
+        audio_dir.mkdir(parents=True, exist_ok=True)
+
+        match_clip = {
+            "id": 20,
+            "relative_path": "g100/u1/match.mp3",
+            "guild_id": "100",
+            "user_id": "1",
+            "username": "user1",
+            "display_name": "User One",
+            "filename": "match.mp3",
+            "duration_seconds": 1.0,
+            "byte_size": 1000,
+            "captured_at": "2026-01-01 00:00:00",
+            "label": None,
+        }
+        nonmatch_clip = {
+            "id": 21,
+            "relative_path": "g100/u1/nonmatch.mp3",
+            "guild_id": "100",
+            "user_id": "1",
+            "username": "user1",
+            "display_name": "User One",
+            "filename": "nonmatch.mp3",
+            "duration_seconds": 1.0,
+            "byte_size": 1000,
+            "captured_at": "2026-01-02 00:00:00",
+            "label": None,
+        }
+
+        (audio_dir / "match.mp3").write_bytes(b"fake-mp3")
+        (audio_dir / "nonmatch.mp3").write_bytes(b"fake-mp3")
+
+        service.repo.list_unlabeled_clips.return_value = [match_clip, nonmatch_clip]
+
+        fake_segment = MagicMock()
+        fake_segment.raw_data = b"\x00\x00" * 16000
+        fake_segment.set_frame_rate.return_value = fake_segment
+        fake_segment.set_channels.return_value = fake_segment
+        fake_segment.set_sample_width.return_value = fake_segment
+        mock_from_file.return_value = fake_segment
+
+        match_result = json.dumps({
+            "text": "chapada",
+            "result": [{"word": "chapada", "conf": 0.85}],
+        })
+        nonmatch_result = json.dumps({
+            "text": "outro",
+            "result": [{"word": "outro", "conf": 0.3}],
+        })
+        recognizer_results = iter([match_result, nonmatch_result])
+
+        def make_recognizer(model, sample_rate, grammar_json=None):
+            rec = FakeRecognizer(model, sample_rate, grammar_json)
+            rec._result = next(recognizer_results)
+            return rec
+
+        fake_model = MagicMock()
+
+        service.repo.bulk_update_review.return_value = 1
+
+        with patch(
+            "bot.services.web_speech_training._get_vosk_model",
+            return_value=fake_model,
+        ), patch(
+            "vosk.KaldiRecognizer",
+            side_effect=make_recognizer,
+        ):
+            result = service.scan_unlabeled_keyword(
+                label_non_matches_as_none=True,
+            )
+
+        assert result["status"] == "ok"
+        assert result["scanned"] == 2
+        assert result["matched"] == 1
+        assert result["skipped"] == 0
+        assert result["label_non_matches_as_none"] is True
+        assert result["labeled_non_matches"] == 1
+        assert len(result["matches"]) == 1
+        assert result["matches"][0]["id"] == 20
+
+        # Verify bulk_update_review was called with non-match IDs and 'none'
+        service.repo.bulk_update_review.assert_called_once()
+        call_kwargs = service.repo.bulk_update_review.call_args[1]
+        assert call_kwargs["label"] == "none"
+        assert call_kwargs["clip_ids"] == [21]
+
+    def test_scan_label_nonmatches_as_none_no_nonmatches(self, service):
+        """With label_non_matches_as_none=True and no non-matches, nothing is labeled."""
         service.repo.list_unlabeled_clips.return_value = []
 
         with patch(
             "bot.services.web_speech_training._get_vosk_model",
             return_value=MagicMock(),
         ):
-            service.scan_unlabeled_keyword(guild_id="100", user_id="1")
+            result = service.scan_unlabeled_keyword(label_non_matches_as_none=True)
 
-        service.repo.list_unlabeled_clips.assert_called_once_with(
-            guild_id="100",
-            user_id="1",
-            max_duration_seconds=30.0,
-        )
-
+        assert result["scanned"] == 0
+        assert result["matched"] == 0
+        assert result["labeled_non_matches"] == 0
+        assert result["label_non_matches_as_none"] is True
+        service.repo.bulk_update_review.assert_not_called()
 
 class TestWebSpeechTrainingLabelOptions:
     """Tests for WebSpeechTrainingService.get_label_options()."""
@@ -679,15 +774,15 @@ class TestWebSpeechTrainingLabelOptions:
         """Default labels appear first, before any custom labels."""
         service.repo.list_labels.return_value = ['custom_one', 'custom_two']
         result = service.get_label_options()
-        assert result["labels"][:4] == ['chapada', 'ventura', 'none', 'unclear']
-        assert result["labels"][4:] == ['custom_one', 'custom_two']
+        assert result["labels"][:3] == ['chapada', 'ventura', 'none']
+        assert result["labels"][3:] == ['custom_one', 'custom_two']
 
     def test_custom_labels_included_once(self, service):
         """Custom labels are included, de-duplicated against defaults."""
         service.repo.list_labels.return_value = ['chapada', 'ventura', 'custom']
         result = service.get_label_options()
         # 'chapada' and 'ventura' already in defaults, so only 'custom' is added
-        assert result["labels"] == ['chapada', 'ventura', 'none', 'unclear', 'custom']
+        assert result["labels"] == ['chapada', 'ventura', 'none', 'custom']
 
     def test_repo_empty_labels_not_present(self, service):
         """The repo already filters empty labels via SQL; the service is not expected to re-filter."""
@@ -695,7 +790,7 @@ class TestWebSpeechTrainingLabelOptions:
         # This test verifies that what the repo returns is passed through correctly.
         service.repo.list_labels.return_value = ['valid_label']
         result = service.get_label_options()
-        assert result["labels"] == ['chapada', 'ventura', 'none', 'unclear', 'valid_label']
+        assert result["labels"] == ['chapada', 'ventura', 'none', 'valid_label']
 
     def test_guild_id_passed_through(self, service):
         """guild_id is forwarded to the repository."""

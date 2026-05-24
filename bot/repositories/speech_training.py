@@ -161,7 +161,7 @@ class SpeechTrainingRepository(BaseRepository):
                     display_name,
                     folder_name,
                     COUNT(*) AS total_count,
-                    SUM(CASE WHEN label IS NULL OR label = '' THEN 1 ELSE 0 END) AS unlabeled_count,
+                    SUM(CASE WHEN label IS NULL OR label = '' OR label = 'unclear' THEN 1 ELSE 0 END) AS unlabeled_count,
                     MAX(captured_at) AS latest_captured_at
                 FROM speech_training_clips
                 WHERE guild_id = ?
@@ -179,7 +179,7 @@ class SpeechTrainingRepository(BaseRepository):
                     display_name,
                     folder_name,
                     COUNT(*) AS total_count,
-                    SUM(CASE WHEN label IS NULL OR label = '' THEN 1 ELSE 0 END) AS unlabeled_count,
+                    SUM(CASE WHEN label IS NULL OR label = '' OR label = 'unclear' THEN 1 ELSE 0 END) AS unlabeled_count,
                     MAX(captured_at) AS latest_captured_at
                 FROM speech_training_clips
                 GROUP BY user_id, username, display_name, folder_name
@@ -229,7 +229,7 @@ class SpeechTrainingRepository(BaseRepository):
             conditions.append("user_id = ?")
             params.append(user_id)
         if label == "unlabeled":
-            conditions.append("(label IS NULL OR label = '')")
+            conditions.append("(label IS NULL OR label = '' OR label = 'unclear')")
         elif label:
             conditions.append("label = ?")
             params.append(label)
@@ -260,9 +260,9 @@ class SpeechTrainingRepository(BaseRepository):
         # With asc: labeled (CASE 0) first; with desc: unlabeled (CASE 0) first
         if safe_sort == "label":
             if safe_dir == "asc":
-                order_expr = "CASE WHEN label IS NULL OR label = '' THEN 1 ELSE 0 END, label asc"
+                order_expr = "CASE WHEN label IS NULL OR label = '' OR label = 'unclear' THEN 1 ELSE 0 END, label asc"
             else:
-                order_expr = "CASE WHEN label IS NULL OR label = '' THEN 0 ELSE 1 END, label desc"
+                order_expr = "CASE WHEN label IS NULL OR label = '' OR label = 'unclear' THEN 0 ELSE 1 END, label desc"
         else:
             order_expr = f"{safe_sort} {safe_dir}"
         # Deterministic tiebreaker
@@ -374,7 +374,7 @@ class SpeechTrainingRepository(BaseRepository):
         Returns:
             List of clip dicts ordered by ``captured_at DESC, id DESC``.
         """
-        conditions: List[str] = ["(label IS NULL OR label = '')"]
+        conditions: List[str] = ["(label IS NULL OR label = '' OR label = 'unclear')"]
         params: List[Any] = []
 
         if guild_id:
@@ -589,7 +589,7 @@ class SpeechTrainingRepository(BaseRepository):
             rows = self._execute(
                 """
                 SELECT DISTINCT label FROM speech_training_clips
-                WHERE label IS NOT NULL AND label != ''
+                WHERE label IS NOT NULL AND label != '' AND label != 'unclear'
                   AND guild_id = ?
                 ORDER BY label COLLATE NOCASE
                 """,
@@ -599,7 +599,7 @@ class SpeechTrainingRepository(BaseRepository):
             rows = self._execute(
                 """
                 SELECT DISTINCT label FROM speech_training_clips
-                WHERE label IS NOT NULL AND label != ''
+                WHERE label IS NOT NULL AND label != '' AND label != 'unclear'
                 ORDER BY label COLLATE NOCASE
                 """
             )

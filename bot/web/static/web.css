@@ -5553,29 +5553,50 @@ tbody.page-swap-active {
     gap: 0.3rem;
 }
 
-.dataset-filter-btn {
-    font-size: 0.72rem;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    padding: 0.3rem 0.7rem;
-    border-radius: 999px;
-    background: var(--paper-muted);
-    border: 1px solid var(--border);
-    color: var(--ink-muted);
-    cursor: pointer;
-    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+.dataset-label-filter-select {
+    font-size: 0.76rem;
+    font-weight: 650;
+    padding: 0.3rem 1.6rem 0.3rem 0.6rem;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-strong);
+    background:
+        linear-gradient(45deg, transparent 50%, var(--ink-muted) 50%) calc(100% - 0.5rem) 50% / 0.3rem 0.3rem no-repeat,
+        linear-gradient(135deg, var(--ink-muted) 50%, transparent 50%) calc(100% - 0.3rem) 50% / 0.3rem 0.3rem no-repeat,
+        var(--paper-muted);
+    color: var(--ink);
     font: inherit;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    min-width: 8rem;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-.dataset-filter-btn:hover {
+.dataset-label-filter-select:hover {
     border-color: var(--accent);
+}
+
+.dataset-label-filter-select:focus {
+    outline: 2px solid var(--accent-soft);
+    outline-offset: 2px;
+    border-color: var(--accent);
+}
+
+.dataset-label-filter-select option {
+    background: var(--paper);
     color: var(--ink);
 }
 
-.dataset-filter-btn.active {
-    background: var(--ink);
-    color: var(--paper);
-    border-color: var(--ink);
+html.theme-dark .dataset-label-filter-select {
+    background:
+        linear-gradient(45deg, transparent 50%, var(--ink-muted) 50%) calc(100% - 0.5rem) 50% / 0.3rem 0.3rem no-repeat,
+        linear-gradient(135deg, var(--ink-muted) 50%, transparent 50%) calc(100% - 0.3rem) 50% / 0.3rem 0.3rem no-repeat,
+        var(--paper-muted);
+}
+
+html.theme-dark .dataset-label-filter-select option {
+    background: var(--panel-dark);
+    color: var(--ink);
 }
 
 .dataset-search {
@@ -6172,6 +6193,57 @@ tbody.page-swap-active {
 .dataset-scan-progress::-moz-progress-bar {
     border-radius: 999px;
     background: var(--accent-olive);
+}
+
+/* ── Speech training toast ──────────────────────────────────────── */
+
+.speech-toast-region {
+    position: fixed;
+    right: max(1rem, env(safe-area-inset-right));
+    bottom: max(1rem, env(safe-area-inset-bottom));
+    z-index: 80;
+    max-width: min(22rem, calc(100vw - 2rem));
+    pointer-events: none;
+}
+
+.speech-toast {
+    pointer-events: auto;
+    padding: 0.85rem 1.05rem;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-strong);
+    border-left: 4px solid var(--accent-olive);
+    background: var(--paper-strong);
+    box-shadow: var(--shadow);
+    color: var(--ink);
+    font-size: 0.82rem;
+    font-weight: 650;
+    line-height: 1.4;
+    animation: speechToastIn 0.2s var(--ease-out-quart) both;
+}
+
+.speech-toast.error {
+    border-left-color: var(--error);
+}
+
+.speech-toast.success {
+    border-left-color: var(--accent);
+}
+
+.speech-toast-hiding {
+    opacity: 0;
+    transform: translateY(4px);
+    transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+@keyframes speechToastIn {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 
 /* ── Confidence chip ────────────────────────────────────────────── */

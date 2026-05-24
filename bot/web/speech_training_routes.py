@@ -302,6 +302,9 @@ def register_speech_training_routes(app: Flask) -> None:
         Optional fields ``guild_id`` and ``user_id`` scope the unlabeled
         clips to scan.  Default keyword is ``chapada`` at 0.5 confidence.
 
+        Non-matching scanned clips are always labeled as ``none`` (unless
+        ``delete_non_matches`` is ``true``, which takes precedence).
+
         When ``delete_non_matches`` is ``true``, clips that are successfully
         scanned but do **not** match the keyword are deleted after the scan
         completes.  Skipped clips (missing audio, decode errors) and matched
@@ -317,6 +320,7 @@ def register_speech_training_routes(app: Flask) -> None:
             guild_id = (data.get("guild_id") or "").strip() or None
             user_id = (data.get("user_id") or "").strip() or None
             delete_non_matches = bool(data.get("delete_non_matches", False))
+            label_non_matches_as_none = bool(data.get("label_non_matches_as_none", True))
 
             # Validate synchronously before queuing
             if not keyword:
@@ -332,6 +336,7 @@ def register_speech_training_routes(app: Flask) -> None:
                 guild_id=guild_id,
                 user_id=user_id,
                 delete_non_matches=delete_non_matches,
+                label_non_matches_as_none=label_non_matches_as_none,
             )
             return jsonify({"job_id": job_id, "status": "queued"}), 202
         except (TypeError, ValueError):

@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import threading
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -84,16 +85,17 @@ def format_bytes(num_bytes: int) -> str:
     return f"{remaining:.1f} {units[unit_idx]}"
 
 # Valid label values for the web labeling UI (unused — superseded by DEFAULT_LABEL_OPTIONS)
-VALID_LABELS: set[str] = {"chapada", "ventura", "none", "unclear", ""}
+VALID_LABELS: set[str] = {"chapada", "ventura", "none", ""}
 
 # Default label options shown in the dataset UI
-DEFAULT_LABEL_OPTIONS: tuple[str, ...] = ("chapada", "ventura", "none", "unclear")
+DEFAULT_LABEL_OPTIONS: tuple[str, ...] = ("chapada", "ventura", "none")
 
 
 class WebSpeechTrainingService:
     """Thin service for the speech training labeling page."""
 
     KEYWORD_SCAN_MAX_DURATION_SECONDS: float = 30.0
+    KEYWORD_SCAN_WORKERS: int = 4  # concurrent workers per scan job
 
     def __init__(
         self,
@@ -347,6 +349,10 @@ class WebSpeechTrainingService:
         if notes is not None and len(notes) > self.NOTES_MAX_LENGTH:
             return False, f"Notes exceed {self.NOTES_MAX_LENGTH} characters"
 
+        # Normalize legacy 'unclear' label to None (unlabeled)
+        if label and label.strip().lower() == 'unclear':
+            label = None
+
         ok = self.repo.update_review(
             clip_id=clip_id,
             label=label if label else None,
@@ -497,6 +503,7 @@ class WebSpeechTrainingService:
         user_id: Optional[str] = None,
         progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
         delete_non_matches: bool = False,
+        label_non_matches_as_none: bool = False,
     ) -> Dict[str, Any]:
         """Scan all unlabeled clips for a keyword using offline Vosk detection.
 
@@ -508,13 +515,17 @@ class WebSpeechTrainingService:
         ``KaldiRecognizer``, and checks word-level confidence for the
         requested keyword.
 
+        Processing is concurrent within this single scan job using a fixed-size
+        thread pool (``KEYWORD_SCAN_WORKERS``, default 4). No environment
+        variables are consulted.
+
         Args:
             keyword: The keyword to detect (lowercased for comparison).
             min_confidence: Minimum Vosk word confidence (0‑1) to consider a match.
             guild_id: Optional guild scope for unlabeled clips.
             user_id: Optional user scope for unlabeled clips.
             progress_callback: Optional callback invoked after total is known
-                and after each clip. Receives a dict with keys ``total``,
+                and as clips complete. Receives a dict with keys ``total``,
                 ``scanned``, ``matched``, ``skipped``, ``current_clip_id``,
                 and ``status`` (``"processing"`` or ``"done"``).  The initial
                 call has ``current_clip_id=None``.
@@ -524,6 +535,9 @@ class WebSpeechTrainingService:
                 clips are preserved.  Deletion happens **after** the full
                 scan completes, using the same batch-safe audio-removal
                 logic as ``bulk_delete``.
+            label_non_matches_as_none: When ``True`` (and ``delete_non_matches``
+                is ``False``), non-matching clips are bulk-labeled as ``none``
+                instead of being deleted.  Skipped clips remain untouched.
 
         Returns:
             Response dict with keys ``status``, ``keyword``,
@@ -533,6 +547,8 @@ class WebSpeechTrainingService:
             When ``delete_non_matches`` was ``True``, also includes
             ``delete_non_matches`` (the input flag) and
             ``deleted_non_matches`` (count of clips actually deleted).
+            When ``label_non_matches_as_none`` was ``True``, also includes
+            that flag and ``labeled_non_matches`` (count).
 
         Raises:
             ValueError: When validation fails (empty keyword, bad
@@ -565,12 +581,13 @@ class WebSpeechTrainingService:
             total, self.KEYWORD_SCAN_MAX_DURATION_SECONDS,
         )
 
+        # ── Notify initial progress ──────────────────────────────────
         scanned = 0
         skipped = 0
         matches: List[Dict[str, Any]] = []
-        non_match_ids: List[int] = []  # scanned clips that did NOT match
+        non_match_ids: List[int] = []
+        _lock = threading.Lock()
 
-        # Notify initial progress
         if progress_callback is not None:
             progress_callback({
                 "total": total,
@@ -581,22 +598,43 @@ class WebSpeechTrainingService:
                 "status": "processing",
             })
 
-        # Pre-compute the grammar: keyword + distractors + [unk]
+        if total == 0:
+            return self._build_scan_result(
+                keyword=keyword,
+                min_confidence=min_confidence,
+                scanned=0,
+                matched=0,
+                skipped=0,
+                matches=[],
+                delete_non_matches=delete_non_matches,
+                deleted_non_matches=0,
+                label_non_matches_as_none=label_non_matches_as_none,
+                labeled_non_matches=0,
+            )
+
+        # ── Concurrency helpers ──────────────────────────────────────
         distractors = ["chapa", "ada", "cha", "o", "google", "jogo", "do jogo"]
         grammar = [keyword] + distractors + ["[unk]"]
         grammar_json = json.dumps(grammar)
 
-        for clip in clips:
-            # Resolve audio path
+        clip_list = list(clips)  # stable order
+        # Map original index -> (clip, future)
+        future_map: Dict[int, Any] = {}
+
+        def _scan_one(clip: dict) -> dict:
+            """Process a single clip: resolve audio, decode, run Vosk.
+
+            Returns a dict with keys:
+                matched (bool), conf (float), text (str), clip_id (int)
+            or keys: error (str), clip_id (int)
+            """
             path = self.resolve_audio_path(clip)
             if path is None:
-                skipped += 1
-                self._notify_scan_progress(progress_callback, total, scanned, matches, skipped, clip)
-                continue
+                return {"matched": False, "conf": 0.0, "text": "", "clip_id": clip.get("id"), "skipped": True, "error": "no_audio"}
 
             try:
-                # Decode MP3 to raw PCM
                 from pydub import AudioSegment
+                import vosk
 
                 segment = (
                     AudioSegment.from_file(str(path), format="mp3")
@@ -606,9 +644,6 @@ class WebSpeechTrainingService:
                 )
                 raw_pcm = segment.raw_data
 
-                # Run through Vosk recognizer
-                import vosk
-
                 rec = vosk.KaldiRecognizer(model, 16000, grammar_json)
                 rec.SetWords(True)
                 rec.AcceptWaveform(raw_pcm)
@@ -617,7 +652,6 @@ class WebSpeechTrainingService:
                 text = result.get("text", "").lower()
                 word_results = result.get("result", [])
 
-                # Find max confidence for exact keyword match
                 best_conf = 0.0
                 for wi in word_results:
                     w = wi.get("word", "").lower()
@@ -626,47 +660,102 @@ class WebSpeechTrainingService:
                         if conf > best_conf:
                             best_conf = conf
 
-                if best_conf >= min_confidence and keyword in text.split():
-                    match_clip = dict(clip)
-                    match_clip["keyword_confidence"] = round(best_conf, 3)
-                    match_clip["keyword_transcript"] = text
-                    matches.append(match_clip)
-                else:
-                    non_match_ids.append(clip["id"])
-
-                scanned += 1
-
+                is_match = best_conf >= min_confidence and keyword in text.split()
+                return {
+                    "matched": is_match,
+                    "conf": round(best_conf, 3),
+                    "text": text,
+                    "clip_id": clip.get("id"),
+                    "skipped": False,
+                    "error": None,
+                }
             except Exception as exc:
-                logger.warning(
-                    "Failed to scan clip %s: %s", clip.get("id"), exc
-                )
-                skipped += 1
+                logger.warning("Failed to scan clip %s: %s", clip.get("id"), exc)
+                return {"matched": False, "conf": 0.0, "text": "", "clip_id": clip.get("id"), "skipped": True, "error": str(exc)}
 
-            self._notify_scan_progress(progress_callback, total, scanned, matches, skipped, clip)
+        def _notify_locked() -> None:
+            """Thread-safe progress notification."""
+            if progress_callback is not None:
+                p_scanned, p_matched, p_skipped = 0, 0, 0
+                with _lock:
+                    p_scanned = scanned
+                    p_matched = len(matches)
+                    p_skipped = skipped
+                progress_callback({
+                    "total": total,
+                    "scanned": p_scanned,
+                    "matched": p_matched,
+                    "skipped": p_skipped,
+                    "current_clip_id": None,
+                    "status": "processing",
+                })
 
-        # ── Delete non-matches ────────────────────────────────────────
+        # ── Submit all clips to the thread pool ──────────────────────
+        pool = ThreadPoolExecutor(max_workers=self.KEYWORD_SCAN_WORKERS)
+        for idx, clip in enumerate(clip_list):
+            future = pool.submit(_scan_one, clip)
+            future_map[idx] = (clip, future)
+
+        # ── Collect results as they complete ─────────────────────────
+        all_futures = [f for _, f in future_map.values()]
+        while all_futures:
+            done, all_futures = wait(all_futures, return_when=FIRST_COMPLETED)
+            for fut in done:
+                result = fut.result()
+                cid = result.get("clip_id")
+                with _lock:
+                    if result.get("skipped"):
+                        skipped += 1
+                    elif result.get("matched"):
+                        # Find the original clip data to augment
+                        for orig in clip_list:
+                            if orig.get("id") == cid:
+                                aug = dict(orig)
+                                aug["keyword_confidence"] = result["conf"]
+                                aug["keyword_transcript"] = result["text"]
+                                matches.append(aug)
+                                break
+                        scanned += 1
+                    else:
+                        non_match_ids.append(cid)
+                        scanned += 1
+            _notify_locked()
+
+        pool.shutdown(wait=False)
+
+        # ── Post-scan: delete or label non-matches ───────────────────
         deleted_non_matches = 0
+        labeled_non_matches = 0
+
         if delete_non_matches and non_match_ids:
             deleted_non_matches = self._delete_nonmatches(non_match_ids)
+        elif label_non_matches_as_none and non_match_ids:
+            labeled_non_matches = self._label_nonmatches_as_none(non_match_ids, "none")
+
+        # Sort matches in original clip order
+        order_map = {c["id"]: i for i, c in enumerate(clip_list)}
+        matches.sort(key=lambda m: order_map.get(m["id"], 999999))
 
         logger.info(
-            "Keyword scan '%s' scanned=%d matched=%d skipped=%d deleted_nonmatches=%d (eligible clips ≤%ss=%d)",
-            keyword, scanned, len(matches), skipped, deleted_non_matches,
+            "Keyword scan '%s' scanned=%d matched=%d skipped=%d "
+            "deleted_nonmatches=%d labeled_nonmatches=%d (eligible clips ≤%ss=%d)",
+            keyword, scanned, len(matches), skipped,
+            deleted_non_matches, labeled_non_matches,
             self.KEYWORD_SCAN_MAX_DURATION_SECONDS, total,
         )
 
-        return {
-            "status": "ok",
-            "keyword": keyword,
-            "min_confidence": min_confidence,
-            "max_duration_seconds": self.KEYWORD_SCAN_MAX_DURATION_SECONDS,
-            "scanned": scanned,
-            "matched": len(matches),
-            "skipped": skipped,
-            "matches": matches,
-            "delete_non_matches": delete_non_matches,
-            "deleted_non_matches": deleted_non_matches,
-        }
+        return self._build_scan_result(
+            keyword=keyword,
+            min_confidence=min_confidence,
+            scanned=scanned,
+            matched=len(matches),
+            skipped=skipped,
+            matches=matches,
+            delete_non_matches=delete_non_matches,
+            deleted_non_matches=deleted_non_matches,
+            label_non_matches_as_none=label_non_matches_as_none,
+            labeled_non_matches=labeled_non_matches,
+        )
 
     _DELETE_CHUNK_SIZE = 500
 
@@ -709,6 +798,66 @@ class WebSpeechTrainingService:
             total_deleted += len(clips)
 
         return total_deleted
+
+    def _label_nonmatches_as_none(
+        self, clip_ids: List[int], label: str
+    ) -> int:
+        """Bulk-label non-matching clip IDs as a given label value.
+
+        Chunks to avoid SQLite variable limits.
+        Uses empty string for reviewer metadata to indicate automated action.
+
+        Args:
+            clip_ids: List of clip primary keys to label.
+            label: Label value to apply (e.g. ``"none"``).
+
+        Returns:
+            Number of clips actually labeled.
+        """
+        if not clip_ids:
+            return 0
+        total_labeled = 0
+        for i in range(0, len(clip_ids), self._DELETE_CHUNK_SIZE):
+            chunk = clip_ids[i : i + self._DELETE_CHUNK_SIZE]
+            updated = self.repo.bulk_update_review(
+                clip_ids=chunk,
+                label=label,
+                reviewer_user_id="",
+                reviewer_username="(scan)",
+            )
+            total_labeled += updated
+        return total_labeled
+
+    @staticmethod
+    def _build_scan_result(
+        *,
+        keyword: str,
+        min_confidence: float,
+        scanned: int,
+        matched: int,
+        skipped: int,
+        matches: List[Dict[str, Any]],
+        delete_non_matches: bool,
+        deleted_non_matches: int,
+        label_non_matches_as_none: bool,
+        labeled_non_matches: int,
+    ) -> Dict[str, Any]:
+        """Build the standard scan response dict."""
+        result: Dict[str, Any] = {
+            "status": "ok",
+            "keyword": keyword,
+            "min_confidence": min_confidence,
+            "max_duration_seconds": WebSpeechTrainingService.KEYWORD_SCAN_MAX_DURATION_SECONDS,
+            "scanned": scanned,
+            "matched": matched,
+            "skipped": skipped,
+            "matches": matches,
+            "delete_non_matches": delete_non_matches,
+            "deleted_non_matches": deleted_non_matches,
+            "label_non_matches_as_none": label_non_matches_as_none,
+            "labeled_non_matches": labeled_non_matches,
+        }
+        return result
 
     @staticmethod
     def _notify_scan_progress(

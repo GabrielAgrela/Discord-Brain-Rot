@@ -53,14 +53,13 @@
         <main class="dataset-main">
             <header class="dataset-toolbar">
                 <div class="dataset-toolbar-left">
-                    <h2 class="dataset-main-title" id="datasetTitle">All clips</h2>
+                    <h2 class="dataset-main-title" id="datasetTitle">Unlabeled clips</h2>
                     <div class="dataset-label-filters" id="labelFilters">
-                        <button type="button" class="dataset-filter-btn active" data-label="">All</button>
-                        <button type="button" class="dataset-filter-btn" data-label="unlabeled">Unlabeled</button>
-                        <button type="button" class="dataset-filter-btn" data-label="chapada">Chapada</button>
-                        <button type="button" class="dataset-filter-btn" data-label="ventura">Ventura</button>
-                        <button type="button" class="dataset-filter-btn" data-label="none">None</button>
-                        <button type="button" class="dataset-filter-btn" data-label="unclear">Unclear</button>
+                        <select id="labelFilterSelect" class="dataset-label-filter-select" aria-label="Filter by label">
+                            <option value="">All</option>
+                            <option value="unlabeled" selected>Unlabeled</option>
+                            <option value="none">None</option>
+                        </select>
                     </div>
                 </div>
                 <div class="dataset-toolbar-right">
@@ -112,7 +111,6 @@
                             <option value="chapada">Chapada</option>
                             <option value="ventura">Ventura</option>
                             <option value="none">None</option>
-                            <option value="unclear">Unclear</option>
                             <option value="__custom__">Custom…</option>
                         </select>
                         <button type="button" class="dataset-bulk-apply-btn" id="bulkApplyLabel" disabled>Apply</button>

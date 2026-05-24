@@ -548,6 +548,63 @@ class TestSpeechTrainingRepository:
         assert len(clips) == 1
         assert clips[0]["duration_seconds"] == 0.8
 
+    # ── 'unclear' treated as unlabeled ───────────────────────────────
+
+    def test_list_users_unlabeled_count_includes_unclear(self, repo):
+        """Unlabeled count includes clips with label='unclear'."""
+        ids = self._insert_sample_clips(repo)
+        repo._execute_write(
+            "UPDATE speech_training_clips SET label = 'unclear' WHERE id = ?",
+            (ids[0],),
+        )
+        repo._execute_write(
+            "UPDATE speech_training_clips SET label = 'chapada' WHERE id = ?",
+            (ids[1],),
+        )
+        users = repo.list_users()
+        u1 = [u for u in users if u["user_id"] == "1"][0]
+        # user1 has ids[0] (unclear), ids[1] (chapada). unlabeled_count should be 1 (unclear)
+        assert u1["unlabeled_count"] == 1
+
+    def test_list_clips_unlabeled_includes_unclear(self, repo):
+        """label='unlabeled' filter includes clips with label='unclear'."""
+        ids = self._insert_sample_clips(repo)
+        repo._execute_write(
+            "UPDATE speech_training_clips SET label = 'unclear' WHERE id = ?",
+            (ids[0],),
+        )
+        items, total = repo.list_clips(label="unlabeled")
+        assert total >= 1
+        # id[0] should appear in results
+        clip_ids = [c["id"] for c in items]
+        assert ids[0] in clip_ids
+
+    def test_list_unlabeled_clips_includes_unclear(self, repo):
+        """list_unlabeled_clips() returns clips with label='unclear'."""
+        ids = self._insert_sample_clips(repo)
+        repo._execute_write(
+            "UPDATE speech_training_clips SET label = 'unclear' WHERE id = ?",
+            (ids[0],),
+        )
+        clips = repo.list_unlabeled_clips()
+        clip_ids = [c["id"] for c in clips]
+        assert ids[0] in clip_ids
+
+    def test_list_labels_excludes_unclear(self, repo):
+        """list_labels() does not return 'unclear'."""
+        ids = self._insert_sample_clips(repo)
+        repo._execute_write(
+            "UPDATE speech_training_clips SET label = 'unclear' WHERE id = ?",
+            (ids[0],),
+        )
+        repo._execute_write(
+            "UPDATE speech_training_clips SET label = 'chapada' WHERE id = ?",
+            (ids[1],),
+        )
+        labels = repo.list_labels()
+        assert 'unclear' not in labels
+        assert 'chapada' in labels
+
     # ── list_labels ──────────────────────────────────────────────────
 
     def test_list_labels_empty(self, repo):

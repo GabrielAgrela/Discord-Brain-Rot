@@ -4,7 +4,7 @@
     // ── State ────────────────────────────────────────────────────────
     const state = {
         selectedUserId: null,
-        labelFilter: '',
+        labelFilter: 'unlabeled',
         page: 1,
         perPage: 20,
         search: '',
@@ -23,12 +23,13 @@
         _scanJobId: null, // pending scan job id for polling
         _scanPollTimer: null, // setTimeout handle for polling
         _scanConfidence: 0.5, // selected min confidence as decimal
-        labelOptions: ['chapada', 'ventura', 'none', 'unclear'],
+        labelOptions: ['chapada', 'ventura', 'none'],
     };
 
-    // ── Passive refresh guards (module-level) ────────────────────────
+    // ── Passive refresh guards / toast timer (module-level) ──────────
     let _passiveRefreshInProgress = false;
     let _passiveRefreshScheduled = false;
+    let _scanToastTimer = null;
 
     // ── DOM refs ─────────────────────────────────────────────────────
     const $ = (id) => document.getElementById(id);
@@ -40,7 +41,7 @@
     const datasetSearch = $('datasetSearch');
     const storageUsed = $('storageUsed');
     const guildSelector = document.getElementById('guildSelector');
-    const labelFilterBtns = document.querySelectorAll('.dataset-filter-btn');
+    const labelFilterSelect = $('labelFilterSelect');
     const datasetSort = $('datasetSort');
     const bulkCount = $('bulkCount');
     const bulkSelectAll = $('bulkSelectAll');
@@ -93,6 +94,42 @@
         userList.innerHTML = '';
         userCount.textContent = String(state.users.length);
 
+        // "All users" option
+        const allEl = document.createElement('button');
+        allEl.type = 'button';
+        allEl.className = 'dataset-user-item' + (state.selectedUserId === null ? ' active' : '');
+        allEl.setAttribute('role', 'option');
+        allEl.setAttribute('aria-selected', String(state.selectedUserId === null));
+
+        const allNameSpan = document.createElement('span');
+        allNameSpan.className = 'dataset-user-name';
+        allNameSpan.textContent = 'All users';
+
+        const allMetaSpan = document.createElement('span');
+        allMetaSpan.className = 'dataset-user-meta';
+        var allTotal = 0;
+        var allUnlabeled = 0;
+        for (var ui = 0; ui < state.users.length; ui++) {
+            allTotal += state.users[ui].total_count || 0;
+            allUnlabeled += state.users[ui].unlabeled_count || 0;
+        }
+        allMetaSpan.textContent = allTotal + ' clips' + (allUnlabeled > 0 ? ' (' + allUnlabeled + ' unlabeled)' : '');
+
+        allEl.appendChild(allNameSpan);
+        allEl.appendChild(allMetaSpan);
+
+        allEl.addEventListener('click', function () {
+            state.selectedUserId = null;
+            state.page = 1;
+            state.selectedIds.clear();
+            updateBulkUI();
+            updateTitleFromFilter();
+            loadClips();
+            renderUsers();
+        });
+
+        userList.appendChild(allEl);
+
         for (const u of state.users) {
             const el = document.createElement('button');
             el.type = 'button';
@@ -115,14 +152,13 @@
             el.addEventListener('click', function () {
                 if (state.selectedUserId === u.user_id) {
                     state.selectedUserId = null;
-                    datasetTitle.textContent = 'All clips';
                 } else {
                     state.selectedUserId = u.user_id;
-                    datasetTitle.textContent = (u.display_name || u.username) + '\u2019s clips';
                 }
                 state.page = 1;
                 state.selectedIds.clear();
                 updateBulkUI();
+                updateTitleFromFilter();
                 loadClips();
                 renderUsers();
             });
@@ -162,6 +198,7 @@
         if (state.labelOptions.indexOf(label) === -1) {
             state.labelOptions.push(label);
             refreshAllLabelSelects();
+            rebuildFilterDropdown();
         }
     }
 
@@ -180,6 +217,37 @@
             html += '<option value="__custom__"' + (isCustom ? ' selected' : '') + '>Custom\u2026</option>';
         }
         return html;
+    }
+
+    function updateTitleFromFilter() {
+        var prefix = state.selectedUserId
+            ? (getUserDisplayName(state.selectedUserId) || 'Selected') + '\u2019s '
+            : 'All users\u2019 ';
+        if (state.labelFilter === 'unlabeled') {
+            datasetTitle.textContent = prefix + 'unlabeled clips';
+        } else if (state.labelFilter === 'none') {
+            datasetTitle.textContent = prefix + '\u201cnone\u201d clips';
+        } else if (state.labelFilter) {
+            datasetTitle.textContent = prefix + '\u201c' + state.labelFilter + '\u201d clips';
+        } else {
+            datasetTitle.textContent = state.selectedUserId ? prefix + 'clips' : 'All clips';
+        }
+    }
+
+    function rebuildFilterDropdown() {
+        if (!labelFilterSelect) return;
+        var currentValue = labelFilterSelect.value || state.labelFilter || '';
+        var html = '<option value="">All</option>';
+        html += '<option value="unlabeled"' + (currentValue === 'unlabeled' ? ' selected' : '') + '>Unlabeled</option>';
+        html += '<option value="none"' + (currentValue === 'none' ? ' selected' : '') + '>None</option>';
+        // Add dynamic labels from state.labelOptions, excluding 'unclear', 'none'
+        for (var i = 0; i < state.labelOptions.length; i++) {
+            var opt = state.labelOptions[i];
+            if (opt === 'none' || opt === 'unclear') continue;
+            var sel = opt === currentValue ? ' selected' : '';
+            html += '<option value="' + escapeHtmlForAttr(opt) + '"' + sel + '>' + escapeHtml(opt) + '</option>';
+        }
+        labelFilterSelect.innerHTML = html;
     }
 
     function refreshAllLabelSelects() {
@@ -239,9 +307,11 @@
             if (data.labels && Array.isArray(data.labels) && data.labels.length > 0) {
                 state.labelOptions = data.labels;
                 refreshAllLabelSelects();
+                rebuildFilterDropdown();
             }
         } catch (e) {
             // keep defaults
+            rebuildFilterDropdown();
         }
     }
 
@@ -843,6 +913,48 @@
         }
     }
 
+    // ── Scan toast helper ────────────────────────────────────────────
+    function showScanToast(message, kind) {
+        kind = kind || 'info';
+
+        var region = document.getElementById('speechToastRegion');
+        if (!region) {
+            region = document.createElement('div');
+            region.id = 'speechToastRegion';
+            region.className = 'speech-toast-region';
+            region.setAttribute('role', 'status');
+            region.setAttribute('aria-live', 'polite');
+            region.setAttribute('aria-atomic', 'true');
+            document.body.appendChild(region);
+        }
+
+        // Remove any existing toast in the region
+        var existing = region.querySelector('.speech-toast');
+        if (existing) {
+            existing.remove();
+            if (_scanToastTimer) {
+                clearTimeout(_scanToastTimer);
+                _scanToastTimer = null;
+            }
+        }
+
+        var toast = document.createElement('div');
+        toast.className = 'speech-toast ' + kind;
+        toast.textContent = message;
+        region.appendChild(toast);
+
+        // Auto-dismiss after 6 seconds with fade-out
+        _scanToastTimer = setTimeout(function () {
+            if (toast.parentNode) {
+                toast.classList.add('speech-toast-hiding');
+                setTimeout(function () {
+                    if (toast.parentNode) toast.remove();
+                }, 180);
+            }
+            _scanToastTimer = null;
+        }, 6000);
+    }
+
     // ── Scan mode ────────────────────────────────────────────────────
     function enterScanMode(clips, keyword, maxDurationSeconds) {
         state._scanMode = true;
@@ -877,9 +989,7 @@
             scanProgress.hidden = true;
             scanProgress.value = 0;
         }
-        datasetTitle.textContent = state.selectedUserId
-            ? (getUserDisplayName(state.selectedUserId) || 'Selected') + '\u2019s clips'
-            : 'All clips';
+        updateTitleFromFilter();
         if (!skipReload) {
             loadClips();
             renderPagination();
@@ -914,7 +1024,7 @@
         }
         state._scanConfidence = minConfidence;
 
-        var body = { keyword: 'chapada', min_confidence: minConfidence, delete_non_matches: true };
+        var body = { keyword: 'chapada', min_confidence: minConfidence, label_non_matches_as_none: true };
         var gid = getSelectedGuildId();
         if (gid) body.guild_id = gid;
         if (state.selectedUserId) body.user_id = state.selectedUserId;
@@ -1006,24 +1116,27 @@
         if (scanKeywordBtn) scanKeywordBtn.disabled = false;
         if (scanProgress) scanProgress.hidden = true;
 
-        // Build deletion suffix if non-matches were deleted
-        var deletionNote = '';
+        // Build suffix for non-matches action
+        var nonMatchNote = '';
         if (data.delete_non_matches && data.deleted_non_matches > 0) {
-            deletionNote = ' \u00b7 ' + data.deleted_non_matches + ' non-match' + (data.deleted_non_matches !== 1 ? 'es' : '') + ' deleted';
+            nonMatchNote = ' \u00b7 ' + data.deleted_non_matches + ' non-match' + (data.deleted_non_matches !== 1 ? 'es' : '') + ' deleted';
+        } else if (data.label_non_matches_as_none && data.labeled_non_matches > 0) {
+            nonMatchNote = ' \u00b7 ' + data.labeled_non_matches + ' non-match' + (data.labeled_non_matches !== 1 ? 'es' : '') + ' labeled as none';
         }
 
-        // Refresh users and storage after potential deletion
+        // Refresh users and storage after potential deletion/labeling
         loadUsers();
         loadStorage();
 
         if (data.matched > 0) {
             enterScanMode(data.matches, data.keyword, data.max_duration_seconds);
-            if (scanStatus && deletionNote) {
-                scanStatus.textContent = scanStatus.textContent + deletionNote;
+            if (scanStatus && nonMatchNote) {
+                scanStatus.textContent = scanStatus.textContent + nonMatchNote;
             }
         } else {
             var maxDur = data.max_duration_seconds ? ' among clips \u2264' + data.max_duration_seconds + 's' : '';
-            if (scanStatus) scanStatus.textContent = 'No matches found' + maxDur + ' (scanned ' + data.scanned + ', skipped ' + data.skipped + ')' + deletionNote;
+            showScanToast('No matches found' + maxDur + ' (scanned ' + data.scanned + ', skipped ' + data.skipped + ')' + nonMatchNote, 'info');
+            if (scanStatus) scanStatus.textContent = '';
             datasetTitle.textContent = 'No matches';
             clipList.innerHTML = '<p class="dataset-empty">No clips matched "' + data.keyword + '" at \u2265' + Math.round(data.min_confidence * 100) + '% confidence' + maxDur + '.</p>';
             datasetPagination.innerHTML = '<div class="pagination-inner"><button type="button" class="pagination-btn" id="clearScanBtn">Show all clips</button></div>';
@@ -1274,19 +1387,18 @@
         });
     }
 
-    // ── Label filters ────────────────────────────────────────────────
-    labelFilterBtns.forEach(function (btn) {
-        btn.addEventListener('click', function () {
-            labelFilterBtns.forEach(function (b) { b.classList.remove('active'); });
-            btn.classList.add('active');
-            state.labelFilter = btn.dataset.label;
+    // ── Label filter dropdown ───────────────────────────────────────
+    if (labelFilterSelect) {
+        labelFilterSelect.addEventListener('change', function () {
+            state.labelFilter = labelFilterSelect.value;
             state.page = 1;
             state.selectedIds.clear();
             updateBulkUI();
             clearScanMode(true);
+            updateTitleFromFilter();
             loadClips();
         });
-    });
+    }
 
     // ── Sort ─────────────────────────────────────────────────────────
     if (datasetSort) {
@@ -1408,7 +1520,9 @@
             state.selectedIds.clear();
             updateBulkUI();
             clearScanMode(true);
-            datasetTitle.textContent = 'All clips';
+            state.labelFilter = 'unlabeled';
+            if (labelFilterSelect) labelFilterSelect.value = 'unlabeled';
+            updateTitleFromFilter();
             loadUsers();
             loadStorage();
             loadLabels();
@@ -1417,6 +1531,11 @@
     }
 
     // ── Init ─────────────────────────────────────────────────────────
+    // Set label filter dropdown to the initial state value
+    state.labelFilter = 'unlabeled';
+    if (labelFilterSelect) labelFilterSelect.value = 'unlabeled';
+    updateTitleFromFilter();
+
     loadUsers();
     loadStorage();
     loadLabels();
