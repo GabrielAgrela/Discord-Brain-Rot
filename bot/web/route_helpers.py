@@ -485,6 +485,195 @@ def _run_web_keyword_scan_job(
         }
 
 
+# ---------------------------------------------------------------------------
+# Auto-transcript async job helpers
+# ---------------------------------------------------------------------------
+
+
+def _queue_web_transcript_job(
+    *,
+    guild_id: str | None,
+    user_id: str | None,
+) -> str:
+    """Persist auto-transcript parameters and submit background processing.
+
+    Returns:
+        The job ID for polling status via
+        ``GET /api/speech_training/transcribe_empty/<job_id>``.
+    """
+    job_id = uuid.uuid4().hex
+    created_at = datetime.now(timezone.utc).isoformat()
+    jobs: dict[str, Any] = current_app.extensions.setdefault("web_transcript_jobs", {})
+    jobs[job_id] = {
+        "job_id": job_id,
+        "status": "queued",
+        "total": 0,
+        "processed": 0,
+        "updated": 0,
+        "empty_marked": 0,
+        "skipped": 0,
+        "errors": [],
+        "error": None,
+        "created_at": created_at,
+        "finished_at": None,
+    }
+
+    # Keep dict bounded: remove oldest terminal entries when over 50
+    _prune_old_transcript_jobs(jobs)
+
+    db_path = current_app.config["DATABASE_PATH"]
+    data_dir = os.getenv(
+        "SPEECH_TRAINING_DATA_DIR",
+        os.path.abspath(
+            os.path.join(
+                os.path.dirname(__file__), "..", "..", "data", "speech_training"
+            )
+        ),
+    )
+    groq_api_key = os.getenv("GROQ_API_KEY", "")
+    groq_whisper_model = os.getenv("GROQ_WHISPER_MODEL", "whisper-large-v3")
+
+    executor = current_app.extensions["web_transcript_executor"]
+    executor.submit(
+        _run_web_transcript_job,
+        job_id=job_id,
+        jobs=jobs,
+        db_path=db_path,
+        data_dir=data_dir,
+        guild_id=guild_id,
+        user_id=user_id,
+        groq_api_key=groq_api_key,
+        groq_whisper_model=groq_whisper_model,
+    )
+    return job_id
+
+
+def _run_web_transcript_job(
+    *,
+    job_id: str,
+    jobs: dict[str, Any],
+    db_path: str,
+    data_dir: str,
+    guild_id: str | None,
+    user_id: str | None,
+    groq_api_key: str,
+    groq_whisper_model: str,
+) -> None:
+    """Process one queued auto-transcript job outside the Flask request thread."""
+    from bot.repositories.speech_training import SpeechTrainingRepository
+    from bot.services.web_speech_training import WebSpeechTrainingService
+
+    finished_at = datetime.now(timezone.utc).isoformat()
+
+    try:
+        repo = SpeechTrainingRepository(db_path=db_path, use_shared=False)
+        svc = WebSpeechTrainingService(repo, data_dir)
+        svc.ensure_schema()
+
+        initial_job_entry = jobs.get(job_id, {})
+
+        def _on_progress(progress: dict[str, Any]) -> None:
+            """Update the shared jobs dict with current transcript progress."""
+            status = progress.get("status", "processing")
+            # Map "done" → "done" for the polling endpoint
+            job_status = "done" if status == "done" else "processing"
+            jobs[job_id] = {
+                "job_id": job_id,
+                "status": job_status,
+                "total": progress.get("total", 0),
+                "processed": progress.get("processed", 0),
+                "updated": progress.get("updated", 0),
+                "empty_marked": progress.get("empty_marked", 0),
+                "skipped": progress.get("skipped", 0),
+                "errors": progress.get("errors", []),
+                "error": None,
+                "created_at": initial_job_entry.get("created_at"),
+                "finished_at": None,
+            }
+
+        result = svc.transcribe_empty_clips(
+            guild_id=guild_id,
+            user_id=user_id,
+            groq_api_key=groq_api_key,
+            groq_whisper_model=groq_whisper_model,
+            progress_callback=_on_progress,
+        )
+
+        jobs[job_id] = {
+            "job_id": job_id,
+            "status": "done",
+            "total": result.get("total", 0),
+            "processed": result.get("processed", 0),
+            "updated": result.get("updated", 0),
+            "empty_marked": result.get("empty_marked", 0),
+            "skipped": result.get("skipped", 0),
+            "errors": result.get("errors", []),
+            "error": None,
+            "created_at": initial_job_entry.get("created_at"),
+            "finished_at": finished_at,
+        }
+    except ValueError as exc:
+        jobs[job_id] = {
+            "job_id": job_id,
+            "status": "error",
+            "total": 0,
+            "processed": 0,
+            "updated": 0,
+            "empty_marked": 0,
+            "skipped": 0,
+            "errors": [],
+            "error": str(exc),
+            "created_at": initial_job_entry.get("created_at"),
+            "finished_at": finished_at,
+        }
+    except Exception:
+        logger.exception("Unexpected error processing transcript job")
+        jobs[job_id] = {
+            "job_id": job_id,
+            "status": "error",
+            "total": 0,
+            "processed": 0,
+            "updated": 0,
+            "empty_marked": 0,
+            "skipped": 0,
+            "errors": [],
+            "error": "Internal server error",
+            "created_at": initial_job_entry.get("created_at"),
+            "finished_at": finished_at,
+        }
+
+
+def _prune_old_transcript_jobs(jobs: dict[str, Any]) -> None:
+    """Remove oldest terminal transcript jobs when the dict exceeds 50 entries.
+
+    Never removes entries with status ``queued`` or ``processing``.
+    """
+    MAX_JOBS = 50
+    if len(jobs) <= MAX_JOBS:
+        return
+
+    active: list[str] = []
+    terminal: list[tuple[str, str | None]] = []
+    for jid, entry in jobs.items():
+        status = entry.get("status", "")
+        if status in ("queued", "processing"):
+            active.append(jid)
+        else:
+            finished_at = entry.get("finished_at")
+            terminal.append((jid, finished_at))
+
+    keep_count = MAX_JOBS - len(active)
+    if keep_count <= 0:
+        for jid, _ in terminal:
+            jobs.pop(jid, None)
+        return
+
+    terminal.sort(key=lambda x: x[1] or "")
+    to_remove = terminal[:-keep_count] if keep_count < len(terminal) else []
+    for jid, _ in to_remove:
+        jobs.pop(jid, None)
+
+
 def _prune_old_keyword_scan_jobs(jobs: dict[str, Any]) -> None:
     """Remove oldest finished/error jobs when the dict exceeds 50 entries.
 

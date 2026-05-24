@@ -493,6 +493,87 @@ class SpeechTrainingRepository(BaseRepository):
         return clip
 
     # ------------------------------------------------------------------
+    # Transcript-specific methods
+    # ------------------------------------------------------------------
+
+    def list_empty_transcript_clips(
+        self,
+        guild_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Return clips where transcript IS NULL or empty, optionally scoped.
+
+        Args:
+            guild_id: Optional guild filter.
+            user_id: Optional user filter.
+
+        Returns:
+            List of clip dicts ordered by ``captured_at DESC, id DESC``.
+        """
+        conditions: List[str] = ["(transcript IS NULL OR transcript = '')"]
+        params: List[Any] = []
+
+        if guild_id:
+            conditions.append("guild_id = ?")
+            params.append(guild_id)
+        if user_id:
+            conditions.append("user_id = ?")
+            params.append(user_id)
+
+        sql = "SELECT * FROM speech_training_clips"
+        if conditions:
+            sql += " WHERE " + " AND ".join(conditions)
+        sql += " ORDER BY captured_at DESC, id DESC"
+        rows = self._execute(sql, tuple(params))
+        return [dict(r) for r in rows]
+
+    def update_transcript(
+        self,
+        clip_id: int,
+        transcript: str,
+        reviewer_user_id: str = "",
+        reviewer_username: str = "(auto-transcript)",
+    ) -> bool:
+        """Update only the transcript and reviewer metadata for a clip.
+
+        Preserves the existing label and notes.  This is distinct from
+        ``update_review`` which always writes all three fields together.
+
+        Args:
+            clip_id: Clip primary key.
+            transcript: New transcript text (use ``"-"`` for empty Whisper).
+            reviewer_user_id: Discord user ID (default ``""``).
+            reviewer_username: Username label (default ``"(auto-transcript)"``).
+
+        Returns:
+            True if the clip was updated.
+        """
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                UPDATE speech_training_clips
+                SET transcript = ?,
+                    reviewed_by_user_id = ?,
+                    reviewed_by_username = ?,
+                    reviewed_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (
+                    transcript if transcript is not None else "",
+                    reviewer_user_id,
+                    reviewer_username,
+                    clip_id,
+                ),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+        finally:
+            if not self._use_shared or BaseRepository._shared_connection is None:
+                conn.close()
+
+    # ------------------------------------------------------------------
     # Bulk operations
     # ------------------------------------------------------------------
 

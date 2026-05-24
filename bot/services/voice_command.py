@@ -128,6 +128,32 @@ COOLDOWN_SECONDS: int = max(1, _cooldown_seconds)
 # Groq Whisper API client
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Groq Whisper result type
+# ---------------------------------------------------------------------------
+
+from dataclasses import dataclass
+
+
+@dataclass
+class GroqWhisperResult:
+    """Typed result from a Groq Whisper transcription request.
+
+    Attributes:
+        text: The transcribed text (stripped), or empty string on failure.
+        is_empty: ``True`` when Groq returned a successful 200 response
+            with empty or whitespace-only text.
+        is_available: ``True`` when a GROQ_API_KEY was configured and the
+            API request was attempted.
+        error: Human-readable error message when the API call failed,
+            or empty string on success.
+    """
+    text: str = ""
+    is_empty: bool = False
+    is_available: bool = False
+    error: str = ""
+
+
 class GroqWhisperService:
     """Lightweight client for Groq Cloud Whisper transcription."""
 
@@ -148,6 +174,83 @@ class GroqWhisperService:
     def is_available(self) -> bool:
         """Return True when a GROQ_API_KEY is configured."""
         return bool(self.api_key)
+
+    async def transcribe_detailed(self, wav_bytes: bytes) -> GroqWhisperResult:
+        """Transcribe a WAV file via Groq Whisper and return a detailed result.
+
+        Unlike ``transcribe()`` which collapses empty/failure into ``None``,
+        this method distinguishes:
+          - success with non-empty text,
+          - success with empty text (Groq returned 200 but text was blank),
+          - API unavailable (no key),
+          - API failure (HTTP error, timeout, network error).
+
+        Args:
+            wav_bytes: Complete WAV file bytes (RIFF header + PCM data).
+
+        Returns:
+            A ``GroqWhisperResult`` with the outcome.
+        """
+        if not self.api_key:
+            return GroqWhisperResult(
+                is_available=False,
+                error="GROQ_API_KEY not set",
+            )
+
+        self._save_debug_audio(wav_bytes)
+
+        url = "https://api.groq.com/openai/v1/audio/transcriptions"
+        headers = {"Authorization": f"Bearer {self.api_key}"}
+
+        data = aiohttp.FormData()
+        data.add_field("file", wav_bytes, filename="voice.wav", content_type="audio/wav")
+        data.add_field("model", self.model)
+        data.add_field("response_format", "json")
+        if self.temperature:
+            data.add_field("temperature", self.temperature)
+        if self.prompt:
+            data.add_field("prompt", self.prompt)
+        if self.language:
+            data.add_field("language", self.language)
+
+        try:
+            timeout = aiohttp.ClientTimeout(total=self.timeout_seconds)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(url, headers=headers, data=data) as resp:
+                    if resp.status != 200:
+                        error_text = await resp.text()
+                        logger.error(
+                            "[GroqWhisper] API error %s: %.200s", resp.status, error_text
+                        )
+                        return GroqWhisperResult(
+                            is_available=True,
+                            error=f"API error {resp.status}",
+                        )
+                    result = await resp.json()
+                    text = (result.get("text") or "").strip()
+                    if not text:
+                        return GroqWhisperResult(
+                            text="",
+                            is_empty=True,
+                            is_available=True,
+                        )
+                    return GroqWhisperResult(
+                        text=text,
+                        is_empty=False,
+                        is_available=True,
+                    )
+        except asyncio.TimeoutError:
+            logger.error("[GroqWhisper] Request timed out after %ss", self.timeout_seconds)
+            return GroqWhisperResult(
+                is_available=True,
+                error=f"Request timed out after {self.timeout_seconds}s",
+            )
+        except Exception as exc:
+            logger.error("[GroqWhisper] Request failed: %s", exc)
+            return GroqWhisperResult(
+                is_available=True,
+                error=str(exc),
+            )
 
     async def transcribe(self, wav_bytes: bytes) -> Optional[str]:
         """Transcribe a WAV file via the Groq Whisper API.

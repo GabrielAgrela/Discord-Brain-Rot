@@ -59,3 +59,17 @@ class TestJavaScriptSyntax:
         assert "% certainty</span>" in content
         # The title should reference "Chapada certainty"
         assert "Chapada certainty" in content
+
+    @pytest.mark.parametrize("filename", JS_FILES)
+    def test_transcript_job_functions_exist(self, filename):
+        """Verify transcribe button handling functions are present."""
+        filepath = os.path.join(STATIC_DIR, filename)
+        assert os.path.exists(filepath), f"JS file not found: {filepath}"
+        with open(filepath, "r", encoding="utf-8") as fh:
+            content = fh.read()
+        assert "runTranscriptJob" in content
+        assert "pollTranscriptJob" in content
+        assert "onTranscriptDone" in content
+        assert "onTranscriptError" in content
+        assert "cancelTranscriptPoll" in content
+        assert "transcribeBtn" in content

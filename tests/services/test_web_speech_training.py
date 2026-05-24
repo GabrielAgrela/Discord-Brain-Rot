@@ -801,3 +801,124 @@ class TestWebSpeechTrainingLabelOptions:
         """Without guild_id, repo is called with guild_id=None."""
         service.get_label_options()
         service.repo.list_labels.assert_called_once_with(guild_id=None)
+
+
+class TestWebSpeechTrainingTranscribe:
+    """Tests for WebSpeechTrainingService.transcribe_empty_clips()."""
+
+    @pytest.fixture
+    def repo(self):
+        """Create a mock SpeechTrainingRepository."""
+        mock_repo = MagicMock()
+        mock_repo.list_empty_transcript_clips.return_value = []
+        return mock_repo
+
+    @pytest.fixture
+    def service(self, repo, tmp_path):
+        """Create a WebSpeechTrainingService with a temp data dir."""
+        from bot.services.web_speech_training import WebSpeechTrainingService
+
+        return WebSpeechTrainingService(repo, str(tmp_path))
+
+    # ── Validation ───────────────────────────────────────────────────
+
+    def test_transcribe_rejects_missing_key(self, service):
+        """Empty groq_api_key raises ValueError."""
+        with pytest.raises(ValueError, match="GROQ_API_KEY is not configured"):
+            service.transcribe_empty_clips(groq_api_key="")
+
+    def test_transcribe_rejects_none_key(self, service):
+        """None groq_api_key raises ValueError."""
+        with pytest.raises(ValueError):
+            service.transcribe_empty_clips(groq_api_key="")
+
+    # ── No empty clips ───────────────────────────────────────────────
+
+    def test_transcribe_no_empty_clips(self, service):
+        """When no empty-transcript clips exist, returns zero counts."""
+        service.repo.list_empty_transcript_clips.return_value = []
+        result = service.transcribe_empty_clips(groq_api_key="test-key")
+        assert result["status"] == "ok"
+        assert result["total"] == 0
+        assert result["processed"] == 0
+        assert result["updated"] == 0
+
+    # ── Progress callback ─────────────────────────────────────────────
+
+    def test_transcribe_progress_callback_initial(self, service):
+        """Progress callback is called with initial state before processing."""
+        service.repo.list_empty_transcript_clips.return_value = []
+
+        callbacks: list = []
+
+        def _cb(progress: dict) -> None:
+            callbacks.append(progress)
+
+        service.transcribe_empty_clips(groq_api_key="test-key", progress_callback=_cb)
+
+        assert len(callbacks) >= 1
+        initial = callbacks[0]
+        assert initial["status"] == "processing"
+        assert initial["total"] == 0
+        assert initial["processed"] == 0
+        assert initial["updated"] == 0
+
+        # Last callback should have status "done"
+        last = callbacks[-1]
+        assert last["status"] == "done"
+
+    # ── Scan passes filters ───────────────────────────────────────────
+
+    def test_transcribe_passes_filters(self, service):
+        """Guild and user filters are forwarded to the repo."""
+        service.repo.list_empty_transcript_clips.return_value = []
+
+        service.transcribe_empty_clips(
+            guild_id="100", user_id="1", groq_api_key="test-key",
+        )
+
+        service.repo.list_empty_transcript_clips.assert_called_once_with(
+            guild_id="100", user_id="1",
+        )
+
+    # ── Results dict ──────────────────────────────────────────────────
+
+    def test_transcribe_returns_result_dict(self, service):
+        """Result dict contains expected keys."""
+        service.repo.list_empty_transcript_clips.return_value = []
+
+        result = service.transcribe_empty_clips(groq_api_key="test-key")
+
+        expected_keys = {
+            "status", "total", "processed", "updated",
+            "empty_marked", "skipped", "errors",
+        }
+        assert expected_keys.issubset(result.keys())
+
+    # ── Cap handling ──────────────────────────────────────────────────
+
+    def test_transcribe_caps_at_max(self, service):
+        """Total is capped at TRANSCRIBE_MAX_CLIPS."""
+        many_clips = [
+            {
+                "id": i,
+                "relative_path": f"g100/u1/clip{i}.mp3",
+                "guild_id": "100",
+                "user_id": "1",
+                "username": "user1",
+                "display_name": "User One",
+                "filename": f"clip{i}.mp3",
+                "duration_seconds": 1.0,
+                "byte_size": 1000,
+                "captured_at": "2026-01-01 00:00:00",
+                "label": None,
+                "transcript": None,
+            }
+            for i in range(service.TRANSCRIBE_MAX_CLIPS + 50)
+        ]
+        service.repo.list_empty_transcript_clips.return_value = many_clips
+
+        result = service.transcribe_empty_clips(groq_api_key="test-key")
+
+        assert result["total"] == service.TRANSCRIBE_MAX_CLIPS
+        assert result["total"] == 500

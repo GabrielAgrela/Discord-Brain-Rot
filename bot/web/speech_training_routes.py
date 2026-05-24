@@ -359,6 +359,55 @@ def register_speech_training_routes(app: Flask) -> None:
             return jsonify({"error": "Job not found"}), 404
         return jsonify(job)
 
+    # ------------------------------------------------------------------
+    # API: Auto-transcribe empty clips (async job)
+    # ------------------------------------------------------------------
+
+    @app.route("/api/speech_training/transcribe_empty", methods=["POST"])
+    @_require_discord_login_api
+    @_require_web_admin_api
+    def api_speech_training_transcribe_empty() -> Any:
+        """Start an async auto-transcript job for empty-transcript clips.
+
+        Request body::
+
+            {"guild_id": "...", "user_id": "..."}
+
+        Both fields are optional.  Scopes the empty-transcript clips
+        to the given guild and/or user.
+
+        Returns ``202`` with ``job_id`` immediately.  Poll status via
+        ``GET /api/speech_training/transcribe_empty/<job_id>``.
+        """
+        data = request.get_json(silent=True) or {}
+        guild_id = (data.get("guild_id") or "").strip() or None
+        user_id = (data.get("user_id") or "").strip() or None
+
+        from bot.web.route_helpers import _queue_web_transcript_job
+
+        job_id = _queue_web_transcript_job(
+            guild_id=guild_id,
+            user_id=user_id,
+        )
+        return jsonify({"job_id": job_id, "status": "queued"}), 202
+
+    @app.route("/api/speech_training/transcribe_empty/<job_id>", methods=["GET"])
+    @_require_discord_login_api
+    @_require_web_admin_api
+    def api_speech_training_transcribe_empty_status(job_id: str) -> Any:
+        """Return the current state of an auto-transcript job.
+
+        Response keys include ``status`` (``queued``, ``processing``,
+        ``done``, ``error``), ``total``, ``processed``, ``updated``,
+        ``empty_marked``, ``skipped``, ``errors`` (list, max 20), and
+        ``error`` (top-level error message).
+        """
+        jobs = app.extensions.get("web_transcript_jobs", {})
+        job = jobs.get(job_id)
+        if job is None:
+            return jsonify({"error": "Job not found"}), 404
+        return jsonify(job)
+
 
 def _redirect_to_login(route_name: str) -> Any:
     """Redirect to Discord login preserving the next route."""

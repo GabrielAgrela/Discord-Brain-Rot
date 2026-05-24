@@ -22,6 +22,9 @@
         _scanKeyword: '', // the keyword that was scanned for
         _scanJobId: null, // pending scan job id for polling
         _scanPollTimer: null, // setTimeout handle for polling
+        _transcriptJobId: null, // pending transcript job id for polling
+        _transcriptPollTimer: null, // setTimeout handle for polling
+        _transcriptProcessing: false, // true while transcript job is running
         _scanConfidence: 0.5, // fixed min confidence (always 50%)
         labelOptions: ['chapada', 'ventura', 'none'],
     };
@@ -52,6 +55,7 @@
     const scanKeywordBtn = $('scanKeywordBtn');
     const scanStatus = $('scanStatus');
     const scanProgress = $('scanProgress');
+    const transcribeBtn = $('transcribeBtn');
 
     // ── Theme toggle ───────────────────────────────────────────────────
     const themeToggle = document.querySelector('.theme-toggle');
@@ -1038,6 +1042,7 @@
         cancelScanPoll();
 
         if (scanKeywordBtn) scanKeywordBtn.disabled = true;
+        if (transcribeBtn) transcribeBtn.disabled = true;
         if (scanStatus) scanStatus.textContent = '';
         showScanToast('Starting scan (clips \u226430s)\u2026', 'info');
         if (scanProgress) {
@@ -1134,6 +1139,7 @@
     function onScanDone(data) {
         state._scanJobId = null;
         if (scanKeywordBtn) scanKeywordBtn.disabled = false;
+        if (transcribeBtn) transcribeBtn.disabled = false;
         if (scanProgress) scanProgress.hidden = true;
 
         // Build suffix for non-matches action
@@ -1173,6 +1179,7 @@
     function onScanError(message) {
         state._scanJobId = null;
         if (scanKeywordBtn) scanKeywordBtn.disabled = false;
+        if (transcribeBtn) transcribeBtn.disabled = false;
         if (scanProgress) scanProgress.hidden = true;
         showScanToast(message, 'error');
         if (scanStatus) scanStatus.textContent = '';
@@ -1186,10 +1193,157 @@
         state._scanJobId = null;
     }
 
+    // ── Auto-transcript job ───────────────────────────────────────────
+    async function runTranscriptJob() {
+        // Cancel any previous poll
+        cancelTranscriptPoll();
+
+        if (transcribeBtn) transcribeBtn.disabled = true;
+        if (scanKeywordBtn) scanKeywordBtn.disabled = true;
+        state._transcriptProcessing = true;
+        showScanToast('Starting auto-transcript job\u2026', 'info');
+        if (scanProgress) {
+            scanProgress.hidden = false;
+            scanProgress.value = 0;
+            scanProgress.max = 100;
+        }
+
+        var body = {};
+        var gid = getSelectedGuildId();
+        if (gid) body.guild_id = gid;
+        if (state.selectedUserId) body.user_id = state.selectedUserId;
+
+        try {
+            var resp = await fetch('/api/speech_training/transcribe_empty', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+            var data = await safeParseJson(resp);
+            if (data.job_id) {
+                state._transcriptJobId = data.job_id;
+                showScanToast('Queued\u2026', 'info');
+                pollTranscriptJob(data.job_id);
+            } else {
+                showScanToast(data.error || 'Failed to start transcript job', 'error');
+                finishTranscriptJob();
+            }
+        } catch (e) {
+            showScanToast('Network error while starting transcript job', 'error');
+            finishTranscriptJob();
+        }
+    }
+
+    async function pollTranscriptJob(jobId) {
+        var pollInterval = 500; // ms
+
+        async function poll() {
+            if (state._transcriptJobId !== jobId) return; // stale poll
+
+            try {
+                var resp = await fetch('/api/speech_training/transcribe_empty/' + jobId);
+                var data = await safeParseJson(resp);
+                if (data.status === 'queued' || data.status === 'processing') {
+                    updateTranscriptProgress(data);
+                    state._transcriptPollTimer = setTimeout(poll, pollInterval);
+                } else if (data.status === 'done') {
+                    onTranscriptDone(data);
+                } else if (data.status === 'error') {
+                    onTranscriptError(data.error || 'Transcript job failed');
+                } else {
+                    onTranscriptError(data.error || 'Unexpected status: ' + data.status);
+                }
+            } catch (e) {
+                onTranscriptError('Network error while checking transcript progress');
+            }
+        }
+
+        state._transcriptPollTimer = setTimeout(poll, pollInterval);
+    }
+
+    function updateTranscriptProgress(data) {
+        var total = data.total || 0;
+        var processed = data.processed || 0;
+        var updated = data.updated || 0;
+        var emptyMarked = data.empty_marked || 0;
+        var skipped = data.skipped || 0;
+
+        if (scanProgress && total > 0) {
+            var pct = Math.min(Math.round((processed / total) * 100), 100);
+            scanProgress.value = pct;
+        }
+        if (scanStatus && total > 0) {
+            var parts = [];
+            parts.push(processed + '/' + total);
+            if (updated > 0) parts.push(updated + ' updated');
+            if (emptyMarked > 0) parts.push(emptyMarked + ' empty');
+            if (skipped > 0) parts.push(skipped + ' skipped');
+            scanStatus.textContent = parts.join(' \u00b7 ');
+        }
+    }
+
+    function onTranscriptDone(data) {
+        state._transcriptJobId = null;
+        state._transcriptProcessing = false;
+        if (transcribeBtn) transcribeBtn.disabled = false;
+        if (scanKeywordBtn) scanKeywordBtn.disabled = false;
+        if (scanProgress) scanProgress.hidden = true;
+        if (scanStatus) scanStatus.textContent = '';
+
+        var total = data.total || 0;
+        var updated = data.updated || 0;
+        var emptyMarked = data.empty_marked || 0;
+        var skipped = data.skipped || 0;
+
+        // Build summary message
+        var parts = [];
+        if (updated > 0) parts.push(updated + ' clip' + (updated !== 1 ? 's' : '') + ' updated');
+        if (emptyMarked > 0) parts.push(emptyMarked + ' empty marked \u201c-\u201d');
+        if (skipped > 0) parts.push(skipped + ' skipped');
+        var summary = parts.length > 0 ? parts.join(', ') : 'No empty transcripts found';
+        var msg = 'Transcript job complete: ' + summary;
+        showScanToast(msg, 'success');
+
+        // Refresh the clip list to show new transcripts
+        loadClips();
+        loadUsers();
+
+        // If there were errors, show them too
+        if (data.errors && data.errors.length > 0) {
+            var errMsg = data.errors.slice(0, 3).join('; ');
+            if (data.errors.length > 3) errMsg += ' (+' + (data.errors.length - 3) + ' more)';
+            showScanToast('Errors: ' + errMsg, 'error');
+        }
+    }
+
+    function onTranscriptError(message) {
+        state._transcriptJobId = null;
+        finishTranscriptJob();
+        showScanToast(message, 'error');
+    }
+
+    function finishTranscriptJob() {
+        state._transcriptProcessing = false;
+        if (transcribeBtn) transcribeBtn.disabled = false;
+        if (scanKeywordBtn) scanKeywordBtn.disabled = false;
+        if (scanProgress) scanProgress.hidden = true;
+        if (scanStatus) scanStatus.textContent = '';
+    }
+
+    function cancelTranscriptPoll() {
+        if (state._transcriptPollTimer) {
+            clearTimeout(state._transcriptPollTimer);
+            state._transcriptPollTimer = null;
+        }
+        state._transcriptJobId = null;
+    }
+
     // ── Passive refresh ──────────────────────────────────────────────
     function shouldSkipPassiveClipRefresh() {
         // Skip while in scan mode
         if (state._scanMode) return true;
+        // Skip while transcript job is running
+        if (state._transcriptProcessing) return true;
         // Skip while user has active selections
         if (state.selectedIds.size > 0) return true;
         // Skip while audio is playing
@@ -1534,6 +1688,11 @@
     // ── Keyword scan button ──────────────────────────────────────────
     if (scanKeywordBtn) {
         scanKeywordBtn.addEventListener('click', runKeywordScan);
+    }
+
+    // ── Auto-transcript button ───────────────────────────────────────
+    if (transcribeBtn) {
+        transcribeBtn.addEventListener('click', runTranscriptJob);
     }
 
     // ── Guild selector change ────────────────────────────────────────

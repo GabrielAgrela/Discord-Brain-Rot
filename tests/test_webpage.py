@@ -144,6 +144,32 @@ def _create_web_tables(db_path: Path) -> None:
             )
             """
         )
+        cursor.execute(
+            """
+            CREATE TABLE speech_training_clips (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id TEXT,
+                user_id TEXT NOT NULL,
+                username TEXT NOT NULL,
+                display_name TEXT,
+                folder_name TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                relative_path TEXT NOT NULL UNIQUE,
+                duration_seconds REAL NOT NULL,
+                byte_size INTEGER NOT NULL DEFAULT 0,
+                sample_rate INTEGER NOT NULL DEFAULT 48000,
+                channels INTEGER NOT NULL DEFAULT 2,
+                sample_width INTEGER NOT NULL DEFAULT 2,
+                captured_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                label TEXT,
+                transcript TEXT,
+                notes TEXT,
+                reviewed_by_user_id TEXT,
+                reviewed_by_username TEXT,
+                reviewed_at DATETIME
+            )
+            """
+        )
         conn.commit()
     finally:
         conn.close()
@@ -4208,3 +4234,67 @@ class TestSpeechTrainingRoutes:
         assert resp.status_code == 200
         assert resp.get_json()["total"] == 0
         assert resp.get_json()["ids"] == []
+
+
+    def test_transcribe_empty_requires_login_and_admin(self, web_client):
+        """POST /api/speech_training/transcribe_empty requires auth and admin."""
+        client, _ = web_client
+
+        # No login → 401
+        resp = client.post("/api/speech_training/transcribe_empty", json={})
+        assert resp.status_code == 401
+
+        # Login but not admin → 403
+        _login_web_user(client, username="regular")
+        resp = client.post("/api/speech_training/transcribe_empty", json={})
+        assert resp.status_code == 403
+
+        # Admin → 202 even though GROQ_API_KEY not set
+        _login_web_user(client, username="admin", admin_guild_ids=["111"])
+        resp = client.post("/api/speech_training/transcribe_empty", json={})
+        assert resp.status_code == 202
+        payload = resp.get_json()
+        assert payload["status"] == "queued"
+        assert payload["job_id"]
+
+    def test_transcribe_empty_status_requires_auth_and_admin(self, web_client):
+        """GET transcribe_empty/<job_id> requires auth."""
+        client, _ = web_client
+
+        resp = client.get("/api/speech_training/transcribe_empty/fake-id")
+        assert resp.status_code == 401
+
+        _login_web_user(client, username="admin", admin_guild_ids=["111"])
+        resp = client.get("/api/speech_training/transcribe_empty/fake-id")
+        assert resp.status_code == 404
+
+    def test_transcribe_empty_job_progresses_to_terminal(self, web_client):
+        """A transcript job transitions through queued → done."""
+        import time
+        client, _ = web_client
+        _login_web_user(client, username="admin", admin_guild_ids=["111"])
+
+        resp = client.post("/api/speech_training/transcribe_empty", json={"guild_id": "111"})
+        assert resp.status_code == 202
+        job_id = resp.get_json()["job_id"]
+        assert job_id
+
+        # Poll until terminal
+        deadline = time.time() + 10
+        last_status = None
+        while time.time() < deadline:
+            poll_resp = client.get(f"/api/speech_training/transcribe_empty/{job_id}")
+            assert poll_resp.status_code == 200
+            payload = poll_resp.get_json()
+            last_status = payload["status"]
+            if last_status in ("done", "error"):
+                break
+            time.sleep(0.1)
+
+        # Because GROQ_API_KEY is empty in test env, it should error
+        assert last_status in ("done", "error")
+        # The job should have produced a result
+        if last_status == "done":
+            assert "total" in payload
+        elif last_status == "error":
+            assert "GROQ_API_KEY" in (payload.get("error") or "")

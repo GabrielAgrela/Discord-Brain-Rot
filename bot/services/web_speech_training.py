@@ -8,6 +8,8 @@ offline Vosk keyword scanning for unlabeled clips.
 
 from __future__ import annotations
 
+import asyncio
+import io
 import json
 import logging
 import os
@@ -876,5 +878,210 @@ class WebSpeechTrainingService:
                 "matched": len(matches),
                 "skipped": skipped,
                 "current_clip_id": clip.get("id"),
+                "status": "processing",
+            })
+
+    # ------------------------------------------------------------------
+    # Auto-transcribe empty clips via Groq Whisper
+    # ------------------------------------------------------------------
+
+    TRANSCRIBE_MAX_CLIPS: int = 500  # safety cap per job
+
+    def transcribe_empty_clips(
+        self,
+        guild_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        groq_api_key: str = "",
+        groq_whisper_model: str = "whisper-large-v3",
+        progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+    ) -> Dict[str, Any]:
+        """Transcribe all clips with empty/missing transcript via Groq Whisper.
+
+        Only processes clips whose ``transcript`` is ``NULL`` or empty.
+        The audio file must exist and be readable; missing/unreadable files
+        are counted as skipped.
+
+        Processing is **sequential** (one clip at a time) to avoid rate
+        limiting.  A safety cap of ``TRANSCRIBE_MAX_CLIPS`` is enforced.
+
+        Args:
+            guild_id: Optional guild scope for empty-transcript clips.
+            user_id: Optional user scope for empty-transcript clips.
+            groq_api_key: The GROQ_API_KEY to use.
+            groq_whisper_model: Groq Whisper model name (default
+                ``whisper-large-v3``).
+            progress_callback: Optional callback invoked after the total
+                is known and after each clip. Receives a dict with keys
+                ``total``, ``processed``, ``updated``, ``empty_marked``,
+                ``skipped``, ``status``. The initial call has
+                ``processed=0``.
+
+        Returns:
+            Dict with keys ``status``, ``total``, ``processed``,
+            ``updated``, ``empty_marked``, ``skipped``, and ``errors``
+            (list of error strings, max 20).
+
+        Raises:
+            ValueError: When ``groq_api_key`` is empty or missing.
+        """
+        if not groq_api_key:
+            raise ValueError(
+                "GROQ_API_KEY is not configured.  "
+                "Set the GROQ_API_KEY environment variable and restart the web container."
+            )
+
+        # ── Fetch empty-transcript clips ──────────────────────────────
+        clips = self.repo.list_empty_transcript_clips(
+            guild_id=guild_id,
+            user_id=user_id,
+        )
+        total = len(clips)
+        if total > self.TRANSCRIBE_MAX_CLIPS:
+            logger.warning(
+                "Transcribe: capping %d empty-transcript clips to %d",
+                total, self.TRANSCRIBE_MAX_CLIPS,
+            )
+            clips = clips[: self.TRANSCRIBE_MAX_CLIPS]
+            total = len(clips)
+
+        logger.debug(
+            "Transcribe: %d clips with empty transcript%s%s",
+            total,
+            f" guild={guild_id}" if guild_id else "",
+            f" user={user_id}" if user_id else "",
+        )
+
+        # ── Notify initial progress ──────────────────────────────────
+        processed = 0
+        updated = 0
+        empty_marked = 0
+        skipped = 0
+        errors: List[str] = []
+
+        if progress_callback is not None:
+            progress_callback({
+                "total": total,
+                "processed": 0,
+                "updated": 0,
+                "empty_marked": 0,
+                "skipped": 0,
+                "status": "processing",
+            })
+
+        if total == 0:
+            result = {
+                "status": "ok",
+                "total": 0,
+                "processed": 0,
+                "updated": 0,
+                "empty_marked": 0,
+                "skipped": 0,
+                "errors": [],
+            }
+            if progress_callback is not None:
+                progress_callback({**result, "status": "done"})
+            return result
+
+        # ── Process clips sequentially ────────────────────────────────
+        from bot.services.voice_command import GroqWhisperService
+        from pydub import AudioSegment
+
+        whisper = GroqWhisperService()
+
+        for clip in clips:
+            clip_id = clip.get("id")
+
+            # Resolve audio path
+            path = self.resolve_audio_path(clip)
+            if path is None:
+                skipped += 1
+                self._notify_transcript_progress(
+                    progress_callback, total, processed, updated, empty_marked, skipped,
+                )
+                continue
+
+            try:
+                # Convert MP3 to WAV bytes in memory
+                segment = AudioSegment.from_file(str(path), format="mp3")
+                wav_buf = io.BytesIO()
+                segment.export(wav_buf, format="wav")
+                wav_bytes = wav_buf.getvalue()
+
+                # Transcribe via Groq Whisper (sequential)
+                result = asyncio.run(whisper.transcribe_detailed(wav_bytes))
+                processed += 1
+
+                if result.is_empty:
+                    # Successful 200 with empty text → store "-"
+                    self.repo.update_transcript(
+                        clip_id=clip_id,
+                        transcript="-",
+                        reviewer_username="(auto-transcript)",
+                    )
+                    empty_marked += 1
+                    updated += 1
+                elif result.text:
+                    # Non-empty transcript
+                    transcript_text = result.text[:self.TRANSCRIPT_MAX_LENGTH]
+                    self.repo.update_transcript(
+                        clip_id=clip_id,
+                        transcript=transcript_text,
+                        reviewer_username="(auto-transcript)",
+                    )
+                    updated += 1
+                else:
+                    # Failure (timeout, API error, etc.)
+                    skipped += 1
+                    if len(errors) < 20:
+                        clip_filename = clip.get("filename", f"id={clip_id}")
+                        errors.append(f"Clip {clip_filename}: {result.error or 'unknown error'}")
+
+            except Exception as exc:
+                logger.warning("Failed to transcribe clip %s: %s", clip_id, exc)
+                skipped += 1
+                if len(errors) < 20:
+                    clip_filename = clip.get("filename", f"id={clip_id}")
+                    errors.append(f"Clip {clip_filename}: {exc}")
+
+            self._notify_transcript_progress(
+                progress_callback, total, processed, updated, empty_marked, skipped,
+            )
+
+        # ── Final result ──────────────────────────────────────────────
+        logger.info(
+            "Auto-transcribe done: %d clips — updated=%d empty_marked=%d skipped=%d",
+            total, updated, empty_marked, skipped,
+        )
+
+        result = {
+            "status": "ok",
+            "total": total,
+            "processed": processed,
+            "updated": updated,
+            "empty_marked": empty_marked,
+            "skipped": skipped,
+            "errors": errors,
+        }
+        if progress_callback is not None:
+            progress_callback({**result, "status": "done"})
+        return result
+
+    @staticmethod
+    def _notify_transcript_progress(
+        progress_callback: Optional[Callable[[Dict[str, Any]], None]],
+        total: int,
+        processed: int,
+        updated: int,
+        empty_marked: int,
+        skipped: int,
+    ) -> None:
+        """Invoke the progress callback with current transcript state."""
+        if progress_callback is not None:
+            progress_callback({
+                "total": total,
+                "processed": processed,
+                "updated": updated,
+                "empty_marked": empty_marked,
+                "skipped": skipped,
                 "status": "processing",
             })

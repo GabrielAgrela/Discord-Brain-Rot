@@ -680,3 +680,102 @@ class TestSpeechTrainingRepository:
         )
         labels = repo.list_labels()
         assert labels == ['alpha', 'Beta', 'Zebra']
+
+    # ── list_empty_transcript_clips ───────────────────────────────────
+
+    def test_list_empty_transcript_clips_all(self, repo):
+        """Return all clips with empty transcript across guilds."""
+        ids = self._insert_sample_clips(repo)
+        clips = repo.list_empty_transcript_clips()
+        # All 4 clips start without transcript
+        assert len(clips) == 4
+
+    def test_list_empty_transcript_clips_guild_filter(self, repo):
+        """Filter empty-transcript clips by guild."""
+        ids = self._insert_sample_clips(repo)
+        clips = repo.list_empty_transcript_clips(guild_id="100")
+        assert len(clips) == 3
+        clips = repo.list_empty_transcript_clips(guild_id="200")
+        assert len(clips) == 1
+
+    def test_list_empty_transcript_clips_user_filter(self, repo):
+        """Filter empty-transcript clips by user."""
+        ids = self._insert_sample_clips(repo)
+        clips = repo.list_empty_transcript_clips(user_id="1")
+        assert len(clips) == 2
+        clips = repo.list_empty_transcript_clips(user_id="2")
+        assert len(clips) == 1
+
+    def test_list_empty_transcript_clips_excludes_filled(self, repo):
+        """Clips with non-empty transcript should not appear."""
+        ids = self._insert_sample_clips(repo)
+        repo._execute_write(
+            "UPDATE speech_training_clips SET transcript = 'hello' WHERE id = ?",
+            (ids[0],),
+        )
+        clips = repo.list_empty_transcript_clips()
+        clip_ids = [c["id"] for c in clips]
+        assert ids[0] not in clip_ids
+        assert len(clips) == 3
+
+    def test_list_empty_transcript_clips_guild_and_user(self, repo):
+        """Combine guild and user filter."""
+        ids = self._insert_sample_clips(repo)
+        clips = repo.list_empty_transcript_clips(guild_id="100", user_id="1")
+        assert len(clips) == 2
+        for c in clips:
+            assert c["guild_id"] == "100"
+            assert c["user_id"] == "1"
+
+    # ── update_transcript ─────────────────────────────────────────────
+
+    def test_update_transcript(self, repo):
+        """Test updating only the transcript."""
+        ids = self._insert_sample_clips(repo)
+        ok = repo.update_transcript(
+            clip_id=ids[0],
+            transcript="hello world",
+        )
+        assert ok is True
+        clip = repo.get_clip(ids[0])
+        assert clip["transcript"] == "hello world"
+        assert clip["reviewed_by_username"] == "(auto-transcript)"
+
+    def test_update_transcript_preserves_label_and_notes(self, repo):
+        """Transcript-only update does not clear label or notes."""
+        ids = self._insert_sample_clips(repo)
+        # Set a label and notes
+        repo.update_review(
+            clip_id=ids[0],
+            label="chapada",
+            transcript="original",
+            notes="original notes",
+            reviewer_user_id="99",
+            reviewer_username="reviewer",
+        )
+        # Now update only transcript
+        ok = repo.update_transcript(
+            clip_id=ids[0],
+            transcript="new transcript",
+        )
+        assert ok is True
+        clip = repo.get_clip(ids[0])
+        assert clip["transcript"] == "new transcript"
+        assert clip["label"] == "chapada"
+        assert clip["notes"] == "original notes"
+
+    def test_update_transcript_not_found(self, repo):
+        """Update for non-existent clip returns False."""
+        ok = repo.update_transcript(clip_id=99999, transcript="test")
+        assert ok is False
+
+    def test_update_transcript_dash_value(self, repo):
+        """Store '-' as a transcript value (empty Whisper marker)."""
+        ids = self._insert_sample_clips(repo)
+        ok = repo.update_transcript(
+            clip_id=ids[0],
+            transcript="-",
+        )
+        assert ok is True
+        clip = repo.get_clip(ids[0])
+        assert clip["transcript"] == "-"

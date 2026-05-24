@@ -77,6 +77,10 @@ def create_app() -> Flask:
         max_workers=_get_web_keyword_scan_worker_count()
     )
     app.extensions["web_keyword_scan_jobs"] = {}
+    app.extensions["web_transcript_executor"] = ThreadPoolExecutor(
+        max_workers=_get_web_transcript_worker_count()
+    )
+    app.extensions["web_transcript_jobs"] = {}
 
     register_web_routes(app)
     return app
@@ -125,3 +129,18 @@ def _get_web_keyword_scan_worker_count() -> int:
     except ValueError:
         worker_count = 2
     return max(1, min(worker_count, 8))
+
+
+def _get_web_transcript_worker_count() -> int:
+    """
+    Return the number of background workers for auto-transcript jobs.
+
+    Returns:
+        Positive worker count for async transcript jobs, bounded 1‑4.
+    """
+    raw_value = os.getenv("WEB_TRANSCRIPT_WORKERS", "1").strip()
+    try:
+        worker_count = int(raw_value)
+    except ValueError:
+        worker_count = 1
+    return max(1, min(worker_count, 4))

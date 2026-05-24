@@ -244,6 +244,8 @@ The optional web dashboard is served by a separate `web` container (Docker profi
 | `POST /api/speech_training/clips/bulk` | Bulk label or delete clips (admin-only) |
 | `POST /api/speech_training/keyword_scan` | Start async keyword scan (admin-only, returns `202` + `job_id`; poll with GET below). Only unlabeled clips ≤30s are eligible. |
 | `GET /api/speech_training/keyword_scan/<job_id>` | Poll keyword scan progress & results (admin-only). Response includes `max_duration_seconds`. |
+| `POST /api/speech_training/transcribe_empty` | Start async auto-transcript job (admin-only, returns `202` + `job_id`). Transcribes empty-transcript clips via Groq Whisper (`GROQ_API_KEY` required). Poll with GET below. |
+| `GET /api/speech_training/transcribe_empty/<job_id>` | Poll auto-transcript progress & results (admin-only). Response includes `total`, `processed`, `updated`, `empty_marked`, `skipped`. |
 
 Unauthenticated buttons show a locked state prompting Discord login. Web playback requires authentication so actions are logged as the real user.
 
