@@ -6161,12 +6161,6 @@ html.theme-dark .dataset-label-filter-select option {
     cursor: wait;
 }
 
-.dataset-scan-status {
-    font-size: 0.72rem;
-    color: var(--ink-muted);
-    font-weight: 600;
-}
-
 .dataset-scan-label {
     font-size: 0.65rem;
     font-weight: 600;
@@ -6185,27 +6179,6 @@ html.theme-dark .dataset-label-filter-select option {
     color: var(--ink);
     font: inherit;
     cursor: pointer;
-}
-
-.dataset-scan-progress {
-    width: 6rem;
-    height: 0.4rem;
-    border-radius: 999px;
-    border: none;
-    background: var(--border);
-    accent-color: var(--accent-olive);
-}
-.dataset-scan-progress::-webkit-progress-bar {
-    border-radius: 999px;
-    background: var(--border);
-}
-.dataset-scan-progress::-webkit-progress-value {
-    border-radius: 999px;
-    background: var(--accent-olive);
-}
-.dataset-scan-progress::-moz-progress-bar {
-    border-radius: 999px;
-    background: var(--accent-olive);
 }
 
 /* ── Speech training toast ──────────────────────────────────────── */
@@ -6269,6 +6242,52 @@ html.theme-dark .dataset-label-filter-select option {
         opacity: 1;
         transform: translateY(0);
     }
+}
+
+/* ── Speech toast progress variant ──────────────────────────────── */
+
+.speech-toast.progress {
+    align-items: flex-start;
+}
+
+.speech-toast-body {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+
+.speech-toast-title {
+    font-weight: 650;
+    color: var(--ink);
+}
+
+.speech-toast-progress {
+    width: 100%;
+    height: 0.35rem;
+    border-radius: 999px;
+    border: none;
+    background: var(--border);
+    accent-color: var(--accent-olive);
+}
+.speech-toast-progress::-webkit-progress-bar {
+    border-radius: 999px;
+    background: var(--border);
+}
+.speech-toast-progress::-webkit-progress-value {
+    border-radius: 999px;
+    background: var(--accent-olive);
+}
+.speech-toast-progress::-moz-progress-bar {
+    border-radius: 999px;
+    background: var(--accent-olive);
+}
+
+.speech-toast-detail {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--ink-muted);
 }
 
 /* ── Confidence chip ────────────────────────────────────────────── */

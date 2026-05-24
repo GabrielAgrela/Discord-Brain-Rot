@@ -53,8 +53,6 @@
     const bulkApplyLabel = $('bulkApplyLabel');
     const bulkDelete = $('bulkDelete');
     const scanKeywordBtn = $('scanKeywordBtn');
-    const scanStatus = $('scanStatus');
-    const scanProgress = $('scanProgress');
     const transcribeBtn = $('transcribeBtn');
 
     // ── Theme toggle ───────────────────────────────────────────────────
@@ -949,10 +947,8 @@
         }
     }
 
-    // ── Scan toast helper ────────────────────────────────────────────
-    function showScanToast(message, kind) {
-        kind = kind || 'info';
-
+    // ── Scan toast helpers ──────────────────────────────────────────
+    function getOrCreateToastRegion() {
         var region = document.getElementById('speechToastRegion');
         if (!region) {
             region = document.createElement('div');
@@ -963,8 +959,10 @@
             region.setAttribute('aria-atomic', 'true');
             document.body.appendChild(region);
         }
+        return region;
+    }
 
-        // Remove any existing toast in the region
+    function clearExistingToast(region) {
         var existing = region.querySelector('.speech-toast');
         if (existing) {
             existing.remove();
@@ -973,10 +971,19 @@
                 _scanToastTimer = null;
             }
         }
+    }
+
+    function showScanToast(message, kind) {
+        kind = kind || 'info';
+        var region = getOrCreateToastRegion();
+        clearExistingToast(region);
 
         var toast = document.createElement('div');
         toast.className = 'speech-toast ' + kind;
-        toast.textContent = message;
+        var body = document.createElement('div');
+        body.className = 'speech-toast-body';
+        body.textContent = message;
+        toast.appendChild(body);
         region.appendChild(toast);
 
         // Auto-dismiss after 6 seconds with fade-out
@@ -989,6 +996,48 @@
             }
             _scanToastTimer = null;
         }, 6000);
+    }
+
+    function showScanProgressToast(config) {
+        var region = getOrCreateToastRegion();
+        clearExistingToast(region);
+
+        var toast = document.createElement('div');
+        toast.className = 'speech-toast progress ' + (config.kind || 'info');
+
+        var body = document.createElement('div');
+        body.className = 'speech-toast-body';
+
+        if (config.title) {
+            var titleEl = document.createElement('div');
+            titleEl.className = 'speech-toast-title';
+            titleEl.textContent = config.title;
+            body.appendChild(titleEl);
+        }
+
+        if (config.max > 0) {
+            var progressEl = document.createElement('progress');
+            progressEl.className = 'speech-toast-progress';
+            progressEl.max = config.max;
+            progressEl.value = config.value || 0;
+            body.appendChild(progressEl);
+        }
+
+        if (config.detail) {
+            var detailEl = document.createElement('div');
+            detailEl.className = 'speech-toast-detail';
+            detailEl.textContent = config.detail;
+            body.appendChild(detailEl);
+        }
+
+        toast.appendChild(body);
+        region.appendChild(toast);
+
+        // No auto-dismiss — stays until replaced by another toast
+        if (_scanToastTimer) {
+            clearTimeout(_scanToastTimer);
+            _scanToastTimer = null;
+        }
     }
 
     // ── Scan mode ────────────────────────────────────────────────────
@@ -1016,11 +1065,6 @@
         state._scanMode = false;
         state._scanClips = [];
         state._scanKeyword = '';
-        if (scanStatus) scanStatus.textContent = '';
-        if (scanProgress) {
-            scanProgress.hidden = true;
-            scanProgress.value = 0;
-        }
         updateTitleFromFilter();
         if (!skipReload) {
             loadClips();
@@ -1043,13 +1087,7 @@
 
         if (scanKeywordBtn) scanKeywordBtn.disabled = true;
         if (transcribeBtn) transcribeBtn.disabled = true;
-        if (scanStatus) scanStatus.textContent = '';
-        showScanToast('Starting scan (clips \u226430s)\u2026', 'info');
-        if (scanProgress) {
-            scanProgress.hidden = false;
-            scanProgress.value = 0;
-            scanProgress.max = 100;
-        }
+        showScanProgressToast({ title: 'Starting scan (clips \u226430s)\u2026', detail: '', kind: 'info', max: 100, value: 0 });
 
         state._scanConfidence = 0.5;
 
@@ -1067,17 +1105,15 @@
             var data = await safeParseJson(resp);
             if (data.job_id) {
                 state._scanJobId = data.job_id;
-                showScanToast('Queued\u2026', 'info');
+                showScanProgressToast({ title: 'Scan queued\u2026', detail: '', kind: 'info', max: 100, value: 0 });
                 pollScanJob(data.job_id);
             } else {
                 showScanToast(data.error || 'Failed to start scan', 'error');
                 if (scanKeywordBtn) scanKeywordBtn.disabled = false;
-                if (scanProgress) scanProgress.hidden = true;
             }
         } catch (e) {
             showScanToast('Network error while starting scan', 'error');
             if (scanKeywordBtn) scanKeywordBtn.disabled = false;
-            if (scanProgress) scanProgress.hidden = true;
         }
     }
 
@@ -1126,21 +1162,27 @@
         var skipped = data.skipped || 0;
         var maxDur = data.max_duration_seconds ? '\u2264' + data.max_duration_seconds + 's ' : '';
 
-        if (scanStatus) {
-            scanStatus.textContent = '';
-        }
+        var pct = total > 0 ? Math.min(Math.round((scanned / total) * 100), 100) : 0;
 
-        if (scanProgress && total > 0) {
-            var pct = Math.min(Math.round((scanned / total) * 100), 100);
-            scanProgress.value = pct;
-        }
+        var detail = 'Sound ' + scanned + '/' + total;
+        var parts = [];
+        if (matched > 0) parts.push(matched + ' match' + (matched !== 1 ? 'es' : ''));
+        if (skipped > 0) parts.push(skipped + ' skipped');
+        if (parts.length > 0) detail += ' \u00b7 ' + parts.join(' \u00b7 ');
+
+        showScanProgressToast({
+            title: 'Scanning' + (maxDur ? ' ' + maxDur : '') + '\u2026',
+            detail: detail,
+            max: 100,
+            value: pct,
+            kind: 'info'
+        });
     }
 
     function onScanDone(data) {
         state._scanJobId = null;
         if (scanKeywordBtn) scanKeywordBtn.disabled = false;
         if (transcribeBtn) transcribeBtn.disabled = false;
-        if (scanProgress) scanProgress.hidden = true;
 
         // Build suffix for non-matches action
         var nonMatchNote = '';
@@ -1153,8 +1195,6 @@
         // Refresh users and storage after potential deletion/labeling
         loadUsers();
         loadStorage();
-
-        if (scanStatus) scanStatus.textContent = '';
 
         if (data.matched > 0) {
             var count = data.matched;
@@ -1180,9 +1220,7 @@
         state._scanJobId = null;
         if (scanKeywordBtn) scanKeywordBtn.disabled = false;
         if (transcribeBtn) transcribeBtn.disabled = false;
-        if (scanProgress) scanProgress.hidden = true;
         showScanToast(message, 'error');
-        if (scanStatus) scanStatus.textContent = '';
     }
 
     function cancelScanPoll() {
@@ -1201,12 +1239,7 @@
         if (transcribeBtn) transcribeBtn.disabled = true;
         if (scanKeywordBtn) scanKeywordBtn.disabled = true;
         state._transcriptProcessing = true;
-        showScanToast('Starting auto-transcript job\u2026', 'info');
-        if (scanProgress) {
-            scanProgress.hidden = false;
-            scanProgress.value = 0;
-            scanProgress.max = 100;
-        }
+        showScanProgressToast({ title: 'Starting auto-transcript job\u2026', detail: '', kind: 'info', max: 100, value: 0 });
 
         var body = {};
         var gid = getSelectedGuildId();
@@ -1222,7 +1255,7 @@
             var data = await safeParseJson(resp);
             if (data.job_id) {
                 state._transcriptJobId = data.job_id;
-                showScanToast('Queued\u2026', 'info');
+                showScanProgressToast({ title: 'Transcript queued\u2026', detail: '', kind: 'info', max: 100, value: 0 });
                 pollTranscriptJob(data.job_id);
             } else {
                 showScanToast(data.error || 'Failed to start transcript job', 'error');
@@ -1268,18 +1301,22 @@
         var emptyMarked = data.empty_marked || 0;
         var skipped = data.skipped || 0;
 
-        if (scanProgress && total > 0) {
-            var pct = Math.min(Math.round((processed / total) * 100), 100);
-            scanProgress.value = pct;
-        }
-        if (scanStatus && total > 0) {
-            var parts = [];
-            parts.push(processed + '/' + total);
-            if (updated > 0) parts.push(updated + ' updated');
-            if (emptyMarked > 0) parts.push(emptyMarked + ' empty');
-            if (skipped > 0) parts.push(skipped + ' skipped');
-            scanStatus.textContent = parts.join(' \u00b7 ');
-        }
+        var pct = total > 0 ? Math.min(Math.round((processed / total) * 100), 100) : 0;
+
+        var detail = 'Sound ' + processed + '/' + total;
+        var parts = [];
+        if (updated > 0) parts.push(updated + ' updated');
+        if (emptyMarked > 0) parts.push(emptyMarked + ' empty');
+        if (skipped > 0) parts.push(skipped + ' skipped');
+        if (parts.length > 0) detail += ' \u00b7 ' + parts.join(' \u00b7 ');
+
+        showScanProgressToast({
+            title: 'Transcribing\u2026',
+            detail: detail,
+            max: 100,
+            value: pct,
+            kind: 'info'
+        });
     }
 
     function onTranscriptDone(data) {
@@ -1287,8 +1324,6 @@
         state._transcriptProcessing = false;
         if (transcribeBtn) transcribeBtn.disabled = false;
         if (scanKeywordBtn) scanKeywordBtn.disabled = false;
-        if (scanProgress) scanProgress.hidden = true;
-        if (scanStatus) scanStatus.textContent = '';
 
         var total = data.total || 0;
         var updated = data.updated || 0;
@@ -1326,8 +1361,6 @@
         state._transcriptProcessing = false;
         if (transcribeBtn) transcribeBtn.disabled = false;
         if (scanKeywordBtn) scanKeywordBtn.disabled = false;
-        if (scanProgress) scanProgress.hidden = true;
-        if (scanStatus) scanStatus.textContent = '';
     }
 
     function cancelTranscriptPoll() {
