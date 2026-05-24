@@ -247,6 +247,12 @@ The following admin-only APIs support quick labeling, bulk operations, and keywo
 - ``GET /api/speech_training/clips`` — parameter ``sort`` one of ``newest``, ``oldest``, ``longest``, ``shortest``, ``unlabeled_first``, ``label_asc``, ``label_desc``, ``speaker_asc``, ``speaker_desc``, ``reviewed_desc``.
 - ``GET /api/speech_training/clips/ids`` — returns **all** clip IDs matching the current scope/filter/search/sort, without pagination.  Accepts the same parameters as ``/api/speech_training/clips`` (``guild_id``, ``user_id``, ``label``, ``search``, ``sort``) but **not** ``page``/``per_page``.  Response: ``{"ids": [1, 2, ...], "total": 42}``.  Used by the "Select all" button to select every clip in the current filter scope.
 
+### Passive Refresh
+
+- Passive polling in `speech_training.js` runs every 5 seconds and calls `renderClips()` which rebuilds the entire clip list DOM. This collapses any expanded `.dataset-clip-details` panels.
+- `shouldSkipPassiveClipRefresh()` must return `true` when any clip details panel is expanded, when a form field is focused inside the clip area, when audio is playing, when clips are selected, or during scan mode.
+- If a passive refresh would disrupt an active labeling workflow (expanded details, focused text input, playing audio), it is skipped until the next cycle.
+
 ### Page UI
 
 - The dataset page toolbar has a ``Find Chapada`` button, a status span, and a ``<progress>`` element.  Keyword scans always use a fixed confidence threshold of ``0.5`` (50%).  Clicking the button starts an **async** keyword scan via ``POST /api/speech_training/keyword_scan`` with ``min_confidence: 0.5`` and ``delete_non_matches: true``.

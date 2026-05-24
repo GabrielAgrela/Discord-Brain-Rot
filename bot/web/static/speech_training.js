@@ -1194,6 +1194,8 @@
         if (state.selectedIds.size > 0) return true;
         // Skip while audio is playing
         if (state.currentlyPlaying !== null && !state.currentlyPlaying.paused) return true;
+        // Skip while any clip details panel is expanded (passive re-render would collapse it)
+        if (clipList && clipList.querySelector('.dataset-clip-details:not([hidden])')) return true;
         // Skip while user is focused on a form field inside the clip area or toolbar
         const active = document.activeElement;
         if (active && active.closest) {
