@@ -28,6 +28,10 @@ from bot.repositories import (
     StatsRepository, KeywordRepository
 )
 from bot.services.image_generator import ImageGeneratorService
+from bot.services.speech_training import (
+    SpeechTrainingRecorderService,
+    SpeechTrainingSegment,
+)
 
 class AudioService:
     """
@@ -119,6 +123,10 @@ class AudioService:
         except Exception as e:
             print(f"[AudioService] Error loading Vosk model: {e}")
             self.vosk_model = None
+
+        # Speech training recorder (opt-in persistent voice data collection).
+        # Must be instantiated before keyword detection sinks are created.
+        self.speech_training_recorder = SpeechTrainingRecorderService()
         
         # Dependency on other services that will be added later
         self.sound_service = None
@@ -835,6 +843,21 @@ class AudioService:
             print(f"[AudioService] Warning: Failed to read STT setting for {guild.name}: {e}")
             return True
 
+    def _is_speech_training_recording_enabled(self) -> bool:
+        """Return whether the speech training recorder is enabled at the service level."""
+        recorder = getattr(self, "speech_training_recorder", None)
+        return bool(recorder and recorder.enabled)
+
+    def _should_run_voice_recording_sink(self, guild: discord.Guild) -> bool:
+        """Return True when the Discord receive sink should run for *guild*.
+
+        The sink is required for STT keyword detection, voice commands, and/or
+        the opt-in speech training recorder.  This replaces the standalone
+        STT-only gate so the sink can run for data collection even when guild
+        STT is disabled.
+        """
+        return self._is_stt_enabled_for_guild(guild) or self._is_speech_training_recording_enabled()
+
     def get_current_view(self, guild_id: int) -> Optional[discord.ui.View]:
         """Get current playback view for a guild."""
         self._ensure_guild_playback_state(guild_id)
@@ -1454,12 +1477,7 @@ class AudioService:
         voice_client = channel.guild.voice_client
         if voice_client and voice_client.is_connected() and voice_client.channel.id == channel.id:
             try:
-                behavior = getattr(self, "_behavior", None)
-                settings_service = getattr(behavior, "_guild_settings_service", None) if behavior else None
-                stt_enabled = True
-                if settings_service is not None:
-                    stt_enabled = settings_service.get(channel.guild.id).stt_enabled
-                if stt_enabled:
+                if self._should_run_voice_recording_sink(channel.guild):
                     await self.start_keyword_detection(channel.guild)
                 else:
                     await self.stop_keyword_detection(channel.guild)
@@ -2679,6 +2697,10 @@ class AudioService:
     async def start_keyword_detection(self, guild: discord.Guild, schedule_retry: bool = True):
         """Start background keyword detection in the specified guild.
         
+        When the speech training recorder is enabled but guild STT is
+        disabled, the Discord receive sink is still started for data
+        collection but Vosk keyword processing is skipped.
+
         Args:
             guild: The guild to start keyword detection for.
             schedule_retry: If True and detection fails due to transient
@@ -2686,8 +2708,8 @@ class AudioService:
                 ``schedule_keyword_detection_restart`` (default True).
         """
         try:
-            if not self._is_stt_enabled_for_guild(guild):
-                print(f"[AudioService] STT disabled for {guild.name}; skipping keyword detection start")
+            if not self._should_run_voice_recording_sink(guild):
+                print(f"[AudioService] Neither STT nor speech training enabled for {guild.name}; skipping detection start")
                 return False
 
             voice_client = guild.voice_client
@@ -2790,8 +2812,8 @@ class AudioService:
             initial_delay: Initial delay in seconds (default 2.0), doubled
                 each attempt and capped at 8.0 s.
         """
-        if not self._is_stt_enabled_for_guild(guild):
-            print(f"[AudioService] STT disabled for {guild.name}; not scheduling keyword detection restart"
+        if not self._should_run_voice_recording_sink(guild):
+            print(f"[AudioService] Neither STT nor speech training enabled for {guild.name}; not scheduling"
                   + (f" ({reason})" if reason else ""))
             return
 
@@ -2895,6 +2917,11 @@ class KeywordDetectionSink(sinks.Sink):
             self.voice_command_wake_words + vosk_aliases
         ))
 
+        # Whether Vosk keyword detection is enabled (guild STT level).
+        # When False, the sink still collects audio for speech training but
+        # skips all Vosk processing, keyword actions, and voice commands.
+        self.stt_enabled = audio_service._is_stt_enabled_for_guild(guild)
+
         self.recognizers = {} # user_id -> vosk.KaldiRecognizer
         self.resample_states = {} # user_id -> audioop state
         self.last_audio_time = {} # user_id -> timestamp
@@ -2903,7 +2930,8 @@ class KeywordDetectionSink(sinks.Sink):
         
         # Load keywords from database
         self.keywords = {}
-        self.refresh_keywords()
+        if self.stt_enabled:
+            self.refresh_keywords()
         
         self.last_partial = {} # user_id -> last partial text to avoid duplicate logs
         self.max_queue_size = 100 # Queue limit to prevent lag
@@ -2942,6 +2970,16 @@ class KeywordDetectionSink(sinks.Sink):
         # Log directory for per-user transcripts
         self.log_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "vosk_logs"))
         os.makedirs(self.log_dir, exist_ok=True)
+
+        # Speech training recorder integration ---------------------------
+        # Per-user speech segment state for the speech training dataset.
+        # Separate from Vosk buffers and _active_captures.
+        self._speech_recorder = getattr(audio_service, "speech_training_recorder", None)
+        self._speech_segment_pcm: Dict[int, bytearray] = {}   # user_id -> accumulated PCM
+        self._speech_segment_start: Dict[int, float] = {}     # user_id -> timestamp of first chunk
+        self._speech_segment_last_chunk: Dict[int, float] = {} # user_id -> timestamp of latest chunk
+        self._speech_lock = threading.Lock()
+
         # Single worker thread
         self.worker_thread = threading.Thread(target=self._worker, name=f"VoskWorker-{guild.id}", daemon=True)
         self.worker_thread.start()
@@ -3047,6 +3085,9 @@ class KeywordDetectionSink(sinks.Sink):
                 self._voice_command_listening_user_id = None
 
     def stop(self):
+        # Force-finalize any open speech segments before stopping.
+        if hasattr(self, '_force_finalize_all_speech_segments'):
+            self._force_finalize_all_speech_segments()
         self.running = False
         self.queue.put((None, None))
 
@@ -3092,30 +3133,34 @@ class KeywordDetectionSink(sinks.Sink):
                 cap["total_bytes"] = cap.get("total_bytes", 0) + len(data)
                 cap["last_audio_time"] = time.time()
 
+        # Feed speech training segmenter (runs before Vosk, independent of listening state).
+        self._feed_speech_segmenter(data, user_id, receive_time)
+
         # Skip Vosk keyword detection while a voice-command listening
         # session is active. The triggering user's audio still feeds
         # _active_captures above, but we suppress other keyword actions.
         if self._is_voice_command_listening():
             return
 
-        # Buffer audio per-user to reduce queue pressure
-        if user_id not in self.audio_buffers:
-            self.audio_buffers[user_id] = bytearray()
-        self.audio_buffers[user_id].extend(data)
-        
-        # CRITICAL: Cap buffer size to prevent massive chunks (max ~500ms = 48000B)
-        max_buffer = 48000
-        if len(self.audio_buffers[user_id]) > max_buffer:
-            # Keep only the most recent audio
-            self.audio_buffers[user_id] = self.audio_buffers[user_id][-max_buffer:]
-        
-        # Only queue when we have enough data (~300ms) or if queue is empty
-        if len(self.audio_buffers[user_id]) >= self.min_batch_size or self.queue.qsize() == 0:
-            buf_size = len(self.audio_buffers[user_id])
-            if self.queue.qsize() < self.max_queue_size:
-                # Include timestamp in queue entry for latency tracking
-                self.queue.put((bytes(self.audio_buffers[user_id]), user_id, receive_time))
-            self.audio_buffers[user_id] = bytearray()
+        # Buffer audio per-user to reduce queue pressure (only when STT enabled).
+        if getattr(self, 'stt_enabled', True):
+            if user_id not in self.audio_buffers:
+                self.audio_buffers[user_id] = bytearray()
+            self.audio_buffers[user_id].extend(data)
+            
+            # CRITICAL: Cap buffer size to prevent massive chunks (max ~500ms = 48000B)
+            max_buffer = 48000
+            if len(self.audio_buffers[user_id]) > max_buffer:
+                # Keep only the most recent audio
+                self.audio_buffers[user_id] = self.audio_buffers[user_id][-max_buffer:]
+            
+            # Only queue when we have enough data (~300ms) or if queue is empty
+            if len(self.audio_buffers[user_id]) >= self.min_batch_size or self.queue.qsize() == 0:
+                buf_size = len(self.audio_buffers[user_id])
+                if self.queue.qsize() < self.max_queue_size:
+                    # Include timestamp in queue entry for latency tracking
+                    self.queue.put((bytes(self.audio_buffers[user_id]), user_id, receive_time))
+                self.audio_buffers[user_id] = bytearray()
 
 
     def _worker(self):
@@ -3182,7 +3227,11 @@ class KeywordDetectionSink(sinks.Sink):
         print("[VoskWorker] Thread exited")
 
     def _flush_silence(self):
-        """Force Vosk to finalize results for users who stopped talking and cleanup idle users."""
+        """Force Vosk to finalize results for users who stopped talking and cleanup idle users.
+
+        Also finalizes any open speech training segments whose last chunk is
+        older than the silence threshold.
+        """
         now = time.time()
         
         # Handle Vosk flushing for speech-to-text after a short pause.
@@ -3208,8 +3257,135 @@ class KeywordDetectionSink(sinks.Sink):
                     del self.resample_states[user_id]
                 if user_id in self.last_partial:
                     del self.last_partial[user_id]
-                # Keep buffer_last_update a bit longer or let it be cleaned up
-                # del self.buffer_last_update[user_id]
+
+        # Finalize speech training segments whose last chunk is old.
+        self._flush_speech_segments(now)
+
+    # ------------------------------------------------------------------ #
+    # Speech training segmenter (runs in Discord receive thread)
+    # ------------------------------------------------------------------ #
+
+    def _feed_speech_segmenter(self, data: bytes, user_id: int, receive_time: float) -> None:
+        """Feed PCM data into the speech training segmenter.
+
+        Manages per-user segment accumulation and boundary detection.
+        Called from :meth:`write` for every incoming audio chunk.
+
+        Segment boundaries are triggered by:
+        - A gap since the previous chunk ``>= SPEECH_TRAINING_SILENCE_SECONDS``.
+        - Accumulated duration exceeding ``SPEECH_TRAINING_MAX_DURATION_SECONDS``.
+
+        Args:
+            data: Raw PCM data (48 kHz, stereo, 16-bit).
+            user_id: Discord user ID.
+            receive_time: Monotonic timestamp of the received audio.
+        """
+        recorder = getattr(self, '_speech_recorder', None)
+        if not recorder or not recorder.enabled:
+            return
+
+        lock = getattr(self, '_speech_lock', None)
+        if lock is None:
+            return
+        with lock:
+            # Check for boundary: gap since last chunk or max duration exceeded.
+            last_chunk_time = self._speech_segment_last_chunk.get(user_id)
+            start_time = self._speech_segment_start.get(user_id)
+
+            if last_chunk_time is not None:
+                gap = receive_time - last_chunk_time
+                if gap >= recorder.silence_seconds:
+                    self._finalize_speech_segment(user_id)
+                    # Reset below
+                elif start_time is not None:
+                    elapsed = receive_time - start_time
+                    if elapsed >= recorder.max_duration_seconds:
+                        self._finalize_speech_segment(user_id)
+
+            # Start or extend the segment
+            if user_id not in self._speech_segment_pcm:
+                self._speech_segment_pcm[user_id] = bytearray()
+                self._speech_segment_start[user_id] = receive_time
+
+            self._speech_segment_pcm[user_id].extend(data)
+            self._speech_segment_last_chunk[user_id] = receive_time
+
+    def _finalize_speech_segment(self, user_id: int) -> None:
+        """Finalize the current speech segment for *user_id* and enqueue it.
+
+        Must be called while holding ``self._speech_lock``.
+        """
+        pcm = self._speech_segment_pcm.pop(user_id, None)
+        self._speech_segment_start.pop(user_id, None)
+        self._speech_segment_last_chunk.pop(user_id, None)
+
+        if pcm is None or not pcm:
+            return
+
+        recorder = getattr(self, '_speech_recorder', None)
+        if not recorder or not recorder.enabled:
+            return
+
+        # Frame-align and compute duration.
+        # 48 kHz * 2 ch * 2 bytes = 192 000 bytes/s
+        FRAME_BYTES = 4  # 2 channels * 2 bytes per sample
+        aligned_len = (len(pcm) // FRAME_BYTES) * FRAME_BYTES
+        if aligned_len < FRAME_BYTES:
+            return
+        if aligned_len < len(pcm):
+            pcm = pcm[:aligned_len]
+
+        duration_seconds = aligned_len / 192000.0
+        if duration_seconds < recorder.min_duration_seconds:
+            return
+
+        # Resolve user metadata
+        member = self.guild.get_member(user_id)
+        username = member.name if member else f"user_{user_id}"
+        display_name = member.display_name if member else username
+        # Build a unique folder name: "username_userid"
+        folder_name = f"{_sanitise_username(username)}_{user_id}"
+
+        segment = SpeechTrainingSegment(
+            pcm_data=bytes(pcm),
+            guild_id=str(self.guild.id) if self.guild else None,
+            user_id=str(user_id),
+            username=username,
+            display_name=display_name,
+            folder_name=folder_name,
+            duration_seconds=duration_seconds,
+            sample_rate=48000,
+            channels=2,
+            sample_width=2,
+        )
+        recorder.enqueue_segment(segment)
+
+    def _flush_speech_segments(self, now: float) -> None:
+        """Finalize any open speech segment whose last chunk is older than the silence threshold."""
+        recorder = getattr(self, '_speech_recorder', None)
+        if not recorder or not recorder.enabled:
+            return
+
+        lock = getattr(self, '_speech_lock', None)
+        if lock is None:
+            return
+        with lock:
+            for user_id, last_chunk_time in list(self._speech_segment_last_chunk.items()):
+                if now - last_chunk_time >= recorder.silence_seconds:
+                    self._finalize_speech_segment(user_id)
+
+    def _force_finalize_all_speech_segments(self) -> None:
+        """Force-finalize all pending speech segments (called from stop())."""
+        recorder = getattr(self, '_speech_recorder', None)
+        if not recorder or not recorder.enabled:
+            return
+
+        lock = getattr(self, '_speech_lock', None)
+        if lock is None:
+            return
+        with lock:
+            for user_id in list(self._speech_segment_pcm.keys()):
+                self._finalize_speech_segment(user_id)
 
     def get_buffer_content(self, seconds: int = 10) -> bytes:
         """Get the last N seconds of mixed audio from all users' buffers."""
@@ -3959,3 +4135,15 @@ class KeywordDetectionSink(sinks.Sink):
                 requester_name=requester_name,
                 cooldown_seconds=cooldown_seconds,
             )
+
+
+# ---------------------------------------------------------------------------
+# Module-level helpers
+# ---------------------------------------------------------------------------
+
+
+def _sanitise_username(name: str) -> str:
+    """Sanitise a username for use as a directory name component."""
+    import re as _re
+    safe = _re.sub(r"[^\w\- ]", "_", name).strip().lower()
+    return safe if safe else "unknown"

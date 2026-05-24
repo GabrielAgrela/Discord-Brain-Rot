@@ -8,6 +8,7 @@ Discord bot for soundboard playback, live voice keyword triggers, TTS/STS, sound
 - **Upload & sound ingestion** — Unified modal for MP3 file upload and URL ingestion (MP3, TikTok, YouTube, Instagram). Automatic loudness normalization on save. Filename sanitization with collision avoidance. Periodic MyInstants scraping.
 - **Voice commands (wake word + Groq Whisper + Ventura chat)** — Vosk detects the configured wake word (default `ventura`), plays a start prompt, records fresh command audio, and sends it to Groq Whisper for transcription. Three-way branching: play a sound, activate 30-minute mute, or route to an OpenRouter LLM (DeepSeek) for an angry André Ventura parody reply with ElevenLabs TTS playback. Wake words, capture duration, silence timeout, cooldown, confidence thresholds, and prompt clips are all configurable via environment variables.
 - **Real-time keyword detection (Vosk)** — Live keyword triggers (slap or list playback) managed via `/keyword add|remove|list`. Voice commands build on top of the same Vosk grammar.
+- **Speech training dataset (opt-in)** — Persistent voice capture for building a labeled speech dataset with Madeiran Portuguese accents. Clips are segmented by silence, saved as MP3, and can be labeled via the web labeling UI. Requires `SPEECH_TRAINING_RECORDING_ENABLED=true`.
 - **TTS / STS / Voice isolation** — `/tts` (Google or ElevenLabs), `/sts` (ElevenLabs speech-to-speech), `/isolate` (ElevenLabs voice isolation). All outputs are loudness-normalized.
 - **Sound lists & events** — CRUD for sound lists via slash commands. Join/leave event sound assignment with paginated browsing.
 - **Analytics & wrapped** — `/top` leaderboards (users, sounds, voice users, voice channels), `/weeklywrapped` and `/yearreview` as Remotion-rendered GIF digests, `/sendyearreview` admin DM flow. Voice session analytics from `voice_activity` rows.
@@ -115,46 +116,16 @@ Create a `.env` file in the project root. Only `DISCORD_BOT_TOKEN` is strictly r
 ### Audio & Playback
 
 | Variable | Default | Description |
-|---|---|---|
-| `AUDIO_LATENCY_MODE` | `low_latency` | Options: `low_latency`, `balanced`, `high_quality` |
-| `PLAYBACK_START_PREROLL_MS` | `180` | Baseline startup pre-roll |
-| `LOW_LATENCY_MP3_START_PREROLL_MS` | `650` | Minimum MP3 pre-roll floor in low-latency mode |
-| `SOUND_PLAYBACK_EAR_PROTECTION_ENABLED` | `true` | Anti-earrape filtering during playback |
-| `TTS_LOUDNORM_MODE` | `off` | Options: `off`, `single`, `double` |
-| `FFMPEG_MAX_CONCURRENT_JOBS` | — | Global FFmpeg concurrency cap |
-| `TTS_MAX_CONCURRENT_JOBS` | — | Global TTS/STS concurrency cap |
-| `PLAYBACK_QUEUE_INTERVAL` | `0.25` | Web request bridge polling interval (seconds) |
-
-### Scheduler & Admin
-
-| Variable | Default | Description |
-|---|---|---|
-| `WEEKLY_WRAPPED_ENABLED` | `true` | Enable weekly digest scheduler |
-| `WEEKLY_WRAPPED_DAY_UTC` | `4` (Friday) | Day of week (0=Monday) |
-| `WEEKLY_WRAPPED_HOUR_UTC` | `18` | Hour |
-| `WEEKLY_WRAPPED_LOOKBACK_DAYS` | `7` | Activity window |
-| `WEEKLY_WRAPPED_GIF_MAX_MB` | — | Upload cap override for weekly GIF |
-| `YEAR_REVIEW_GIF_MAX_MB` | — | Upload cap override for year-review GIF |
-| `BACKUP_SCHEDULER_ENABLED` | `true` | Enable weekly backup |
-| `BACKUP_SCHEDULER_DAY_UTC` | `4` (Friday) | Day of week |
-| `BACKUP_SCHEDULER_HOUR_UTC` | `18` | Hour |
-| `RLSTORE_NOTIFY_ENABLED` | `true` | Daily RL store notification |
-| `RLSTORE_NOTIFY_HOUR_UTC` | `19` | Notification hour |
-| `RLSTORE_NOTIFY_MINUTE_UTC` | `5` | Notification minute |
-| `RLSTORE_NOTIFY_TARGET_USERNAME` | `sopustos` | User to mention |
-| `BOT_SELF_HEAL_RESTART_ENABLED` | `true` | Let Docker restart after unrecoverable failures |
-| `BOT_GATEWAY_UNREADY_RESTART_SECONDS` | `300` | Gateway unready restart threshold |
-| `BOT_VOICE_RECOVERY_FAILURE_RESTARTS` | `3` | Voice recovery failure restart threshold |
-
-### Advanced Tuning
-
-| Variable | Default | Description |
-|---|---|---|
-| `SOUND_INGEST_NORMALIZE_ENABLED` | `true` | Normalize uploaded/ingested MP3s |
-| `SOUND_INGEST_TARGET_DBFS` | `-18.0` | Target loudness for ingest normalization |
-| `SOUND_EARRAPE_KEYWORDS` | `earrape,bassboost,bass boost` | Filename markers for stronger protection |
-| `FAVORITE_WATCHER_SCAN_LIMIT` | `50` | Max TikTok collection entries per poll |
+|---|---|---|---|
 | `KEYWORD_SILENCE_FLUSH_SECONDS` | `0.35` | Vosk final detection flush delay |
+| `SPEECH_TRAINING_RECORDING_ENABLED` | `false` | Enable persistent voice capture for dataset (privacy-sensitive — opt-in only) |
+| `SPEECH_TRAINING_DATA_DIR` | `data/speech_training` | Root directory for captured MP3 clips |
+| `SPEECH_TRAINING_SILENCE_SECONDS` | `0.35` | Silence gap to split speech segments (range `0.15`–`3.0`) |
+| `SPEECH_TRAINING_MIN_DURATION_SECONDS` | `0.25` | Minimum segment duration to save |
+| `SPEECH_TRAINING_MAX_DURATION_SECONDS` | `10.0` | Max segment duration before forced split |
+| `SPEECH_TRAINING_MIN_RMS` | `120` | Minimum RMS amplitude to skip near-silent artifacts |
+| `SPEECH_TRAINING_MP3_BITRATE` | `64k` | MP3 export bitrate for captured clips |
+| `SPEECH_TRAINING_QUEUE_SIZE` | `200` | Max pending export jobs before dropping |
 | `PERFORMANCE_MONITOR_TICK_SECONDS` | `0.5` | Telemetry interval (min `0.1`) |
 | `WEB_TTS_ENHANCER_MODEL` | `deepseek/deepseek-v4-flash` | OpenRouter model for web TTS enhancer |
 | `WEB_TTS_ENHANCER_PROVIDER` | — | OpenRouter provider for web TTS enhancer |
@@ -261,6 +232,13 @@ The optional web dashboard is served by a separate `web` container (Docker profi
 | `GET /api/uploads` | Upload inbox (admin/mod) |
 | `POST /api/uploads/<id>/moderation` | Approve/reject upload (admin/mod) |
 | `GET /api/analytics/summary\|top_users\|top_sounds\|activity_heatmap\|activity_timeline\|recent_activity` | Analytics data |
+| `GET /speech-training` | Speech training dataset labeling page (admin-only, auto-refreshes every 5 s) |
+| `GET /api/speech_training/users` | Per-user clip aggregation (admin-only) |
+| `GET /api/speech_training/clips` | Paginated clip list with filters (admin-only) |
+| `GET /api/speech_training/clips/<id>/audio` | Stream a captured MP3 (admin-only) |
+| `POST /api/speech_training/clips/<id>/label` | Update label/transcript/notes (admin-only) |
+| `DELETE /api/speech_training/clips/<id>` | Delete a single clip (admin-only) |
+| `POST /api/speech_training/clips/bulk` | Bulk label or delete clips (admin-only) |
 
 Unauthenticated buttons show a locked state prompting Discord login. Web playback requires authentication so actions are logged as the real user.
 
@@ -272,6 +250,7 @@ Unauthenticated buttons show a locked state prompting Discord login. Web playbac
 - **Logs:** `logs/YYYY-MM-DD.log` plus `logs/errors.log`.
 - **Debug:** `debug/` — Vosk/Groq debug WAVs when enabled.
 - **Vosk model:** Expected at `data/models/vosk-model-small-pt-0.3`.
+- **Speech training data:** `data/speech_training/<guild_id>/<username>_<user_id>/<timestamp>_<dur-ms>ms.mp3` — optional captured voice clips for dataset labeling.
 - **Remotion:** Year-review and weekly-wrapped GIF rendering requires Node.js/npm and a local Remotion CLI under `trailer/node_modules/.bin/remotion` (setup not included in this repo).
 
 ## Project Layout

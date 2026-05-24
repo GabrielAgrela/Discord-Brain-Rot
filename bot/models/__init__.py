@@ -15,6 +15,7 @@ from bot.models.rl_store import (
     RocketLeagueStoreGroup,
     RocketLeagueStoreItem,
 )
+from bot.models.speech_training import SpeechTrainingClip
 
 __all__ = [
     "Sound",
@@ -27,4 +28,5 @@ __all__ = [
     "RocketLeagueStoreShop",
     "RocketLeagueStoreGroup",
     "RocketLeagueStoreItem",
+    "SpeechTrainingClip",
 ]

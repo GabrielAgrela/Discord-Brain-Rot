@@ -3233,3 +3233,676 @@ def test_read_cache_invalidates_after_ttl_via_invalidate(web_client):
         assert call_count[0] == 2  # fresh call after invalidation
     finally:
         WebContentService.get_actions = original
+
+
+# ── Speech Training Dataset Tests ─────────────────────────────────────
+
+class TestSpeechTrainingRoutes:
+    """Tests for the speech training labeling routes."""
+
+    def test_speech_training_page_redirects_when_not_logged_in(self, web_client):
+        """Unauthenticated users get redirected to login."""
+        client, db_path = web_client
+        resp = client.get("/speech-training")
+        assert resp.status_code in (302, 401)
+
+    def test_speech_training_page_requires_admin(self, web_client):
+        """Non-admin users get a 403 error page."""
+        client, db_path = web_client
+        resp = client.get("/speech-training")
+        # Re-check as non-admin user
+        _login_web_user(client, username="nonadmin", admin_guild_ids=[])
+        resp = client.get("/speech-training")
+        assert resp.status_code == 403
+
+    def test_speech_training_page_renders_for_admin(self, web_client):
+        """Admin users can see the speech training page."""
+        client, db_path = web_client
+        _login_web_user(client, username="admin", admin_guild_ids=["111"])
+        # Create a guild setting so guild_options works
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("INSERT OR IGNORE INTO guild_settings (guild_id) VALUES ('111')")
+            conn.commit()
+        finally:
+            conn.close()
+        resp = client.get("/speech-training")
+        assert resp.status_code == 200
+        assert b"Dataset" in resp.data or b"dataset" in resp.data.lower()
+
+    def test_api_users_requires_auth(self, web_client):
+        """API /api/speech_training/users returns 401 when not logged in."""
+        client, _ = web_client
+        resp = client.get("/api/speech_training/users")
+        assert resp.status_code == 401
+
+    def test_api_users_requires_admin(self, web_client):
+        """API /api/speech_training/users returns 403 for non-admin."""
+        client, _ = web_client
+        _login_web_user(client, username="nonadmin", admin_guild_ids=[])
+        resp = client.get("/api/speech_training/users")
+        assert resp.status_code == 403
+
+    def test_api_users_returns_data(self, web_client):
+        """Admin can fetch user aggregation."""
+        client, db_path = web_client
+        _login_web_user(client, username="admin", admin_guild_ids=["111"])
+
+        # Seed the speech_training_clips table
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS speech_training_clips (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id TEXT,
+                    user_id TEXT NOT NULL,
+                    username TEXT NOT NULL,
+                    display_name TEXT,
+                    folder_name TEXT NOT NULL,
+                    filename TEXT NOT NULL,
+                    relative_path TEXT NOT NULL UNIQUE,
+                    duration_seconds REAL NOT NULL,
+                    byte_size INTEGER NOT NULL DEFAULT 0,
+                    sample_rate INTEGER NOT NULL DEFAULT 48000,
+                    channels INTEGER NOT NULL DEFAULT 2,
+                    sample_width INTEGER NOT NULL DEFAULT 2,
+                    captured_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    label TEXT,
+                    transcript TEXT,
+                    notes TEXT,
+                    reviewed_by_user_id TEXT,
+                    reviewed_by_username TEXT,
+                    reviewed_at DATETIME
+                )
+                """
+            )
+            conn.execute(
+                "INSERT INTO speech_training_clips "
+                "(guild_id, user_id, username, display_name, folder_name, filename, "
+                "relative_path, duration_seconds, byte_size) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ("111", "1", "user1", "User One", "user1_1",
+                 "clip1.mp3", "111/user1_1/clip1.mp3", 1.5, 30000),
+            )
+            conn.execute(
+                "INSERT INTO speech_training_clips "
+                "(guild_id, user_id, username, display_name, folder_name, filename, "
+                "relative_path, duration_seconds, byte_size) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ("111", "1", "user1", "User One", "user1_1",
+                 "clip2.mp3", "111/user1_1/clip2.mp3", 2.0, 40000),
+            )
+            conn.execute(
+                "INSERT INTO speech_training_clips "
+                "(guild_id, user_id, username, display_name, folder_name, filename, "
+                "relative_path, duration_seconds, byte_size) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ("111", "2", "user2", "User Two", "user2_2",
+                 "clip3.mp3", "111/user2_2/clip3.mp3", 0.8, 16000),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        resp = client.get("/api/speech_training/users?guild_id=111")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert isinstance(data, list)
+        assert len(data) == 2  # 2 users
+
+    def test_api_clips_returns_paginated(self, web_client):
+        """Admin can fetch paginated clips."""
+        client, db_path = web_client
+        _login_web_user(client, username="admin", admin_guild_ids=["111"])
+
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS speech_training_clips (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id TEXT,
+                    user_id TEXT NOT NULL,
+                    username TEXT NOT NULL,
+                    display_name TEXT,
+                    folder_name TEXT NOT NULL,
+                    filename TEXT NOT NULL,
+                    relative_path TEXT NOT NULL UNIQUE,
+                    duration_seconds REAL NOT NULL,
+                    byte_size INTEGER NOT NULL DEFAULT 0,
+                    sample_rate INTEGER NOT NULL DEFAULT 48000,
+                    channels INTEGER NOT NULL DEFAULT 2,
+                    sample_width INTEGER NOT NULL DEFAULT 2,
+                    captured_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    label TEXT,
+                    transcript TEXT,
+                    notes TEXT,
+                    reviewed_by_user_id TEXT,
+                    reviewed_by_username TEXT,
+                    reviewed_at DATETIME
+                )
+                """
+            )
+            conn.execute(
+                "INSERT INTO speech_training_clips "
+                "(guild_id, user_id, username, display_name, folder_name, filename, "
+                "relative_path, duration_seconds, byte_size) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ("111", "1", "user1", "User One", "user1_1",
+                 "clip1.mp3", "111/user1_1/clip1.mp3", 1.5, 30000),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        resp = client.get("/api/speech_training/clips?guild_id=111")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["total"] == 1
+        assert len(data["items"]) == 1
+        assert data["items"][0]["filename"] == "clip1.mp3"
+
+    def test_api_clip_audio_returns_404_for_missing_file(self, web_client):
+        """Audio route returns 404 when file doesn't exist on disk."""
+        client, db_path = web_client
+        _login_web_user(client, username="admin", admin_guild_ids=["111"])
+
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS speech_training_clips (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id TEXT,
+                    user_id TEXT NOT NULL,
+                    username TEXT NOT NULL,
+                    display_name TEXT,
+                    folder_name TEXT NOT NULL,
+                    filename TEXT NOT NULL,
+                    relative_path TEXT NOT NULL UNIQUE,
+                    duration_seconds REAL NOT NULL,
+                    byte_size INTEGER NOT NULL DEFAULT 0,
+                    sample_rate INTEGER NOT NULL DEFAULT 48000,
+                    channels INTEGER NOT NULL DEFAULT 2,
+                    sample_width INTEGER NOT NULL DEFAULT 2,
+                    captured_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    label TEXT,
+                    transcript TEXT,
+                    notes TEXT,
+                    reviewed_by_user_id TEXT,
+                    reviewed_by_username TEXT,
+                    reviewed_at DATETIME
+                )
+                """
+            )
+            conn.execute(
+                "INSERT INTO speech_training_clips "
+                "(guild_id, user_id, username, display_name, folder_name, filename, "
+                "relative_path, duration_seconds, byte_size) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ("111", "1", "user1", "User One", "user1_1",
+                 "nofile.mp3", "111/user1_1/nofile.mp3", 1.0, 20000),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        resp = client.get("/api/speech_training/clips/1/audio")
+        assert resp.status_code == 404
+
+    def test_api_clip_label_update(self, web_client):
+        """POST label updates the clip and reviewer metadata."""
+        client, db_path = web_client
+        _login_web_user(client, username="admin", admin_guild_ids=["111"])
+
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute(
+                """
+                 CREATE TABLE IF NOT EXISTS speech_training_clips (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id TEXT,
+                    user_id TEXT NOT NULL,
+                    username TEXT NOT NULL,
+                    display_name TEXT,
+                    folder_name TEXT NOT NULL,
+                    filename TEXT NOT NULL,
+                    relative_path TEXT NOT NULL UNIQUE,
+                    duration_seconds REAL NOT NULL,
+                    byte_size INTEGER NOT NULL DEFAULT 0,
+                    sample_rate INTEGER NOT NULL DEFAULT 48000,
+                    channels INTEGER NOT NULL DEFAULT 2,
+                    sample_width INTEGER NOT NULL DEFAULT 2,
+                    captured_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    label TEXT,
+                    transcript TEXT,
+                    notes TEXT,
+                    reviewed_by_user_id TEXT,
+                    reviewed_by_username TEXT,
+                    reviewed_at DATETIME
+                )
+                """
+            )
+            conn.execute(
+                "INSERT INTO speech_training_clips "
+                "(guild_id, user_id, username, display_name, folder_name, filename, "
+                "relative_path, duration_seconds, byte_size) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ("111", "1", "user1", "User One", "user1_1",
+                 "clip1.mp3", "111/user1_1/clip1.mp3", 1.5, 30000),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        resp = client.post(
+            "/api/speech_training/clips/1/label",
+            json={"label": "chapada", "transcript": "test", "notes": "good"},
+        )
+        assert resp.status_code == 200
+        assert resp.get_json()["status"] == "ok"
+
+        # Verify DB was updated
+        conn = sqlite3.connect(db_path)
+        try:
+            row = conn.execute(
+                "SELECT label, transcript, reviewed_by_username FROM speech_training_clips WHERE id = 1"
+            ).fetchone()
+            assert row[0] == "chapada"
+            assert row[1] == "test"
+        finally:
+            conn.close()
+
+    def test_api_clips_supports_sort_param(self, web_client):
+        """Clips endpoint accepts sort param and returns ordered results."""
+        client, db_path = web_client
+        _login_web_user(client, username="admin", admin_guild_ids=["111"])
+
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS speech_training_clips (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id TEXT, user_id TEXT NOT NULL, username TEXT NOT NULL,
+                    display_name TEXT, folder_name TEXT NOT NULL,
+                    filename TEXT NOT NULL, relative_path TEXT NOT NULL UNIQUE,
+                    duration_seconds REAL NOT NULL, byte_size INTEGER NOT NULL DEFAULT 0,
+                    sample_rate INTEGER NOT NULL DEFAULT 48000,
+                    channels INTEGER NOT NULL DEFAULT 2,
+                    sample_width INTEGER NOT NULL DEFAULT 2,
+                    captured_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    label TEXT, transcript TEXT, notes TEXT,
+                    reviewed_by_user_id TEXT, reviewed_by_username TEXT, reviewed_at DATETIME
+                )
+            """)
+            conn.execute(
+                "INSERT INTO speech_training_clips "
+                "(guild_id, user_id, username, display_name, folder_name, filename, "
+                "relative_path, duration_seconds, byte_size, captured_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ("111", "1", "user1", "User One", "user1_1",
+                 "short.mp3", "111/user1_1/short.mp3", 0.5, 10000, "2026-01-01 12:00:00"),
+            )
+            conn.execute(
+                "INSERT INTO speech_training_clips "
+                "(guild_id, user_id, username, display_name, folder_name, filename, "
+                "relative_path, duration_seconds, byte_size, captured_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ("111", "2", "user2", "User Two", "user2_2",
+                 "long.mp3", "111/user2_2/long.mp3", 5.0, 100000, "2026-01-02 12:00:00"),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        resp = client.get("/api/speech_training/clips?guild_id=111&sort=longest")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert len(data["items"]) == 2
+        assert data["items"][0]["duration_seconds"] == 5.0  # longest first
+
+    def test_api_clip_delete(self, web_client):
+        """DELETE clip removes the DB row."""
+        client, db_path = web_client
+        _login_web_user(client, username="admin", admin_guild_ids=["111"])
+
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS speech_training_clips (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id TEXT, user_id TEXT NOT NULL, username TEXT NOT NULL,
+                    display_name TEXT, folder_name TEXT NOT NULL,
+                    filename TEXT NOT NULL, relative_path TEXT NOT NULL UNIQUE,
+                    duration_seconds REAL NOT NULL, byte_size INTEGER NOT NULL DEFAULT 0,
+                    sample_rate INTEGER NOT NULL DEFAULT 48000,
+                    channels INTEGER NOT NULL DEFAULT 2,
+                    sample_width INTEGER NOT NULL DEFAULT 2,
+                    captured_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    label TEXT, transcript TEXT, notes TEXT,
+                    reviewed_by_user_id TEXT, reviewed_by_username TEXT, reviewed_at DATETIME
+                )
+            """)
+            conn.execute(
+                "INSERT INTO speech_training_clips "
+                "(guild_id, user_id, username, display_name, folder_name, filename, "
+                "relative_path, duration_seconds, byte_size) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ("111", "1", "user1", "User One", "user1_1",
+                 "todelete.mp3", "111/user1_1/todelete.mp3", 1.0, 20000),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        resp = client.delete("/api/speech_training/clips/1")
+        assert resp.status_code == 200
+        assert resp.get_json()["status"] == "ok"
+
+        conn = sqlite3.connect(db_path)
+        try:
+            row = conn.execute("SELECT id FROM speech_training_clips WHERE id = 1").fetchone()
+            assert row is None
+        finally:
+            conn.close()
+
+    def test_api_clip_delete_not_found(self, web_client):
+        """DELETE missing clip returns 404."""
+        client, _ = web_client
+        _login_web_user(client, username="admin", admin_guild_ids=["111"])
+        resp = client.delete("/api/speech_training/clips/99999")
+        assert resp.status_code == 404
+
+    def test_api_clip_delete_requires_admin(self, web_client):
+        """DELETE clip requires admin."""
+        client, _ = web_client
+        resp = client.delete("/api/speech_training/clips/1")
+        assert resp.status_code == 401
+
+        _login_web_user(client, username="nonadmin", admin_guild_ids=[])
+        resp = client.delete("/api/speech_training/clips/1")
+        assert resp.status_code == 403
+
+    def test_api_bulk_label(self, web_client):
+        """POST bulk label updates multiple clips."""
+        client, db_path = web_client
+        _login_web_user(client, username="admin", admin_guild_ids=["111"])
+
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS speech_training_clips (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id TEXT, user_id TEXT NOT NULL, username TEXT NOT NULL,
+                    display_name TEXT, folder_name TEXT NOT NULL,
+                    filename TEXT NOT NULL, relative_path TEXT NOT NULL UNIQUE,
+                    duration_seconds REAL NOT NULL, byte_size INTEGER NOT NULL DEFAULT 0,
+                    sample_rate INTEGER NOT NULL DEFAULT 48000,
+                    channels INTEGER NOT NULL DEFAULT 2,
+                    sample_width INTEGER NOT NULL DEFAULT 2,
+                    captured_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    label TEXT, transcript TEXT, notes TEXT,
+                    reviewed_by_user_id TEXT, reviewed_by_username TEXT, reviewed_at DATETIME
+                )
+            """)
+            conn.execute(
+                "INSERT INTO speech_training_clips "
+                "(guild_id, user_id, username, display_name, folder_name, filename, "
+                "relative_path, duration_seconds, byte_size) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ("111", "1", "user1", "User One", "user1_1",
+                 "a.mp3", "111/user1_1/a.mp3", 1.0, 20000),
+            )
+            conn.execute(
+                "INSERT INTO speech_training_clips "
+                "(guild_id, user_id, username, display_name, folder_name, filename, "
+                "relative_path, duration_seconds, byte_size) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ("111", "1", "user1", "User One", "user1_1",
+                 "b.mp3", "111/user1_1/b.mp3", 1.0, 20000),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        resp = client.post(
+            "/api/speech_training/clips/bulk",
+            json={"action": "label", "ids": [1, 2], "label": "chapada"},
+        )
+        assert resp.status_code == 200
+        assert resp.get_json()["status"] == "ok"
+
+        conn = sqlite3.connect(db_path)
+        try:
+            labels = conn.execute(
+                "SELECT label FROM speech_training_clips ORDER BY id"
+            ).fetchall()
+            assert labels == [("chapada",), ("chapada",)]
+        finally:
+            conn.close()
+
+    def test_api_bulk_delete(self, web_client):
+        """POST bulk delete removes multiple clips."""
+        client, db_path = web_client
+        _login_web_user(client, username="admin", admin_guild_ids=["111"])
+
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS speech_training_clips (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id TEXT, user_id TEXT NOT NULL, username TEXT NOT NULL,
+                    display_name TEXT, folder_name TEXT NOT NULL,
+                    filename TEXT NOT NULL, relative_path TEXT NOT NULL UNIQUE,
+                    duration_seconds REAL NOT NULL, byte_size INTEGER NOT NULL DEFAULT 0,
+                    sample_rate INTEGER NOT NULL DEFAULT 48000,
+                    channels INTEGER NOT NULL DEFAULT 2,
+                    sample_width INTEGER NOT NULL DEFAULT 2,
+                    captured_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    label TEXT, transcript TEXT, notes TEXT,
+                    reviewed_by_user_id TEXT, reviewed_by_username TEXT, reviewed_at DATETIME
+                )
+            """)
+            conn.execute(
+                "INSERT INTO speech_training_clips "
+                "(guild_id, user_id, username, display_name, folder_name, filename, "
+                "relative_path, duration_seconds, byte_size) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ("111", "1", "user1", "User One", "user1_1",
+                 "a.mp3", "111/user1_1/a.mp3", 1.0, 20000),
+            )
+            conn.execute(
+                "INSERT INTO speech_training_clips "
+                "(guild_id, user_id, username, display_name, folder_name, filename, "
+                "relative_path, duration_seconds, byte_size) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ("111", "1", "user1", "User One", "user1_1",
+                 "b.mp3", "111/user1_1/b.mp3", 1.0, 20000),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        resp = client.post(
+            "/api/speech_training/clips/bulk",
+            json={"action": "delete", "ids": [1, 2]},
+        )
+        assert resp.status_code == 200
+        assert resp.get_json()["status"] == "ok"
+
+        conn = sqlite3.connect(db_path)
+        try:
+            count = conn.execute("SELECT COUNT(*) FROM speech_training_clips").fetchone()[0]
+            assert count == 0
+        finally:
+            conn.close()
+
+    def test_api_bulk_invalid_action(self, web_client):
+        """Bulk with unknown action returns 400."""
+        client, _ = web_client
+        _login_web_user(client, username="admin", admin_guild_ids=["111"])
+        resp = client.post(
+            "/api/speech_training/clips/bulk",
+            json={"action": "unknown", "ids": [1]},
+        )
+        assert resp.status_code == 400
+
+    def test_api_bulk_requires_admin(self, web_client):
+        """Bulk endpoint requires admin."""
+        client, _ = web_client
+        resp = client.post(
+            "/api/speech_training/clips/bulk",
+            json={"action": "label", "ids": [1], "label": "chapada"},
+        )
+        assert resp.status_code == 401
+
+    # ── Storage API ───────────────────────────────────────────────────
+
+    def test_api_storage_requires_auth(self, web_client):
+        """Storage API returns 401 when not logged in."""
+        client, _ = web_client
+        resp = client.get("/api/speech_training/storage")
+        assert resp.status_code == 401
+
+    def test_api_storage_requires_admin(self, web_client):
+        """Storage API returns 403 for non-admin."""
+        client, _ = web_client
+        _login_web_user(client, username="nonadmin", admin_guild_ids=[])
+        resp = client.get("/api/speech_training/storage")
+        assert resp.status_code == 403
+
+    def test_api_storage_returns_data(self, web_client):
+        """Admin can fetch storage summary."""
+        client, db_path = web_client
+        _login_web_user(client, username="admin", admin_guild_ids=["111"])
+
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS speech_training_clips (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id TEXT, user_id TEXT NOT NULL, username TEXT NOT NULL,
+                    display_name TEXT, folder_name TEXT NOT NULL,
+                    filename TEXT NOT NULL, relative_path TEXT NOT NULL UNIQUE,
+                    duration_seconds REAL NOT NULL, byte_size INTEGER NOT NULL DEFAULT 0,
+                    sample_rate INTEGER NOT NULL DEFAULT 48000,
+                    channels INTEGER NOT NULL DEFAULT 2,
+                    sample_width INTEGER NOT NULL DEFAULT 2,
+                    captured_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    label TEXT, transcript TEXT, notes TEXT,
+                    reviewed_by_user_id TEXT, reviewed_by_username TEXT, reviewed_at DATETIME
+                )
+            """)
+            conn.execute(
+                "INSERT INTO speech_training_clips "
+                "(guild_id, user_id, username, display_name, folder_name, filename, "
+                "relative_path, duration_seconds, byte_size) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ("111", "1", "user1", "User One", "user1_1",
+                 "a.mp3", "111/user1_1/a.mp3", 1.0, 30000),
+            )
+            conn.execute(
+                "INSERT INTO speech_training_clips "
+                "(guild_id, user_id, username, display_name, folder_name, filename, "
+                "relative_path, duration_seconds, byte_size) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ("111", "1", "user1", "User One", "user1_1",
+                 "b.mp3", "111/user1_1/b.mp3", 2.0, 45000),
+            )
+            conn.execute(
+                "INSERT INTO speech_training_clips "
+                "(guild_id, user_id, username, display_name, folder_name, filename, "
+                "relative_path, duration_seconds, byte_size) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ("222", "2", "user2", "User Two", "user2_2",
+                 "c.mp3", "222/user2_2/c.mp3", 0.5, 12000),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        # Fetch with guild filter
+        resp = client.get("/api/speech_training/storage?guild_id=111")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["total_bytes"] == 75000  # 30000 + 45000
+        assert data["clip_count"] == 2
+        assert data["total_size"] == "73.2 KB"
+
+        # Fetch without filter (all guilds)
+        resp = client.get("/api/speech_training/storage")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["total_bytes"] == 87000  # 30000 + 45000 + 12000
+        assert data["clip_count"] == 3
+
+    def test_api_storage_no_data(self, web_client):
+        """Storage API returns zeros when no clips exist."""
+        client, _ = web_client
+        _login_web_user(client, username="admin", admin_guild_ids=["111"])
+        resp = client.get("/api/speech_training/storage")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["total_bytes"] == 0
+        assert data["clip_count"] == 0
+        assert data["total_size"] == "0 B"
+
+    def test_api_storage_page_renders_with_element(self, web_client):
+        """Speech training page includes the storage element."""
+        client, db_path = web_client
+        _login_web_user(client, username="admin", admin_guild_ids=["111"])
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("INSERT OR IGNORE INTO guild_settings (guild_id) VALUES ('111')")
+            conn.commit()
+        finally:
+            conn.close()
+        resp = client.get("/speech-training")
+        assert resp.status_code == 200
+        html = resp.get_data(as_text=True)
+        assert 'id="storageUsed"' in html
+        assert 'MP3 storage:' in html
+
+    def test_analytics_page_shows_dataset_link_for_admin(self, web_client):
+        """Analytics page includes Dataset link in nav for admin users."""
+        client, db_path = web_client
+        _login_web_user(client, username="admin", admin_guild_ids=["111"])
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("INSERT OR IGNORE INTO guild_settings (guild_id) VALUES ('111')")
+            conn.commit()
+        finally:
+            conn.close()
+        resp = client.get("/analytics")
+        assert resp.status_code == 200
+        html = resp.get_data(as_text=True)
+        assert '/speech-training' in html
+        assert 'Dataset' in html
+
+    def test_analytics_page_hides_dataset_link_for_non_admin(self, web_client):
+        """Analytics page should not include Dataset link for non-admin."""
+        client, _ = web_client
+        resp = client.get("/analytics")
+        assert resp.status_code == 200
+        html = resp.get_data(as_text=True)
+        # Dataset link should not appear for anonymous
+        assert 'href="/speech-training"' not in html
+
+    def test_speech_training_page_uses_shared_nav(self, web_client):
+        """Speech training page has shared nav with Dataset active."""
+        client, db_path = web_client
+        _login_web_user(client, username="admin", admin_guild_ids=["111"])
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("INSERT OR IGNORE INTO guild_settings (guild_id) VALUES ('111')")
+            conn.commit()
+        finally:
+            conn.close()
+        resp = client.get("/speech-training")
+        assert resp.status_code == 200
+        html = resp.get_data(as_text=True)
+        # Should have shared nav content
+        assert 'href="/speech-training"' in html
+        assert 'nav-link' in html
+        assert 'nav-brand' in html

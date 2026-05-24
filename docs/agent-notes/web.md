@@ -215,11 +215,35 @@ The TTLs are intentionally short (1.0–1.5 s) so that user-triggered searches
 - Cache entries are evicted when the entry count exceeds 256 (oldest are removed first).
 - The cache does not persist across web container restarts.
 
+## Speech Training Labeling UI
+
+- ``GET /speech-training`` and its API routes (``/api/speech_training/*``) are admin-only. Unauthenticated visitors are redirected to Discord login with ``next``; authenticated non-admins receive a 403 error page.
+- Audio files are served through the protected ``/api/speech_training/clips/<id>/audio`` route (via ``send_file(mimetype="audio/mpeg", conditional=True)``), **never** as static file paths.
+- ``WebSpeechTrainingService.resolve_audio_path()`` validates that the resolved path is within ``SPEECH_TRAINING_DATA_DIR`` and the file exists — rejecting path traversal.
+- The repository table ``speech_training_clips`` is created by both ``Database._run_schema_migrations()`` (bot startup) and ``SpeechTrainingRepository.ensure_schema()`` (web service factory) so both processes can read/write without a strict startup order.
+
 ### Tests
 
 - ``tests/services/test_system_monitor_service.py`` — covers ``HostSystemMonitorService`` with fake ``/proc`` trees and ``WebSystemMonitorService`` with a mocked repository, plus in-process cache hit/miss/TTL behavior.
 - ``tests/repositories/test_web_system_status_repository.py`` — covers upsert, read, staleness, and edge cases.
 - ``tests/test_webpage.py`` — system-monitor endpoint tests replace the service with fakes and verify route behaviour; cache tests verify producer-count reduction, scope isolation, query-param isolation, and TTL invalidation for the five cached endpoints.
+
+### Shared navigation
+
+A shared nav partial lives at ``bot/web/templates/shared/nav.html``.  All pages (soundboard, analytics, dataset) include it.  The including template sets ``active_page`` (``"soundboard"``, ``"analytics"``, or ``"dataset"``), ``nav_subtitle`` (e.g. ``"Web Sound Desk"``, ``"Signal Report"``, ``"Dataset"``), ``logout_next`` (logout redirect path), and ``show_upload_inbox`` (bool for the admin inbox button).
+
+``bot/web/templates/soundboard/nav.html`` is a compatibility wrapper that defaults ``active_page='soundboard'``, ``nav_subtitle='Web Sound Desk'``, ``show_upload_inbox=true``, and ``logout_next='/'``, then includes ``shared/nav.html``.
+
+When adding a new page, include ``shared/nav.html`` with the correct ``active_page`` so the appropriate nav link is highlighted.  If the new page should show the Dataset link, the page route must also inject ``web_user_is_admin`` (already available from the global context processor).
+
+### Speech Training APIs
+
+The following admin-only APIs support quick labeling and bulk operations:
+
+- ``DELETE /api/speech_training/clips/<id>`` — delete a single clip and its audio file.
+- ``POST /api/speech_training/clips/bulk`` — body ``{"action": "label", "ids": [...], "label": "chapada"}`` or ``{"action": "delete", "ids": [...]}``.  Max 200 ids.
+
+The ``GET /api/speech_training/clips`` endpoint now accepts a ``sort`` parameter (values: ``newest``, ``oldest``, ``longest``, ``shortest``, ``unlabeled_first``, ``label_asc``, ``label_desc``, ``speaker_asc``, ``speaker_desc``, ``reviewed_desc``).
 
 ### Page UI
 

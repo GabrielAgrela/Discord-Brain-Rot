@@ -21,6 +21,7 @@ from bot.repositories.web_system_status import WebSystemStatusRepository
 from bot.repositories.favorite_watcher import FavoriteWatcherRepository
 from bot.repositories.sound_import_notification import SoundImportNotificationRepository
 from bot.repositories.web_tts_settings import WebTtsSettingsRepository
+from bot.repositories.speech_training import SpeechTrainingRepository
 
 __all__ = [
     "BaseRepository",
@@ -37,4 +38,5 @@ __all__ = [
     "FavoriteWatcherRepository",
     "SoundImportNotificationRepository",
     "WebTtsSettingsRepository",
+    "SpeechTrainingRepository",
 ]

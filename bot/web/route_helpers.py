@@ -31,6 +31,7 @@ from bot.repositories.sound_import_notification import SoundImportNotificationRe
 from bot.repositories.web_upload import WebUploadRepository
 from bot.repositories.web_user_access import WebUserAccessRepository
 from bot.repositories.web_tts_settings import WebTtsSettingsRepository
+from bot.repositories.speech_training import SpeechTrainingRepository
 from bot.services.web_analytics import WebAnalyticsService
 from bot.services.web_auth import WebAuthService
 from bot.services.web_content import WebContentService
@@ -603,6 +604,25 @@ def _get_web_tts_settings_service() -> WebTtsSettingsService:
     db_path = current_app.config["DATABASE_PATH"]
     repo = WebTtsSettingsRepository(db_path=db_path, use_shared=False)
     svc = WebTtsSettingsService(repo)
+    svc.ensure_schema()
+    return svc
+
+
+def _get_web_speech_training_service() -> "WebSpeechTrainingService":
+    """Build a speech training service for the current request config."""
+    from bot.services.web_speech_training import WebSpeechTrainingService
+
+    db_path = current_app.config["DATABASE_PATH"]
+    repo = SpeechTrainingRepository(db_path=db_path, use_shared=False)
+    data_dir = os.getenv(
+        "SPEECH_TRAINING_DATA_DIR",
+        os.path.abspath(
+            os.path.join(
+                os.path.dirname(__file__), "..", "..", "data", "speech_training"
+            )
+        ),
+    )
+    svc = WebSpeechTrainingService(repo, data_dir)
     svc.ensure_schema()
     return svc
 

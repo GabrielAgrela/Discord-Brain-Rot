@@ -52,6 +52,17 @@ Read this when changing uploads, sound ingest, playback, generated sound cards, 
 - Real-time dedupe should remove old controls through raw component payload edits, preserving existing progress labels/emoji.
 - Tracked `discord.Message` objects can have stale `components`; fetch a fresh copy before removing controls.
 
+## Speech Training Dataset Capture
+
+- The opt-in speech training recorder (`SPEECH_TRAINING_RECORDING_ENABLED=true`) uses the same `KeywordDetectionSink` receive audio that Vosk uses. This avoids adding a separate Discord recording sink.
+- The recorder can start the sink when collection is enabled even if guild STT is disabled, but Vosk keyword processing must remain gated by guild STT (`sink.stt_enabled`).
+- PCM-to-MP3 export uses pydub in a background daemon writer thread (`SpeechTrainingRecorderService._writer_loop`) and must **not** block the `write()` receive thread.
+- Segment boundary detection runs in the receive thread (`_feed_speech_segmenter`) and checks silence gaps vs `SPEECH_TRAINING_SILENCE_SECONDS`. Finalization computes RMS and enqueues to the writer thread.
+- Minimum duration and RMS thresholds prevent saving near-silent artifacts.
+- `_flush_silence()` in the Vosk worker loop also flushes pending speech segments via `_flush_speech_segments()`. `stop()` calls `_force_finalize_all_speech_segments()`.
+- Directory layout: `<data_dir>/<guild_id>/<sanitised_username>_<user_id>/<timestamp>_<dur-ms>ms.mp3`.
+- Raw captured PCM is preserved as-is; no loudness normalization for training data.
+
 ## Vosk Keyword Detection
 
 - Vosk keyword detection remains supported for configured trigger words. Do not remove `data/models/vosk-model-small-pt-0.3`, `KeywordCog`, `KeywordRepository`, the `AudioService` recording sink, or DAVE inbound decrypt unless explicitly asked.

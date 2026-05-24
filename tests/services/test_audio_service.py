@@ -3245,3 +3245,67 @@ class TestAudioService:
             sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
             sink.voice_command_silence_seconds = getattr(service, "voice_command_silence_seconds", 1.0)
             assert sink.voice_command_silence_seconds == 1.0
+
+
+class TestSpeechTrainingSinkIntegration:
+    """Tests for the speech training segmenter in KeywordDetectionSink."""
+
+    def _make_sink(self, stt_enabled=True, recorder_enabled=True):
+        """Create a bare KeywordDetectionSink instance with minimal mocks."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        sink.stt_enabled = stt_enabled
+        sink.audio_service = Mock()
+        sink.guild = Mock(id=123)
+        sink.guild.get_member = Mock(return_value=None)
+        sink.loop = Mock()
+        sink.running = True
+        sink.recognizers = {}
+        sink.resample_states = {}
+        sink.last_audio_time = {}
+        sink.queue = Mock()
+        sink.keywords = {}
+        sink.last_partial = {}
+        sink.recognizer_start_time = {}
+        sink.max_segment_duration = 10.0
+        sink.audio_buffers = {}
+        sink.min_batch_size = 28800
+        sink.silence_flush_seconds = 0.35
+        sink.voice_command_enabled = stt_enabled
+        sink.voice_command_wake_words = ["ventura"]
+        sink.voice_command_vosk_wake_words = ["ventura"]
+        sink.voice_command_transcript_wake_words = ["ventura"]
+        sink.voice_command_silence_seconds = 0.5
+        sink.buffer_seconds = 30
+        sink.user_audio_buffers = {}
+        sink.buffer_last_update = {}
+        sink.buffer_lock = Mock()
+        sink._active_captures = {}
+        sink._quota_notification_timestamps = {}
+        sink._voice_command_listening_user_id = None
+        sink._voice_command_listening_lock = Mock()
+        sink.log_dir = "/tmp"
+
+        # Speech training state
+        import threading
+        sink._speech_segment_pcm = {}
+        sink._speech_segment_start = {}
+        sink._speech_segment_last_chunk = {}
+        sink._speech_lock = threading.Lock()
+
+        if recorder_enabled:
+            from bot.services.speech_training import SpeechTrainingRecorderService
+            recorder = SpeechTrainingRecorderService.__new__(SpeechTrainingRecorderService)
+            recorder.enabled = True
+            recorder.silence_seconds = 0.35
+            recorder.min_duration_seconds = 0.25
+            recorder.max_duration_seconds = 10.0
+            recorder.min_rms = 0  # allow all RMS
+            recorder.enqueue_segment = Mock(return_value=True)
+            sink._speech_recorder = recorder
+        else:
+            sink._speech_recorder = None
+
+        return sink
+

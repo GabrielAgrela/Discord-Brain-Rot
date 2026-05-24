@@ -300,6 +300,47 @@ class Database:
                 ON sound_import_notifications(sent_at, attempts, created_at)
                 """
             )
+
+            # Speech training clips table for voice data collection + labeling UI.
+            self.conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS speech_training_clips (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id TEXT,
+                    user_id TEXT NOT NULL,
+                    username TEXT NOT NULL,
+                    display_name TEXT,
+                    folder_name TEXT NOT NULL,
+                    filename TEXT NOT NULL,
+                    relative_path TEXT NOT NULL UNIQUE,
+                    duration_seconds REAL NOT NULL,
+                    byte_size INTEGER NOT NULL DEFAULT 0,
+                    sample_rate INTEGER NOT NULL DEFAULT 48000,
+                    channels INTEGER NOT NULL DEFAULT 2,
+                    sample_width INTEGER NOT NULL DEFAULT 2,
+                    captured_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    label TEXT,
+                    transcript TEXT,
+                    notes TEXT,
+                    reviewed_by_user_id TEXT,
+                    reviewed_by_username TEXT,
+                    reviewed_at DATETIME
+                )
+                """
+            )
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_st_clips_guild_user_captured "
+                "ON speech_training_clips(guild_id, user_id, captured_at DESC)"
+            )
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_st_clips_guild_label_captured "
+                "ON speech_training_clips(guild_id, label, captured_at DESC)"
+            )
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_st_clips_captured_at "
+                "ON speech_training_clips(captured_at DESC)"
+            )
+
             self.conn.commit()
         except sqlite3.Error as e:
             print(f"[Database] Schema migration warning: {e}")
