@@ -547,3 +547,79 @@ class TestSpeechTrainingRepository:
         # Guild 100 clips ≤1.0: only 0.8
         assert len(clips) == 1
         assert clips[0]["duration_seconds"] == 0.8
+
+    # ── list_labels ──────────────────────────────────────────────────
+
+    def test_list_labels_empty(self, repo):
+        """No labels returns empty list."""
+        labels = repo.list_labels()
+        assert labels == []
+
+    def test_list_labels_distinct(self, repo):
+        """Returns distinct non-empty labels."""
+        ids = self._insert_sample_clips(repo)
+        # Assign labels
+        repo._execute_write(
+            "UPDATE speech_training_clips SET label = 'chapada' WHERE id = ?",
+            (ids[0],),
+        )
+        repo._execute_write(
+            "UPDATE speech_training_clips SET label = 'ventura' WHERE id = ?",
+            (ids[1],),
+        )
+        repo._execute_write(
+            "UPDATE speech_training_clips SET label = 'chapada' WHERE id = ?",
+            (ids[2],),
+        )
+        labels = repo.list_labels()
+        assert len(labels) == 2
+        assert 'chapada' in labels
+        assert 'ventura' in labels
+
+    def test_list_labels_excludes_empty_and_null(self, repo):
+        """Empty string and NULL labels are excluded."""
+        ids = self._insert_sample_clips(repo)
+        # Leave some labels null/empty, set one to a real value
+        repo._execute_write(
+            "UPDATE speech_training_clips SET label = 'test_label' WHERE id = ?",
+            (ids[0],),
+        )
+        labels = repo.list_labels()
+        assert labels == ['test_label']
+
+    def test_list_labels_guild_filter(self, repo):
+        """Labels are scoped to guild when filter is provided."""
+        ids = self._insert_sample_clips(repo)
+        # ids[0] = guild 100, ids[3] = guild 200
+        repo._execute_write(
+            "UPDATE speech_training_clips SET label = 'chapada' WHERE id = ?",
+            (ids[0],),
+        )
+        repo._execute_write(
+            "UPDATE speech_training_clips SET label = 'ventura' WHERE id = ?",
+            (ids[3],),
+        )
+        labels_g100 = repo.list_labels(guild_id="100")
+        assert labels_g100 == ['chapada']
+        labels_g200 = repo.list_labels(guild_id="200")
+        assert labels_g200 == ['ventura']
+        labels_all = repo.list_labels()
+        assert len(labels_all) == 2
+
+    def test_list_labels_case_insensitive_order(self, repo):
+        """Labels are ordered case-insensitively."""
+        ids = self._insert_sample_clips(repo)
+        repo._execute_write(
+            "UPDATE speech_training_clips SET label = 'Zebra' WHERE id = ?",
+            (ids[0],),
+        )
+        repo._execute_write(
+            "UPDATE speech_training_clips SET label = 'alpha' WHERE id = ?",
+            (ids[1],),
+        )
+        repo._execute_write(
+            "UPDATE speech_training_clips SET label = 'Beta' WHERE id = ?",
+            (ids[2],),
+        )
+        labels = repo.list_labels()
+        assert labels == ['alpha', 'Beta', 'Zebra']

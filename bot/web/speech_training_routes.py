@@ -77,6 +77,19 @@ def register_speech_training_routes(app: Flask) -> None:
         return jsonify(svc.get_users(guild_id=guild_id))
 
     # ------------------------------------------------------------------
+    # API: Label options (defaults + persisted custom labels)
+    # ------------------------------------------------------------------
+
+    @app.route("/api/speech_training/labels")
+    @_require_discord_login_api
+    @_require_web_admin_api
+    def api_speech_training_labels() -> Any:
+        """Return available label options for the dataset UI."""
+        svc = _get_web_speech_training_service()
+        guild_id = request.args.get("guild_id", "").strip() or None
+        return jsonify(svc.get_label_options(guild_id=guild_id))
+
+    # ------------------------------------------------------------------
     # API: Storage summary
     # ------------------------------------------------------------------
 
@@ -289,6 +302,11 @@ def register_speech_training_routes(app: Flask) -> None:
         Optional fields ``guild_id`` and ``user_id`` scope the unlabeled
         clips to scan.  Default keyword is ``chapada`` at 0.5 confidence.
 
+        When ``delete_non_matches`` is ``true``, clips that are successfully
+        scanned but do **not** match the keyword are deleted after the scan
+        completes.  Skipped clips (missing audio, decode errors) and matched
+        clips are preserved.
+
         Returns ``202`` with ``job_id`` immediately.  Poll status via
         ``GET /api/speech_training/keyword_scan/<job_id>``.
         """
@@ -298,6 +316,7 @@ def register_speech_training_routes(app: Flask) -> None:
             min_confidence = float(data.get("min_confidence", 0.5))
             guild_id = (data.get("guild_id") or "").strip() or None
             user_id = (data.get("user_id") or "").strip() or None
+            delete_non_matches = bool(data.get("delete_non_matches", False))
 
             # Validate synchronously before queuing
             if not keyword:
@@ -312,6 +331,7 @@ def register_speech_training_routes(app: Flask) -> None:
                 min_confidence=min_confidence,
                 guild_id=guild_id,
                 user_id=user_id,
+                delete_non_matches=delete_non_matches,
             )
             return jsonify({"job_id": job_id, "status": "queued"}), 202
         except (TypeError, ValueError):

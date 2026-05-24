@@ -573,6 +573,39 @@ class SpeechTrainingRepository(BaseRepository):
         return clips
 
     # ------------------------------------------------------------------
+    # Distinct labels
+    # ------------------------------------------------------------------
+
+    def list_labels(self, guild_id: Optional[str] = None) -> List[str]:
+        """Return distinct non-empty labels, ordered case-insensitively.
+
+        Args:
+            guild_id: Optional guild filter.
+
+        Returns:
+            List of distinct label strings (non-empty, not NULL).
+        """
+        if guild_id:
+            rows = self._execute(
+                """
+                SELECT DISTINCT label FROM speech_training_clips
+                WHERE label IS NOT NULL AND label != ''
+                  AND guild_id = ?
+                ORDER BY label COLLATE NOCASE
+                """,
+                (guild_id,),
+            )
+        else:
+            rows = self._execute(
+                """
+                SELECT DISTINCT label FROM speech_training_clips
+                WHERE label IS NOT NULL AND label != ''
+                ORDER BY label COLLATE NOCASE
+                """
+            )
+        return [r["label"] for r in rows]
+
+    # ------------------------------------------------------------------
     # Storage summary
     # ------------------------------------------------------------------
 

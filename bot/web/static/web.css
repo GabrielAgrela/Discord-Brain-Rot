@@ -5799,7 +5799,7 @@ tbody.page-swap-active {
 }
 
 .dataset-quick-play,
-.dataset-quick-label,
+.dataset-quick-label-apply,
 .dataset-quick-delete,
 .dataset-quick-more {
     font-size: 0.7rem;
@@ -5816,19 +5816,32 @@ tbody.page-swap-active {
     white-space: nowrap;
 }
 
+.dataset-quick-label-select {
+    font-size: 0.7rem;
+    padding: 0.2rem 0.3rem;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--paper);
+    color: var(--ink);
+    font: inherit;
+    line-height: 1.4;
+    max-width: 7rem;
+    cursor: pointer;
+}
+
 .dataset-quick-play {
     font-size: 0.82rem;
     padding: 0.2rem 0.5rem;
 }
 
 .dataset-quick-play:hover,
-.dataset-quick-label:hover,
+.dataset-quick-label-apply:hover,
 .dataset-quick-more:hover {
     background: var(--accent-soft);
     border-color: var(--accent);
 }
 
-.dataset-quick-label.saved {
+.dataset-quick-label-apply.saved {
     background: var(--success);
     color: var(--paper);
     border-color: var(--success);
@@ -5878,8 +5891,9 @@ tbody.page-swap-active {
 
 .dataset-quick-progress-track {
     display: inline-block;
-    width: 4rem;
-    height: 0.35rem;
+    width: clamp(8rem, 16vw, 14rem);
+    height: auto;
+    padding: 0.5rem 0;
     border-radius: 999px;
     background: var(--border);
     overflow: hidden;
@@ -5901,14 +5915,14 @@ tbody.page-swap-active {
 
 .dataset-quick-progress-fill {
     display: block;
-    height: 100%;
+    height: 0.55rem;
     width: 0%;
     border-radius: 999px;
     background: var(--accent);
 }
 
 .dataset-quick-progress-time {
-    font-size: 0.65rem;
+    font-size: 0.7rem;
     font-weight: 500;
     color: var(--ink-muted);
     font-variant-numeric: tabular-nums;
@@ -6186,25 +6200,30 @@ tbody.page-swap-active {
     }
 
     .dataset-quick-progress-track {
-        width: 3rem;
+        width: clamp(6rem, 28vw, 12rem);
         padding: 0.6rem 0;
         height: auto;
     }
 
     .dataset-quick-progress-fill {
-        height: 0.35rem;
+        height: 0.5rem;
     }
 
     .dataset-quick-progress-time {
-        font-size: 0.6rem;
+        font-size: 0.65rem;
     }
 
     .dataset-quick-play,
-    .dataset-quick-label,
+    .dataset-quick-label-apply,
     .dataset-quick-delete,
     .dataset-quick-more {
         font-size: 0.65rem;
         padding: 0.2rem 0.4rem;
+    }
+
+    .dataset-quick-label-select {
+        font-size: 0.65rem;
+        max-width: 5.5rem;
     }
 
     .dataset-action-toolbar {

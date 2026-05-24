@@ -23,13 +23,12 @@
         _scanJobId: null, // pending scan job id for polling
         _scanPollTimer: null, // setTimeout handle for polling
         _scanConfidence: 0.5, // selected min confidence as decimal
+        labelOptions: ['chapada', 'ventura', 'none', 'unclear'],
     };
 
     // ── Passive refresh guards (module-level) ────────────────────────
     let _passiveRefreshInProgress = false;
     let _passiveRefreshScheduled = false;
-
-    const LABEL_OPTIONS = ['chapada', 'ventura', 'none', 'unclear'];
 
     // ── DOM refs ─────────────────────────────────────────────────────
     const $ = (id) => document.getElementById(id);
@@ -148,6 +147,101 @@
             storageUsed.textContent = 'MP3 storage: ' + (data.total_size || '—');
         } catch (e) {
             storageUsed.textContent = 'MP3 storage: —';
+        }
+    }
+
+    // ── Label options helpers ─────────────────────────────────────────
+    function escapeHtmlForAttr(str) {
+        if (!str) return '';
+        return str.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    function addLabelOption(label) {
+        label = label.trim();
+        if (!label) return;
+        if (state.labelOptions.indexOf(label) === -1) {
+            state.labelOptions.push(label);
+            refreshAllLabelSelects();
+        }
+    }
+
+    function buildLabelOptionsHtml(selectedLabel, includeEmpty, includeCustom) {
+        let html = '';
+        if (includeEmpty) {
+            const sel = selectedLabel === '' || selectedLabel === null || selectedLabel === undefined ? ' selected' : '';
+            html += '<option value=""' + sel + '>None</option>';
+        }
+        for (const opt of state.labelOptions) {
+            const sel = opt === selectedLabel ? ' selected' : '';
+            html += '<option value="' + escapeHtmlForAttr(opt) + '"' + sel + '>' + escapeHtml(opt) + '</option>';
+        }
+        if (includeCustom) {
+            const isCustom = selectedLabel && state.labelOptions.indexOf(selectedLabel) === -1;
+            html += '<option value="__custom__"' + (isCustom ? ' selected' : '') + '>Custom\u2026</option>';
+        }
+        return html;
+    }
+
+    function refreshAllLabelSelects() {
+        // Quick label selects
+        document.querySelectorAll('.dataset-quick-label-select').forEach(function (sel) {
+            const clipEl = sel.closest('.dataset-clip');
+            const currentLabel = clipEl ? (clipEl.querySelector('.dataset-clip-label-chip')?.dataset.label || '') : '';
+            const currentValue = sel.value;
+            sel.innerHTML = buildLabelOptionsHtml(currentLabel || currentValue, true, true);
+        });
+        // Expanded detail selects
+        document.querySelectorAll('.dataset-clip-label-select').forEach(function (sel) {
+            const currentValue = sel.value;
+            const isCustom = currentValue === '__custom__' || (currentValue && state.labelOptions.indexOf(currentValue) === -1);
+            sel.innerHTML = buildLabelOptionsHtml(isCustom ? '__custom__' : currentValue, true, true);
+        });
+        // Bulk label select
+        updateBulkLabelSelect();
+    }
+
+    function updateBulkLabelSelect() {
+        if (!bulkLabelSelect) return;
+        const currentValue = bulkLabelSelect.value;
+        bulkLabelSelect.innerHTML = '<option value="">Label\u2026</option>';
+        bulkLabelSelect.innerHTML += buildLabelOptionsHtml('', false, true);
+    }
+
+    function updateLabelChip(clipEl, label) {
+        const existingChip = clipEl.querySelector('.dataset-clip-label-chip');
+        if (label) {
+            if (existingChip) {
+                existingChip.textContent = label;
+                existingChip.dataset.label = label;
+            } else {
+                const meta = clipEl.querySelector('.dataset-clip-meta');
+                if (meta) {
+                    const chip = document.createElement('span');
+                    chip.className = 'dataset-clip-label-chip';
+                    chip.dataset.label = label;
+                    chip.textContent = label;
+                    meta.parentNode.insertBefore(chip, meta.nextSibling);
+                }
+            }
+        } else {
+            if (existingChip) existingChip.remove();
+        }
+    }
+
+    async function loadLabels() {
+        const params = new URLSearchParams();
+        const gid = getSelectedGuildId();
+        if (gid) params.set('guild_id', gid);
+        try {
+            const resp = await fetch('/api/speech_training/labels?' + params.toString());
+            if (!resp.ok) return;
+            const data = await resp.json();
+            if (data.labels && Array.isArray(data.labels) && data.labels.length > 0) {
+                state.labelOptions = data.labels;
+                refreshAllLabelSelects();
+            }
+        } catch (e) {
+            // keep defaults
         }
     }
 
@@ -425,6 +519,14 @@
             clipList.innerHTML = '<p class="dataset-empty">No clips found.</p>';
             return;
         }
+
+        // Ensure custom labels from clips are available in select options
+        for (const clip of items) {
+            if (clip.label && state.labelOptions.indexOf(clip.label) === -1) {
+                state.labelOptions.push(clip.label);
+            }
+        }
+
         let html = '';
         for (const clip of items) {
             const label = clip.label || '';
@@ -468,7 +570,8 @@
             // Quick action buttons
             html += '<div class="dataset-clip-actions">';
             html += '<button type="button" class="dataset-quick-play" data-id="' + clip.id + '" title="Play clip" aria-label="Play clip">&#9654;</button>';
-            html += '<button type="button" class="dataset-quick-label" data-id="' + clip.id + '" data-label="chapada" title="Label chapada" aria-label="Label chapada">Chapada</button>';
+            html += '<select class="dataset-quick-label-select" data-id="' + clip.id + '" aria-label="Quick label">' + buildLabelOptionsHtml(label, true, true) + '</select>';
+            html += '<button type="button" class="dataset-quick-label-apply" data-id="' + clip.id + '" title="Apply label" aria-label="Apply label">Label</button>';
             html += '<button type="button" class="dataset-quick-delete" data-id="' + clip.id + '" title="Delete clip" aria-label="Delete clip">Delete</button>';
             html += '<button type="button" class="dataset-quick-more" data-id="' + clip.id + '" aria-expanded="false" title="More options" aria-label="More options">&#9660;</button>';
             html += '</div>';
@@ -485,11 +588,7 @@
             html += '<div class="dataset-field">';
             html += '<label class="dataset-field-label">Label</label>';
             html += '<select class="dataset-clip-label-select" data-field="label">';
-            const selOpts = ['', ...LABEL_OPTIONS, '__custom__'];
-            for (const opt of selOpts) {
-                const display = opt === '' ? 'None' : opt === '__custom__' ? 'Custom…' : opt;
-                html += '<option value="' + opt + '"' + (opt === label ? ' selected' : '') + '>' + display + '</option>';
-            }
+            html += buildLabelOptionsHtml(label, true, true);
             html += '</select>';
             // Custom label input (hidden by default)
             html += '<input type="text" class="dataset-clip-custom-label" data-field="custom_label" maxlength="64" placeholder="Custom label" hidden>';
@@ -571,12 +670,21 @@
             });
         });
 
-        // Quick label (Chapada)
-        container.querySelectorAll('.dataset-quick-label').forEach(function (btn) {
+        // Quick label apply button
+        container.querySelectorAll('.dataset-quick-label-apply').forEach(function (btn) {
             btn.addEventListener('click', function () {
+                const clipEl = btn.closest('.dataset-clip');
+                const select = clipEl ? clipEl.querySelector('.dataset-quick-label-select') : null;
+                if (!select) return;
                 const id = parseInt(btn.dataset.id, 10);
-                const label = btn.dataset.label;
-                quickLabelClip(id, label, btn);
+                let label = select.value;
+                if (label === '__custom__') {
+                    const custom = prompt('Enter custom label:');
+                    if (custom === null) return; // cancelled
+                    label = custom.trim();
+                    if (!label) return;
+                }
+                quickLabelClip(id, label, btn, select, clipEl);
             });
         });
 
@@ -631,10 +739,9 @@
     }
 
     // ── Quick label ──────────────────────────────────────────────────
-    async function quickLabelClip(id, label, btn) {
-        const statusEl = btn;
+    async function quickLabelClip(id, label, btn, select, clipEl) {
         const originalText = btn.textContent;
-        btn.textContent = '…';
+        btn.textContent = '\u2026';
         btn.disabled = true;
 
         try {
@@ -647,6 +754,28 @@
             if (data.status === 'ok') {
                 btn.textContent = 'Saved';
                 btn.classList.add('saved');
+
+                // If label is custom and not yet in options, add it
+                if (label && state.labelOptions.indexOf(label) === -1) {
+                    addLabelOption(label);
+                }
+                // Update the select to show the selected label
+                if (select) {
+                    select.innerHTML = buildLabelOptionsHtml(label, true, true);
+                }
+                // Also sync the expanded detail select if visible
+                if (clipEl) {
+                    const detailSelect = clipEl.querySelector('.dataset-clip-label-select');
+                    if (detailSelect) {
+                        detailSelect.innerHTML = buildLabelOptionsHtml(label, true, true);
+                    }
+                    const customInput = clipEl.querySelector('.dataset-clip-custom-label');
+                    if (customInput) {
+                        customInput.value = '';
+                        customInput.hidden = true;
+                    }
+                }
+
                 setTimeout(function () {
                     btn.textContent = originalText;
                     btn.disabled = false;
@@ -654,29 +783,10 @@
                 }, 1200);
                 // Remove clip if filter is active and doesn't match
                 if (state.labelFilter && state.labelFilter !== label && state.labelFilter !== '') {
-                    const clipEl = btn.closest('.dataset-clip');
                     if (clipEl) clipEl.remove();
                     checkEmptyList();
-                } else {
-                    // Update label chip
-                    const clipEl = btn.closest('.dataset-clip');
-                    if (clipEl) {
-                        const existingChip = clipEl.querySelector('.dataset-clip-label-chip');
-                        if (existingChip) {
-                            existingChip.textContent = label;
-                            existingChip.dataset.label = label;
-                        } else {
-                            // No chip exists, add one
-                            const meta = clipEl.querySelector('.dataset-clip-meta');
-                            if (meta) {
-                                const chip = document.createElement('span');
-                                chip.className = 'dataset-clip-label-chip';
-                                chip.dataset.label = label;
-                                chip.textContent = label;
-                                meta.parentNode.insertBefore(chip, meta.nextSibling);
-                            }
-                        }
-                    }
+                } else if (clipEl) {
+                    updateLabelChip(clipEl, label);
                 }
                 loadUsers();
             } else {
@@ -804,7 +914,7 @@
         }
         state._scanConfidence = minConfidence;
 
-        var body = { keyword: 'chapada', min_confidence: minConfidence };
+        var body = { keyword: 'chapada', min_confidence: minConfidence, delete_non_matches: true };
         var gid = getSelectedGuildId();
         if (gid) body.guild_id = gid;
         if (state.selectedUserId) body.user_id = state.selectedUserId;
@@ -896,11 +1006,24 @@
         if (scanKeywordBtn) scanKeywordBtn.disabled = false;
         if (scanProgress) scanProgress.hidden = true;
 
+        // Build deletion suffix if non-matches were deleted
+        var deletionNote = '';
+        if (data.delete_non_matches && data.deleted_non_matches > 0) {
+            deletionNote = ' \u00b7 ' + data.deleted_non_matches + ' non-match' + (data.deleted_non_matches !== 1 ? 'es' : '') + ' deleted';
+        }
+
+        // Refresh users and storage after potential deletion
+        loadUsers();
+        loadStorage();
+
         if (data.matched > 0) {
             enterScanMode(data.matches, data.keyword, data.max_duration_seconds);
+            if (scanStatus && deletionNote) {
+                scanStatus.textContent = scanStatus.textContent + deletionNote;
+            }
         } else {
             var maxDur = data.max_duration_seconds ? ' among clips \u2264' + data.max_duration_seconds + 's' : '';
-            if (scanStatus) scanStatus.textContent = 'No matches found' + maxDur + ' (scanned ' + data.scanned + ', skipped ' + data.skipped + ')';
+            if (scanStatus) scanStatus.textContent = 'No matches found' + maxDur + ' (scanned ' + data.scanned + ', skipped ' + data.skipped + ')' + deletionNote;
             datasetTitle.textContent = 'No matches';
             clipList.innerHTML = '<p class="dataset-empty">No clips matched "' + data.keyword + '" at \u2265' + Math.round(data.min_confidence * 100) + '% confidence' + maxDur + '.</p>';
             datasetPagination.innerHTML = '<div class="pagination-inner"><button type="button" class="pagination-btn" id="clearScanBtn">Show all clips</button></div>';
@@ -1025,23 +1148,16 @@
                 statusEl.textContent = 'Saved';
                 statusEl.className = 'dataset-save-status saved';
                 loadUsers();
+                // If label is custom and not yet in options, add it
+                if (label && state.labelOptions.indexOf(label) === -1) {
+                    addLabelOption(label);
+                }
                 // Update label chip in quick row
-                const chip = clipEl.querySelector('.dataset-clip-label-chip');
-                if (label && chip) {
-                    chip.textContent = label;
-                    chip.dataset.label = label;
-                    chip.hidden = false;
-                } else if (label && !chip) {
-                    const meta = clipEl.querySelector('.dataset-clip-meta');
-                    if (meta) {
-                        const newChip = document.createElement('span');
-                        newChip.className = 'dataset-clip-label-chip';
-                        newChip.dataset.label = label;
-                        newChip.textContent = label;
-                        meta.parentNode.insertBefore(newChip, meta.nextSibling);
-                    }
-                } else if (!label && chip) {
-                    chip.remove();
+                updateLabelChip(clipEl, label || '');
+                // Sync the quick label select
+                const quickSelect = clipEl.querySelector('.dataset-quick-label-select');
+                if (quickSelect) {
+                    quickSelect.innerHTML = buildLabelOptionsHtml(label || '', true, true);
                 }
             } else {
                 statusEl.textContent = data.error || 'Error';
@@ -1263,7 +1379,11 @@
             if (value === '__custom__') {
                 const custom = prompt('Enter custom label:');
                 if (custom && custom.trim()) {
-                    bulkLabelClips(custom.trim());
+                    const label = custom.trim();
+                    if (state.labelOptions.indexOf(label) === -1) {
+                        addLabelOption(label);
+                    }
+                    bulkLabelClips(label);
                 }
                 return;
             }
@@ -1291,6 +1411,7 @@
             datasetTitle.textContent = 'All clips';
             loadUsers();
             loadStorage();
+            loadLabels();
             loadClips();
         });
     }
@@ -1298,6 +1419,7 @@
     // ── Init ─────────────────────────────────────────────────────────
     loadUsers();
     loadStorage();
+    loadLabels();
     loadClips();
     // Start passive refresh chain after a brief initial delay
     scheduleNextPassiveRefresh();

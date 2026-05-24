@@ -83,8 +83,11 @@ def format_bytes(num_bytes: int) -> str:
         return f"{int(remaining)} B"
     return f"{remaining:.1f} {units[unit_idx]}"
 
-# Valid label values for the web labeling UI
+# Valid label values for the web labeling UI (unused — superseded by DEFAULT_LABEL_OPTIONS)
 VALID_LABELS: set[str] = {"chapada", "ventura", "none", "unclear", ""}
+
+# Default label options shown in the dataset UI
+DEFAULT_LABEL_OPTIONS: tuple[str, ...] = ("chapada", "ventura", "none", "unclear")
 
 
 class WebSpeechTrainingService:
@@ -141,6 +144,32 @@ class WebSpeechTrainingService:
             "total_size": format_bytes(raw["total_bytes"]),
             "clip_count": raw["clip_count"],
         }
+
+    # ------------------------------------------------------------------
+    # Label options (defaults + persisted custom labels)
+    # ------------------------------------------------------------------
+
+    def get_label_options(self, guild_id: Optional[str] = None) -> Dict[str, Any]:
+        """Return available label options combining defaults and persisted custom labels.
+
+        Default labels (``chapada``, ``ventura``, ``none``, ``unclear``) always
+        appear first. Custom labels from the database are appended after,
+        de-duplicated against the defaults.
+
+        Args:
+            guild_id: Optional guild filter for custom labels.
+
+        Returns:
+            Dict with ``labels`` (list of distinct label strings).
+        """
+        custom_labels = self.repo.list_labels(guild_id=guild_id)
+        seen: set[str] = set(DEFAULT_LABEL_OPTIONS)
+        combined: list[str] = list(DEFAULT_LABEL_OPTIONS)
+        for label in custom_labels:
+            if label not in seen:
+                seen.add(label)
+                combined.append(label)
+        return {"labels": combined}
 
     # ------------------------------------------------------------------
     # Clip list
@@ -467,6 +496,7 @@ class WebSpeechTrainingService:
         guild_id: Optional[str] = None,
         user_id: Optional[str] = None,
         progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+        delete_non_matches: bool = False,
     ) -> Dict[str, Any]:
         """Scan all unlabeled clips for a keyword using offline Vosk detection.
 
@@ -488,12 +518,21 @@ class WebSpeechTrainingService:
                 ``scanned``, ``matched``, ``skipped``, ``current_clip_id``,
                 and ``status`` (``"processing"`` or ``"done"``).  The initial
                 call has ``current_clip_id=None``.
+            delete_non_matches: When ``True``, delete clips that were
+                successfully scanned but did **not** match the keyword.
+                Skipped clips (missing audio, decode errors) and matched
+                clips are preserved.  Deletion happens **after** the full
+                scan completes, using the same batch-safe audio-removal
+                logic as ``bulk_delete``.
 
         Returns:
             Response dict with keys ``status``, ``keyword``,
             ``min_confidence``, ``max_duration_seconds``, ``scanned``,
             ``matched``, ``skipped``, and ``matches`` (list of clip dicts
             augmented with ``keyword_confidence`` and ``keyword_transcript``).
+            When ``delete_non_matches`` was ``True``, also includes
+            ``delete_non_matches`` (the input flag) and
+            ``deleted_non_matches`` (count of clips actually deleted).
 
         Raises:
             ValueError: When validation fails (empty keyword, bad
@@ -529,6 +568,7 @@ class WebSpeechTrainingService:
         scanned = 0
         skipped = 0
         matches: List[Dict[str, Any]] = []
+        non_match_ids: List[int] = []  # scanned clips that did NOT match
 
         # Notify initial progress
         if progress_callback is not None:
@@ -591,6 +631,8 @@ class WebSpeechTrainingService:
                     match_clip["keyword_confidence"] = round(best_conf, 3)
                     match_clip["keyword_transcript"] = text
                     matches.append(match_clip)
+                else:
+                    non_match_ids.append(clip["id"])
 
                 scanned += 1
 
@@ -602,9 +644,14 @@ class WebSpeechTrainingService:
 
             self._notify_scan_progress(progress_callback, total, scanned, matches, skipped, clip)
 
+        # ── Delete non-matches ────────────────────────────────────────
+        deleted_non_matches = 0
+        if delete_non_matches and non_match_ids:
+            deleted_non_matches = self._delete_nonmatches(non_match_ids)
+
         logger.info(
-            "Keyword scan '%s' scanned=%d matched=%d skipped=%d (eligible clips ≤%ss=%d)",
-            keyword, scanned, len(matches), skipped,
+            "Keyword scan '%s' scanned=%d matched=%d skipped=%d deleted_nonmatches=%d (eligible clips ≤%ss=%d)",
+            keyword, scanned, len(matches), skipped, deleted_non_matches,
             self.KEYWORD_SCAN_MAX_DURATION_SECONDS, total,
         )
 
@@ -617,7 +664,51 @@ class WebSpeechTrainingService:
             "matched": len(matches),
             "skipped": skipped,
             "matches": matches,
+            "delete_non_matches": delete_non_matches,
+            "deleted_non_matches": deleted_non_matches,
         }
+
+    _DELETE_CHUNK_SIZE = 500
+
+    def _delete_nonmatches(self, clip_ids: List[int]) -> int:
+        """Delete clips and their audio files, chunking to avoid SQLite variable limits.
+
+        Args:
+            clip_ids: List of clip primary keys to delete.
+
+        Returns:
+            Number of clips actually deleted (may be less than input if some
+            rows disappeared before deletion).
+        """
+        if not clip_ids:
+            return 0
+
+        total_deleted = 0
+
+        for i in range(0, len(clip_ids), self._DELETE_CHUNK_SIZE):
+            chunk = clip_ids[i : i + self._DELETE_CHUNK_SIZE]
+            clips = self.repo.bulk_delete_clips(chunk)
+            if not clips:
+                continue
+
+            for clip in clips:
+                rel = clip.get("relative_path", "")
+                if not rel:
+                    continue
+                full = (self.data_dir / rel).resolve()
+                try:
+                    full.relative_to(self.data_dir)
+                except ValueError:
+                    logger.warning("Path traversal blocked on delete: %s", full)
+                else:
+                    try:
+                        full.unlink(missing_ok=True)
+                    except OSError:
+                        logger.warning("Could not remove audio file: %s", full)
+
+            total_deleted += len(clips)
+
+        return total_deleted
 
     @staticmethod
     def _notify_scan_progress(

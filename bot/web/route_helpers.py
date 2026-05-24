@@ -303,6 +303,7 @@ def _queue_web_keyword_scan_job(
     min_confidence: float,
     guild_id: str | None,
     user_id: str | None,
+    delete_non_matches: bool = False,
 ) -> str:
     """Persist keyword scan parameters and submit background processing.
 
@@ -324,6 +325,8 @@ def _queue_web_keyword_scan_job(
         "matched": 0,
         "skipped": 0,
         "matches": [],
+        "delete_non_matches": delete_non_matches,
+        "deleted_non_matches": 0,
         "error": None,
         "created_at": created_at,
         "finished_at": None,
@@ -352,6 +355,7 @@ def _queue_web_keyword_scan_job(
         min_confidence=min_confidence,
         guild_id=guild_id,
         user_id=user_id,
+        delete_non_matches=delete_non_matches,
     )
     return job_id
 
@@ -366,6 +370,7 @@ def _run_web_keyword_scan_job(
     min_confidence: float,
     guild_id: str | None,
     user_id: str | None,
+    delete_non_matches: bool = False,
 ) -> None:
     """Process one queued keyword scan outside the Flask request thread."""
     from bot.repositories.speech_training import SpeechTrainingRepository
@@ -393,6 +398,8 @@ def _run_web_keyword_scan_job(
                 "matched": progress.get("matched", 0),
                 "skipped": progress.get("skipped", 0),
                 "matches": [],
+                "delete_non_matches": delete_non_matches,
+                "deleted_non_matches": 0,
                 "error": None,
                 "created_at": initial_job_entry.get("created_at"),
                 "finished_at": None,
@@ -404,6 +411,7 @@ def _run_web_keyword_scan_job(
             guild_id=guild_id,
             user_id=user_id,
             progress_callback=_on_progress,
+            delete_non_matches=delete_non_matches,
         )
 
         # Final state with matches
@@ -418,6 +426,8 @@ def _run_web_keyword_scan_job(
             "matched": result.get("matched", 0),
             "skipped": result.get("skipped", 0),
             "matches": result.get("matches", []),
+            "delete_non_matches": result.get("delete_non_matches", False),
+            "deleted_non_matches": result.get("deleted_non_matches", 0),
             "error": None,
             "created_at": initial_job_entry.get("created_at"),
             "finished_at": finished_at,
@@ -434,6 +444,8 @@ def _run_web_keyword_scan_job(
             "matched": 0,
             "skipped": 0,
             "matches": [],
+            "delete_non_matches": delete_non_matches,
+            "deleted_non_matches": 0,
             "error": str(exc),
             "created_at": initial_job_entry.get("created_at"),
             "finished_at": finished_at,
@@ -451,6 +463,8 @@ def _run_web_keyword_scan_job(
             "matched": 0,
             "skipped": 0,
             "matches": [],
+            "delete_non_matches": delete_non_matches,
+            "deleted_non_matches": 0,
             "error": "Internal server error",
             "created_at": initial_job_entry.get("created_at"),
             "finished_at": finished_at,
