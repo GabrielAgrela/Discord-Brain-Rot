@@ -70,42 +70,46 @@
 
             <!-- Sort & Bulk toolbar -->
             <div class="dataset-action-toolbar" id="datasetActionToolbar">
-                <div class="dataset-sort-group">
-                    <label for="datasetSort" class="dataset-sort-label">Sort</label>
-                    <select id="datasetSort" class="dataset-sort-select" aria-label="Sort clips">
-                        <option value="newest">Newest first</option>
-                        <option value="oldest">Oldest first</option>
-                        <option value="longest">Longest</option>
-                        <option value="shortest">Shortest</option>
-                        <option value="unlabeled_first">Unlabeled first</option>
-                        <option value="label_asc">Label A-Z</option>
-                        <option value="label_desc">Label Z-A</option>
-                        <option value="speaker_asc">Speaker A-Z</option>
-                        <option value="speaker_desc">Speaker Z-A</option>
-                        <option value="reviewed_desc">Reviewed latest</option>
-                    </select>
-                </div>
-                <div class="dataset-scan-group" id="scanGroup">
-                    <button type="button" class="dataset-scan-btn" id="scanKeywordBtn">
-                        Find Chapada
-                    </button>
-                    <span class="dataset-scan-status" id="scanStatus"></span>
-                    <progress id="scanProgress" class="dataset-scan-progress" max="100" value="0" hidden aria-label="Scan progress"></progress>
-                </div>
-                <div class="dataset-bulk-group" id="bulkGroup">
-                    <span class="dataset-bulk-count" id="bulkCount">0 selected</span>
-                    <button type="button" class="dataset-bulk-btn" id="bulkSelectAll" title="Select all matching filters">Select all</button>
-                    <button type="button" class="dataset-bulk-btn" id="bulkClear" title="Clear selection">Clear</button>
-                    <div class="dataset-bulk-actions">
-                        <select id="bulkLabelSelect" class="dataset-bulk-label-select" aria-label="Bulk label" disabled>
-                            <option value="">Label…</option>
-                            <option value="chapada">Chapada</option>
-                            <option value="ventura">Ventura</option>
-                            <option value="none">None</option>
-                            <option value="__custom__">Custom…</option>
+                <div class="dataset-action-row dataset-action-row-primary">
+                    <div class="dataset-sort-group">
+                        <label for="datasetSort" class="dataset-sort-label">Sort</label>
+                        <select id="datasetSort" class="dataset-sort-select" aria-label="Sort clips">
+                            <option value="newest">Newest first</option>
+                            <option value="oldest">Oldest first</option>
+                            <option value="longest">Longest</option>
+                            <option value="shortest">Shortest</option>
+                            <option value="unlabeled_first">Unlabeled first</option>
+                            <option value="label_asc">Label A-Z</option>
+                            <option value="label_desc">Label Z-A</option>
+                            <option value="speaker_asc">Speaker A-Z</option>
+                            <option value="speaker_desc">Speaker Z-A</option>
+                            <option value="reviewed_desc">Reviewed latest</option>
                         </select>
-                        <button type="button" class="dataset-bulk-apply-btn" id="bulkApplyLabel" disabled>Apply</button>
-                        <button type="button" class="dataset-bulk-delete-btn" id="bulkDelete" disabled>Delete</button>
+                    </div>
+                    <div class="dataset-scan-group" id="scanGroup">
+                        <button type="button" class="dataset-scan-btn" id="scanKeywordBtn">
+                            Find Chapada
+                        </button>
+                        <span class="dataset-scan-status" id="scanStatus"></span>
+                        <progress id="scanProgress" class="dataset-scan-progress" max="100" value="0" hidden aria-label="Scan progress"></progress>
+                    </div>
+                </div>
+                <div class="dataset-action-row dataset-action-row-bulk">
+                    <div class="dataset-bulk-group" id="bulkGroup">
+                        <span class="dataset-bulk-count" id="bulkCount">0 selected</span>
+                        <button type="button" class="dataset-bulk-btn" id="bulkSelectAll" title="Select all matching filters">Select all</button>
+                        <button type="button" class="dataset-bulk-btn" id="bulkClear" title="Clear selection">Clear</button>
+                        <div class="dataset-bulk-actions">
+                            <select id="bulkLabelSelect" class="dataset-bulk-label-select" aria-label="Bulk label" disabled>
+                                <option value="">Label…</option>
+                                <option value="chapada">Chapada</option>
+                                <option value="ventura">Ventura</option>
+                                <option value="none">None</option>
+                                <option value="__custom__">Custom…</option>
+                            </select>
+                            <button type="button" class="dataset-bulk-apply-btn" id="bulkApplyLabel" disabled>Apply</button>
+                            <button type="button" class="dataset-bulk-delete-btn" id="bulkDelete" disabled>Delete</button>
+                        </div>
                     </div>
                 </div>
             </div>

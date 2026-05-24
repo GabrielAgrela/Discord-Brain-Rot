@@ -5972,13 +5972,26 @@ html.theme-dark .dataset-label-filter-select option {
 
 .dataset-action-toolbar {
     display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.8rem;
-    justify-content: space-between;
+    flex-direction: column;
+    gap: 0.5rem;
     padding: 0.5rem 0;
     border-top: 1px solid var(--border);
     border-bottom: 1px solid var(--border);
+}
+
+.dataset-action-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.8rem;
+}
+
+.dataset-action-row-primary {
+    justify-content: space-between;
+}
+
+.dataset-action-row-bulk {
+    justify-content: flex-start;
 }
 
 .dataset-sort-group {
@@ -6316,9 +6329,15 @@ html.theme-dark .dataset-label-filter-select option {
         gap: 0.5rem;
     }
 
-    .dataset-sort-group,
-    .dataset-scan-group,
-    .dataset-bulk-group {
+    .dataset-action-row {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0.5rem;
+    }
+
+    .dataset-action-row .dataset-sort-group,
+    .dataset-action-row .dataset-scan-group,
+    .dataset-action-row .dataset-bulk-group {
         width: 100%;
     }
 
