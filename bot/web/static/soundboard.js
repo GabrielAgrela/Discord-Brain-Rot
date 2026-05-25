@@ -2800,6 +2800,71 @@
             if (uploadBtn) motion.burst(uploadBtn, e);
         });
 
+        /* ── Action dock toggle ──────────────────────────── */
+
+        const actionDock = document.getElementById('controlRoomActionDock');
+        const actionsTrigger = document.getElementById('controlRoomActionsButton');
+        const actionMenu = document.getElementById('controlRoomActionMenu');
+
+        function openActionDock() {
+            if (!actionDock || !actionsTrigger || !actionMenu) return;
+            actionDock.classList.add('open');
+            actionsTrigger.setAttribute('aria-expanded', 'true');
+            actionMenu.setAttribute('aria-hidden', 'false');
+        }
+
+        function closeActionDock() {
+            if (!actionDock || !actionsTrigger || !actionMenu) return;
+            actionDock.classList.remove('open');
+            actionsTrigger.setAttribute('aria-expanded', 'false');
+            actionMenu.setAttribute('aria-hidden', 'true');
+        }
+
+        if (actionsTrigger) {
+            actionsTrigger.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (actionDock && actionDock.classList.contains('open')) {
+                    closeActionDock();
+                } else {
+                    openActionDock();
+                }
+            });
+            actionsTrigger.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (actionDock && actionDock.classList.contains('open')) {
+                    closeActionDock();
+                } else {
+                    openActionDock();
+                }
+            });
+        }
+
+        // Close dock on outside click
+        document.addEventListener('click', (e) => {
+            if (actionDock && !actionDock.contains(e.target)) {
+                closeActionDock();
+            }
+        });
+
+        // Close dock on Escape
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && actionDock) {
+                closeActionDock();
+            }
+        });
+
+        // Close dock after activating any action button inside the menu
+        if (actionMenu) {
+            actionMenu.addEventListener('click', (e) => {
+                const btn = e.target.closest('.web-control-button, .web-upload-control-button');
+                if (btn) {
+                    // Delay close slightly so the button state feedback fires
+                    requestAnimationFrame(() => closeActionDock());
+                }
+            });
+        }
+
         const webUploadForm = document.getElementById('webUploadForm');
         const webUploadDialog = document.getElementById('webUploadDialog');
         const webUploadOpenButton = document.getElementById('webUploadOpenButton');

@@ -1573,10 +1573,12 @@ def test_soundboard_page_renders_shared_redesign(web_client):
     assert 'class="control-room-equalizer"' in html
     assert 'id="controlRoomUpdated"' not in html
     assert '<span>Guild</span>' not in html
+    assert 'id="controlRoomActionDock"' in html
+    assert 'id="controlRoomActionsButton"' in html
+    assert 'id="controlRoomActionMenu"' in html
+    assert 'aria-haspopup="true"' in html
     assert 'id="webUploadOpenButton"' in html
     assert 'class="control-room-metric-button web-upload-control-button login-required"' in html
-    assert '<span class="control-room-metric-label">Upload</span>' in html
-    assert '<span class="control-room-metric-label">TTS</span>' in html
     assert '<option value="ventura" selected>' in html
     assert '<option value="en"' in html
     assert "Login with Discord to upload sounds" in html

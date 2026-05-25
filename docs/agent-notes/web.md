@@ -85,7 +85,7 @@ Read this when changing `web_page.py`, `bot/web/`, web repositories/services, te
 - Web slap/mute controls belong inside the control-room panel, not the nav header.
 - Keep control-room metrics as a flat status strip, not boxed cards inside the rounded banner.
 - Verify desktop control-room/table rhythm in the 1920x1080 browser-window check; the 7-row tables rely on compact desktop header/row heights.
-- On mobile, the control room should be a compact two-row controller: row one has status plus slap/mute, row two has voice, system (compact CPU/RAM), upload, and TTS.
+- On mobile, the control room should be a compact two-row controller: row one has status, row two has voice and system (compact CPU/RAM), and a single ⚡ action-dock trigger spans both rows on the right side. Hover/tap on the trigger opens a popup menu for Upload, TTS, Slap, and Mute.
 - Mobile play/slap/mute buttons need direct `touchend` handlers with duplicate-click suppression.
 - On mobile, nav intentionally scrolls away and the control-room panel is the sticky top element. Do not make both sticky.
 

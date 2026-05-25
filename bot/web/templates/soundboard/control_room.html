@@ -59,44 +59,45 @@
                         <p id="systemMonitorFootnote" class="system-monitor-footnote"></p>
                     </div>
                 </div>
-                <div class="control-room-metric control-room-metric--upload control-room-metric--action">
-                    <span class="control-room-metric-label">Upload</span>
-                    <button type="button" id="webUploadOpenButton"
-                        class="control-room-metric-button web-upload-control-button{% if not discord_user %} login-required{% endif %}"
-                        title="{% if discord_user %}Upload sound{% else %}Login with Discord to upload sounds{% endif %}"
-                        aria-label="{% if discord_user %}Upload sound{% else %}Login with Discord to upload sounds{% endif %}">
-                        {% if discord_user %}⬆️{% else %}🔒{% endif %}
+                <div class="control-room-action-dock" id="controlRoomActionDock">
+                    <button type="button" id="controlRoomActionsButton" class="control-room-actions-trigger"
+                        aria-haspopup="true" aria-expanded="false" aria-controls="controlRoomActionMenu"
+                        title="Bot actions" aria-label="Bot actions">
+                        ⚡
                     </button>
-                </div>
-                <div class="control-room-metric control-room-metric--tts control-room-metric--action">
-                    <span class="control-room-metric-label">TTS</span>
-                    <button type="button" id="controlRoomTtsButton"
-                        class="control-room-metric-button web-control-button{% if not discord_user %} login-required{% endif %}"
-                        data-control-action="tts"
-                        title="{% if discord_user %}Text to speech{% else %}Login with Discord to use bot controls{% endif %}"
-                        aria-label="{% if discord_user %}Text to speech{% else %}Login with Discord to use bot controls{% endif %}">
-                        {% if discord_user %}💬{% else %}🔒{% endif %}
-                    </button>
-                </div>
-                <div class="control-room-metric control-room-metric--slap control-room-metric--action">
-                    <span class="control-room-metric-label">Slap</span>
-                    <button type="button" id="controlRoomSlapButton"
-                        class="control-room-metric-button web-control-button{% if not discord_user %} login-required{% endif %}"
-                        data-control-action="slap"
-                        title="{% if discord_user %}Slap{% else %}Login with Discord to use bot controls{% endif %}"
-                        aria-label="{% if discord_user %}Slap{% else %}Login with Discord to use bot controls{% endif %}">
-                        {% if discord_user %}👋{% else %}🔒{% endif %}
-                    </button>
-                </div>
-                <div class="control-room-metric control-room-metric--mute control-room-metric--action">
-                    <span class="control-room-metric-label">Mute</span>
-                    <button type="button" id="controlRoomMuteButton"
-                        class="control-room-metric-button web-control-button{% if not discord_user %} login-required{% endif %}"
-                        data-control-action="toggle_mute"
-                        title="{% if discord_user %}Toggle mute{% else %}Login with Discord to use bot controls{% endif %}"
-                        aria-label="{% if discord_user %}Toggle mute{% else %}Login with Discord to use bot controls{% endif %}">
-                        {% if discord_user %}🔇{% else %}🔒{% endif %}
-                    </button>
+                    <div class="control-room-action-menu" id="controlRoomActionMenu" aria-hidden="true" role="menu">
+                        <button type="button" id="webUploadOpenButton"
+                            class="control-room-metric-button web-upload-control-button{% if not discord_user %} login-required{% endif %}"
+                            title="{% if discord_user %}Upload sound{% else %}Login with Discord to upload sounds{% endif %}"
+                            aria-label="{% if discord_user %}Upload sound{% else %}Login with Discord to upload sounds{% endif %}"
+                            role="menuitem">
+                            {% if discord_user %}⬆️{% else %}🔒{% endif %}
+                        </button>
+                        <button type="button" id="controlRoomTtsButton"
+                            class="control-room-metric-button web-control-button{% if not discord_user %} login-required{% endif %}"
+                            data-control-action="tts"
+                            title="{% if discord_user %}Text to speech{% else %}Login with Discord to use bot controls{% endif %}"
+                            aria-label="{% if discord_user %}Text to speech{% else %}Login with Discord to use bot controls{% endif %}"
+                            role="menuitem">
+                            {% if discord_user %}💬{% else %}🔒{% endif %}
+                        </button>
+                        <button type="button" id="controlRoomSlapButton"
+                            class="control-room-metric-button web-control-button{% if not discord_user %} login-required{% endif %}"
+                            data-control-action="slap"
+                            title="{% if discord_user %}Slap{% else %}Login with Discord to use bot controls{% endif %}"
+                            aria-label="{% if discord_user %}Slap{% else %}Login with Discord to use bot controls{% endif %}"
+                            role="menuitem">
+                            {% if discord_user %}👋{% else %}🔒{% endif %}
+                        </button>
+                        <button type="button" id="controlRoomMuteButton"
+                            class="control-room-metric-button web-control-button{% if not discord_user %} login-required{% endif %}"
+                            data-control-action="toggle_mute"
+                            title="{% if discord_user %}Toggle mute{% else %}Login with Discord to use bot controls{% endif %}"
+                            aria-label="{% if discord_user %}Toggle mute{% else %}Login with Discord to use bot controls{% endif %}"
+                            role="menuitem">
+                            {% if discord_user %}🔇{% else %}🔒{% endif %}
+                        </button>
+                    </div>
                 </div>
             </div>
         </section>
