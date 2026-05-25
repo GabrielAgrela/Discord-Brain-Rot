@@ -1602,6 +1602,21 @@ html.theme-dark .control-room-metric + .control-room-metric::before {
     box-shadow: 1px 1px 0 oklch(58% 0.15 32 / 0.2);
 }
 
+html.theme-dark .control-room-actions-trigger {
+    background: var(--panel-dark);
+    color: var(--accent-amber);
+    border-color: var(--border-strong);
+    box-shadow: 3px 3px 0 oklch(5% 0.01 164 / 0.32);
+}
+
+html.theme-dark .control-room-actions-trigger:hover {
+    box-shadow: 5px 5px 0 oklch(5% 0.01 164 / 0.32);
+}
+
+html.theme-dark .control-room-actions-trigger:active {
+    box-shadow: 1px 1px 0 oklch(5% 0.01 164 / 0.32);
+}
+
 /* Collapse the trigger when the dock is open */
 .control-room-action-dock:hover .control-room-actions-trigger,
 .control-room-action-dock:focus-within .control-room-actions-trigger,
