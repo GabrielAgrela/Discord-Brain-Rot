@@ -67,6 +67,7 @@ Read this when changing uploads, sound ingest, playback, generated sound cards, 
 - `_flush_silence()` in the Vosk worker loop also flushes pending speech segments via `_flush_speech_segments()` (using last-voiced time). `stop()` calls `_force_finalize_all_speech_segments()`.
 - Directory layout: `<data_dir>/<guild_id>/<sanitised_username>_<user_id>/<timestamp>_<dur-ms>ms.mp3`.
 - Raw captured PCM is preserved as-is; no loudness normalization for training data.
+- **Web auto-transcript throttling**: The web auto-transcript job (`transcribe_empty_clips()`) sends Groq Whisper requests sequentially with a configurable delay (`WEB_TRANSCRIPT_REQUEST_DELAY_SECONDS`, default 1.0 s). On HTTP 429, it retries up to `WEB_TRANSCRIPT_429_MAX_RETRIES` times (default 3) with exponential backoff, respecting the `Retry-After` header. Persistent 429 stops the job early with an error in the UI. These env vars are in `web_speech_training.py` as module-level constants parsed from environment.
 
 ## Vosk Keyword Detection
 

@@ -749,6 +749,96 @@ class TestGroqWhisperService:
         assert len(lang_fields) == 0
 
 
+# ------------------------------------------------------------------
+#  GroqWhisperService transcribe_detailed — rate-limit handling
+# ------------------------------------------------------------------
+
+class TestGroqWhisperServiceDetailed:
+    """Tests for ``GroqWhisperService.transcribe_detailed()``."""
+
+    @pytest.fixture
+    def service(self):
+        from bot.services.voice_command import GroqWhisperService
+
+        srv = GroqWhisperService()
+        srv.api_key = "test-key-123"
+        return srv
+
+    @pytest.mark.asyncio
+    async def test_detailed_429_with_retry_after(self, service):
+        """429 response with Retry-After header returns status_code + retry_after."""
+        with patch("bot.services.voice_command.aiohttp.ClientSession.post") as mock_post:
+            mock_resp = AsyncMock()
+            mock_resp.status = 429
+            mock_resp.text = AsyncMock(return_value='{"error": "rate limited"}')
+            mock_resp.headers = {"Retry-After": "30"}
+            mock_post.return_value.__aenter__ = AsyncMock(return_value=mock_resp)
+
+            result = await service.transcribe_detailed(b"fake-wav-data")
+
+        assert result.is_available is True
+        assert result.status_code == 429
+        assert result.retry_after_seconds == 30.0
+        assert "rate limited" in result.error
+
+    @pytest.mark.asyncio
+    async def test_detailed_429_without_retry_after(self, service):
+        """429 response without Retry-After header returns None retry_after."""
+        with patch("bot.services.voice_command.aiohttp.ClientSession.post") as mock_post:
+            mock_resp = AsyncMock()
+            mock_resp.status = 429
+            mock_resp.text = AsyncMock(return_value="{}")
+            mock_resp.headers = {}
+            mock_post.return_value.__aenter__ = AsyncMock(return_value=mock_resp)
+
+            result = await service.transcribe_detailed(b"fake-wav-data")
+
+        assert result.status_code == 429
+        assert result.retry_after_seconds is None
+        assert "rate limited" in result.error
+
+    @pytest.mark.asyncio
+    async def test_detailed_non_429_error(self, service):
+        """Non-429 error (e.g. 500) returns status_code but no retry_after."""
+        with patch("bot.services.voice_command.aiohttp.ClientSession.post") as mock_post:
+            mock_resp = AsyncMock()
+            mock_resp.status = 500
+            mock_resp.text = AsyncMock(return_value="internal error")
+            mock_resp.headers = {}
+            mock_post.return_value.__aenter__ = AsyncMock(return_value=mock_resp)
+
+            result = await service.transcribe_detailed(b"fake-wav-data")
+
+        assert result.is_available is True
+        assert result.status_code == 500
+        assert result.retry_after_seconds is None
+        assert "API error 500" in result.error
+
+    @pytest.mark.asyncio
+    async def test_detailed_empty_key(self, service):
+        """No API key → no status_code (no request made)."""
+        service.api_key = ""
+        result = await service.transcribe_detailed(b"fake-wav-data")
+        assert result.is_available is False
+        assert result.status_code is None
+        assert result.error == "GROQ_API_KEY not set"
+
+    @pytest.mark.asyncio
+    async def test_detailed_429_unparseable_retry_after(self, service):
+        """Unparseable Retry-After string does not crash, returns None."""
+        with patch("bot.services.voice_command.aiohttp.ClientSession.post") as mock_post:
+            mock_resp = AsyncMock()
+            mock_resp.status = 429
+            mock_resp.text = AsyncMock(return_value="{}")
+            mock_resp.headers = {"Retry-After": "not-a-number"}
+            mock_post.return_value.__aenter__ = AsyncMock(return_value=mock_resp)
+
+            result = await service.transcribe_detailed(b"fake-wav-data")
+
+        assert result.status_code == 429
+        assert result.retry_after_seconds is None
+
+
 # ====================================================================
 #  GroqWhisperService debug save
 # ====================================================================

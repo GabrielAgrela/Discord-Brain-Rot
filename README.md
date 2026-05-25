@@ -98,6 +98,10 @@ Create a `.env` file in the project root. Only `DISCORD_BOT_TOKEN` is strictly r
 | `GROQ_WHISPER_MODEL` | `whisper-large-v3` | Groq Whisper model |
 | `GROQ_WHISPER_LANGUAGE` | `pt` | Language hint for Whisper; empty for auto-detect |
 | `GROQ_WHISPER_TIMEOUT_SECONDS` | `20` | Groq API timeout |
+| `WEB_TRANSCRIPT_REQUEST_DELAY_SECONDS` | `1.0` | Inter-request delay (s) between Groq API calls during auto-transcript (max `60`) |
+| `WEB_TRANSCRIPT_429_MAX_RETRIES` | `3` | Max retries per clip on HTTP 429 rate-limit (max `10`, `0` to disable retry) |
+| `WEB_TRANSCRIPT_429_BACKOFF_SECONDS` | `15` | Base backoff (s) for 429 retry when no Retry-After header (max `300`) |
+| `WEB_TRANSCRIPT_429_BACKOFF_MAX_SECONDS` | `120` | Exponential-backoff ceiling (s) for 429 retries (max `600`) |
 | `VOICE_MAX_DAVE_PROTOCOL_VERSION` | auto | Set `0` to force-disable DAVE negotiation |
 
 ### Ventura Chat (LLM Branch)

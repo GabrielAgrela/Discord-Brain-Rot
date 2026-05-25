@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import threading
+import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
@@ -21,6 +22,65 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 from bot.repositories.speech_training import SpeechTrainingRepository
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Auto-transcript throttling defaults
+# ---------------------------------------------------------------------------
+
+def _parse_float_env(key: str, default: float, minimum: float = 0.0, maximum: float | None = None) -> float:
+    """Parse a float env var with bounds clamping.
+
+    Args:
+        key: Environment variable name.
+        default: Fallback when unset or unparseable.
+        minimum: Minimum allowed value (inclusive).
+        maximum: Maximum allowed value (inclusive), or ``None`` for unbounded.
+
+    Returns:
+        A float within the allowed range.
+    """
+    try:
+        val = float(os.getenv(key, str(default)))
+    except (ValueError, TypeError):
+        val = default
+    val = max(val, minimum)
+    if maximum is not None:
+        val = min(val, maximum)
+    return val
+
+
+def _parse_int_env(key: str, default: int, minimum: int = 0, maximum: int | None = None) -> int:
+    """Parse an int env var with bounds clamping."""
+    try:
+        val = int(os.getenv(key, str(default)))
+    except (ValueError, TypeError):
+        val = default
+    val = max(val, minimum)
+    if maximum is not None:
+        val = min(val, maximum)
+    return val
+
+
+# Delay between successive Groq Whisper API requests (seconds).
+WEB_TRANSCRIPT_REQUEST_DELAY_SECONDS: float = _parse_float_env(
+    "WEB_TRANSCRIPT_REQUEST_DELAY_SECONDS", 1.0, 0.0, 60.0,
+)
+
+# Maximum retries on 429 (rate-limit) response per clip.
+WEB_TRANSCRIPT_429_MAX_RETRIES: int = _parse_int_env(
+    "WEB_TRANSCRIPT_429_MAX_RETRIES", 3, 0, 10,
+)
+
+# Base backoff seconds for 429 retries (fallback when no Retry-After header).
+WEB_TRANSCRIPT_429_BACKOFF_SECONDS: float = _parse_float_env(
+    "WEB_TRANSCRIPT_429_BACKOFF_SECONDS", 15.0, 0.0, 300.0,
+)
+
+# Maximum exponential-backoff ceiling for 429 retries.
+WEB_TRANSCRIPT_429_BACKOFF_MAX_SECONDS: float = _parse_float_env(
+    "WEB_TRANSCRIPT_429_BACKOFF_MAX_SECONDS", 120.0, 0.0, 600.0,
+)
+
 
 # ---------------------------------------------------------------------------
 # Module-level Vosk model cache (load once per process)
@@ -955,8 +1015,20 @@ class WebSpeechTrainingService:
         The audio file must exist and be readable; missing/unreadable files
         are counted as skipped.
 
-        Processing is **sequential** (one clip at a time) to avoid rate
-        limiting.  A safety cap of ``TRANSCRIBE_MAX_CLIPS`` is enforced.
+        Processing is **sequential** (one clip at a time) with a configurable
+        inter-request delay (``WEB_TRANSCRIPT_REQUEST_DELAY_SECONDS``, default
+        1.0 s) and automatic 429 rate-limit retry with exponential backoff:
+
+        - On HTTP 429, retries up to ``WEB_TRANSCRIPT_429_MAX_RETRIES`` times
+          (default 3).
+        - Waits ``Retry-After`` header seconds when provided, otherwise applies
+          exponential backoff from ``WEB_TRANSCRIPT_429_BACKOFF_SECONDS``
+          (default 15 s) capped at
+          ``WEB_TRANSCRIPT_429_BACKOFF_MAX_SECONDS`` (default 120 s).
+        - If retries are exhausted on a 429, the job **stops early** with an
+          error message suggesting a higher delay.
+
+        A safety cap of ``TRANSCRIBE_MAX_CLIPS`` (500) is enforced.
 
         Args:
             guild_id: Optional guild scope for empty-transcript clips.
@@ -1036,11 +1108,19 @@ class WebSpeechTrainingService:
                 progress_callback({**result, "status": "done"})
             return result
 
-        # ── Process clips sequentially ────────────────────────────────
+        # ── Process clips sequentially with throttling ─────────────────
         from bot.services.voice_command import GroqWhisperService
         from pydub import AudioSegment
 
         whisper = GroqWhisperService()
+        whisper.api_key = groq_api_key
+        whisper.model = groq_whisper_model
+
+        max_retries = WEB_TRANSCRIPT_429_MAX_RETRIES
+        base_backoff = WEB_TRANSCRIPT_429_BACKOFF_SECONDS
+        max_backoff = WEB_TRANSCRIPT_429_BACKOFF_MAX_SECONDS
+        request_delay = WEB_TRANSCRIPT_REQUEST_DELAY_SECONDS
+        rate_limit_stopped_early = False
 
         for clip in clips:
             clip_id = clip.get("id")
@@ -1061,11 +1141,39 @@ class WebSpeechTrainingService:
                 segment.export(wav_buf, format="wav")
                 wav_bytes = wav_buf.getvalue()
 
-                # Transcribe via Groq Whisper (sequential)
-                result = asyncio.run(whisper.transcribe_detailed(wav_bytes))
+                # ── Transcribe with 429 retry loop ─────────────────
+                result: GroqWhisperResult | None = None
+                for attempt in range(max_retries + 1):
+                    result = asyncio.run(whisper.transcribe_detailed(wav_bytes))
+
+                    if result.status_code == 429 and attempt < max_retries:
+                        # Rate limited — backoff and retry
+                        wait_seconds = result.retry_after_seconds
+                        if wait_seconds is None or wait_seconds <= 0:
+                            wait_seconds = min(
+                                base_backoff * (2 ** attempt),
+                                max_backoff,
+                            )
+                        logger.info(
+                            "Transcribe clip %s: rate limited (attempt %d/%d), "
+                            "waiting %.1fs before retry",
+                            clip_id, attempt + 1, max_retries, wait_seconds,
+                        )
+                        time.sleep(wait_seconds)
+                        continue
+
+                    # Non-429 or final attempt — break retry loop
+                    break
+
+                # Apply inter-request delay after API attempt
+                # (skip after the last clip to avoid unnecessary wait)
+                is_last_clip = (clip is clips[-1])
+                if not is_last_clip:
+                    time.sleep(request_delay)
+
                 processed += 1
 
-                if result.is_empty:
+                if result is not None and result.is_empty:
                     # Successful 200 with empty text → store "-"
                     self.repo.update_transcript(
                         clip_id=clip_id,
@@ -1074,7 +1182,7 @@ class WebSpeechTrainingService:
                     )
                     empty_marked += 1
                     updated += 1
-                elif result.text:
+                elif result is not None and result.text:
                     # Non-empty transcript
                     transcript_text = result.text[:self.TRANSCRIPT_MAX_LENGTH]
                     self.repo.update_transcript(
@@ -1083,12 +1191,29 @@ class WebSpeechTrainingService:
                         reviewer_username="(auto-transcript)",
                     )
                     updated += 1
+                elif result is not None and result.status_code == 429:
+                    # Final retry exhausted on 429 — stop early
+                    rate_limit_stopped_early = True
+                    logger.warning(
+                        "Transcribe clip %s: rate limit retries exhausted, "
+                        "stopping early",
+                        clip_id,
+                    )
+                    if len(errors) < 20:
+                        clip_filename = clip.get("filename", f"id={clip_id}")
+                        errors.append(
+                            f"Clip {clip_filename}: Rate limited by Groq after "
+                            f"{max_retries + 1} attempts. "
+                            f"Increase WEB_TRANSCRIPT_REQUEST_DELAY_SECONDS "
+                            f"or wait before retrying."
+                        )
+                    break  # stop processing further clips
                 else:
                     # Failure (timeout, API error, etc.)
                     skipped += 1
                     if len(errors) < 20:
                         clip_filename = clip.get("filename", f"id={clip_id}")
-                        errors.append(f"Clip {clip_filename}: {result.error or 'unknown error'}")
+                        errors.append(f"Clip {clip_filename}: {result.error if result else 'unknown error'}")
 
             except Exception as exc:
                 logger.warning("Failed to transcribe clip %s: %s", clip_id, exc)
@@ -1101,11 +1226,21 @@ class WebSpeechTrainingService:
                 progress_callback, total, processed, updated, empty_marked, skipped,
             )
 
+            if rate_limit_stopped_early:
+                break
+
         # ── Final result ──────────────────────────────────────────────
-        logger.info(
-            "Auto-transcribe done: %d clips — updated=%d empty_marked=%d skipped=%d",
-            total, updated, empty_marked, skipped,
-        )
+        if rate_limit_stopped_early:
+            logger.warning(
+                "Auto-transcribe stopped early due to persistent rate limiting "
+                "after %d clips — updated=%d empty_marked=%d skipped=%d",
+                processed, updated, empty_marked, skipped,
+            )
+        else:
+            logger.info(
+                "Auto-transcribe done: %d clips — updated=%d empty_marked=%d skipped=%d",
+                total, updated, empty_marked, skipped,
+            )
 
         result = {
             "status": "ok",

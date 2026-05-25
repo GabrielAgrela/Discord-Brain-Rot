@@ -4,8 +4,11 @@ Tests for bot/services/web_speech_training.py - offline keyword scanning.
 
 from __future__ import annotations
 
+import io
 import json
-from unittest.mock import MagicMock, patch
+import time
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -1013,3 +1016,240 @@ class TestWebSpeechTrainingTranscribe:
 
         assert result["total"] == service.TRANSCRIBE_MAX_CLIPS
         assert result["total"] == 500
+
+    # ── Throttling / rate-limit handling ────────────────────────────────
+
+    def _make_clip(self, clip_id: int, relative_path: str = "g1/u1/clip.mp3") -> dict:
+        """Helper to create a minimal clip dict for testing."""
+        return {
+            "id": clip_id,
+            "relative_path": relative_path,
+            "guild_id": "100",
+            "user_id": "1",
+            "username": "user1",
+            "display_name": "User One",
+            "filename": f"clip{clip_id}.mp3",
+            "duration_seconds": 1.0,
+            "byte_size": 1000,
+            "captured_at": "2026-01-01 00:00:00",
+            "label": None,
+            "transcript": None,
+        }
+
+    def _create_clip_file(self, service, clip: dict) -> None:
+        """Create the audio file for a clip so resolve_audio_path succeeds."""
+        rel = clip["relative_path"]
+        full_path = service.data_dir / rel
+        full_path.parent.mkdir(parents=True, exist_ok=True)
+        full_path.write_bytes(b"fake-mp3-content")
+
+    def test_transcribe_sets_api_key_and_model(self, service):
+        """whisper.api_key and whisper.model are set from parameters."""
+        from bot.services.voice_command import GroqWhisperResult
+
+        mock_whisper = MagicMock()
+        mock_whisper.transcribe_detailed = AsyncMock(return_value=GroqWhisperResult(
+            text="ok", is_available=True,
+        ))
+
+        with (
+            patch("bot.services.voice_command.GroqWhisperService",
+                  return_value=mock_whisper) as _mw,
+            patch("pydub.AudioSegment.from_file") as mock_audio,
+            patch("bot.services.web_speech_training.time.sleep"),
+        ):
+            mock_seg = MagicMock()
+            mock_seg.export.side_effect = lambda buf, **_kw: (buf.write(b"x"), buf)[1]
+            mock_audio.return_value = mock_seg
+
+            clip = self._make_clip(1)
+            self._create_clip_file(service, clip)
+            service.repo.list_empty_transcript_clips.return_value = [clip]
+            service.transcribe_empty_clips(
+                groq_api_key="custom-key",
+                groq_whisper_model="custom-model",
+            )
+
+            assert mock_whisper.api_key == "custom-key"
+            assert mock_whisper.model == "custom-model"
+
+    def test_transcribe_429_retries_and_succeeds(self, service):
+        """A single 429 triggers retry; the retry succeeds."""
+        from bot.services.voice_command import GroqWhisperResult
+
+        mock_whisper = MagicMock()
+        results = [
+            GroqWhisperResult(
+                is_available=True,
+                error="API error 429 (rate limited)",
+                status_code=429,
+                retry_after_seconds=2.0,
+            ),
+            GroqWhisperResult(text="retry ok", is_available=True),
+        ]
+        mock_whisper.transcribe_detailed = AsyncMock(side_effect=results)
+
+        with (
+            patch("bot.services.voice_command.GroqWhisperService",
+                  return_value=mock_whisper),
+            patch("pydub.AudioSegment.from_file") as mock_audio,
+            patch("bot.services.web_speech_training.time.sleep") as mock_sleep,
+        ):
+            mock_seg = MagicMock()
+            mock_seg.export.side_effect = lambda buf, **_kw: (buf.write(b"x"), buf)[1]
+            mock_audio.return_value = mock_seg
+
+            clip = self._make_clip(1)
+            self._create_clip_file(service, clip)
+            service.repo.list_empty_transcript_clips.return_value = [clip]
+            result = service.transcribe_empty_clips(groq_api_key="test-key")
+
+            assert result["processed"] == 1
+            assert result["updated"] == 1
+            assert result["status"] == "ok"
+            assert len(result["errors"]) == 0
+            # Should have slept for retry-after duration
+            mock_sleep.assert_any_call(2.0)
+            # Two calls: one 429, one success
+            assert mock_whisper.transcribe_detailed.call_count == 2
+
+    def test_transcribe_429_exhausted_stops_early(self, service):
+        """Persistent 429 exhausts retries and stops early with an error."""
+        from bot.services.voice_command import GroqWhisperResult
+
+        mock_whisper = MagicMock()
+        # All attempts return 429
+        mock_whisper.transcribe_detailed = AsyncMock(return_value=GroqWhisperResult(
+            is_available=True,
+            error="API error 429 (rate limited)",
+            status_code=429,
+            retry_after_seconds=1.0,
+        ))
+
+        with (
+            patch("bot.services.voice_command.GroqWhisperService",
+                  return_value=mock_whisper),
+            patch("pydub.AudioSegment.from_file") as mock_audio,
+            patch("bot.services.web_speech_training.time.sleep") as mock_sleep,
+        ):
+            mock_seg = MagicMock()
+            mock_seg.export.side_effect = lambda buf, **_kw: (buf.write(b"x"), buf)[1]
+            mock_audio.return_value = mock_seg
+
+            clip1 = self._make_clip(1)
+            clip2 = self._make_clip(2)
+            self._create_clip_file(service, clip1)
+            self._create_clip_file(service, clip2)
+            # Two clips; only first should be attempted
+            service.repo.list_empty_transcript_clips.return_value = [clip1, clip2]
+            result = service.transcribe_empty_clips(groq_api_key="test-key")
+
+            assert result["processed"] == 1  # processed one clip
+            assert result["updated"] == 0
+            assert result["skipped"] == 0
+            assert len(result["errors"]) == 1
+            assert "Rate limited by Groq" in result["errors"][0]
+            assert "WEB_TRANSCRIPT_REQUEST_DELAY_SECONDS" in result["errors"][0]
+            # Should have tried max_retries+1 times on the first clip
+            expected_attempts = 3 + 1  # default max_retries=3 + first attempt
+            assert mock_whisper.transcribe_detailed.call_count == expected_attempts
+
+    def test_transcribe_429_zero_retries_skips_immediately(self, service):
+        """When max retries = 0, 429 skips immediately (no retry)."""
+        from bot.services.voice_command import GroqWhisperResult
+
+        mock_whisper = MagicMock()
+        mock_whisper.transcribe_detailed = AsyncMock(return_value=GroqWhisperResult(
+            is_available=True,
+            error="API error 429 (rate limited)",
+            status_code=429,
+        ))
+
+        with (
+            patch("bot.services.voice_command.GroqWhisperService",
+                  return_value=mock_whisper),
+            patch("pydub.AudioSegment.from_file") as mock_audio,
+            patch("bot.services.web_speech_training.time.sleep"),
+            patch("bot.services.web_speech_training.WEB_TRANSCRIPT_429_MAX_RETRIES", 0),
+        ):
+            mock_seg = MagicMock()
+            mock_seg.export.side_effect = lambda buf, **_kw: (buf.write(b"x"), buf)[1]
+            mock_audio.return_value = mock_seg
+
+            clip = self._make_clip(1)
+            self._create_clip_file(service, clip)
+            service.repo.list_empty_transcript_clips.return_value = [clip]
+            result = service.transcribe_empty_clips(groq_api_key="test-key")
+
+            # 0 retries: max_retries (0) + first attempt = 1 call total
+            assert mock_whisper.transcribe_detailed.call_count == 1
+            assert result["processed"] == 1
+            assert len(result["errors"]) == 1
+            assert "Rate limited" in result["errors"][0]
+
+    def test_transcribe_inter_request_delay(self, service):
+        """Delay between requests is applied after non-last clip."""
+        from bot.services.voice_command import GroqWhisperResult
+
+        mock_whisper = MagicMock()
+        mock_whisper.transcribe_detailed = AsyncMock(return_value=GroqWhisperResult(
+            text="ok", is_available=True,
+        ))
+
+        with (
+            patch("bot.services.voice_command.GroqWhisperService",
+                  return_value=mock_whisper),
+            patch("pydub.AudioSegment.from_file") as mock_audio,
+            patch("bot.services.web_speech_training.time.sleep") as mock_sleep,
+        ):
+            mock_seg = MagicMock()
+            mock_seg.export.side_effect = lambda buf, **_kw: (buf.write(b"x"), buf)[1]
+            mock_audio.return_value = mock_seg
+
+            clip1 = self._make_clip(1)
+            clip2 = self._make_clip(2)
+            self._create_clip_file(service, clip1)
+            self._create_clip_file(service, clip2)
+            service.repo.list_empty_transcript_clips.return_value = [clip1, clip2]
+            service.transcribe_empty_clips(groq_api_key="test-key")
+
+            # Should have slept once (after first clip, before second)
+            delay_calls = [
+                c for c in mock_sleep.call_args_list
+                if abs(c[0][0] - 1.0) < 0.01
+            ]
+            assert len(delay_calls) == 1
+
+    def test_transcribe_429_uses_retry_after_not_exponential(self, service):
+        """When Retry-After is provided, it is used instead of exponential backoff."""
+        from bot.services.voice_command import GroqWhisperResult
+
+        mock_whisper = MagicMock()
+        results = [
+            GroqWhisperResult(
+                is_available=True,
+                error="API error 429 (rate limited)",
+                status_code=429,
+                retry_after_seconds=5.0,
+            ),
+            GroqWhisperResult(text="ok", is_available=True),
+        ]
+        mock_whisper.transcribe_detailed = AsyncMock(side_effect=results)
+
+        with (
+            patch("bot.services.voice_command.GroqWhisperService",
+                  return_value=mock_whisper),
+            patch("pydub.AudioSegment.from_file") as mock_audio,
+            patch("bot.services.web_speech_training.time.sleep") as mock_sleep,
+        ):
+            mock_seg = MagicMock()
+            mock_seg.export.side_effect = lambda buf, **_kw: (buf.write(b"x"), buf)[1]
+            mock_audio.return_value = mock_seg
+
+            clip = self._make_clip(1)
+            self._create_clip_file(service, clip)
+            service.repo.list_empty_transcript_clips.return_value = [clip]
+            service.transcribe_empty_clips(groq_api_key="test-key")
+
+            # Should have slept for exactly 5.0s (Retry-After), not exponential
+            mock_sleep.assert_any_call(5.0)

@@ -147,11 +147,18 @@ class GroqWhisperResult:
             API request was attempted.
         error: Human-readable error message when the API call failed,
             or empty string on success.
+        status_code: The HTTP status code returned by the API, or ``None``
+            when no request was made.
+        retry_after_seconds: Value of the ``Retry-After`` response header
+            parsed as seconds, or ``None`` when not provided or not a
+            429 response.
     """
     text: str = ""
     is_empty: bool = False
     is_available: bool = False
     error: str = ""
+    status_code: int | None = None
+    retry_after_seconds: float | None = None
 
 
 class GroqWhisperService:
@@ -222,9 +229,21 @@ class GroqWhisperService:
                         logger.error(
                             "[GroqWhisper] API error %s: %.200s", resp.status, error_text
                         )
+                        # Parse Retry-After header for rate-limit handling
+                        retry_after: float | None = None
+                        if resp.status == 429:
+                            raw_retry_after = resp.headers.get("Retry-After")
+                            if raw_retry_after is not None:
+                                try:
+                                    retry_after = float(raw_retry_after)
+                                except (ValueError, TypeError):
+                                    pass  # ignore unparseable header values
+                        error_label = "rate limited" if resp.status == 429 else f"API error {resp.status}"
                         return GroqWhisperResult(
                             is_available=True,
-                            error=f"API error {resp.status}",
+                            error=f"API error {resp.status} ({error_label})",
+                            status_code=resp.status,
+                            retry_after_seconds=retry_after,
                         )
                     result = await resp.json()
                     text = (result.get("text") or "").strip()
