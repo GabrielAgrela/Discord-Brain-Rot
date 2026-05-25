@@ -1649,3 +1649,121 @@ class TestKeywordScanHelpers:
         assert "20 sounds scanned" in desc
         assert "match" not in desc
         assert "skipped" not in desc
+
+    def test_keyword_scan_border_color_is_red(self):
+        """Verify KEYWORD_SCAN_BORDER_COLOR is red #ED4245."""
+        from bot.services.background import BackgroundService
+
+        assert BackgroundService.KEYWORD_SCAN_BORDER_COLOR == "#ED4245"
+
+    @pytest.mark.asyncio
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    async def test_send_keyword_scan_card_passes_red_border(
+        self, _mock_sound_repo, _mock_action_repo
+    ):
+        """Ensure _send_keyword_scan_card uses red image_border_color via behavior.send_message."""
+        from bot.services.background import BackgroundService
+
+        behavior = Mock()
+        behavior.send_message = AsyncMock(return_value=Mock(spec=discord.Message))
+
+        service = BackgroundService(
+            bot=Mock(),
+            audio_service=Mock(),
+            sound_service=Mock(),
+            behavior=behavior,
+        )
+
+        channel = Mock(spec=discord.TextChannel)
+        guild = Mock(spec=discord.Guild)
+
+        result = await service._send_keyword_scan_card(
+            channel=channel,
+            guild=guild,
+            title="Keyword Scan Progress",
+            description="3 keyword(s) · 12/83 sounds · 4 matches",
+        )
+
+        assert result is not None
+        behavior.send_message.assert_awaited_once_with(
+            title="Keyword Scan Progress",
+            description="3 keyword(s) · 12/83 sounds · 4 matches",
+            channel=channel,
+            guild=guild,
+            message_format="image",
+            image_requester=BackgroundService.KEYWORD_SCAN_REQUESTER,
+            image_show_footer=False,
+            image_show_sound_icon=False,
+            image_border_color="#ED4245",
+            send_controls=False,
+        )
+
+    @pytest.mark.asyncio
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    async def test_send_keyword_scan_card_fallback_embed_uses_red(
+        self, _mock_sound_repo, _mock_action_repo
+    ):
+        """Ensure fallback embed in _send_keyword_scan_card uses red color."""
+        from bot.services.background import BackgroundService
+
+        service = BackgroundService(
+            bot=Mock(),
+            audio_service=Mock(),
+            sound_service=Mock(),
+            behavior=None,  # No behavior => falls through to embed
+        )
+
+        channel = Mock(spec=discord.TextChannel)
+        channel.send = AsyncMock(return_value=Mock(spec=discord.Message))
+        guild = Mock(spec=discord.Guild)
+
+        result = await service._send_keyword_scan_card(
+            channel=channel,
+            guild=guild,
+            title="KW Scan",
+            description="test",
+        )
+
+        assert result is not None
+        channel.send.assert_awaited_once()
+        args, kwargs = channel.send.await_args
+        embed = kwargs.get("embed")
+        assert embed is not None
+        assert embed.color.value == 0xED4245
+
+    @pytest.mark.asyncio
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    async def test_edit_keyword_scan_card_fallback_embed_uses_red(
+        self, _mock_sound_repo, _mock_action_repo
+    ):
+        """Ensure fallback embed in _edit_keyword_scan_card uses red color."""
+        from bot.services.background import BackgroundService
+
+        service = BackgroundService(
+            bot=Mock(),
+            audio_service=Mock(),
+            sound_service=Mock(),
+            behavior=Mock(),
+        )
+
+        # Mock message_service so image generation fails and triggers fallback
+        message_service = Mock()
+        message_service._generate_message_image = AsyncMock(return_value=None)
+
+        message = AsyncMock(spec=discord.Message)
+
+        await service._edit_keyword_scan_card(
+            message=message,
+            title="KW Scan Updated",
+            description="updated desc",
+            message_service=message_service,
+        )
+
+        message.edit.assert_awaited_once()
+        args, kwargs = message.edit.await_args
+        embed = kwargs.get("embed")
+        assert embed is not None
+        assert embed.color.value == 0xED4245

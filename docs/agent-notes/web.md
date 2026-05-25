@@ -263,7 +263,7 @@ The following admin-only APIs support quick labeling, bulk operations, and keywo
 - The "Select all" button now selects all clips matching the current filters (not just the visible page).  It fetches IDs from ``GET /api/speech_training/clips/ids`` with the current filter/sort scope.  In scan mode, it selects all rendered scan-match clips locally.
 - Each scan-match clip shows a confidence percentage chip (e.g. ``87%``) styled with ``--accent-olive`` colors. The chip title shows the specific matched keyword (e.g. ``ventura certainty: 87%``).
 - Scan jobs run in a background thread pool (``WEB_KEYWORD_SCAN_WORKERS`` env var, default 2, bounded 1–8).  Job state is in-memory and lost on web restart.
-- The bot also runs a scheduled hourly keyword scan (``SPEECH_TRAINING_KEYWORD_SCAN_ENABLED``, default ``true``) that scans all guilds' unlabeled clips with configured trigger keywords and labels non-matches as ``none``. Progress is reported via a standard image-card notification (the same style as import notifications) that is edited in-place with updated progress, not a plain self-editing text message.
+- The bot also runs a scheduled daily keyword scan (``SPEECH_TRAINING_KEYWORD_SCAN_ENABLED``, default ``true``) every 24 h that scans all guilds' unlabeled clips with configured trigger keywords and labels non-matches as ``none``. The interval defaults to 86400 s and is configurable via ``SPEECH_TRAINING_KEYWORD_SCAN_INTERVAL_SECONDS`` (range 300–86400). Progress is reported via a standard image-card notification (the same style as import notifications) that is edited in-place with updated progress, not a plain self-editing text message.
 
 ### Auto-Transcript
 

@@ -103,12 +103,12 @@ class BackgroundService:
         self._voice_recovery_failures: Dict[int, int] = {}
         self._restart_requested = False
 
-        # Speech training keyword scan (hourly)
-        self._keyword_scan_hourly_enabled = self._env_flag(
+        # Speech training keyword scan (daily/24h)
+        self._keyword_scan_daily_enabled = self._env_flag(
             "SPEECH_TRAINING_KEYWORD_SCAN_ENABLED", True
         )
-        self._keyword_scan_hourly_interval = self._env_int(
-            "SPEECH_TRAINING_KEYWORD_SCAN_INTERVAL_SECONDS", 3600, 300, 86400
+        self._keyword_scan_daily_interval = self._env_int(
+            "SPEECH_TRAINING_KEYWORD_SCAN_INTERVAL_SECONDS", 86400, 300, 86400
         )
         self._keyword_scan_in_progress = False
 
@@ -154,9 +154,9 @@ class BackgroundService:
                 self.bot_self_heal_watchdog_loop.start()
             if not self.sound_import_notification_drain_loop.is_running():
                 self.sound_import_notification_drain_loop.start()
-            if self._keyword_scan_hourly_enabled and not self.speech_training_keyword_scan_loop.is_running():
+            if self._keyword_scan_daily_enabled and not self.speech_training_keyword_scan_loop.is_running():
                 self.speech_training_keyword_scan_loop.change_interval(
-                    seconds=self._keyword_scan_hourly_interval
+                    seconds=self._keyword_scan_daily_interval
                 )
                 self.speech_training_keyword_scan_loop.start()
             
@@ -1371,9 +1371,9 @@ class BackgroundService:
                 exc_info=True,
             )
 
-    @tasks.loop(seconds=3600)
+    @tasks.loop(seconds=86400)
     async def speech_training_keyword_scan_loop(self):
-        """Hourly keyword scan of unlabeled speech training clips.
+        """Daily keyword scan of unlabeled speech training clips.
 
         For each guild with configured trigger keywords, scans unlabeled
         clips (≤30s) using offline Vosk and labels non-matches as ``none``.
@@ -1385,7 +1385,7 @@ class BackgroundService:
                 "[BackgroundService] Speech training keyword scan already in progress, skipping tick"
             )
             return
-        if not self._keyword_scan_hourly_enabled:
+        if not self._keyword_scan_daily_enabled:
             return
 
         self._keyword_scan_in_progress = True
@@ -1467,7 +1467,7 @@ class BackgroundService:
 
     # ── Keyword scan image-card helpers ────────────────────────────────────────
 
-    KEYWORD_SCAN_BORDER_COLOR = "#5865F2"
+    KEYWORD_SCAN_BORDER_COLOR = "#ED4245"
     KEYWORD_SCAN_REQUESTER = "Keyword Scan"
 
     @staticmethod
@@ -1544,7 +1544,7 @@ class BackgroundService:
             embed = discord.Embed(
                 title=title,
                 description=description,
-                color=discord.Color.blurple(),
+                color=discord.Color(0xED4245),
             )
             return await channel.send(embed=embed)
         except Exception:
@@ -1598,7 +1598,7 @@ class BackgroundService:
             embed = discord.Embed(
                 title=title,
                 description=description,
-                color=discord.Color.blurple(),
+                color=discord.Color(0xED4245),
             )
             await message.edit(content=None, embed=embed, attachments=[])
             return

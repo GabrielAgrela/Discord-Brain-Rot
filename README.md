@@ -138,8 +138,8 @@ Create a `.env` file in the project root. Only `DISCORD_BOT_TOKEN` is strictly r
 | `WEB_TTS_ENHANCER_PROVIDER` | — | OpenRouter provider for web TTS enhancer |
 | `WEB_TTS_ENHANCER_MAX_TOKENS` | `8192` | Max tokens for enhance response |
 | `WEB_TTS_ENHANCER_REASONING_ENABLED` | `true` | Enable reasoning for web TTS enhancer |
-| `SPEECH_TRAINING_KEYWORD_SCAN_ENABLED` | `true` | Enable hourly scheduled keyword scan of unlabeled speech training clips via the bot (labels non-matches as ``none``) |
-| `SPEECH_TRAINING_KEYWORD_SCAN_INTERVAL_SECONDS` | `3600` | Interval for the scheduled keyword scan (range `300`–`86400`) |
+| `SPEECH_TRAINING_KEYWORD_SCAN_ENABLED` | `true` | Enable daily (24h) scheduled keyword scan of unlabeled speech training clips via the bot (labels non-matches as ``none``) |
+| `SPEECH_TRAINING_KEYWORD_SCAN_INTERVAL_SECONDS` | `86400` | Interval for the scheduled keyword scan, default 24h (range `300`–`86400`) |
 
 ## Slash Commands
 
