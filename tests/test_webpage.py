@@ -4076,6 +4076,57 @@ class TestSpeechTrainingRoutes:
         assert "matched" in payload
         assert "matches" in payload
 
+    @patch("bot.repositories.keyword.KeywordRepository.get_all")
+    def test_api_keyword_scan_all_keywords_no_keywords(self, mock_get_all, web_client):
+        """POST with all_keywords=true and no keywords in DB returns 400."""
+        mock_get_all.return_value = []
+        client, db_path = web_client
+        _login_web_user(client, username="admin", admin_guild_ids=["111"])
+        resp = client.post(
+            "/api/speech_training/keyword_scan",
+            json={"all_keywords": True},
+        )
+        assert resp.status_code == 400
+        data = resp.get_json()
+        assert "error" in data
+        assert "No trigger keywords configured" in data["error"]
+
+    @patch("bot.repositories.keyword.KeywordRepository.get_all")
+    @patch("bot.services.web_speech_training._get_vosk_model")
+    def test_api_keyword_scan_all_keywords_with_keywords(
+        self, mock_get_model, mock_get_all, web_client
+    ):
+        """POST with all_keywords=true uses trigger keywords from DB."""
+        mock_get_model.return_value = MagicMock()
+        mock_get_all.return_value = [
+            {"keyword": "chapada", "action_type": "slap", "action_value": ""},
+            {"keyword": "ventura", "action_type": "slap", "action_value": ""},
+        ]
+        client, db_path = web_client
+        _login_web_user(client, username="admin", admin_guild_ids=["111"])
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("INSERT OR IGNORE INTO guild_settings (guild_id) VALUES ('111')")
+            conn.commit()
+        finally:
+            conn.close()
+
+        resp = client.post(
+            "/api/speech_training/keyword_scan",
+            json={"all_keywords": True, "min_confidence": 0.5},
+        )
+        assert resp.status_code == 202
+        data = resp.get_json()
+        assert "job_id" in data
+        assert data["status"] == "queued"
+
+        job_id = data["job_id"]
+        payload = self._wait_for_keyword_scan_job(client, job_id)
+        assert payload["status"] == "done"
+        assert payload["keyword"] == "keywords"
+        assert "keywords" in payload
+        assert payload["keyword_count"] == 2
+
     # ── clip IDs endpoint (unpaginated select-all) ─────────────────────
 
     def test_api_clip_ids_requires_auth(self, web_client):

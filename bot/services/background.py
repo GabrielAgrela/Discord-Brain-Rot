@@ -1,11 +1,13 @@
 import asyncio
 import gc
+import io
 import json
 import logging
 import os
 import random
 import resource
 import shutil
+import threading
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Tuple
@@ -18,6 +20,8 @@ from bot.repositories import (
     WebSystemStatusRepository,
     SoundImportNotificationRepository,
 )
+from bot.repositories.keyword import KeywordRepository
+from bot.repositories.speech_training import SpeechTrainingRepository
 from bot.downloaders.sound import SoundDownloader
 from bot.services.guild_settings import GuildSettingsService
 from bot.services.system_monitor import HostSystemMonitorService
@@ -99,6 +103,15 @@ class BackgroundService:
         self._voice_recovery_failures: Dict[int, int] = {}
         self._restart_requested = False
 
+        # Speech training keyword scan (hourly)
+        self._keyword_scan_hourly_enabled = self._env_flag(
+            "SPEECH_TRAINING_KEYWORD_SCAN_ENABLED", True
+        )
+        self._keyword_scan_hourly_interval = self._env_int(
+            "SPEECH_TRAINING_KEYWORD_SCAN_INTERVAL_SECONDS", 3600, 300, 86400
+        )
+        self._keyword_scan_in_progress = False
+
     def start_tasks(self):
         """Schedule tasks to start when the bot is ready."""
         if self._started:
@@ -141,6 +154,11 @@ class BackgroundService:
                 self.bot_self_heal_watchdog_loop.start()
             if not self.sound_import_notification_drain_loop.is_running():
                 self.sound_import_notification_drain_loop.start()
+            if self._keyword_scan_hourly_enabled and not self.speech_training_keyword_scan_loop.is_running():
+                self.speech_training_keyword_scan_loop.change_interval(
+                    seconds=self._keyword_scan_hourly_interval
+                )
+                self.speech_training_keyword_scan_loop.start()
             
             asyncio.create_task(self._auto_join_channels())
             print("[BackgroundService] Background tasks started.")
@@ -1352,6 +1370,418 @@ class BackgroundService:
                 exc,
                 exc_info=True,
             )
+
+    @tasks.loop(seconds=3600)
+    async def speech_training_keyword_scan_loop(self):
+        """Hourly keyword scan of unlabeled speech training clips.
+
+        For each guild with configured trigger keywords, scans unlabeled
+        clips (≤30s) using offline Vosk and labels non-matches as ``none``.
+        Progress is reported to the guild's bot channel with a self-editing
+        message.
+        """
+        if self._keyword_scan_in_progress:
+            logger.debug(
+                "[BackgroundService] Speech training keyword scan already in progress, skipping tick"
+            )
+            return
+        if not self._keyword_scan_hourly_enabled:
+            return
+
+        self._keyword_scan_in_progress = True
+        try:
+            speech_training_data_dir = os.getenv(
+                "SPEECH_TRAINING_DATA_DIR",
+                os.path.abspath(
+                    os.path.join(
+                        os.path.dirname(__file__),
+                        "..", "..", "data", "speech_training",
+                    )
+                ),
+            )
+            db_path = os.getenv(
+                "DATABASE_PATH",
+                os.path.abspath(
+                    os.path.join(
+                        os.path.dirname(__file__),
+                        "..", "..", "data", "database.db",
+                    )
+                ),
+            )
+            # Override with config if available
+            try:
+                from config import DATABASE_PATH
+
+                db_path = DATABASE_PATH
+            except Exception:
+                pass
+
+            repo = SpeechTrainingRepository(
+                db_path=db_path, use_shared=False
+            )
+            repo.ensure_schema()
+            kw_repo = KeywordRepository(
+                db_path=db_path, use_shared=False
+            )
+            kw_rows = kw_repo.get_all(limit=200)
+            trigger_keywords = sorted({
+                r["keyword"].strip().lower()
+                for r in kw_rows
+                if r.get("keyword") and r["keyword"].strip()
+            })
+
+            if not trigger_keywords:
+                logger.info(
+                    "[BackgroundService] No trigger keywords configured, skipping "
+                    "speech training keyword scan"
+                )
+                return
+
+            from bot.services.web_speech_training import WebSpeechTrainingService
+
+            svc = WebSpeechTrainingService(repo, speech_training_data_dir)
+
+            for guild in self.bot.guilds:
+                try:
+                    await self._run_guild_keyword_scan(
+                        guild=guild,
+                        svc=svc,
+                        keywords=trigger_keywords,
+                    )
+                except Exception as exc:
+                    logger.error(
+                        "[BackgroundService] Speech training keyword scan failed "
+                        "for guild '%s': %s",
+                        guild.name,
+                        exc,
+                        exc_info=True,
+                    )
+        except Exception as exc:
+            logger.error(
+                "[BackgroundService] Speech training keyword scan error: %s",
+                exc,
+                exc_info=True,
+            )
+        finally:
+            self._keyword_scan_in_progress = False
+
+    # ── Keyword scan image-card helpers ────────────────────────────────────────
+
+    KEYWORD_SCAN_BORDER_COLOR = "#5865F2"
+    KEYWORD_SCAN_REQUESTER = "Keyword Scan"
+
+    @staticmethod
+    def _format_keyword_scan_description(
+        *,
+        total: int,
+        scanned: int,
+        matched: int,
+        skipped: int,
+        labeled_non: int = 0,
+        keywords: Optional[list[str]] = None,
+    ) -> str:
+        """Build a compact description line for keyword scan progress/completion cards.
+
+        Args:
+            total: Total number of eligible clips.
+            scanned: Number of clips scanned so far.
+            matched: Number of keyword matches found.
+            skipped: Number of clips skipped.
+            labeled_non: Number of clips labeled as ``none`` (completion only).
+            keywords: The keyword list used for the scan (included once at start).
+
+        Returns:
+            Compact summary string, e.g. ``"3 keyword(s) · 12/83 sounds · 4 matches · 2 skipped"``.
+        """
+        parts: list[str] = []
+        if keywords is not None:
+            parts.append(f"{len(keywords)} keyword(s)")
+        if scanned == total:
+            parts.append(f"{scanned} sound{'s' if scanned != 1 else ''} scanned")
+        else:
+            parts.append(f"{scanned}/{total} sounds")
+        if matched:
+            parts.append(f"{matched} match{'es' if matched != 1 else ''}")
+        if skipped:
+            parts.append(f"{skipped} skipped")
+        if labeled_non:
+            parts.append(f"{labeled_non} labeled as none")
+        return " · ".join(parts)
+
+    async def _send_keyword_scan_card(
+        self,
+        channel: discord.TextChannel,
+        guild: discord.Guild,
+        title: str,
+        description: str,
+    ) -> Optional[discord.Message]:
+        """Send an initial keyword scan progress/completion card.
+
+        Uses the standard image-card notification style with fallback to embed,
+        then plain text as a last resort.
+        """
+        if self.behavior:
+            try:
+                msg = await self.behavior.send_message(
+                    title=title,
+                    description=description,
+                    channel=channel,
+                    guild=guild,
+                    message_format="image",
+                    image_requester=self.KEYWORD_SCAN_REQUESTER,
+                    image_show_footer=False,
+                    image_show_sound_icon=False,
+                    image_border_color=self.KEYWORD_SCAN_BORDER_COLOR,
+                    send_controls=False,
+                )
+                if msg:
+                    return msg
+            except Exception:
+                pass
+
+        # Fallback: embed
+        try:
+            embed = discord.Embed(
+                title=title,
+                description=description,
+                color=discord.Color.blurple(),
+            )
+            return await channel.send(embed=embed)
+        except Exception:
+            pass
+
+        # Last resort: plain text
+        try:
+            return await channel.send(f"**{title}**\n{description}")
+        except Exception:
+            return None
+
+    async def _edit_keyword_scan_card(
+        self,
+        message: discord.Message,
+        title: str,
+        description: str,
+        message_service,
+    ) -> None:
+        """Edit an existing keyword scan message with a new image card.
+
+        Generates a fresh image card and replaces the attachment in-place.
+        Falls back to embed edit, then plain-text content edit.
+        """
+        # Preferred path: regenerate image card and replace attachment
+        try:
+            image_bytes = await message_service._generate_message_image(
+                title=title,
+                description=description,
+                thumbnail=None,
+                requester=self.KEYWORD_SCAN_REQUESTER,
+                show_footer=False,
+                show_sound_icon=False,
+                border_color=self.KEYWORD_SCAN_BORDER_COLOR,
+            )
+            if image_bytes:
+                await message.edit(
+                    content=None,
+                    embed=None,
+                    attachments=[],
+                    file=discord.File(
+                        io.BytesIO(image_bytes),
+                        filename="message_card.png",
+                    ),
+                )
+                return
+        except Exception:
+            pass
+
+        # Fallback: embed edit
+        try:
+            embed = discord.Embed(
+                title=title,
+                description=description,
+                color=discord.Color.blurple(),
+            )
+            await message.edit(content=None, embed=embed, attachments=[])
+            return
+        except Exception:
+            pass
+
+        # Last resort: plain-text edit
+        try:
+            await message.edit(
+                content=f"**{title}**\n{description}",
+                embed=None,
+                attachments=[],
+            )
+        except Exception:
+            pass
+
+    async def _run_guild_keyword_scan(
+        self,
+        guild: discord.Guild,
+        svc: "WebSpeechTrainingService",
+        keywords: list[str],
+    ) -> None:
+        """Run keyword scan for one guild and send progress to bot channel.
+
+        Progress is reported with standard image-card notifications (editable
+        in-place), not plain text.
+        """
+        message_service = getattr(self.audio_service, "message_service", None)
+        if message_service is None:
+            return
+
+        channel = message_service.get_bot_channel(guild)
+        if channel is None:
+            logger.debug(
+                "[BackgroundService] No bot channel for guild '%s', skipping keyword scan",
+                guild.name,
+            )
+            return
+
+        # Count eligible clips first
+        eligible = svc.repo.list_unlabeled_clips(
+            guild_id=str(guild.id),
+            max_duration_seconds=svc.KEYWORD_SCAN_MAX_DURATION_SECONDS,
+        )
+        if not eligible:
+            logger.debug(
+                "[BackgroundService] No eligible unlabeled clips for guild '%s', "
+                "skipping keyword scan",
+                guild.name,
+            )
+            return
+
+        total = len(eligible)
+        logger.info(
+            "[BackgroundService] Starting keyword scan for guild '%s': %d clips, "
+            "%d keywords",
+            guild.name,
+            total,
+            len(keywords),
+        )
+
+        # Send initial progress card
+        initial_desc = self._format_keyword_scan_description(
+            total=total, scanned=0, matched=0, skipped=0, keywords=keywords,
+        )
+        progress_msg = await self._send_keyword_scan_card(
+            channel=channel,
+            guild=guild,
+            title="🔎 Keyword scan running",
+            description=initial_desc,
+        )
+        if progress_msg is None:
+            logger.error(
+                "[BackgroundService] Failed to send initial keyword scan card for guild '%s'",
+                guild.name,
+            )
+            return
+
+        # Thread-safe progress state
+        progress_state: dict[str, Any] = {
+            "scanned": 0,
+            "matched": 0,
+            "skipped": 0,
+            "total": total,
+        }
+        progress_lock = threading.Lock()
+
+        async def _update_progress_message() -> None:
+            """Edit the progress card with current state (throttled)."""
+            with progress_lock:
+                scanned = progress_state["scanned"]
+                matched = progress_state["matched"]
+                skipped = progress_state["skipped"]
+                total = progress_state["total"]
+            description = self._format_keyword_scan_description(
+                total=total, scanned=scanned, matched=matched, skipped=skipped,
+                keywords=keywords,
+            )
+            await self._edit_keyword_scan_card(
+                message=progress_msg,
+                title="🔎 Keyword scan running",
+                description=description,
+                message_service=message_service,
+            )
+
+        last_update_time = time.monotonic()
+        min_update_interval = 3.0  # seconds between Discord edits
+
+        def _on_progress(progress: dict[str, Any]) -> None:
+            """Thread-safe progress callback from the Vosk scan."""
+            nonlocal last_update_time
+            with progress_lock:
+                progress_state["scanned"] = progress.get("scanned", 0)
+                progress_state["matched"] = progress.get("matched", 0)
+                progress_state["skipped"] = progress.get("skipped", 0)
+                progress_state["total"] = progress.get("total", 0)
+                now = time.monotonic()
+                if now - last_update_time >= min_update_interval:
+                    last_update_time = now
+                    # Schedule the async update on the event loop
+                    asyncio.run_coroutine_threadsafe(
+                        _update_progress_message(),
+                        self.bot.loop,
+                    )
+
+        # Run the scan in a thread executor (Vosk is CPU-bound)
+        loop = asyncio.get_event_loop()
+        # Use a timeout so the task doesn't hang forever
+        scan_future = loop.run_in_executor(
+            None,
+            lambda: svc.scan_unlabeled_keywords(
+                keywords=keywords,
+                min_confidence=0.5,
+                guild_id=str(guild.id),
+                label_non_matches_as_none=True,
+                progress_callback=_on_progress,
+            ),
+        )
+
+        try:
+            result = await asyncio.wait_for(scan_future, timeout=1800)  # 30 min max
+        except asyncio.TimeoutError:
+            logger.error(
+                "[BackgroundService] Keyword scan timed out for guild '%s'",
+                guild.name,
+            )
+            await self._edit_keyword_scan_card(
+                message=progress_msg,
+                title="⚠️ Keyword scan timed out",
+                description=self._format_keyword_scan_description(
+                    total=total, scanned=progress_state["scanned"],
+                    matched=progress_state["matched"],
+                    skipped=progress_state["skipped"],
+                ),
+                message_service=message_service,
+            )
+            return
+
+        # Final update
+        scanned = result.get("scanned", 0)
+        matched = result.get("matched", 0)
+        skipped = result.get("skipped", 0)
+        labeled_non = result.get("labeled_non_matches", 0)
+
+        await self._edit_keyword_scan_card(
+            message=progress_msg,
+            title="✅ Keyword scan complete",
+            description=self._format_keyword_scan_description(
+                total=total, scanned=scanned, matched=matched, skipped=skipped,
+                labeled_non=labeled_non,
+            ),
+            message_service=message_service,
+        )
+
+        logger.info(
+            "[BackgroundService] Keyword scan complete for guild '%s': "
+            "scanned=%d matched=%d skipped=%d labeled_none=%d",
+            guild.name,
+            scanned,
+            matched,
+            skipped,
+            labeled_non,
+        )
 
     @staticmethod
     def _parse_guild_id(raw: object) -> int | None:

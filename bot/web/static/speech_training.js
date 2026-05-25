@@ -19,7 +19,7 @@
         _passiveIntervalMs: 5000,
         _scanMode: false, // true when displaying keyword scan results
         _scanClips: [],   // cached scan match clips
-        _scanKeyword: '', // the keyword that was scanned for
+        _scanKeyword: '', // the keyword(s) that were scanned for
         _scanJobId: null, // pending scan job id for polling
         _scanPollTimer: null, // setTimeout handle for polling
         _transcriptJobId: null, // pending transcript job id for polling
@@ -662,7 +662,8 @@
             }
             if (clip.keyword_confidence !== undefined && clip.keyword_confidence !== null) {
                 var pct = Math.round(clip.keyword_confidence * 100);
-                html += '<span class="dataset-clip-conf-chip" title="Chapada certainty: ' + pct + '% (Vosk confidence ' + clip.keyword_confidence + ')">' + pct + '% certainty</span>';
+                var kwName = clip.matched_keyword || 'keyword';
+                html += '<span class="dataset-clip-conf-chip" title="' + escapeHtml(kwName) + ' certainty: ' + pct + '% (Vosk confidence ' + clip.keyword_confidence + ')">' + escapeHtml(kwName) + ' &middot; ' + pct + '%</span>';
             }
 
             // Quick progress indicator + scrubber (hidden by default)
@@ -1041,7 +1042,7 @@
     }
 
     // ── Scan mode ────────────────────────────────────────────────────
-    function enterScanMode(clips, keyword, maxDurationSeconds) {
+    function enterScanMode(clips, keyword, maxDurationSeconds, keywordCount) {
         state._scanMode = true;
         state._scanClips = clips;
         state._scanKeyword = keyword;
@@ -1049,7 +1050,8 @@
         updateBulkUI();
         var pct = Math.round((state._scanConfidence || 0.5) * 100);
         var durLabel = maxDurationSeconds ? ' \u2264' + maxDurationSeconds + 's' : '';
-        datasetTitle.textContent = 'Scan results: "' + keyword + '" (\u2265' + pct + '%' + durLabel + ')';
+        var kwLabel = keywordCount > 1 ? keywordCount + ' keywords' : '"' + keyword + '"';
+        datasetTitle.textContent = 'Scan results: ' + kwLabel + ' (\u2265' + pct + '%' + durLabel + ')';
         renderClips(clips);
         datasetPagination.innerHTML = '<div class="pagination-inner"><button type="button" class="pagination-btn" id="clearScanBtn">Show all clips</button></div>';
         var clearBtn = $('clearScanBtn');
@@ -1091,7 +1093,7 @@
 
         state._scanConfidence = 0.5;
 
-        var body = { keyword: 'chapada', min_confidence: 0.5, label_non_matches_as_none: true };
+        var body = { all_keywords: true, min_confidence: 0.5, label_non_matches_as_none: true };
         var gid = getSelectedGuildId();
         if (gid) body.guild_id = gid;
         if (state.selectedUserId) body.user_id = state.selectedUserId;
@@ -1171,7 +1173,7 @@
         if (parts.length > 0) detail += ' \u00b7 ' + parts.join(' \u00b7 ');
 
         showScanProgressToast({
-            title: 'Scanning' + (maxDur ? ' ' + maxDur : '') + '\u2026',
+            title: 'Scanning keywords' + (maxDur ? ' ' + maxDur : '') + '\u2026',
             detail: detail,
             max: 100,
             value: pct,
@@ -1200,12 +1202,13 @@
             var count = data.matched;
             var msg = count + ' match' + (count !== 1 ? 'es' : '') + ' found' + nonMatchNote;
             showScanToast(msg, 'success');
-            enterScanMode(data.matches, data.keyword, data.max_duration_seconds);
+            enterScanMode(data.matches, data.keyword, data.max_duration_seconds, data.keyword_count || 1);
         } else {
             var maxDur = data.max_duration_seconds ? ' among clips \u2264' + data.max_duration_seconds + 's' : '';
+            var kwLabel = (data.keyword_count || 1) > 1 ? 'any configured keyword' : '"' + data.keyword + '"';
             showScanToast('No matches found' + maxDur + ' (scanned ' + data.scanned + ', skipped ' + data.skipped + ')' + nonMatchNote, 'info');
             datasetTitle.textContent = 'No matches';
-            clipList.innerHTML = '<p class="dataset-empty">No clips matched "' + data.keyword + '" at \u2265' + Math.round(data.min_confidence * 100) + '% confidence' + maxDur + '.</p>';
+            clipList.innerHTML = '<p class="dataset-empty">No clips matched ' + kwLabel + ' at \u2265' + Math.round(data.min_confidence * 100) + '% confidence' + maxDur + '.</p>';
             datasetPagination.innerHTML = '<div class="pagination-inner"><button type="button" class="pagination-btn" id="clearScanBtn">Show all clips</button></div>';
             var clearBtn = $('clearScanBtn');
             if (clearBtn) {

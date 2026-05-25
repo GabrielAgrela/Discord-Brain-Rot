@@ -16,7 +16,7 @@ import os
 import threading
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from bot.repositories.speech_training import SpeechTrainingRepository
 
@@ -509,20 +509,48 @@ class WebSpeechTrainingService:
     ) -> Dict[str, Any]:
         """Scan all unlabeled clips for a keyword using offline Vosk detection.
 
+        This is a convenience wrapper that delegates to
+        :meth:`scan_unlabeled_keywords` with a single keyword.
+
+        See :meth:`scan_unlabeled_keywords` for full parameter documentation.
+        """
+        return self.scan_unlabeled_keywords(
+            keywords=[keyword],
+            min_confidence=min_confidence,
+            guild_id=guild_id,
+            user_id=user_id,
+            progress_callback=progress_callback,
+            delete_non_matches=delete_non_matches,
+            label_non_matches_as_none=label_non_matches_as_none,
+        )
+
+    def scan_unlabeled_keywords(
+        self,
+        keywords: Iterable[str] = ("chapada",),
+        min_confidence: float = 0.5,
+        guild_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+        delete_non_matches: bool = False,
+        label_non_matches_as_none: bool = False,
+    ) -> Dict[str, Any]:
+        """Scan all unlabeled clips for any of the given keywords using offline Vosk.
+
         Only clips with ``duration_seconds <= KEYWORD_SCAN_MAX_DURATION_SECONDS``
         (default 30.0) are eligible — longer clips are excluded from the
         unlabeled list before any Vosk decoding.
 
         Decodes each eligible MP3 clip to 16 kHz mono PCM, feeds it to a Vosk
-        ``KaldiRecognizer``, and checks word-level confidence for the
-        requested keyword.
+        ``KaldiRecognizer``, and checks word-level confidence for every
+        configured keyword. A clip is considered a match if **any** keyword
+        appears in the recognised text at or above ``min_confidence``.
 
         Processing is concurrent within this single scan job using a fixed-size
         thread pool (``KEYWORD_SCAN_WORKERS``, default 4). No environment
         variables are consulted.
 
         Args:
-            keyword: The keyword to detect (lowercased for comparison).
+            keywords: Iterable of keywords to detect (lowercased for comparison).
             min_confidence: Minimum Vosk word confidence (0‑1) to consider a match.
             guild_id: Optional guild scope for unlabeled clips.
             user_id: Optional user scope for unlabeled clips.
@@ -532,7 +560,7 @@ class WebSpeechTrainingService:
                 and ``status`` (``"processing"`` or ``"done"``).  The initial
                 call has ``current_clip_id=None``.
             delete_non_matches: When ``True``, delete clips that were
-                successfully scanned but did **not** match the keyword.
+                successfully scanned but did **not** match any keyword.
                 Skipped clips (missing audio, decode errors) and matched
                 clips are preserved.  Deletion happens **after** the full
                 scan completes, using the same batch-safe audio-removal
@@ -544,8 +572,10 @@ class WebSpeechTrainingService:
         Returns:
             Response dict with keys ``status``, ``keyword``,
             ``min_confidence``, ``max_duration_seconds``, ``scanned``,
-            ``matched``, ``skipped``, and ``matches`` (list of clip dicts
-            augmented with ``keyword_confidence`` and ``keyword_transcript``).
+            ``matched``, ``skipped``, ``keywords`` (list of configured
+            keywords), ``keyword_count``, and ``matches`` (list of clip
+            dicts augmented with ``keyword_confidence``,
+            ``matched_keyword`` and ``keyword_transcript``).
             When ``delete_non_matches`` was ``True``, also includes
             ``delete_non_matches`` (the input flag) and
             ``deleted_non_matches`` (count of clips actually deleted).
@@ -553,13 +583,18 @@ class WebSpeechTrainingService:
             that flag and ``labeled_non_matches`` (count).
 
         Raises:
-            ValueError: When validation fails (empty keyword, bad
+            ValueError: When validation fails (empty keywords, bad
                 confidence).
         """
         # ── Validate parameters ──────────────────────────────────────
-        keyword = keyword.strip().lower()
-        if not keyword:
-            raise ValueError("Keyword must be non-empty")
+        normalized_keywords: List[str] = sorted({
+            kw.strip().lower()
+            for kw in keywords
+            if kw and kw.strip()
+        })
+        if not normalized_keywords:
+            raise ValueError("At least one keyword must be configured")
+        display_keyword = normalized_keywords[0] if len(normalized_keywords) == 1 else "keywords"
         if not 0 <= min_confidence <= 1:
             raise ValueError("min_confidence must be between 0 and 1")
 
@@ -579,8 +614,8 @@ class WebSpeechTrainingService:
         )
         total = len(clips)
         logger.debug(
-            "Keyword scan: %d unlabeled clips ≤%ss",
-            total, self.KEYWORD_SCAN_MAX_DURATION_SECONDS,
+            "Keyword scan (%d keywords): %d unlabeled clips ≤%ss",
+            len(normalized_keywords), total, self.KEYWORD_SCAN_MAX_DURATION_SECONDS,
         )
 
         # ── Notify initial progress ──────────────────────────────────
@@ -602,7 +637,7 @@ class WebSpeechTrainingService:
 
         if total == 0:
             return self._build_scan_result(
-                keyword=keyword,
+                keyword=display_keyword,
                 min_confidence=min_confidence,
                 scanned=0,
                 matched=0,
@@ -612,27 +647,31 @@ class WebSpeechTrainingService:
                 deleted_non_matches=0,
                 label_non_matches_as_none=label_non_matches_as_none,
                 labeled_non_matches=0,
+                keywords=normalized_keywords,
             )
 
         # ── Concurrency helpers ──────────────────────────────────────
         distractors = ["chapa", "ada", "cha", "o", "google", "jogo", "do jogo"]
-        grammar = [keyword] + distractors + ["[unk]"]
+        grammar = list(normalized_keywords) + distractors + ["[unk]"]
         grammar_json = json.dumps(grammar)
 
         clip_list = list(clips)  # stable order
         # Map original index -> (clip, future)
         future_map: Dict[int, Any] = {}
 
+        keyword_set = set(normalized_keywords)
+
         def _scan_one(clip: dict) -> dict:
             """Process a single clip: resolve audio, decode, run Vosk.
 
             Returns a dict with keys:
-                matched (bool), conf (float), text (str), clip_id (int)
+                matched (bool), conf (float), text (str), clip_id (int),
+                matched_keyword (str)
             or keys: error (str), clip_id (int)
             """
             path = self.resolve_audio_path(clip)
             if path is None:
-                return {"matched": False, "conf": 0.0, "text": "", "clip_id": clip.get("id"), "skipped": True, "error": "no_audio"}
+                return {"matched": False, "conf": 0.0, "text": "", "clip_id": clip.get("id"), "skipped": True, "error": "no_audio", "matched_keyword": ""}
 
             try:
                 from pydub import AudioSegment
@@ -655,14 +694,17 @@ class WebSpeechTrainingService:
                 word_results = result.get("result", [])
 
                 best_conf = 0.0
+                best_keyword = ""
                 for wi in word_results:
                     w = wi.get("word", "").lower()
-                    if w == keyword:
+                    if w in keyword_set:
                         conf = wi.get("conf", 0.0)
                         if conf > best_conf:
                             best_conf = conf
+                            best_keyword = w
 
-                is_match = best_conf >= min_confidence and keyword in text.split()
+                words_in_text = text.split()
+                is_match = best_conf >= min_confidence and best_keyword in words_in_text
                 return {
                     "matched": is_match,
                     "conf": round(best_conf, 3),
@@ -670,10 +712,11 @@ class WebSpeechTrainingService:
                     "clip_id": clip.get("id"),
                     "skipped": False,
                     "error": None,
+                    "matched_keyword": best_keyword,
                 }
             except Exception as exc:
                 logger.warning("Failed to scan clip %s: %s", clip.get("id"), exc)
-                return {"matched": False, "conf": 0.0, "text": "", "clip_id": clip.get("id"), "skipped": True, "error": str(exc)}
+                return {"matched": False, "conf": 0.0, "text": "", "clip_id": clip.get("id"), "skipped": True, "error": str(exc), "matched_keyword": ""}
 
         def _notify_locked() -> None:
             """Thread-safe progress notification."""
@@ -715,6 +758,7 @@ class WebSpeechTrainingService:
                                 aug = dict(orig)
                                 aug["keyword_confidence"] = result["conf"]
                                 aug["keyword_transcript"] = result["text"]
+                                aug["matched_keyword"] = result.get("matched_keyword", "")
                                 matches.append(aug)
                                 break
                         scanned += 1
@@ -739,15 +783,15 @@ class WebSpeechTrainingService:
         matches.sort(key=lambda m: order_map.get(m["id"], 999999))
 
         logger.info(
-            "Keyword scan '%s' scanned=%d matched=%d skipped=%d "
+            "Keyword scan '%s' (keywords=%s) scanned=%d matched=%d skipped=%d "
             "deleted_nonmatches=%d labeled_nonmatches=%d (eligible clips ≤%ss=%d)",
-            keyword, scanned, len(matches), skipped,
+            display_keyword, normalized_keywords, scanned, len(matches), skipped,
             deleted_non_matches, labeled_non_matches,
             self.KEYWORD_SCAN_MAX_DURATION_SECONDS, total,
         )
 
         return self._build_scan_result(
-            keyword=keyword,
+            keyword=display_keyword,
             min_confidence=min_confidence,
             scanned=scanned,
             matched=len(matches),
@@ -757,6 +801,7 @@ class WebSpeechTrainingService:
             deleted_non_matches=deleted_non_matches,
             label_non_matches_as_none=label_non_matches_as_none,
             labeled_non_matches=labeled_non_matches,
+            keywords=normalized_keywords,
         )
 
     _DELETE_CHUNK_SIZE = 500
@@ -843,8 +888,14 @@ class WebSpeechTrainingService:
         deleted_non_matches: int,
         label_non_matches_as_none: bool,
         labeled_non_matches: int,
+        keywords: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
-        """Build the standard scan response dict."""
+        """Build the standard scan response dict.
+
+        Args:
+            keywords: Optional list of all configured keywords for
+                multi-keyword scan awareness.
+        """
         result: Dict[str, Any] = {
             "status": "ok",
             "keyword": keyword,
@@ -859,6 +910,9 @@ class WebSpeechTrainingService:
             "label_non_matches_as_none": label_non_matches_as_none,
             "labeled_non_matches": labeled_non_matches,
         }
+        if keywords is not None:
+            result["keywords"] = keywords
+            result["keyword_count"] = len(keywords)
         return result
 
     @staticmethod

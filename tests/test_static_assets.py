@@ -48,17 +48,19 @@ class TestJavaScriptSyntax:
 
     @pytest.mark.parametrize("filename", JS_FILES)
     def test_keyword_confidence_wording(self, filename):
-        """Verify keyword scan confidence chips show percentage certainty text."""
+        """Verify keyword scan confidence chips show keyword name and percentage."""
         filepath = os.path.join(STATIC_DIR, filename)
         assert os.path.exists(filepath), f"JS file not found: {filepath}"
         with open(filepath, "r", encoding="utf-8") as fh:
             content = fh.read()
         # The chip should use explicit null/undefined guard, not truthiness
         assert "keyword_confidence !== undefined" in content
-        # The chip should display "N% certainty" (not just bare "N%")
-        assert "% certainty</span>" in content
-        # The title should reference "Chapada certainty"
-        assert "Chapada certainty" in content
+        # The chip should show keyword name + middot + percentage (not bare "% certainty")
+        assert " &middot; " in content
+        assert "'%</span>'" in content or '"%</span>"' in content
+        # The title should use escaped keyword reference, not hardcoded "Chapada certainty"
+        assert "certainty:" in content
+        assert "Chapada certainty" not in content
 
     @pytest.mark.parametrize("filename", JS_FILES)
     def test_transcript_job_functions_exist(self, filename):

@@ -67,11 +67,24 @@ class TestWebSpeechTrainingScan:
 
     def test_scan_rejects_empty_keyword(self, service):
         """Empty keyword raises ValueError."""
-        from bot.services.web_speech_training import WebSpeechTrainingService
+        with pytest.raises(ValueError, match="At least one keyword must be configured"):
+            service.scan_unlabeled_keyword(keyword="")
 
-        svc = service
-        with pytest.raises(ValueError, match="Keyword must be non-empty"):
-            svc.scan_unlabeled_keyword(keyword="")
+    def test_scan_rejects_empty_keywords_list(self, service):
+        """Empty keywords list raises ValueError."""
+        with pytest.raises(ValueError, match="At least one keyword must be configured"):
+            service.scan_unlabeled_keywords(keywords=[])
+
+    def test_scan_multi_keyword_delegates(self, service):
+        """scan_unlabeled_keyword delegates to scan_unlabeled_keywords with single keyword."""
+        service.repo.list_unlabeled_clips.return_value = []
+        with patch(
+            "bot.services.web_speech_training._get_vosk_model",
+            return_value=MagicMock(),
+        ):
+            result = service.scan_unlabeled_keyword(keyword="chapada")
+        assert result["status"] == "ok"
+        assert result["keyword"] == "chapada"
 
     def test_scan_rejects_bad_confidence_low(self, service):
         """Confidence below 0 raises ValueError."""
@@ -191,6 +204,84 @@ class TestWebSpeechTrainingScan:
         assert len(result["matches"]) == 1
         assert result["matches"][0]["keyword_confidence"] == 0.85
         assert result["matches"][0]["keyword_transcript"] == "chapada"
+
+    @patch("pydub.AudioSegment.from_file")
+    def test_scan_matches_any_keyword_in_list(self, mock_from_file, service, tmp_path):
+        """Clip matching any keyword in the list is included in matches."""
+        audio_file = tmp_path / "g100" / "u1"
+        audio_file.mkdir(parents=True, exist_ok=True)
+        mp3_path = audio_file / "test.mp3"
+        mp3_path.write_bytes(b"fake-mp3-bytes")
+
+        clip = {
+            "id": 1,
+            "relative_path": "g100/u1/test.mp3",
+            "guild_id": "100",
+            "user_id": "1",
+            "username": "user1",
+            "display_name": "User One",
+            "filename": "test.mp3",
+            "duration_seconds": 1.0,
+            "byte_size": 1000,
+            "captured_at": "2026-01-01 00:00:00",
+            "label": None,
+        }
+        service.repo.list_unlabeled_clips.return_value = [clip]
+
+        fake_segment = MagicMock()
+        fake_segment.raw_data = b"\x00\x00" * 16000
+        fake_segment.set_frame_rate.return_value = fake_segment
+        fake_segment.set_channels.return_value = fake_segment
+        fake_segment.set_sample_width.return_value = fake_segment
+        mock_from_file.return_value = fake_segment
+
+        # Vosk returns "ventura" which is one of the scanned keywords
+        fake_result = json.dumps({
+            "text": "ventura",
+            "result": [{"word": "ventura", "conf": 0.85}],
+        })
+
+        def make_fake_recognizer(model, sample_rate, grammar_json=None):
+            rec = FakeRecognizer(model, sample_rate, grammar_json)
+            rec._result = fake_result
+            return rec
+
+        fake_model = MagicMock()
+
+        with patch(
+            "bot.services.web_speech_training._get_vosk_model",
+            return_value=fake_model,
+        ), patch(
+            "vosk.KaldiRecognizer",
+            side_effect=make_fake_recognizer,
+        ):
+            result = service.scan_unlabeled_keywords(
+                keywords=["chapada", "ventura", "teste"],
+            )
+
+        assert result["status"] == "ok"
+        assert result["scanned"] == 1
+        assert result["matched"] == 1
+        assert len(result["matches"]) == 1
+        assert result["matches"][0]["keyword_confidence"] == 0.85
+        assert result["matches"][0]["matched_keyword"] == "ventura"
+        assert result["keywords"] == ["chapada", "teste", "ventura"]
+        assert result["keyword_count"] == 3
+        assert result["keyword"] == "keywords"
+
+    def test_scan_keywords_result_includes_keyword_metadata(self, service):
+        """Result for multi-keyword scan includes keywords/keyword_count."""
+        service.repo.list_unlabeled_clips.return_value = []
+        with patch(
+            "bot.services.web_speech_training._get_vosk_model",
+            return_value=MagicMock(),
+        ):
+            result = service.scan_unlabeled_keywords(
+                keywords=["chapada", "ventura"],
+            )
+        assert result["keyword"] == "keywords"
+        assert result["keywords"] == ["chapada", "ventura"]
+        assert result["keyword_count"] == 2
 
     @patch("pydub.AudioSegment.from_file")
     def test_scan_excludes_low_confidence(self, mock_from_file, service, tmp_path):

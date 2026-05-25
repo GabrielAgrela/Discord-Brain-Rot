@@ -1577,3 +1577,75 @@ class TestBotStatusCpu:
         await type(service).update_bot_status_loop.coro(service)
 
         bot.change_presence.assert_not_awaited()
+
+
+class TestKeywordScanHelpers:
+    """Tests for BackgroundService keyword scan helper methods."""
+
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    def test_format_keyword_scan_description_initial(self, _mock_sound_repo, _mock_action_repo):
+        """Verify initial progress description format."""
+        from bot.services.background import BackgroundService
+
+        desc = BackgroundService._format_keyword_scan_description(
+            total=83, scanned=0, matched=0, skipped=0, keywords=["ventura", "chapada"],
+        )
+        assert "2 keyword(s)" in desc
+        assert "0/83 sounds" in desc
+        assert "match" not in desc
+        assert "skipped" not in desc
+
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    def test_format_keyword_scan_description_mid_scan(self, _mock_sound_repo, _mock_action_repo):
+        """Verify mid-scan description includes counts."""
+        from bot.services.background import BackgroundService
+
+        desc = BackgroundService._format_keyword_scan_description(
+            total=83, scanned=42, matched=3, skipped=1, keywords=["ventura"],
+        )
+        assert "1 keyword(s)" in desc
+        assert "42/83 sounds" in desc
+        assert "3 matches" in desc
+        assert "1 skipped" in desc
+
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    def test_format_keyword_scan_description_complete(self, _mock_sound_repo, _mock_action_repo):
+        """Verify final description with all fields."""
+        from bot.services.background import BackgroundService
+
+        desc = BackgroundService._format_keyword_scan_description(
+            total=83, scanned=83, matched=5, skipped=2, labeled_non=76,
+        )
+        assert "83 sounds scanned" in desc  # scanned == total
+        assert "5 matches" in desc
+        assert "2 skipped" in desc
+        assert "76 labeled as none" in desc
+
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    def test_format_keyword_scan_description_no_keywords_arg(self, _mock_sound_repo, _mock_action_repo):
+        """Verify description still works without keywords list (e.g. timeout)."""
+        from bot.services.background import BackgroundService
+
+        desc = BackgroundService._format_keyword_scan_description(
+            total=50, scanned=12, matched=1, skipped=0,
+        )
+        assert "12/50 sounds" in desc
+        assert "1 match" in desc
+        assert "keyword" not in desc.lower()
+
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    def test_format_keyword_scan_description_no_matches(self, _mock_sound_repo, _mock_action_repo):
+        """Verify zero matches are omitted from description."""
+        from bot.services.background import BackgroundService
+
+        desc = BackgroundService._format_keyword_scan_description(
+            total=20, scanned=20, matched=0, skipped=0,
+        )
+        assert "20 sounds scanned" in desc
+        assert "match" not in desc
+        assert "skipped" not in desc

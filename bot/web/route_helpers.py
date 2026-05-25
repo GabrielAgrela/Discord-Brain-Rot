@@ -32,6 +32,7 @@ from bot.repositories.web_upload import WebUploadRepository
 from bot.repositories.web_user_access import WebUserAccessRepository
 from bot.repositories.web_tts_settings import WebTtsSettingsRepository
 from bot.repositories.speech_training import SpeechTrainingRepository
+from bot.repositories.keyword import KeywordRepository
 from bot.services.web_analytics import WebAnalyticsService
 from bot.services.web_auth import WebAuthService
 from bot.services.web_content import WebContentService
@@ -299,26 +300,46 @@ def _run_web_upload_job(
 
 def _queue_web_keyword_scan_job(
     *,
-    keyword: str,
-    min_confidence: float,
-    guild_id: str | None,
-    user_id: str | None,
+    keyword: str | None = None,
+    keywords: list[str] | None = None,
+    min_confidence: float = 0.5,
+    guild_id: str | None = None,
+    user_id: str | None = None,
     delete_non_matches: bool = False,
     label_non_matches_as_none: bool = True,
 ) -> str:
     """Persist keyword scan parameters and submit background processing.
 
+    Args:
+        keyword: Single keyword to scan for (legacy, for backward compat).
+        keywords: List of keywords to scan for. If both ``keyword`` and
+            ``keywords`` are provided, ``keywords`` takes precedence.
+        min_confidence: Minimum Vosk word confidence (0‑1).
+        guild_id: Optional guild scope.
+        user_id: Optional user scope.
+        delete_non_matches: When True, delete non-matching clips.
+        label_non_matches_as_none: When True, label non-matches as ``none``.
+
     Returns:
         The job ID for polling status via
         ``GET /api/speech_training/keyword_scan/<job_id>``.
     """
+    # Resolve keywords: prefer explicit list, fall back to single keyword
+    if keywords is None:
+        kw_list: list[str] = [keyword] if keyword else ["chapada"]
+    else:
+        kw_list = keywords
+    display_keyword = kw_list[0] if len(kw_list) == 1 else "keywords"
+
     job_id = uuid.uuid4().hex
     created_at = datetime.now(timezone.utc).isoformat()
     jobs: dict[str, Any] = current_app.extensions.setdefault("web_keyword_scan_jobs", {})
     jobs[job_id] = {
         "job_id": job_id,
         "status": "queued",
-        "keyword": keyword,
+        "keyword": display_keyword,
+        "keywords": kw_list,
+        "keyword_count": len(kw_list),
         "min_confidence": min_confidence,
         "max_duration_seconds": None,
         "total": 0,
@@ -354,7 +375,7 @@ def _queue_web_keyword_scan_job(
         jobs=jobs,
         db_path=db_path,
         data_dir=data_dir,
-        keyword=keyword,
+        keywords=kw_list,
         min_confidence=min_confidence,
         guild_id=guild_id,
         user_id=user_id,
@@ -370,7 +391,7 @@ def _run_web_keyword_scan_job(
     jobs: dict[str, Any],
     db_path: str,
     data_dir: str,
-    keyword: str,
+    keywords: list[str],
     min_confidence: float,
     guild_id: str | None,
     user_id: str | None,
@@ -382,6 +403,7 @@ def _run_web_keyword_scan_job(
     from bot.services.web_speech_training import WebSpeechTrainingService
 
     finished_at = datetime.now(timezone.utc).isoformat()
+    display_keyword = keywords[0] if len(keywords) == 1 else "keywords"
 
     try:
         repo = SpeechTrainingRepository(db_path=db_path, use_shared=False)
@@ -395,7 +417,9 @@ def _run_web_keyword_scan_job(
             jobs[job_id] = {
                 "job_id": job_id,
                 "status": progress.get("status", "processing"),
-                "keyword": keyword,
+                "keyword": display_keyword,
+                "keywords": keywords,
+                "keyword_count": len(keywords),
                 "min_confidence": min_confidence,
                 "max_duration_seconds": progress.get("max_duration_seconds"),
                 "total": progress.get("total", 0),
@@ -412,8 +436,8 @@ def _run_web_keyword_scan_job(
                 "finished_at": None,
             }
 
-        result = svc.scan_unlabeled_keyword(
-            keyword=keyword,
+        result = svc.scan_unlabeled_keywords(
+            keywords=keywords,
             min_confidence=min_confidence,
             guild_id=guild_id,
             user_id=user_id,
@@ -426,7 +450,9 @@ def _run_web_keyword_scan_job(
         jobs[job_id] = {
             "job_id": job_id,
             "status": "done",
-            "keyword": keyword,
+            "keyword": display_keyword,
+            "keywords": keywords,
+            "keyword_count": len(keywords),
             "min_confidence": min_confidence,
             "max_duration_seconds": result.get("max_duration_seconds"),
             "total": result.get("scanned", 0) + result.get("skipped", 0),
@@ -446,7 +472,9 @@ def _run_web_keyword_scan_job(
         jobs[job_id] = {
             "job_id": job_id,
             "status": "error",
-            "keyword": keyword,
+            "keyword": display_keyword,
+            "keywords": keywords,
+            "keyword_count": len(keywords),
             "min_confidence": min_confidence,
             "max_duration_seconds": None,
             "total": 0,
@@ -467,7 +495,9 @@ def _run_web_keyword_scan_job(
         jobs[job_id] = {
             "job_id": job_id,
             "status": "error",
-            "keyword": keyword,
+            "keyword": display_keyword,
+            "keywords": keywords,
+            "keyword_count": len(keywords),
             "min_confidence": min_confidence,
             "max_duration_seconds": None,
             "total": 0,

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from flask import Flask, jsonify, render_template, request, send_file
+from flask import Flask, current_app, jsonify, render_template, request, send_file
 
 from bot.web.route_helpers import (
     _current_web_user_is_admin,
@@ -315,29 +315,55 @@ def register_speech_training_routes(app: Flask) -> None:
         """
         try:
             data = request.get_json(silent=True) or {}
-            keyword = (data.get("keyword") or "chapada").strip()
+            all_keywords = bool(data.get("all_keywords", False))
+            keyword = (data.get("keyword") or "").strip()
             min_confidence = float(data.get("min_confidence", 0.5))
             guild_id = (data.get("guild_id") or "").strip() or None
             user_id = (data.get("user_id") or "").strip() or None
             delete_non_matches = bool(data.get("delete_non_matches", False))
             label_non_matches_as_none = bool(data.get("label_non_matches_as_none", True))
 
-            # Validate synchronously before queuing
-            if not keyword:
-                return jsonify({"error": "Keyword must be non-empty"}), 400
+            # When all_keywords is true, fetch configured trigger keywords
+            if all_keywords:
+                from bot.repositories.keyword import KeywordRepository
+
+                kw_repo = KeywordRepository(
+                    db_path=current_app.config["DATABASE_PATH"],
+                    use_shared=False,
+                )
+                kw_rows = kw_repo.get_all(limit=200)
+                keywords = sorted({
+                    r["keyword"].strip().lower()
+                    for r in kw_rows
+                    if r.get("keyword") and r["keyword"].strip()
+                })
+                if not keywords:
+                    return jsonify({
+                        "error": "No trigger keywords configured. Add keywords via /keyword or the keywords table.",
+                    }), 400
+            else:
+                if not keyword:
+                    keyword = "chapada"
+                keywords = None  # will use keyword below
+
             if not 0 <= min_confidence <= 1:
                 return jsonify({"error": "min_confidence must be between 0 and 1"}), 400
 
             from bot.web.route_helpers import _queue_web_keyword_scan_job
 
-            job_id = _queue_web_keyword_scan_job(
-                keyword=keyword,
-                min_confidence=min_confidence,
-                guild_id=guild_id,
-                user_id=user_id,
-                delete_non_matches=delete_non_matches,
-                label_non_matches_as_none=label_non_matches_as_none,
-            )
+            job_kwargs: dict[str, Any] = {
+                "min_confidence": min_confidence,
+                "guild_id": guild_id,
+                "user_id": user_id,
+                "delete_non_matches": delete_non_matches,
+                "label_non_matches_as_none": label_non_matches_as_none,
+            }
+            if keywords is not None:
+                job_kwargs["keywords"] = keywords
+            else:
+                job_kwargs["keyword"] = keyword
+
+            job_id = _queue_web_keyword_scan_job(**job_kwargs)
             return jsonify({"job_id": job_id, "status": "queued"}), 202
         except (TypeError, ValueError):
             return jsonify({"error": "Invalid request body"}), 400

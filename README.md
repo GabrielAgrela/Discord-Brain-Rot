@@ -134,6 +134,8 @@ Create a `.env` file in the project root. Only `DISCORD_BOT_TOKEN` is strictly r
 | `WEB_TTS_ENHANCER_PROVIDER` | — | OpenRouter provider for web TTS enhancer |
 | `WEB_TTS_ENHANCER_MAX_TOKENS` | `8192` | Max tokens for enhance response |
 | `WEB_TTS_ENHANCER_REASONING_ENABLED` | `true` | Enable reasoning for web TTS enhancer |
+| `SPEECH_TRAINING_KEYWORD_SCAN_ENABLED` | `true` | Enable hourly scheduled keyword scan of unlabeled speech training clips via the bot (labels non-matches as ``none``) |
+| `SPEECH_TRAINING_KEYWORD_SCAN_INTERVAL_SECONDS` | `3600` | Interval for the scheduled keyword scan (range `300`–`86400`) |
 
 ## Slash Commands
 
@@ -242,8 +244,8 @@ The optional web dashboard is served by a separate `web` container (Docker profi
 | `POST /api/speech_training/clips/<id>/label` | Update label/transcript/notes (admin-only) |
 | `DELETE /api/speech_training/clips/<id>` | Delete a single clip (admin-only) |
 | `POST /api/speech_training/clips/bulk` | Bulk label or delete clips (admin-only) |
-| `POST /api/speech_training/keyword_scan` | Start async keyword scan (admin-only, returns `202` + `job_id`; poll with GET below). Only unlabeled clips ≤30s are eligible. |
-| `GET /api/speech_training/keyword_scan/<job_id>` | Poll keyword scan progress & results (admin-only). Response includes `max_duration_seconds`. |
+| `POST /api/speech_training/keyword_scan` | Start async keyword scan (admin-only, returns `202` + `job_id`; poll with GET below). Only unlabeled clips ≤30s are eligible. Supports `all_keywords: true` to scan all configured trigger keywords from the `keywords` table, or a specific `keyword`. |
+| `GET /api/speech_training/keyword_scan/<job_id>` | Poll keyword scan progress & results (admin-only). Response includes `max_duration_seconds`. When multiple keywords were scanned, includes `keywords` (list) and `keyword_count`. |
 | `POST /api/speech_training/transcribe_empty` | Start async auto-transcript job (admin-only, returns `202` + `job_id`). Transcribes empty-transcript clips via Groq Whisper (`GROQ_API_KEY` required). Poll with GET below. |
 | `GET /api/speech_training/transcribe_empty/<job_id>` | Poll auto-transcript progress & results (admin-only). Response includes `total`, `processed`, `updated`, `empty_marked`, `skipped`. |
 

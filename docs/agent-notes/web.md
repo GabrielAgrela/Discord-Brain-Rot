@@ -257,16 +257,17 @@ The following admin-only APIs support quick labeling, bulk operations, and keywo
 
 ### Page UI
 
-- The dataset page toolbar has a ``Find Chapada`` button.  Keyword scans always use a fixed confidence threshold of ``0.5`` (50%).  Clicking the button starts an **async** keyword scan via ``POST /api/speech_training/keyword_scan`` with ``min_confidence: 0.5`` and ``delete_non_matches: true``.
+- The dataset page toolbar has a ``Find Keywords`` button.  Keyword scans always use a fixed confidence threshold of ``0.5`` (50%).  Clicking the button starts an **async** keyword scan via ``POST /api/speech_training/keyword_scan`` with ``all_keywords: true``, ``min_confidence: 0.5`` and ``label_non_matches_as_none: true``. Instead of scanning for a hardcoded ``chapada`` keyword, it fetches all configured trigger keywords from the ``keywords`` table.
 - The JS polls ``GET /api/speech_training/keyword_scan/<job_id>`` every 500 ms and updates a persistent toast notification with a progress bar and detail text (e.g. ``Sound 12/83 · 4 matches · 1 skipped``).  On completion, matching clips populate the clip list in scan mode (showing matches only, with a ``Show all clips`` button).  If non-matches were deleted, the toast appends e.g. ``· 72 non-matches deleted``.  After deletion, the user list and storage summary are refreshed immediately.  Network errors during polling show a distinct "Network error while checking scan progress" message.
 - Scan mode is cleared when the user changes any filter (label, search, sort, speaker, or guild).  While in scan mode, passive clip refresh is paused.
 - The "Select all" button now selects all clips matching the current filters (not just the visible page).  It fetches IDs from ``GET /api/speech_training/clips/ids`` with the current filter/sort scope.  In scan mode, it selects all rendered scan-match clips locally.
-- Each scan-match clip shows a confidence percentage chip (e.g. ``87%``) styled with ``--accent-olive`` colors.
+- Each scan-match clip shows a confidence percentage chip (e.g. ``87%``) styled with ``--accent-olive`` colors. The chip title shows the specific matched keyword (e.g. ``ventura certainty: 87%``).
 - Scan jobs run in a background thread pool (``WEB_KEYWORD_SCAN_WORKERS`` env var, default 2, bounded 1–8).  Job state is in-memory and lost on web restart.
+- The bot also runs a scheduled hourly keyword scan (``SPEECH_TRAINING_KEYWORD_SCAN_ENABLED``, default ``true``) that scans all guilds' unlabeled clips with configured trigger keywords and labels non-matches as ``none``. Progress is reported via a standard image-card notification (the same style as import notifications) that is edited in-place with updated progress, not a plain self-editing text message.
 
 ### Auto-Transcript
 
-- The dataset page toolbar has an ``Auto transcript`` button alongside ``Find Chapada``.  Clicking it starts an **async** job via ``POST /api/speech_training/transcribe_empty`` that transcribes all clips with empty/missing ``transcript`` via Groq Whisper.
+- The dataset page toolbar has an ``Auto transcript`` button alongside ``Find Keywords``.  Clicking it starts an **async** job via ``POST /api/speech_training/transcribe_empty`` that transcribes all clips with empty/missing ``transcript`` via Groq Whisper.
 - The JS polls ``GET /api/speech_training/transcribe_empty/<job_id>`` every 500 ms and updates a persistent toast notification with a progress bar and detail text (e.g. ``Sound 5/20 · 3 updated · 1 empty · 1 skipped``).
 - Audio files are converted from MP3 to WAV in memory using ``pydub.AudioSegment`` before sending to Groq Whisper.
 - Processing is **sequential** (one clip at a time) to avoid rate limiting.  A safety cap of 500 clips per job is enforced.
