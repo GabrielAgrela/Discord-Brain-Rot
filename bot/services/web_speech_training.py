@@ -808,6 +808,42 @@ class WebSpeechTrainingService:
             for fut in done:
                 result = fut.result()
                 cid = result.get("clip_id")
+
+                # Persist detection metadata for all scanned clips
+                if result.get("skipped"):
+                    self.repo.update_detection_metadata(
+                        clip_id=cid,
+                        detection_status="skipped",
+                        detection_source="vosk_keyword_scan",
+                        detection_keywords_json=json.dumps(normalized_keywords),
+                        detection_min_confidence=min_confidence,
+                        detection_error=result.get("error") or "no_audio",
+                    )
+                elif result.get("matched"):
+                    self.repo.update_detection_metadata(
+                        clip_id=cid,
+                        detected_keyword=result.get("matched_keyword", ""),
+                        detected_confidence=result.get("conf"),
+                        detected_transcript=result.get("text") or None,
+                        detection_status="matched",
+                        detection_source="vosk_keyword_scan",
+                        detection_keywords_json=json.dumps(normalized_keywords),
+                        detection_min_confidence=min_confidence,
+                        detection_error=None,
+                    )
+                else:
+                    self.repo.update_detection_metadata(
+                        clip_id=cid,
+                        detected_keyword=None,
+                        detected_confidence=result.get("conf") if result.get("conf", 0) > 0 else None,
+                        detected_transcript=result.get("text") or None,
+                        detection_status="non_match",
+                        detection_source="vosk_keyword_scan",
+                        detection_keywords_json=json.dumps(normalized_keywords),
+                        detection_min_confidence=min_confidence,
+                        detection_error=None,
+                    )
+
                 with _lock:
                     if result.get("skipped"):
                         skipped += 1

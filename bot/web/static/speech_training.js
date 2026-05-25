@@ -664,6 +664,11 @@
                 var pct = Math.round(clip.keyword_confidence * 100);
                 var kwName = clip.matched_keyword || 'keyword';
                 html += '<span class="dataset-clip-conf-chip" title="' + escapeHtml(kwName) + ' certainty: ' + pct + '% (Vosk confidence ' + clip.keyword_confidence + ')">' + escapeHtml(kwName) + ' &middot; ' + pct + '%</span>';
+            } else if (clip.detected_keyword && clip.detected_confidence !== undefined && clip.detected_confidence !== null) {
+                var pct = Math.round(clip.detected_confidence * 100);
+                html += '<span class="dataset-clip-conf-chip" title="Detected: ' + escapeHtml(clip.detected_keyword) + ' at ' + pct + '% confidence (Vosk ' + clip.detection_status + ')">' + escapeHtml(clip.detected_keyword) + ' &middot; ' + pct + '%</span>';
+            } else if (clip.detection_status === 'non_match' && clip.detected_transcript) {
+                html += '<span class="dataset-clip-conf-chip" title="Vosk non-match transcript: ' + escapeHtml(clip.detected_transcript) + '" style="opacity:0.55">Scanned &middot; non-match</span>';
             }
 
             // Quick progress indicator + scrubber (hidden by default)
@@ -710,6 +715,31 @@
             html += '<label class="dataset-field-label">Notes</label>';
             html += '<textarea class="dataset-clip-notes" data-field="notes" rows="2" maxlength="2000" placeholder="Optional notes">' + escapeHtml(notes) + '</textarea>';
             html += '</div>';
+
+            // Detection metadata (read-only, from Vosk scan)
+            if (clip.detection_status) {
+                html += '<div class="dataset-field dataset-detection-meta">';
+                html += '<details><summary class="dataset-detection-summary">Detection metadata</summary>';
+                html += '<table class="dataset-detection-table">';
+                html += '<tr><td>Status</td><td>' + escapeHtml(clip.detection_status) + '</td></tr>';
+                if (clip.detection_source) html += '<tr><td>Source</td><td>' + escapeHtml(clip.detection_source) + '</td></tr>';
+                if (clip.detected_keyword) html += '<tr><td>Detected keyword</td><td>' + escapeHtml(clip.detected_keyword) + '</td></tr>';
+                if (clip.detected_confidence !== undefined && clip.detected_confidence !== null) {
+                    var detPct = Math.round(clip.detected_confidence * 100);
+                    html += '<tr><td>Confidence</td><td>' + detPct + '%</td></tr>';
+                }
+                if (clip.detection_min_confidence !== undefined && clip.detection_min_confidence !== null) {
+                    var threshPct = Math.round(clip.detection_min_confidence * 100);
+                    html += '<tr><td>Scan threshold</td><td>' + threshPct + '%</td></tr>';
+                }
+                if (clip.detection_keywords_json) {
+                    html += '<tr><td>Scanned keywords</td><td>' + escapeHtml(clip.detection_keywords_json) + '</td></tr>';
+                }
+                if (clip.detection_scanned_at) html += '<tr><td>Scanned at</td><td>' + escapeHtml(clip.detection_scanned_at) + '</td></tr>';
+                if (clip.detected_transcript) html += '<tr><td>Vosk transcript</td><td>' + escapeHtml(clip.detected_transcript) + '</td></tr>';
+                if (clip.detection_error) html += '<tr><td>Error</td><td>' + escapeHtml(clip.detection_error) + '</td></tr>';
+                html += '</table></details></div>';
+            }
 
             // Save button
             html += '<button type="button" class="dataset-save-btn">Save</button>';

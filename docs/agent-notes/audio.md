@@ -52,6 +52,13 @@ Read this when changing uploads, sound ingest, playback, generated sound cards, 
 - Real-time dedupe should remove old controls through raw component payload edits, preserving existing progress labels/emoji.
 - Tracked `discord.Message` objects can have stale `components`; fetch a fresh copy before removing controls.
 
+## Speech Training Dataset Capture & Labeling
+
+- **Labels vs detection metadata**: `label` is always human ground truth (`ventura`, `chapada`, `none`). `transcript` is the human transcript. Vosk scan results are stored separately in `detected_*`/`detection_*` columns and never overwrite human fields.
+- **False positives** are derivable as `label='none' AND detected_keyword IS NOT NULL`. **False negatives** as `label='<keyword>' AND (detected_keyword IS NULL OR detected_keyword != label)`. The `detection_keywords_json` column preserves which keywords were targeted in the scan so past scans remain interpretable.
+- Schema migration (adding `detected_*` columns) is idempotent in `SpeechTrainingRepository.ensure_schema()` via `PRAGMA table_info`.
+- `update_detection_metadata()` in the repository sets `detection_scanned_at = CURRENT_TIMESTAMP` and is safe to call on labeled or unlabeled clips — it never touches `label`, `transcript`, or `notes`.
+
 ## Speech Training Dataset Capture
 
 - The opt-in speech training recorder (`SPEECH_TRAINING_RECORDING_ENABLED=true`) uses the same `KeywordDetectionSink` receive audio that Vosk uses. This avoids adding a separate Discord recording sink.

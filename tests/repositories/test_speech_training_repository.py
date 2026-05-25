@@ -779,3 +779,180 @@ class TestSpeechTrainingRepository:
         assert ok is True
         clip = repo.get_clip(ids[0])
         assert clip["transcript"] == "-"
+
+    # ── Detection metadata ─────────────────────────────────────────────
+
+    def test_ensure_schema_adds_detection_columns_idempotently(self):
+        """Detection metadata columns are added to existing tables and calling
+        ensure_schema again is a no-op."""
+        import tempfile, os
+        from bot.repositories.speech_training import SpeechTrainingRepository
+        from bot.repositories.base import BaseRepository
+
+        BaseRepository._shared_connection = None
+        BaseRepository._shared_db_path = None
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
+            tmp_path = tmp.name
+        try:
+            # Create schema without detection columns (v1)
+            conn = sqlite3.connect(tmp_path)
+            conn.row_factory = sqlite3.Row
+            conn.execute("""
+                CREATE TABLE speech_training_clips (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id TEXT, user_id TEXT NOT NULL, username TEXT NOT NULL,
+                    display_name TEXT, folder_name TEXT NOT NULL, filename TEXT NOT NULL,
+                    relative_path TEXT NOT NULL UNIQUE, duration_seconds REAL NOT NULL,
+                    byte_size INTEGER NOT NULL DEFAULT 0, sample_rate INTEGER NOT NULL DEFAULT 48000,
+                    channels INTEGER NOT NULL DEFAULT 2, sample_width INTEGER NOT NULL DEFAULT 2,
+                    captured_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    label TEXT, transcript TEXT, notes TEXT,
+                    reviewed_by_user_id TEXT, reviewed_by_username TEXT, reviewed_at DATETIME
+                )
+            """)
+            conn.close()
+
+            # Now ensure_schema should add the detection columns
+            repo = SpeechTrainingRepository(db_path=tmp_path, use_shared=False)
+            repo.ensure_schema()
+
+            # Verify columns exist
+            row = repo._execute_one("PRAGMA table_info(speech_training_clips)")
+            col_names = set()
+            cursor = repo._get_connection().cursor()
+            cursor.execute("PRAGMA table_info(speech_training_clips)")
+            for r in cursor.fetchall():
+                col_names.add(r["name"])
+            if not repo._use_shared or BaseRepository._shared_connection is None:
+                cursor.connection.close()
+
+            expected_detection_cols = {
+                "detected_keyword", "detected_confidence", "detected_transcript",
+                "detection_status", "detection_source", "detection_keywords_json",
+                "detection_min_confidence", "detection_error", "detection_scanned_at",
+            }
+            assert expected_detection_cols.issubset(col_names), (
+                f"Missing detection columns. Have: {col_names}"
+            )
+
+            # Second call should not raise
+            repo.ensure_schema()
+
+        finally:
+            os.unlink(tmp_path)
+
+    def test_update_detection_metadata_persists(self, repo):
+        """Detection metadata is persisted and does not affect human labels."""
+        ids = self._insert_sample_clips(repo)
+        cid = ids[0]
+
+        ok = repo.update_detection_metadata(
+            clip_id=cid,
+            detected_keyword="chapada",
+            detected_confidence=0.85,
+            detected_transcript="chapada",
+            detection_status="matched",
+            detection_source="vosk_keyword_scan",
+            detection_keywords_json='["chapada"]',
+            detection_min_confidence=0.5,
+            detection_error=None,
+        )
+        assert ok is True
+
+        clip = repo.get_clip(cid)
+        assert clip["detected_keyword"] == "chapada"
+        assert clip["detected_confidence"] == 0.85
+        assert clip["detected_transcript"] == "chapada"
+        assert clip["detection_status"] == "matched"
+        assert clip["detection_source"] == "vosk_keyword_scan"
+        assert clip["detection_keywords_json"] == '["chapada"]'
+        assert clip["detection_min_confidence"] == 0.5
+        assert clip["detection_error"] is None
+        assert clip["detection_scanned_at"] is not None
+        # Human fields are untouched
+        assert clip["label"] is None
+        assert clip["transcript"] is None
+
+    def test_update_detection_metadata_non_match(self, repo):
+        """Non-match metadata is persisted correctly."""
+        ids = self._insert_sample_clips(repo)
+        cid = ids[0]
+
+        ok = repo.update_detection_metadata(
+            clip_id=cid,
+            detected_keyword=None,
+            detected_confidence=None,
+            detected_transcript="outra frase",
+            detection_status="non_match",
+            detection_source="vosk_keyword_scan",
+            detection_keywords_json='["chapada","ventura"]',
+            detection_min_confidence=0.5,
+            detection_error=None,
+        )
+        assert ok is True
+
+        clip = repo.get_clip(cid)
+        assert clip["detected_keyword"] is None
+        assert clip["detected_confidence"] is None
+        assert clip["detected_transcript"] == "outra frase"
+        assert clip["detection_status"] == "non_match"
+
+    def test_update_detection_metadata_skipped(self, repo):
+        """Skipped metadata is persisted with error message."""
+        ids = self._insert_sample_clips(repo)
+        cid = ids[0]
+
+        ok = repo.update_detection_metadata(
+            clip_id=cid,
+            detection_status="skipped",
+            detection_source="vosk_keyword_scan",
+            detection_keywords_json='["chapada"]',
+            detection_min_confidence=0.5,
+            detection_error="no_audio",
+        )
+        assert ok is True
+
+        clip = repo.get_clip(cid)
+        assert clip["detection_status"] == "skipped"
+        assert clip["detection_error"] == "no_audio"
+        assert clip["detected_keyword"] is None
+
+    def test_update_detection_metadata_not_found(self, repo):
+        """Updating a non-existent clip returns False."""
+        ok = repo.update_detection_metadata(clip_id=99999, detection_status="matched")
+        assert ok is False
+
+    def test_update_detection_metadata_does_not_clear_human_fields(self, repo):
+        """Calling update_detection_metadata on a clip with existing label/transcript
+        should not modify the human fields."""
+        ids = self._insert_sample_clips(repo)
+        cid = ids[0]
+
+        # First set a human label
+        repo.update_review(
+            clip_id=cid,
+            label="chapada",
+            transcript="human transcript",
+            notes="human notes",
+            reviewer_user_id="99",
+            reviewer_username="reviewer",
+        )
+
+        # Now update detection metadata
+        repo.update_detection_metadata(
+            clip_id=cid,
+            detected_keyword="ventura",
+            detected_confidence=0.9,
+            detected_transcript="ventura detection",
+            detection_status="matched",
+        )
+
+        clip = repo.get_clip(cid)
+        # Human fields should be preserved
+        assert clip["label"] == "chapada"
+        assert clip["transcript"] == "human transcript"
+        assert clip["notes"] == "human notes"
+        # Detection fields should be set
+        assert clip["detected_keyword"] == "ventura"
+        assert clip["detected_confidence"] == 0.9

@@ -145,6 +145,14 @@ class TestWebSpeechTrainingScan:
         assert result["scanned"] == 0
         assert result["skipped"] == 1
         assert result["matched"] == 0
+        # Verify detection metadata was persisted as skipped
+        skipped_calls = [
+            c for c in service.repo.update_detection_metadata.call_args_list
+            if c[1].get("detection_status") == "skipped"
+        ]
+        assert len(skipped_calls) == 1
+        assert skipped_calls[0][1]["clip_id"] == 1
+        assert skipped_calls[0][1]["detection_error"] == "no_audio"
 
     @patch("pydub.AudioSegment.from_file")
     def test_scan_matches_keyword(self, mock_from_file, service, tmp_path):
@@ -207,6 +215,15 @@ class TestWebSpeechTrainingScan:
         assert len(result["matches"]) == 1
         assert result["matches"][0]["keyword_confidence"] == 0.85
         assert result["matches"][0]["keyword_transcript"] == "chapada"
+        # Verify detection metadata was persisted
+        service.repo.update_detection_metadata.assert_called_once()
+        call_kwargs = service.repo.update_detection_metadata.call_args[1]
+        assert call_kwargs["clip_id"] == 1
+        assert call_kwargs["detected_keyword"] == "chapada"
+        assert call_kwargs["detected_confidence"] == 0.85
+        assert call_kwargs["detected_transcript"] == "chapada"
+        assert call_kwargs["detection_status"] == "matched"
+        assert call_kwargs["detection_source"] == "vosk_keyword_scan"
 
     @patch("pydub.AudioSegment.from_file")
     def test_scan_matches_any_keyword_in_list(self, mock_from_file, service, tmp_path):
@@ -271,6 +288,15 @@ class TestWebSpeechTrainingScan:
         assert result["keywords"] == ["chapada", "teste", "ventura"]
         assert result["keyword_count"] == 3
         assert result["keyword"] == "keywords"
+        # Verify detection metadata was persisted for the match
+        assert service.repo.update_detection_metadata.call_count >= 1
+        # Find the match call
+        match_calls = [
+            c for c in service.repo.update_detection_metadata.call_args_list
+            if c[1].get("detection_status") == "matched"
+        ]
+        assert len(match_calls) == 1
+        assert match_calls[0][1]["detected_keyword"] == "ventura"
 
     def test_scan_keywords_result_includes_keyword_metadata(self, service):
         """Result for multi-keyword scan includes keywords/keyword_count."""
@@ -334,6 +360,15 @@ class TestWebSpeechTrainingScan:
         assert result["scanned"] == 1
         assert result["matched"] == 0
         assert len(result["matches"]) == 0
+        # Verify detection metadata was persisted as non_match
+        nonmatch_calls = [
+            c for c in service.repo.update_detection_metadata.call_args_list
+            if c[1].get("detection_status") == "non_match"
+        ]
+        assert len(nonmatch_calls) == 1
+        assert nonmatch_calls[0][1]["clip_id"] == 2
+        assert nonmatch_calls[0][1]["detected_transcript"] == "chapada"
+        assert nonmatch_calls[0][1]["detected_confidence"] == 0.3
 
     @patch("pydub.AudioSegment.from_file")
     def test_scan_skips_decode_error(self, mock_from_file, service, tmp_path):
@@ -364,6 +399,14 @@ class TestWebSpeechTrainingScan:
         assert result["scanned"] == 0
         assert result["skipped"] == 1
         assert result["matched"] == 0
+        # Verify detection metadata was persisted as skipped
+        skipped_calls = [
+            c for c in service.repo.update_detection_metadata.call_args_list
+            if c[1].get("detection_status") == "skipped"
+        ]
+        assert len(skipped_calls) == 1
+        assert skipped_calls[0][1]["clip_id"] == 3
+        assert skipped_calls[0][1]["detection_error"] is not None
 
     def test_scan_passes_filters(self, service):
         """Guild, user, and max_duration filters are forwarded to the repo."""

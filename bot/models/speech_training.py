@@ -34,3 +34,13 @@ class SpeechTrainingClip:
     reviewed_by_user_id: Optional[str] = None
     reviewed_by_username: Optional[str] = None
     reviewed_at: Optional[str] = None
+    # Detection metadata (populated by Vosk keyword scan)
+    detected_keyword: Optional[str] = None
+    detected_confidence: Optional[float] = None
+    detected_transcript: Optional[str] = None
+    detection_status: Optional[str] = None  # 'matched', 'non_match', 'skipped', or None
+    detection_source: Optional[str] = None  # e.g. 'vosk_keyword_scan'
+    detection_keywords_json: Optional[str] = None  # JSON list of target keywords scanned
+    detection_min_confidence: Optional[float] = None  # threshold used for the scan
+    detection_error: Optional[str] = None
+    detection_scanned_at: Optional[str] = None

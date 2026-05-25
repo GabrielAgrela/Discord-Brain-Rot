@@ -35,7 +35,16 @@ CREATE TABLE IF NOT EXISTS speech_training_clips (
     notes TEXT,
     reviewed_by_user_id TEXT,
     reviewed_by_username TEXT,
-    reviewed_at DATETIME
+    reviewed_at DATETIME,
+    detected_keyword TEXT,
+    detected_confidence REAL,
+    detected_transcript TEXT,
+    detection_status TEXT,
+    detection_source TEXT,
+    detection_keywords_json TEXT,
+    detection_min_confidence REAL,
+    detection_error TEXT,
+    detection_scanned_at DATETIME
 )
 """
 
@@ -46,6 +55,23 @@ _SPEECH_TRAINING_INDEXES = [
     "ON speech_training_clips(guild_id, label, captured_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_st_clips_captured_at "
     "ON speech_training_clips(captured_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_st_clips_detected_keyword "
+    "ON speech_training_clips(guild_id, detected_keyword, detection_scanned_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_st_clips_detection_status "
+    "ON speech_training_clips(guild_id, detection_status, detection_scanned_at DESC)",
+]
+
+# Columns added in the detection metadata migration (v2 schema).
+_DETECTION_COLUMNS: list[tuple[str, str]] = [
+    ("detected_keyword", "TEXT"),
+    ("detected_confidence", "REAL"),
+    ("detected_transcript", "TEXT"),
+    ("detection_status", "TEXT"),
+    ("detection_source", "TEXT"),
+    ("detection_keywords_json", "TEXT"),
+    ("detection_min_confidence", "REAL"),
+    ("detection_error", "TEXT"),
+    ("detection_scanned_at", "DATETIME"),
 ]
 
 
@@ -59,14 +85,23 @@ class SpeechTrainingRepository(BaseRepository):
     def ensure_schema(self) -> None:
         """Create the speech_training_clips table and indexes if they do not exist.
 
-        Uses a single connection for the DDL batch so that indexes are
-        created on the same database connection as the table (important
-        for in-memory databases in tests).
+        Idempotent — also runs a lightweight migration to add detection
+        metadata columns on existing tables.
         """
         conn = self._get_connection()
         try:
             cursor = conn.cursor()
             cursor.execute(_SPEECH_TRAINING_SCHEMA)
+            # Idempotent migration: add detection metadata columns if missing
+            existing_cols = {
+                row[1]
+                for row in cursor.execute("PRAGMA table_info(speech_training_clips)")
+            }
+            for col_name, col_type in _DETECTION_COLUMNS:
+                if col_name not in existing_cols:
+                    cursor.execute(
+                        f"ALTER TABLE speech_training_clips ADD COLUMN {col_name} {col_type}"
+                    )
             for idx_sql in _SPEECH_TRAINING_INDEXES:
                 cursor.execute(idx_sql)
             conn.commit()
@@ -468,6 +503,77 @@ class SpeechTrainingRepository(BaseRepository):
                 conn.close()
 
     # ------------------------------------------------------------------
+    # Detection metadata
+    # ------------------------------------------------------------------
+
+    def update_detection_metadata(
+        self,
+        clip_id: int,
+        detected_keyword: Optional[str] = None,
+        detected_confidence: Optional[float] = None,
+        detected_transcript: Optional[str] = None,
+        detection_status: Optional[str] = None,
+        detection_source: str = "vosk_keyword_scan",
+        detection_keywords_json: Optional[str] = None,
+        detection_min_confidence: Optional[float] = None,
+        detection_error: Optional[str] = None,
+    ) -> bool:
+        """Persist Vosk keyword detection metadata for a clip without touching human labels.
+
+        This stores what the scan *thought* the clip contained, independently
+        of the human ``label`` and ``transcript`` fields.  It is safe to call
+        on both labeled and unlabeled clips.
+
+        Args:
+            clip_id: Clip primary key.
+            detected_keyword: The keyword that matched (or None for non-matches).
+            detected_confidence: Best word-level confidence (0‑1) from Vosk.
+            detected_transcript: Vosk's full transcript text.
+            detection_status: One of ``"matched"``, ``"non_match"``, ``"skipped"``.
+            detection_source: Source identifier (default ``"vosk_keyword_scan"``).
+            detection_keywords_json: JSON-serialized list of all target keywords.
+            detection_min_confidence: Confidence threshold used for the scan.
+            detection_error: Error message if the clip was skipped.
+
+        Returns:
+            True if the clip was updated.
+        """
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                UPDATE speech_training_clips
+                SET detected_keyword = ?,
+                    detected_confidence = ?,
+                    detected_transcript = ?,
+                    detection_status = ?,
+                    detection_source = ?,
+                    detection_keywords_json = ?,
+                    detection_min_confidence = ?,
+                    detection_error = ?,
+                    detection_scanned_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (
+                    detected_keyword,
+                    detected_confidence,
+                    detected_transcript,
+                    detection_status,
+                    detection_source,
+                    detection_keywords_json,
+                    detection_min_confidence,
+                    detection_error,
+                    clip_id,
+                ),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+        finally:
+            if not self._use_shared or BaseRepository._shared_connection is None:
+                conn.close()
+
+    # ------------------------------------------------------------------
     # Delete
     # ------------------------------------------------------------------
 
@@ -765,4 +871,13 @@ class SpeechTrainingRepository(BaseRepository):
             reviewed_by_user_id=row["reviewed_by_user_id"],
             reviewed_by_username=row["reviewed_by_username"],
             reviewed_at=row["reviewed_at"],
+            detected_keyword=row.get("detected_keyword"),
+            detected_confidence=row.get("detected_confidence"),
+            detected_transcript=row.get("detected_transcript"),
+            detection_status=row.get("detection_status"),
+            detection_source=row.get("detection_source"),
+            detection_keywords_json=row.get("detection_keywords_json"),
+            detection_min_confidence=row.get("detection_min_confidence"),
+            detection_error=row.get("detection_error"),
+            detection_scanned_at=row.get("detection_scanned_at"),
         )
