@@ -890,6 +890,523 @@ class TestWebSpeechTrainingScan:
         assert result["label_non_matches_as_none"] is True
         service.repo.bulk_update_review.assert_not_called()
 
+    # ── Label matches as potential ─────────────────────────────────────
+
+    @patch("pydub.AudioSegment.from_file")
+    def test_scan_label_matches_as_potential(self, mock_from_file, service, tmp_path):
+        """With label_matches_as_potential=True, matched clips are bulk-labeled as 'potential'."""
+        service.KEYWORD_SCAN_WORKERS = 1  # deterministic order
+
+        audio_dir = tmp_path / "g100" / "u1"
+        audio_dir.mkdir(parents=True, exist_ok=True)
+
+        match_clip = {
+            "id": 20,
+            "relative_path": "g100/u1/match.mp3",
+            "guild_id": "100",
+            "user_id": "1",
+            "username": "user1",
+            "display_name": "User One",
+            "filename": "match.mp3",
+            "duration_seconds": 1.0,
+            "byte_size": 1000,
+            "captured_at": "2026-01-01 00:00:00",
+            "label": None,
+        }
+        nonmatch_clip = {
+            "id": 21,
+            "relative_path": "g100/u1/nonmatch.mp3",
+            "guild_id": "100",
+            "user_id": "1",
+            "username": "user1",
+            "display_name": "User One",
+            "filename": "nonmatch.mp3",
+            "duration_seconds": 1.0,
+            "byte_size": 1000,
+            "captured_at": "2026-01-02 00:00:00",
+            "label": None,
+        }
+
+        (audio_dir / "match.mp3").write_bytes(b"fake-mp3")
+        (audio_dir / "nonmatch.mp3").write_bytes(b"fake-mp3")
+
+        service.repo.list_unlabeled_clips.return_value = [match_clip, nonmatch_clip]
+
+        fake_segment = MagicMock()
+        fake_segment.raw_data = b"\x00\x00" * 16000
+        fake_segment.set_frame_rate.return_value = fake_segment
+        fake_segment.set_channels.return_value = fake_segment
+        fake_segment.set_sample_width.return_value = fake_segment
+        mock_from_file.return_value = fake_segment
+
+        match_result = json.dumps({
+            "text": "chapada",
+            "result": [{"word": "chapada", "conf": 0.85}],
+        })
+        nonmatch_result = json.dumps({
+            "text": "outro",
+            "result": [{"word": "outro", "conf": 0.3}],
+        })
+        recognizer_results = iter([match_result, nonmatch_result])
+
+        def make_recognizer(model, sample_rate, grammar_json=None):
+            rec = FakeRecognizer(model, sample_rate, grammar_json)
+            rec._result = next(recognizer_results)
+            return rec
+
+        fake_model = MagicMock()
+
+        # Simulate both match labeling and non-match labeling
+        service.repo.bulk_update_review.return_value = 1
+
+        with patch(
+            "bot.services.web_speech_training._get_vosk_model",
+            return_value=fake_model,
+        ), patch(
+            "vosk.KaldiRecognizer",
+            side_effect=make_recognizer,
+        ):
+            result = service.scan_unlabeled_keyword(
+                label_non_matches_as_none=True,
+                label_matches_as_potential=True,
+            )
+
+        assert result["status"] == "ok"
+        assert result["scanned"] == 2
+        assert result["matched"] == 1
+        assert result["skipped"] == 0
+        assert result["label_matches_as_potential"] is True
+        assert result["labeled_matches"] == 1
+        assert result["label_non_matches_as_none"] is True
+        assert result["labeled_non_matches"] == 1
+        assert len(result["matches"]) == 1
+        assert result["matches"][0]["id"] == 20
+        # Match clip should have label set to potential
+        assert result["matches"][0].get("label") == "potential"
+
+        # Verify bulk_update_review was called twice: once for matches, once for non-matches
+        assert service.repo.bulk_update_review.call_count == 2
+        calls = service.repo.bulk_update_review.call_args_list
+        # First call could be either order; check by label
+        labels_used = [call[1]["label"] for call in calls]
+        assert "potential" in labels_used
+        assert "none" in labels_used
+
+    def test_scan_label_matches_as_potential_no_matches(self, service):
+        """With label_matches_as_potential=True and no matches, nothing is labeled as potential."""
+        service.repo.list_unlabeled_clips.return_value = []
+
+        with patch(
+            "bot.services.web_speech_training._get_vosk_model",
+            return_value=MagicMock(),
+        ):
+            result = service.scan_unlabeled_keyword(
+                label_non_matches_as_none=True,
+                label_matches_as_potential=True,
+            )
+
+        assert result["scanned"] == 0
+        assert result["matched"] == 0
+        assert result["labeled_matches"] == 0
+        assert result["label_matches_as_potential"] is True
+        # bulk_update_review should not be called (no clips to label)
+        service.repo.bulk_update_review.assert_not_called()
+
+    @patch("pydub.AudioSegment.from_file")
+    def test_scan_label_matches_as_potential_clip_label_set(self, mock_from_file, service, tmp_path):
+        """When label_matches_as_potential=True, each returned match dict has label='potential'."""
+        service.KEYWORD_SCAN_WORKERS = 1
+
+        audio_dir = tmp_path / "g100" / "u1"
+        audio_dir.mkdir(parents=True, exist_ok=True)
+
+        match_clip = {
+            "id": 30,
+            "relative_path": "g100/u1/m.mp3",
+            "guild_id": "100",
+            "user_id": "1",
+            "username": "user1",
+            "display_name": "U1",
+            "filename": "m.mp3",
+            "duration_seconds": 1.0,
+            "byte_size": 1000,
+            "captured_at": "2026-01-01 00:00:00",
+            "label": None,
+        }
+        service.repo.list_unlabeled_clips.return_value = [match_clip]
+        (audio_dir / "m.mp3").write_bytes(b"fake-mp3")
+
+        fake_segment = MagicMock()
+        fake_segment.raw_data = b"\x00\x00" * 16000
+        fake_segment.set_frame_rate.return_value = fake_segment
+        fake_segment.set_channels.return_value = fake_segment
+        fake_segment.set_sample_width.return_value = fake_segment
+        mock_from_file.return_value = fake_segment
+
+        match_result = json.dumps({
+            "text": "ventura",
+            "result": [{"word": "ventura", "conf": 0.92}],
+        })
+
+        def make_recognizer(model, sample_rate, grammar_json=None):
+            rec = FakeRecognizer(model, sample_rate, grammar_json)
+            rec._result = match_result
+            return rec
+
+        service.repo.bulk_update_review.return_value = 1
+
+        with patch(
+            "bot.services.web_speech_training._get_vosk_model",
+            return_value=MagicMock(),
+        ), patch(
+            "vosk.KaldiRecognizer",
+            side_effect=make_recognizer,
+        ):
+            result = service.scan_unlabeled_keyword(
+                keyword="ventura",
+                label_matches_as_potential=True,
+            )
+
+        assert result["matched"] == 1
+        assert result["labeled_matches"] == 1
+        assert result["matches"][0]["label"] == "potential"
+
+    # ── Keyword timing in scan results ─────────────────────────────────
+
+    @patch("pydub.AudioSegment.from_file")
+    def test_scan_returns_keyword_timing(self, mock_from_file, service, tmp_path):
+        """Scan match includes keyword_start_seconds and keyword_end_seconds from Vosk word data."""
+        audio_file = tmp_path / "g100" / "u1"
+        audio_file.mkdir(parents=True, exist_ok=True)
+        mp3_path = audio_file / "test.mp3"
+        mp3_path.write_bytes(b"fake-mp3-bytes")
+
+        clip = {
+            "id": 1,
+            "relative_path": "g100/u1/test.mp3",
+            "guild_id": "100",
+            "user_id": "1",
+            "username": "user1",
+            "display_name": "User One",
+            "filename": "test.mp3",
+            "duration_seconds": 5.0,
+            "byte_size": 1000,
+            "captured_at": "2026-01-01 00:00:00",
+            "label": None,
+        }
+        service.repo.list_unlabeled_clips.return_value = [clip]
+
+        fake_segment = MagicMock()
+        fake_segment.raw_data = b"\x00\x00" * 80000  # 5 seconds of 16-bit PCM
+        fake_segment.set_frame_rate.return_value = fake_segment
+        fake_segment.set_channels.return_value = fake_segment
+        fake_segment.set_sample_width.return_value = fake_segment
+        mock_from_file.return_value = fake_segment
+
+        # Vosk returns chapada with timing metadata
+        fake_result = json.dumps({
+            "text": "chapada",
+            "result": [{"word": "chapada", "conf": 0.85, "start": 2.5, "end": 3.1}],
+        })
+
+        def make_fake_recognizer(model, sample_rate, grammar_json=None):
+            rec = FakeRecognizer(model, sample_rate, grammar_json)
+            rec._result = fake_result
+            return rec
+
+        fake_model = MagicMock()
+
+        with patch(
+            "bot.services.web_speech_training._get_vosk_model",
+            return_value=fake_model,
+        ), patch(
+            "vosk.KaldiRecognizer",
+            side_effect=make_fake_recognizer,
+        ):
+            result = service.scan_unlabeled_keyword()
+
+        assert result["status"] == "ok"
+        assert len(result["matches"]) == 1
+        match = result["matches"][0]
+        assert match["keyword_start_seconds"] == 2.5
+        assert match["keyword_end_seconds"] == 3.1
+
+        # Verify timing was persisted via update_detection_metadata
+        match_calls = [
+            c for c in service.repo.update_detection_metadata.call_args_list
+            if c[1].get("detection_status") == "matched"
+        ]
+        assert len(match_calls) == 1
+        assert match_calls[0][1]["detected_start_seconds"] == 2.5
+        assert match_calls[0][1]["detected_end_seconds"] == 3.1
+
+    # ── Auto-trim matches to keyword ──────────────────────────────────
+
+    @patch("pydub.AudioSegment.from_file")
+    def test_scan_trim_matches_to_keyword(self, mock_from_file, service, tmp_path):
+        """With trim_matches_to_keyword=True, matched clips are auto-trimmed."""
+        from unittest.mock import PropertyMock
+
+        service.KEYWORD_SCAN_WORKERS = 1
+        audio_dir = tmp_path / "g100" / "u1"
+        audio_dir.mkdir(parents=True, exist_ok=True)
+        mp3_path = audio_dir / "match.mp3"
+        mp3_path.write_bytes(b"fake-mp3")
+
+        match_clip = {
+            "id": 40,
+            "relative_path": "g100/u1/match.mp3",
+            "guild_id": "100",
+            "user_id": "1",
+            "username": "user1",
+            "display_name": "User One",
+            "filename": "match.mp3",
+            "duration_seconds": 5.0,
+            "byte_size": 5000,
+            "captured_at": "2026-01-01 00:00:00",
+            "label": None,
+        }
+        service.repo.list_unlabeled_clips.return_value = [match_clip]
+
+        fake_segment = MagicMock()
+        fake_segment.raw_data = b"\x00\x00" * 80000
+        fake_segment.set_frame_rate.return_value = fake_segment
+        fake_segment.set_channels.return_value = fake_segment
+        fake_segment.set_sample_width.return_value = fake_segment
+        # Make __getitem__ slice work for trim
+        type(fake_segment).__getitem__ = lambda self, key: MagicMock()
+        mock_from_file.return_value = fake_segment
+
+        fake_result = json.dumps({
+            "text": "chapada",
+            "result": [{"word": "chapada", "conf": 0.85, "start": 2.5, "end": 3.1}],
+        })
+
+        def make_fake_recognizer(model, sample_rate, grammar_json=None):
+            rec = FakeRecognizer(model, sample_rate, grammar_json)
+            rec._result = fake_result
+            return rec
+
+        fake_model = MagicMock()
+
+        # Patch trim_clip_to_keyword to verify it's called correctly.
+        # We need it to succeed so the result includes trimmed counts.
+        trim_metadata = {
+            "duration_seconds": 1.2,
+            "byte_size": 800,
+            "keyword_start_seconds": 0.3,
+            "keyword_end_seconds": 1.0,
+            "trim_start_seconds": 2.2,
+            "trim_end_seconds": 3.4,
+        }
+
+        # Configure bulk_update_review return value for match labeling
+        service.repo.bulk_update_review.return_value = 1
+
+        with patch.object(
+            service, "trim_clip_to_keyword",
+            return_value=(True, "", trim_metadata),
+        ) as mock_trim, patch(
+            "bot.services.web_speech_training._get_vosk_model",
+            return_value=fake_model,
+        ), patch(
+            "vosk.KaldiRecognizer",
+            side_effect=make_fake_recognizer,
+        ):
+            result = service.scan_unlabeled_keyword(
+                label_matches_as_potential=True,
+                trim_matches_to_keyword=True,
+            )
+
+        assert result["status"] == "ok"
+        assert result["matched"] == 1
+        assert result["trim_matches_to_keyword"] is True
+        assert result["trimmed_matches"] == 1
+        assert result["failed_trim_matches"] == 0
+        assert result["labeled_matches"] == 1
+
+        # Verify trim_clip_to_keyword was called with the right args
+        mock_trim.assert_called_once_with(
+            clip_id=40,
+            start_seconds=2.5,
+            end_seconds=3.1,
+        )
+
+        # Verify match dict was updated with post-trim metadata
+        match = result["matches"][0]
+        assert match["duration_seconds"] == 1.2
+        assert match["byte_size"] == 800
+        assert match["keyword_start_seconds"] == 0.3
+        assert match["keyword_end_seconds"] == 1.0
+        assert match.get("label") == "potential"
+
+        # Verify bulk_update_review was called for match labeling
+        assert service.repo.bulk_update_review.call_count >= 1
+
+    @patch("pydub.AudioSegment.from_file")
+    def test_scan_trim_missing_timing_fails_safely(self, mock_from_file, service, tmp_path):
+        """Match with word result but no start/end timing is counted as failed trim but not fatal."""
+        service.KEYWORD_SCAN_WORKERS = 1
+        audio_dir = tmp_path / "g100" / "u1"
+        audio_dir.mkdir(parents=True, exist_ok=True)
+        mp3_path = audio_dir / "match.mp3"
+        mp3_path.write_bytes(b"fake-mp3")
+
+        match_clip = {
+            "id": 41,
+            "relative_path": "g100/u1/match.mp3",
+            "guild_id": "100",
+            "user_id": "1",
+            "username": "user1",
+            "display_name": "User One",
+            "filename": "match.mp3",
+            "duration_seconds": 5.0,
+            "byte_size": 5000,
+            "captured_at": "2026-01-01 00:00:00",
+            "label": None,
+        }
+        service.repo.list_unlabeled_clips.return_value = [match_clip]
+
+        fake_segment = MagicMock()
+        fake_segment.raw_data = b"\x00\x00" * 80000
+        fake_segment.set_frame_rate.return_value = fake_segment
+        fake_segment.set_channels.return_value = fake_segment
+        fake_segment.set_sample_width.return_value = fake_segment
+        mock_from_file.return_value = fake_segment
+
+        # Word-level result with conf but no start/end timing
+        fake_result = json.dumps({
+            "text": "chapada",
+            "result": [{"word": "chapada", "conf": 0.85}],
+        })
+
+        def make_fake_recognizer(model, sample_rate, grammar_json=None):
+            rec = FakeRecognizer(model, sample_rate, grammar_json)
+            rec._result = fake_result
+            return rec
+
+        fake_model = MagicMock()
+
+        # Configure bulk_update_review for match labeling
+        service.repo.bulk_update_review.return_value = 1
+
+        with patch(
+            "bot.services.web_speech_training._get_vosk_model",
+            return_value=fake_model,
+        ), patch(
+            "vosk.KaldiRecognizer",
+            side_effect=make_fake_recognizer,
+        ):
+            result = service.scan_unlabeled_keyword(
+                label_matches_as_potential=True,
+                trim_matches_to_keyword=True,
+            )
+
+        assert result["status"] == "ok"
+        assert result["matched"] == 1
+        assert result["trim_matches_to_keyword"] is True
+        assert result["trimmed_matches"] == 0
+        assert result["failed_trim_matches"] == 1
+        # Match should still be present and labeled
+        assert len(result["matches"]) == 1
+        assert result["matches"][0].get("label") == "potential"
+        # keyword timing should be None for this match
+        assert result["matches"][0].get("keyword_start_seconds") is None
+        assert result["matches"][0].get("keyword_end_seconds") is None
+
+    @patch("pydub.AudioSegment.from_file")
+    def test_scan_trim_failure_continues(self, mock_from_file, service, tmp_path):
+        """When trim_clip_to_keyword fails, scan continues and failure is counted."""
+        service.KEYWORD_SCAN_WORKERS = 1
+        audio_dir = tmp_path / "g100" / "u1"
+        audio_dir.mkdir(parents=True, exist_ok=True)
+        mp3_path = audio_dir / "match.mp3"
+        mp3_path.write_bytes(b"fake-mp3")
+
+        match_clip = {
+            "id": 42,
+            "relative_path": "g100/u1/match.mp3",
+            "guild_id": "100",
+            "user_id": "1",
+            "username": "user1",
+            "display_name": "User One",
+            "filename": "match.mp3",
+            "duration_seconds": 5.0,
+            "byte_size": 5000,
+            "captured_at": "2026-01-01 00:00:00",
+            "label": None,
+        }
+        service.repo.list_unlabeled_clips.return_value = [match_clip]
+
+        fake_segment = MagicMock()
+        fake_segment.raw_data = b"\x00\x00" * 80000
+        fake_segment.set_frame_rate.return_value = fake_segment
+        fake_segment.set_channels.return_value = fake_segment
+        fake_segment.set_sample_width.return_value = fake_segment
+        mock_from_file.return_value = fake_segment
+
+        fake_result = json.dumps({
+            "text": "chapada",
+            "result": [{"word": "chapada", "conf": 0.85, "start": 2.5, "end": 3.1}],
+        })
+
+        def make_fake_recognizer(model, sample_rate, grammar_json=None):
+            rec = FakeRecognizer(model, sample_rate, grammar_json)
+            rec._result = fake_result
+            return rec
+
+        fake_model = MagicMock()
+
+        # Configure bulk_update_review for match labeling
+        service.repo.bulk_update_review.return_value = 1
+
+        with patch.object(
+            service, "trim_clip_to_keyword",
+            return_value=(False, "Audio processing failed", {}),
+        ) as mock_trim, patch(
+            "bot.services.web_speech_training._get_vosk_model",
+            return_value=fake_model,
+        ), patch(
+            "vosk.KaldiRecognizer",
+            side_effect=make_fake_recognizer,
+        ):
+            result = service.scan_unlabeled_keyword(
+                label_matches_as_potential=True,
+                trim_matches_to_keyword=True,
+            )
+
+        assert result["status"] == "ok"
+        assert result["matched"] == 1
+        assert result["trim_matches_to_keyword"] is True
+        assert result["trimmed_matches"] == 0
+        assert result["failed_trim_matches"] == 1
+        # Match should still be present and labeled
+        assert len(result["matches"]) == 1
+        assert result["matches"][0].get("label") == "potential"
+        mock_trim.assert_called_once_with(
+            clip_id=42,
+            start_seconds=2.5,
+            end_seconds=3.1,
+        )
+
+    def test_scan_trim_no_matches_returns_zeros(self, service):
+        """With trim_matches_to_keyword=True and no matches, counts are zero."""
+        service.repo.list_unlabeled_clips.return_value = []
+        with patch(
+            "bot.services.web_speech_training._get_vosk_model",
+            return_value=MagicMock(),
+        ):
+            result = service.scan_unlabeled_keyword(
+                label_matches_as_potential=True,
+                trim_matches_to_keyword=True,
+            )
+
+        assert result["scanned"] == 0
+        assert result["matched"] == 0
+        assert result["trim_matches_to_keyword"] is True
+        assert result["trimmed_matches"] == 0
+        assert result["failed_trim_matches"] == 0
+
 class TestWebSpeechTrainingLabelOptions:
     """Tests for WebSpeechTrainingService.get_label_options()."""
 
@@ -911,15 +1428,19 @@ class TestWebSpeechTrainingLabelOptions:
         """Default labels appear first, before any custom labels."""
         service.repo.list_labels.return_value = ['custom_one', 'custom_two']
         result = service.get_label_options()
-        assert result["labels"][:3] == ['chapada', 'ventura', 'none']
-        assert result["labels"][3:] == ['custom_one', 'custom_two']
+        defaults = result["labels"][:4]
+        assert 'chapada' in defaults
+        assert 'ventura' in defaults
+        assert 'none' in defaults
+        assert 'potential' in defaults
+        assert result["labels"][4:] == ['custom_one', 'custom_two']
 
     def test_custom_labels_included_once(self, service):
         """Custom labels are included, de-duplicated against defaults."""
         service.repo.list_labels.return_value = ['chapada', 'ventura', 'custom']
         result = service.get_label_options()
-        # 'chapada' and 'ventura' already in defaults, so only 'custom' is added
-        assert result["labels"] == ['chapada', 'ventura', 'none', 'custom']
+        # 'chapada', 'ventura', and 'potential' already in defaults; only 'custom' added
+        assert result["labels"] == ['chapada', 'ventura', 'none', 'potential', 'custom']
 
     def test_repo_empty_labels_not_present(self, service):
         """The repo already filters empty labels via SQL; the service is not expected to re-filter."""
@@ -927,7 +1448,7 @@ class TestWebSpeechTrainingLabelOptions:
         # This test verifies that what the repo returns is passed through correctly.
         service.repo.list_labels.return_value = ['valid_label']
         result = service.get_label_options()
-        assert result["labels"] == ['chapada', 'ventura', 'none', 'valid_label']
+        assert result["labels"] == ['chapada', 'ventura', 'none', 'potential', 'valid_label']
 
     def test_guild_id_passed_through(self, service):
         """guild_id is forwarded to the repository."""
@@ -1296,3 +1817,209 @@ class TestWebSpeechTrainingTranscribe:
 
             # Should have slept for exactly 5.0s (Retry-After), not exponential
             mock_sleep.assert_any_call(5.0)
+
+
+class TestWebSpeechTrainingStorage:
+    """Tests for WebSpeechTrainingService storage summary."""
+
+    @pytest.fixture
+    def repo(self):
+        """Create a mock SpeechTrainingRepository."""
+        mock_repo = MagicMock()
+        mock_repo.get_storage_summary.return_value = {
+            "total_bytes": 75000,
+            "clip_count": 2,
+        }
+        return mock_repo
+
+    @pytest.fixture
+    def service(self, repo, tmp_path):
+        """Create a WebSpeechTrainingService with a temp data dir."""
+        from bot.services.web_speech_training import WebSpeechTrainingService
+
+        return WebSpeechTrainingService(repo, str(tmp_path))
+
+    def test_get_storage_summary_returns_mp3_and_disk_fields(self, service):
+        """get_storage_summary includes both MP3 and disk fields."""
+        with patch("bot.services.web_speech_training.shutil.disk_usage") as mock_du:
+            mock_du.return_value.total = 512_000_000_000
+            mock_du.return_value.free = 200_000_000_000
+            result = service.get_storage_summary()
+
+        assert result["total_bytes"] == 75000
+        assert result["total_size"] == "73.2 KB"
+        assert result["clip_count"] == 2
+        assert result["available_bytes"] == 200_000_000_000
+        assert result["available_size"] == "186.3 GB"
+        assert result["disk_total_bytes"] == 512_000_000_000
+        assert result["disk_total_size"] == "476.8 GB"
+
+    def test_get_storage_summary_zero_mp3_still_shows_disk(self, service):
+        """Zero MP3 storage still reports disk info."""
+        service.repo.get_storage_summary.return_value = {
+            "total_bytes": 0,
+            "clip_count": 0,
+        }
+        with patch("bot.services.web_speech_training.shutil.disk_usage") as mock_du:
+            mock_du.return_value.total = 1_000_000_000_000
+            mock_du.return_value.free = 800_000_000_000
+            result = service.get_storage_summary()
+
+        assert result["total_bytes"] == 0
+        assert result["total_size"] == "0 B"
+        assert result["clip_count"] == 0
+        assert result["available_bytes"] == 800_000_000_000
+
+    def test_get_storage_summary_when_disk_usage_fails(self, service):
+        """When disk_usage raises, no disk fields are in the result."""
+        with patch("bot.services.web_speech_training.shutil.disk_usage") as mock_du:
+            mock_du.side_effect = PermissionError("Permission denied")
+            result = service.get_storage_summary()
+
+        assert result["total_bytes"] == 75000
+        assert result["total_size"] == "73.2 KB"
+        assert result["clip_count"] == 2
+        assert "available_bytes" not in result
+        assert "available_size" not in result
+        assert "disk_total_bytes" not in result
+        assert "disk_total_size" not in result
+
+    def test_get_storage_summary_when_data_dir_missing(self, service):
+        """When data_dir does not exist, disk usage falls back to parent."""
+        non_existent = service.data_dir / "nonexistent_subdir"
+        service.data_dir = non_existent
+
+        with patch("bot.services.web_speech_training.shutil.disk_usage") as mock_du:
+            mock_du.return_value.total = 256_000_000_000
+            mock_du.return_value.free = 128_000_000_000
+            result = service.get_storage_summary()
+
+        # Should have called disk_usage on the parent (tmp_path)
+        assert mock_du.call_count == 1
+        assert result["available_bytes"] == 128_000_000_000
+
+
+class TestWebSpeechTrainingTrim:
+    """Tests for WebSpeechTrainingService.trim_clip_to_keyword()."""
+
+    @pytest.fixture
+    def repo(self):
+        """Create a mock SpeechTrainingRepository."""
+        return MagicMock()
+
+    @pytest.fixture
+    def service(self, repo, tmp_path):
+        """Create a WebSpeechTrainingService with a temp data dir."""
+        from bot.services.web_speech_training import WebSpeechTrainingService
+
+        return WebSpeechTrainingService(repo, str(tmp_path))
+
+    def _make_clip_data(self, clip_id: int = 1, duration: float = 5.0, has_timing: bool = True) -> dict:
+        data = {
+            "id": clip_id,
+            "relative_path": f"g100/u1/clip{clip_id}.mp3",
+            "guild_id": "100",
+            "user_id": "1",
+            "username": "user1",
+            "display_name": "User One",
+            "filename": f"clip{clip_id}.mp3",
+            "duration_seconds": duration,
+            "byte_size": 50000,
+            "captured_at": "2026-01-01 00:00:00",
+            "label": None,
+            "detected_start_seconds": 2.0 if has_timing else None,
+            "detected_end_seconds": 2.8 if has_timing else None,
+        }
+        return data
+
+    def _create_audio(self, service, clip: dict, duration_ms: int = 5000) -> Path:
+        """Create a real MP3 file for a clip using pydub, returning its path."""
+        from pydub import AudioSegment
+
+        rel = clip["relative_path"]
+        full_path = service.data_dir / rel
+        full_path.parent.mkdir(parents=True, exist_ok=True)
+        # Generate a minimal silent audio segment and export as MP3
+        segment = AudioSegment.silent(duration=duration_ms, frame_rate=16000)
+        segment.export(str(full_path), format="mp3")
+        return full_path
+
+    def test_trim_success(self, service, tmp_path):
+        """Successful trim returns updated metadata, updates DB, replaces file."""
+        clip = self._make_clip_data(clip_id=1, duration=5.0, has_timing=True)
+        service.repo.get_clip.return_value = clip
+        audio_path = self._create_audio(service, clip)
+
+        original_size = audio_path.stat().st_size
+
+        success, error, metadata = service.trim_clip_to_keyword(clip_id=1)
+
+        assert success is True
+        assert error == ""
+        assert metadata["duration_seconds"] < 5.0  # trimmed
+        assert metadata["byte_size"] < original_size  # trimmed
+        assert metadata["trim_start_seconds"] >= 0
+        assert metadata["trim_end_seconds"] <= 5.0
+        assert metadata["keyword_start_seconds"] >= 0
+        assert metadata["keyword_end_seconds"] > metadata["keyword_start_seconds"]
+
+        # Verify DB was updated
+        service.repo.update_audio_metadata_after_trim.assert_called_once()
+        call_kwargs = service.repo.update_audio_metadata_after_trim.call_args[1]
+        assert call_kwargs["clip_id"] == 1
+        assert call_kwargs["duration_seconds"] == metadata["duration_seconds"]
+        assert call_kwargs["byte_size"] == metadata["byte_size"]
+        assert call_kwargs["detected_start_seconds"] == metadata["keyword_start_seconds"]
+        assert call_kwargs["detected_end_seconds"] == metadata["keyword_end_seconds"]
+
+    def test_trim_no_timing_returns_error(self, service, tmp_path):
+        """Trim without timing data returns error."""
+        clip = self._make_clip_data(clip_id=1, duration=5.0, has_timing=False)
+        service.repo.get_clip.return_value = clip
+        # Create audio file so we reach the timing check
+        self._create_audio(service, clip)
+
+        success, error, metadata = service.trim_clip_to_keyword(clip_id=1)
+
+        assert success is False
+        assert "timing" in error.lower()
+        assert metadata == {}
+
+    def test_trim_clip_not_found(self, service):
+        """Trim on non-existent clip returns error."""
+        service.repo.get_clip.return_value = None
+
+        success, error, metadata = service.trim_clip_to_keyword(clip_id=999)
+
+        assert success is False
+        assert "not found" in error.lower()
+        assert metadata == {}
+
+    def test_trim_missing_audio(self, service, tmp_path):
+        """Trim on clip with missing audio file returns error."""
+        clip = self._make_clip_data(clip_id=1, duration=5.0, has_timing=True)
+        # Don't create the audio file
+        service.repo.get_clip.return_value = clip
+
+        success, error, metadata = service.trim_clip_to_keyword(clip_id=1)
+
+        assert success is False
+        assert "not found" in error.lower() or "inaccessible" in error.lower()
+
+    def test_trim_with_explicit_timing(self, service, tmp_path):
+        """Explicit start/end overrides persisted timing."""
+        clip = self._make_clip_data(clip_id=1, duration=10.0, has_timing=False)
+        service.repo.get_clip.return_value = clip
+        self._create_audio(service, clip, duration_ms=10000)
+
+        success, error, metadata = service.trim_clip_to_keyword(
+            clip_id=1,
+            start_seconds=3.0,
+            end_seconds=4.0,
+        )
+
+        assert success is True
+        assert error == ""
+        # Trim window should be ~3.0 - 0.3 = 2.7 to 4.0 + 0.3 = 4.3 = 1.6s
+        assert metadata["duration_seconds"] < 3.0
+        assert metadata["duration_seconds"] > 0.5

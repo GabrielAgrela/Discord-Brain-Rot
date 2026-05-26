@@ -1626,6 +1626,18 @@ class TestKeywordScanHelpers:
 
     @patch("bot.services.background.ActionRepository")
     @patch("bot.services.background.SoundRepository")
+    def test_format_keyword_scan_description_with_labeled_potential(self, _mock_sound_repo, _mock_action_repo):
+        """Verify final description includes labeled_potential when >0."""
+        from bot.services.background import BackgroundService
+
+        desc = BackgroundService._format_keyword_scan_description(
+            total=83, scanned=83, matched=5, skipped=2, labeled_non=76, labeled_potential=5,
+        )
+        assert "5 labeled potential" in desc
+        assert "83 sounds scanned" in desc
+
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
     def test_format_keyword_scan_description_no_keywords_arg(self, _mock_sound_repo, _mock_action_repo):
         """Verify description still works without keywords list (e.g. timeout)."""
         from bot.services.background import BackgroundService
@@ -1649,6 +1661,19 @@ class TestKeywordScanHelpers:
         assert "20 sounds scanned" in desc
         assert "match" not in desc
         assert "skipped" not in desc
+
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    def test_format_keyword_scan_description_with_trimmed(self, _mock_sound_repo, _mock_action_repo):
+        """Verify trimmed count appears when >0."""
+        from bot.services.background import BackgroundService
+
+        desc = BackgroundService._format_keyword_scan_description(
+            total=10, scanned=10, matched=3, skipped=0, trimmed=3,
+        )
+        assert "3 trimmed" in desc
+        assert "10 sounds scanned" in desc
+        assert "3 matches" in desc
 
     def test_keyword_scan_border_color_is_red(self):
         """Verify KEYWORD_SCAN_BORDER_COLOR is red #ED4245."""
@@ -1767,3 +1792,180 @@ class TestKeywordScanHelpers:
         embed = kwargs.get("embed")
         assert embed is not None
         assert embed.color.value == 0xED4245
+
+
+class TestKeywordScanSchedulePersistence:
+    """Tests for _persist_keyword_scan_schedule and _resolve_db_path."""
+
+    def test_resolve_db_path_returns_string(self):
+        """_resolve_db_path should return a non-empty string."""
+        from bot.services.background import BackgroundService
+
+        path = BackgroundService._resolve_db_path()
+        assert isinstance(path, str)
+        assert len(path) > 0
+
+    @pytest.mark.asyncio
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    async def test_persist_keyword_scan_schedule_writes_settings(
+        self, _mock_sound_repo, _mock_action_repo, tmp_path
+    ):
+        """_persist_keyword_scan_schedule should write to app_settings."""
+        from bot.services.background import BackgroundService
+
+        db_path = str(tmp_path / "test.db")
+        # Create the app_settings table
+        from bot.repositories.app_settings import AppSettingsRepository
+
+        app_repo = AppSettingsRepository(db_path=db_path, use_shared=False)
+        app_repo.ensure_schema()
+
+        service = BackgroundService(
+            bot=Mock(),
+            audio_service=Mock(),
+            sound_service=Mock(),
+            behavior=Mock(),
+        )
+        service._init_app_settings_repo(db_path)
+
+        service._persist_keyword_scan_schedule(
+            enabled=True,
+            interval_seconds=3600,
+            last_started_at="2026-05-26T10:00:00",
+            last_finished_at="2026-05-26T10:30:00",
+            last_status="completed",
+            last_summary="3 guilds, 83 scanned",
+            next_run_at="2026-05-27T10:00:00",
+        )
+
+        # Verify via fresh repository
+        check_repo = AppSettingsRepository(db_path=db_path, use_shared=False)
+        assert check_repo.get_setting("speech_training_keyword_scan.enabled") == "1"
+        assert check_repo.get_setting("speech_training_keyword_scan.interval_seconds") == "3600"
+        assert (
+            check_repo.get_setting("speech_training_keyword_scan.last_started_at")
+            == "2026-05-26T10:00:00"
+        )
+        assert (
+            check_repo.get_setting("speech_training_keyword_scan.last_finished_at")
+            == "2026-05-26T10:30:00"
+        )
+        assert (
+            check_repo.get_setting("speech_training_keyword_scan.last_status")
+            == "completed"
+        )
+        assert (
+            check_repo.get_setting("speech_training_keyword_scan.last_summary")
+            == "3 guilds, 83 scanned"
+        )
+        assert (
+            check_repo.get_setting("speech_training_keyword_scan.next_run_at")
+            == "2026-05-27T10:00:00"
+        )
+        # updated_at should have been set
+        assert check_repo.get_setting("speech_training_keyword_scan.updated_at") is not None
+
+    @pytest.mark.asyncio
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    async def test_persist_keyword_scan_schedule_disabled(
+        self, _mock_sound_repo, _mock_action_repo, tmp_path
+    ):
+        """Setting enabled=False should store '0'."""
+        from bot.services.background import BackgroundService
+        from bot.repositories.app_settings import AppSettingsRepository
+
+        db_path = str(tmp_path / "test.db")
+        app_repo = AppSettingsRepository(db_path=db_path, use_shared=False)
+        app_repo.ensure_schema()
+
+        service = BackgroundService(
+            bot=Mock(),
+            audio_service=Mock(),
+            sound_service=Mock(),
+            behavior=Mock(),
+        )
+        service._init_app_settings_repo(db_path)
+
+        service._persist_keyword_scan_schedule(
+            enabled=False,
+        )
+
+        check_repo = AppSettingsRepository(db_path=db_path, use_shared=False)
+        assert check_repo.get_setting("speech_training_keyword_scan.enabled") == "0"
+
+    @pytest.mark.asyncio
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    async def test_persist_keyword_scan_schedule_partial_update(
+        self, _mock_sound_repo, _mock_action_repo, tmp_path
+    ):
+        """Partial updates should not overwrite unrelated keys."""
+        from bot.services.background import BackgroundService
+        from bot.repositories.app_settings import AppSettingsRepository
+
+        db_path = str(tmp_path / "test.db")
+        app_repo = AppSettingsRepository(db_path=db_path, use_shared=False)
+        app_repo.ensure_schema()
+
+        service = BackgroundService(
+            bot=Mock(),
+            audio_service=Mock(),
+            sound_service=Mock(),
+            behavior=Mock(),
+        )
+        service._init_app_settings_repo(db_path)
+
+        # First, persist full set
+        service._persist_keyword_scan_schedule(
+            enabled=True,
+            interval_seconds=86400,
+            last_status="completed",
+        )
+
+        # Then update only status
+        service._persist_keyword_scan_schedule(last_status="error")
+
+        check_repo = AppSettingsRepository(db_path=db_path, use_shared=False)
+        # Existing keys should be retained
+        assert check_repo.get_setting("speech_training_keyword_scan.enabled") == "1"
+        assert check_repo.get_setting("speech_training_keyword_scan.interval_seconds") == "86400"
+        # Updated key should be changed
+        assert (
+            check_repo.get_setting("speech_training_keyword_scan.last_status")
+            == "error"
+        )
+
+    def test_persist_without_init_does_not_crash(self):
+        """Calling _persist_keyword_scan_schedule without init should be a noop."""
+        from bot.services.background import BackgroundService
+
+        service = BackgroundService(
+            bot=Mock(),
+            audio_service=Mock(),
+            sound_service=Mock(),
+            behavior=Mock(),
+        )
+        # Should not raise even though _app_settings_repo is None
+        service._persist_keyword_scan_schedule(enabled=True)
+
+    def test_init_app_settings_repo_creates_table(self, tmp_path):
+        """_init_app_settings_repo should create the app_settings table."""
+        from bot.services.background import BackgroundService
+        from bot.repositories.app_settings import AppSettingsRepository
+
+        db_path = str(tmp_path / "test.db")
+        service = BackgroundService(
+            bot=Mock(),
+            audio_service=Mock(),
+            sound_service=Mock(),
+            behavior=Mock(),
+        )
+        service._init_app_settings_repo(db_path)
+
+        check_repo = AppSettingsRepository(db_path=db_path, use_shared=False)
+        row = check_repo._execute_one(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='app_settings'",
+        )
+        assert row is not None

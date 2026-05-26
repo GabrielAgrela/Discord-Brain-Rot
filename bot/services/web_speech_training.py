@@ -13,6 +13,7 @@ import io
 import json
 import logging
 import os
+import shutil
 import threading
 import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
@@ -147,10 +148,10 @@ def format_bytes(num_bytes: int) -> str:
     return f"{remaining:.1f} {units[unit_idx]}"
 
 # Valid label values for the web labeling UI (unused — superseded by DEFAULT_LABEL_OPTIONS)
-VALID_LABELS: set[str] = {"chapada", "ventura", "none", ""}
+VALID_LABELS: set[str] = {"chapada", "ventura", "none", "potential", ""}
 
 # Default label options shown in the dataset UI
-DEFAULT_LABEL_OPTIONS: tuple[str, ...] = ("chapada", "ventura", "none")
+DEFAULT_LABEL_OPTIONS: tuple[str, ...] = ("chapada", "ventura", "none", "potential")
 
 
 class WebSpeechTrainingService:
@@ -158,6 +159,8 @@ class WebSpeechTrainingService:
 
     KEYWORD_SCAN_MAX_DURATION_SECONDS: float = 30.0
     KEYWORD_SCAN_WORKERS: int = 4  # concurrent workers per scan job
+    KEYWORD_TRIM_PADDING_SECONDS: float = 0.30  # padding added around the keyword when trimming
+    KEYWORD_TRIM_MAX_PADDING: float = 2.0  # maximum allowed padding per side
 
     def __init__(
         self,
@@ -190,24 +193,54 @@ class WebSpeechTrainingService:
     # Storage summary
     # ------------------------------------------------------------------
 
+    def _get_disk_usage(self) -> Dict[str, Any]:
+        """Return disk usage for the filesystem hosting the data directory.
+
+        Tries ``self.data_dir`` first, falling back to its parent if the
+        directory does not exist yet.  Returns an empty dict on any failure.
+
+        Returns:
+            Dict with ``available_bytes``, ``available_size`` (human-readable
+            free space), ``disk_total_bytes``, ``disk_total_size`` (human-readable
+            capacity), or an empty dict when unavailable.
+        """
+        try:
+            path = self.data_dir
+            if not path.exists():
+                path = path.parent
+            usage = shutil.disk_usage(path)
+            return {
+                "available_bytes": usage.free,
+                "available_size": format_bytes(usage.free),
+                "disk_total_bytes": usage.total,
+                "disk_total_size": format_bytes(usage.total),
+            }
+        except Exception:
+            logger.warning("Failed to query disk usage for %s", self.data_dir, exc_info=True)
+            return {}
+
     def get_storage_summary(
         self, guild_id: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Return total MP3 storage used and clip count.
+        """Return total MP3 storage used, clip count, and machine disk info.
 
         Args:
             guild_id: Optional guild filter.
 
         Returns:
             Dict with ``total_bytes``, ``total_size`` (human-readable),
-            and ``clip_count``.
+            ``clip_count``, and filesystem disk info
+            (``available_bytes``, ``available_size``,
+            ``disk_total_bytes``, ``disk_total_size``) when available.
         """
         raw = self.repo.get_storage_summary(guild_id=guild_id)
-        return {
+        result: Dict[str, Any] = {
             "total_bytes": raw["total_bytes"],
             "total_size": format_bytes(raw["total_bytes"]),
             "clip_count": raw["clip_count"],
         }
+        result.update(self._get_disk_usage())
+        return result
 
     # ------------------------------------------------------------------
     # Label options (defaults + persisted custom labels)
@@ -566,6 +599,8 @@ class WebSpeechTrainingService:
         progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
         delete_non_matches: bool = False,
         label_non_matches_as_none: bool = False,
+        label_matches_as_potential: bool = False,
+        trim_matches_to_keyword: bool = False,
     ) -> Dict[str, Any]:
         """Scan all unlabeled clips for a keyword using offline Vosk detection.
 
@@ -582,6 +617,8 @@ class WebSpeechTrainingService:
             progress_callback=progress_callback,
             delete_non_matches=delete_non_matches,
             label_non_matches_as_none=label_non_matches_as_none,
+            label_matches_as_potential=label_matches_as_potential,
+            trim_matches_to_keyword=trim_matches_to_keyword,
         )
 
     def scan_unlabeled_keywords(
@@ -593,6 +630,8 @@ class WebSpeechTrainingService:
         progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
         delete_non_matches: bool = False,
         label_non_matches_as_none: bool = False,
+        label_matches_as_potential: bool = False,
+        trim_matches_to_keyword: bool = False,
     ) -> Dict[str, Any]:
         """Scan all unlabeled clips for any of the given keywords using offline Vosk.
 
@@ -628,6 +667,15 @@ class WebSpeechTrainingService:
             label_non_matches_as_none: When ``True`` (and ``delete_non_matches``
                 is ``False``), non-matching clips are bulk-labeled as ``none``
                 instead of being deleted.  Skipped clips remain untouched.
+            label_matches_as_potential: When ``True``, matching clips are
+                bulk-labeled as ``potential`` after the scan completes.
+                Clips that were deleted or already had a label are skipped.
+            trim_matches_to_keyword: When ``True``, matched clips with valid
+                keyword timing are automatically trimmed to the detected keyword
+                region after the scan completes.  The label is preserved
+                (``potential`` when ``label_matches_as_potential`` is also
+                ``True``).  Matches without Vosk word-level timing are kept
+                but counted as trim failures/skipped.
 
         Returns:
             Response dict with keys ``status``, ``keyword``,
@@ -641,6 +689,12 @@ class WebSpeechTrainingService:
             ``deleted_non_matches`` (count of clips actually deleted).
             When ``label_non_matches_as_none`` was ``True``, also includes
             that flag and ``labeled_non_matches`` (count).
+            When ``label_matches_as_potential`` was ``True``, also includes
+            that flag and ``labeled_matches`` (count).
+            When ``trim_matches_to_keyword`` was ``True``, also includes
+            that flag, ``trimmed_matches`` (count successfully trimmed),
+            and ``failed_trim_matches`` (count of matches where trim
+            was attempted but failed).
 
         Raises:
             ValueError: When validation fails (empty keywords, bad
@@ -707,6 +761,11 @@ class WebSpeechTrainingService:
                 deleted_non_matches=0,
                 label_non_matches_as_none=label_non_matches_as_none,
                 labeled_non_matches=0,
+                label_matches_as_potential=label_matches_as_potential,
+                labeled_matches=0,
+                trim_matches_to_keyword=trim_matches_to_keyword,
+                trimmed_matches=0,
+                failed_trim_matches=0,
                 keywords=normalized_keywords,
             )
 
@@ -755,6 +814,8 @@ class WebSpeechTrainingService:
 
                 best_conf = 0.0
                 best_keyword = ""
+                best_start: float | None = None
+                best_end: float | None = None
                 for wi in word_results:
                     w = wi.get("word", "").lower()
                     if w in keyword_set:
@@ -762,6 +823,8 @@ class WebSpeechTrainingService:
                         if conf > best_conf:
                             best_conf = conf
                             best_keyword = w
+                            best_start = wi.get("start")
+                            best_end = wi.get("end")
 
                 words_in_text = text.split()
                 is_match = best_conf >= min_confidence and best_keyword in words_in_text
@@ -773,6 +836,8 @@ class WebSpeechTrainingService:
                     "skipped": False,
                     "error": None,
                     "matched_keyword": best_keyword,
+                    "keyword_start_seconds": best_start,
+                    "keyword_end_seconds": best_end,
                 }
             except Exception as exc:
                 logger.warning("Failed to scan clip %s: %s", clip.get("id"), exc)
@@ -830,6 +895,8 @@ class WebSpeechTrainingService:
                         detection_keywords_json=json.dumps(normalized_keywords),
                         detection_min_confidence=min_confidence,
                         detection_error=None,
+                        detected_start_seconds=result.get("keyword_start_seconds"),
+                        detected_end_seconds=result.get("keyword_end_seconds"),
                     )
                 else:
                     self.repo.update_detection_metadata(
@@ -855,6 +922,8 @@ class WebSpeechTrainingService:
                                 aug["keyword_confidence"] = result["conf"]
                                 aug["keyword_transcript"] = result["text"]
                                 aug["matched_keyword"] = result.get("matched_keyword", "")
+                                aug["keyword_start_seconds"] = result.get("keyword_start_seconds")
+                                aug["keyword_end_seconds"] = result.get("keyword_end_seconds")
                                 matches.append(aug)
                                 break
                         scanned += 1
@@ -868,11 +937,62 @@ class WebSpeechTrainingService:
         # ── Post-scan: delete or label non-matches ───────────────────
         deleted_non_matches = 0
         labeled_non_matches = 0
+        labeled_matches = 0
 
         if delete_non_matches and non_match_ids:
             deleted_non_matches = self._delete_nonmatches(non_match_ids)
         elif label_non_matches_as_none and non_match_ids:
             labeled_non_matches = self._label_nonmatches_as_none(non_match_ids, "none")
+
+        # ── Post-scan: label matches as potential ────────────────────
+        if label_matches_as_potential and matches:
+            match_ids = [m["id"] for m in matches]
+            labeled_matches = self._bulk_label_scan_clips(match_ids, "potential")
+            # Update each returned match dict's label to reflect the new label
+            if labeled_matches:
+                for m in matches:
+                    m["label"] = "potential"
+
+        # ── Post-scan: auto-trim matches to keyword region ────────────
+        trimmed_matches = 0
+        failed_trim_matches = 0
+        if trim_matches_to_keyword and matches:
+            for m in matches:
+                cid = m["id"]
+                kw_start = m.get("keyword_start_seconds")
+                kw_end = m.get("keyword_end_seconds")
+                if kw_start is None or kw_end is None:
+                    failed_trim_matches += 1
+                    logger.debug(
+                        "Skipped auto-trim for clip %s: no keyword timing available",
+                        cid,
+                    )
+                    continue
+                success, error, metadata = self.trim_clip_to_keyword(
+                    clip_id=cid,
+                    start_seconds=kw_start,
+                    end_seconds=kw_end,
+                )
+                if success:
+                    trimmed_matches += 1
+                    # Update the match dict with post-trim metadata
+                    m["duration_seconds"] = metadata.get("duration_seconds", m.get("duration_seconds"))
+                    m["byte_size"] = metadata.get("byte_size", m.get("byte_size"))
+                    m["keyword_start_seconds"] = metadata.get("keyword_start_seconds", kw_start)
+                    m["keyword_end_seconds"] = metadata.get("keyword_end_seconds", kw_end)
+                    m["detected_start_seconds"] = metadata.get("keyword_start_seconds", kw_start)
+                    m["detected_end_seconds"] = metadata.get("keyword_end_seconds", kw_end)
+                else:
+                    failed_trim_matches += 1
+                    logger.warning(
+                        "Auto-trim failed for clip %s (keyword %.2f–%.2f): %s",
+                        cid, kw_start, kw_end, error,
+                    )
+            if trimmed_matches:
+                logger.info(
+                    "Auto-trimmed %d match(es) to keyword region, %d failed",
+                    trimmed_matches, failed_trim_matches,
+                )
 
         # Sort matches in original clip order
         order_map = {c["id"]: i for i, c in enumerate(clip_list)}
@@ -880,9 +1000,12 @@ class WebSpeechTrainingService:
 
         logger.info(
             "Keyword scan '%s' (keywords=%s) scanned=%d matched=%d skipped=%d "
-            "deleted_nonmatches=%d labeled_nonmatches=%d (eligible clips ≤%ss=%d)",
+            "deleted_nonmatches=%d labeled_nonmatches=%d labeled_potential=%d "
+            "trimmed_matches=%d failed_trim=%d "
+            "(eligible clips ≤%ss=%d)",
             display_keyword, normalized_keywords, scanned, len(matches), skipped,
-            deleted_non_matches, labeled_non_matches,
+            deleted_non_matches, labeled_non_matches, labeled_matches,
+            trimmed_matches, failed_trim_matches,
             self.KEYWORD_SCAN_MAX_DURATION_SECONDS, total,
         )
 
@@ -897,6 +1020,11 @@ class WebSpeechTrainingService:
             deleted_non_matches=deleted_non_matches,
             label_non_matches_as_none=label_non_matches_as_none,
             labeled_non_matches=labeled_non_matches,
+            label_matches_as_potential=label_matches_as_potential,
+            labeled_matches=labeled_matches,
+            trim_matches_to_keyword=trim_matches_to_keyword,
+            trimmed_matches=trimmed_matches,
+            failed_trim_matches=failed_trim_matches,
             keywords=normalized_keywords,
         )
 
@@ -971,6 +1099,182 @@ class WebSpeechTrainingService:
             total_labeled += updated
         return total_labeled
 
+    def _bulk_label_scan_clips(
+        self, clip_ids: List[int], label: str
+    ) -> int:
+        """Bulk-label scanned clip IDs with a given label value.
+
+        Chunks to avoid SQLite variable limits.
+        Uses ``"(scan)"`` as reviewer username to indicate automated action.
+
+        Args:
+            clip_ids: List of clip primary keys to label.
+            label: Label value to apply (e.g. ``"potential"``).
+
+        Returns:
+            Number of clips actually labeled.
+        """
+        if not clip_ids:
+            return 0
+        total_labeled = 0
+        for i in range(0, len(clip_ids), self._DELETE_CHUNK_SIZE):
+            chunk = clip_ids[i : i + self._DELETE_CHUNK_SIZE]
+            updated = self.repo.bulk_update_review(
+                clip_ids=chunk,
+                label=label,
+                reviewer_user_id="",
+                reviewer_username="(scan)",
+            )
+            total_labeled += updated
+        return total_labeled
+
+    # ------------------------------------------------------------------
+    # Trim clip to keyword
+    # ------------------------------------------------------------------
+
+    def trim_clip_to_keyword(
+        self,
+        clip_id: int,
+        start_seconds: Optional[float] = None,
+        end_seconds: Optional[float] = None,
+        padding_seconds: Optional[float] = None,
+    ) -> Tuple[bool, str, Dict[str, Any]]:
+        """Trim a clip's audio file to the detected keyword region (in-place).
+
+        If ``start_seconds`` and ``end_seconds`` are omitted, the persisted
+        ``detected_start_seconds`` / ``detected_end_seconds`` from a previous
+        scan are used.  At least one of the explicit or persisted values must
+        be present.
+
+        The trim window is expanded by ``padding_seconds`` (default
+        ``KEYWORD_TRIM_PADDING_SECONDS`` = 0.30 s) on each side, clamped to
+        ``[0, clip_duration]``, and must result in a positive-duration region.
+
+        Re-encodes the trimmed subsection to MP3 via pydub, atomically replaces
+        the original file, and updates ``duration_seconds``, ``byte_size``,
+        ``detected_start_seconds``, and ``detected_end_seconds`` in the database.
+
+        Args:
+            clip_id: Clip primary key.
+            start_seconds: Keyword start in the original clip (seconds), or
+                ``None`` to use ``detected_start_seconds``.
+            end_seconds: Keyword end in the original clip (seconds), or
+                ``None`` to use ``detected_end_seconds``.
+            padding_seconds: Padding on each side of the keyword (seconds).
+                Defaults to ``KEYWORD_TRIM_PADDING_SECONDS``.
+                Clamped to ``[0, KEYWORD_TRIM_MAX_PADDING]``.
+
+        Returns:
+            Tuple of ``(success, error_message, updated_metadata)``.
+            On success ``updated_metadata`` contains ``duration_seconds``,
+            ``byte_size``, ``keyword_start_seconds``, ``keyword_end_seconds``,
+            ``trim_start_seconds``, ``trim_end_seconds``.
+        """
+        from pydub import AudioSegment
+
+        # ── Fetch clip ───────────────────────────────────────────────
+        clip = self.repo.get_clip(clip_id)
+        if clip is None:
+            return False, "Clip not found", {}
+
+        # ── Resolve audio path ───────────────────────────────────────
+        path = self.resolve_audio_path(clip)
+        if path is None:
+            return False, "Audio file not found or inaccessible", {}
+
+        clip_duration = clip.get("duration_seconds", 0.0) or 0.0
+        if clip_duration <= 0:
+            return False, "Clip has zero or unknown duration", {}
+
+        # ── Determine trim window ────────────────────────────────────
+        if start_seconds is None:
+            start_seconds = clip.get("detected_start_seconds")
+        if end_seconds is None:
+            end_seconds = clip.get("detected_end_seconds")
+
+        if start_seconds is None or end_seconds is None:
+            return False, (
+                "Keyword timing not available. "
+                "Run a keyword scan first or provide explicit start/end seconds."
+            ), {}
+
+        pad = self.KEYWORD_TRIM_PADDING_SECONDS if padding_seconds is None \
+            else max(0.0, min(padding_seconds, self.KEYWORD_TRIM_MAX_PADDING))
+
+        trim_start = max(0.0, start_seconds - pad)
+        trim_end = min(clip_duration, end_seconds + pad)
+        trim_duration = trim_end - trim_start
+
+        if trim_duration <= 0.01:
+            return False, "Trim region is empty or too short", {}
+
+        # ── Decode, trim, re-encode ──────────────────────────────────
+        try:
+            segment = AudioSegment.from_file(str(path), format="mp3")
+            segment_duration_s = len(segment) / 1000.0
+            # Clamp trim to actual decoded duration
+            trim_ms_start = max(0, int(trim_start * 1000))
+            trim_ms_end = min(len(segment), int(trim_end * 1000))
+            if trim_ms_end - trim_ms_start < 10:  # <10ms is too short
+                return False, "Trim region is empty or too short", {}
+
+            trimmed = segment[trim_ms_start:trim_ms_end]
+
+            # Export to a temp file in the same directory
+            tmp_path = path.with_suffix(".mp3.trim.tmp")
+            try:
+                trimmed.export(
+                    str(tmp_path),
+                    format="mp3",
+                    parameters=["-q:a", "2"],  # high quality VBR
+                )
+                # Atomically replace the original
+                os.replace(str(tmp_path), str(path))
+            except Exception:
+                # Clean up temp file on failure
+                if tmp_path.exists():
+                    tmp_path.unlink(missing_ok=True)
+                raise
+
+            new_byte_size = path.stat().st_size
+            new_duration_s = round(len(trimmed) / 1000.0, 3)
+        except Exception as exc:
+            logger.warning("Failed to trim clip %s: %s", clip_id, exc)
+            return False, f"Audio processing failed: {exc}", {}
+
+        # ── Compute adjusted keyword timing in the new clip ──────────
+        # The keyword region within the new clip starts at padding
+        # (trim_start - start_seconds is negative because we padded)
+        # More precisely: keyword_start_in_new = start_seconds - trim_start
+        # keyword_end_in_new = end_seconds - trim_start
+        keyword_start_seconds_new = round(max(0.0, start_seconds - trim_start), 3)
+        keyword_end_seconds_new = round(min(new_duration_s, end_seconds - trim_start), 3)
+
+        # ── Persist ──────────────────────────────────────────────────
+        self.repo.update_audio_metadata_after_trim(
+            clip_id=clip_id,
+            duration_seconds=new_duration_s,
+            byte_size=new_byte_size,
+            detected_start_seconds=keyword_start_seconds_new,
+            detected_end_seconds=keyword_end_seconds_new,
+        )
+
+        logger.info(
+            "Trimmed clip %s from %.2fs to %.2fs (keyword %.2f–%.2f) — new size %d bytes",
+            clip_id, clip_duration, new_duration_s,
+            keyword_start_seconds_new, keyword_end_seconds_new,
+            new_byte_size,
+        )
+
+        return True, "", {
+            "duration_seconds": new_duration_s,
+            "byte_size": new_byte_size,
+            "keyword_start_seconds": keyword_start_seconds_new,
+            "keyword_end_seconds": keyword_end_seconds_new,
+            "trim_start_seconds": round(trim_start, 3),
+            "trim_end_seconds": round(trim_end, 3),
+        }
+
     @staticmethod
     def _build_scan_result(
         *,
@@ -984,6 +1288,11 @@ class WebSpeechTrainingService:
         deleted_non_matches: int,
         label_non_matches_as_none: bool,
         labeled_non_matches: int,
+        label_matches_as_potential: bool = False,
+        labeled_matches: int = 0,
+        trim_matches_to_keyword: bool = False,
+        trimmed_matches: int = 0,
+        failed_trim_matches: int = 0,
         keywords: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Build the standard scan response dict.
@@ -1005,6 +1314,11 @@ class WebSpeechTrainingService:
             "deleted_non_matches": deleted_non_matches,
             "label_non_matches_as_none": label_non_matches_as_none,
             "labeled_non_matches": labeled_non_matches,
+            "label_matches_as_potential": label_matches_as_potential,
+            "labeled_matches": labeled_matches,
+            "trim_matches_to_keyword": trim_matches_to_keyword,
+            "trimmed_matches": trimmed_matches,
+            "failed_trim_matches": failed_trim_matches,
         }
         if keywords is not None:
             result["keywords"] = keywords

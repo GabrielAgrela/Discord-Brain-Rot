@@ -956,3 +956,83 @@ class TestSpeechTrainingRepository:
         # Detection fields should be set
         assert clip["detected_keyword"] == "ventura"
         assert clip["detected_confidence"] == 0.9
+
+    def test_update_detection_metadata_with_timing(self, repo):
+        """Detection timing columns are persisted correctly."""
+        ids = self._insert_sample_clips(repo)
+        cid = ids[0]
+
+        ok = repo.update_detection_metadata(
+            clip_id=cid,
+            detected_keyword="chapada",
+            detected_confidence=0.85,
+            detected_transcript="chapada",
+            detection_status="matched",
+            detection_source="vosk_keyword_scan",
+            detection_keywords_json='["chapada"]',
+            detection_min_confidence=0.5,
+            detected_start_seconds=2.5,
+            detected_end_seconds=3.1,
+        )
+        assert ok is True
+
+        clip = repo.get_clip(cid)
+        assert clip["detected_start_seconds"] == 2.5
+        assert clip["detected_end_seconds"] == 3.1
+
+    def test_update_audio_metadata_after_trim(self, repo):
+        """update_audio_metadata_after_trim updates duration, byte_size, and optional timing."""
+        ids = self._insert_sample_clips(repo)
+        cid = ids[0]
+
+        ok = repo.update_audio_metadata_after_trim(
+            clip_id=cid,
+            duration_seconds=0.8,
+            byte_size=15000,
+            detected_start_seconds=0.2,
+            detected_end_seconds=0.6,
+        )
+        assert ok is True
+
+        clip = repo.get_clip(cid)
+        assert clip["duration_seconds"] == 0.8
+        assert clip["byte_size"] == 15000
+        assert clip["detected_start_seconds"] == 0.2
+        assert clip["detected_end_seconds"] == 0.6
+
+        # Human fields are untouched
+        assert clip["label"] is None
+        assert clip["transcript"] is None
+
+    def test_update_audio_metadata_after_trim_no_timing(self, repo):
+        """Without timing params, existing timing columns are left unchanged."""
+        ids = self._insert_sample_clips(repo)
+        cid = ids[0]
+
+        # First set timing
+        repo.update_detection_metadata(
+            clip_id=cid,
+            detection_status="matched",
+            detected_start_seconds=1.0,
+            detected_end_seconds=2.0,
+        )
+
+        # Now update only duration/byte_size
+        ok = repo.update_audio_metadata_after_trim(
+            clip_id=cid,
+            duration_seconds=0.5,
+            byte_size=5000,
+        )
+        assert ok is True
+
+        clip = repo.get_clip(cid)
+        assert clip["duration_seconds"] == 0.5
+        assert clip["byte_size"] == 5000
+        # Timing should still have the old values
+        assert clip["detected_start_seconds"] == 1.0
+        assert clip["detected_end_seconds"] == 2.0
+
+    def test_update_audio_metadata_after_trim_not_found(self, repo):
+        """Updating a non-existent clip returns False."""
+        ok = repo.update_audio_metadata_after_trim(clip_id=99999, duration_seconds=1.0, byte_size=1000)
+        assert ok is False

@@ -72,6 +72,8 @@ _DETECTION_COLUMNS: list[tuple[str, str]] = [
     ("detection_min_confidence", "REAL"),
     ("detection_error", "TEXT"),
     ("detection_scanned_at", "DATETIME"),
+    ("detected_start_seconds", "REAL"),
+    ("detected_end_seconds", "REAL"),
 ]
 
 
@@ -517,6 +519,8 @@ class SpeechTrainingRepository(BaseRepository):
         detection_keywords_json: Optional[str] = None,
         detection_min_confidence: Optional[float] = None,
         detection_error: Optional[str] = None,
+        detected_start_seconds: Optional[float] = None,
+        detected_end_seconds: Optional[float] = None,
     ) -> bool:
         """Persist Vosk keyword detection metadata for a clip without touching human labels.
 
@@ -534,6 +538,8 @@ class SpeechTrainingRepository(BaseRepository):
             detection_keywords_json: JSON-serialized list of all target keywords.
             detection_min_confidence: Confidence threshold used for the scan.
             detection_error: Error message if the clip was skipped.
+            detected_start_seconds: Keyword word start time within clip (seconds).
+            detected_end_seconds: Keyword word end time within clip (seconds).
 
         Returns:
             True if the clip was updated.
@@ -552,6 +558,8 @@ class SpeechTrainingRepository(BaseRepository):
                     detection_keywords_json = ?,
                     detection_min_confidence = ?,
                     detection_error = ?,
+                    detected_start_seconds = ?,
+                    detected_end_seconds = ?,
                     detection_scanned_at = CURRENT_TIMESTAMP
                 WHERE id = ?
                 """,
@@ -564,9 +572,72 @@ class SpeechTrainingRepository(BaseRepository):
                     detection_keywords_json,
                     detection_min_confidence,
                     detection_error,
+                    detected_start_seconds,
+                    detected_end_seconds,
                     clip_id,
                 ),
             )
+            conn.commit()
+            return cursor.rowcount > 0
+        finally:
+            if not self._use_shared or BaseRepository._shared_connection is None:
+                conn.close()
+
+    # ------------------------------------------------------------------
+    # Audio metadata update (after in-place trim)
+    # ------------------------------------------------------------------
+
+    def update_audio_metadata_after_trim(
+        self,
+        clip_id: int,
+        duration_seconds: float,
+        byte_size: int,
+        detected_start_seconds: Optional[float] = None,
+        detected_end_seconds: Optional[float] = None,
+    ) -> bool:
+        """Update duration, file size, and optional timing after an in-place audio trim.
+
+        Intentionally does **not** touch ``label``, ``transcript``,
+        ``notes``, or ``captured_at``.
+
+        Args:
+            clip_id: Clip primary key.
+            duration_seconds: New clip duration after trimming.
+            byte_size: New file size in bytes.
+            detected_start_seconds: Adjusted keyword start time in the new clip,
+                or ``None`` to leave unchanged.
+            detected_end_seconds: Adjusted keyword end time in the new clip,
+                or ``None`` to leave unchanged.
+
+        Returns:
+            True if the clip was updated.
+        """
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+
+            # Build SET clauses dynamically to handle optional timing columns
+            set_clauses = [
+                "duration_seconds = ?",
+                "byte_size = ?",
+            ]
+            params: list[Any] = [duration_seconds, byte_size]
+
+            if detected_start_seconds is not None:
+                set_clauses.append("detected_start_seconds = ?")
+                params.append(detected_start_seconds)
+            if detected_end_seconds is not None:
+                set_clauses.append("detected_end_seconds = ?")
+                params.append(detected_end_seconds)
+
+            params.append(clip_id)
+
+            sql = (
+                "UPDATE speech_training_clips\n"
+                "SET " + ", ".join(set_clauses) + "\n"
+                "WHERE id = ?"
+            )
+            cursor.execute(sql, tuple(params))
             conn.commit()
             return cursor.rowcount > 0
         finally:
@@ -880,4 +951,6 @@ class SpeechTrainingRepository(BaseRepository):
             detection_min_confidence=row.get("detection_min_confidence"),
             detection_error=row.get("detection_error"),
             detection_scanned_at=row.get("detection_scanned_at"),
+            detected_start_seconds=row.get("detected_start_seconds"),
+            detected_end_seconds=row.get("detected_end_seconds"),
         )

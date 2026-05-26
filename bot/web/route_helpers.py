@@ -307,6 +307,8 @@ def _queue_web_keyword_scan_job(
     user_id: str | None = None,
     delete_non_matches: bool = False,
     label_non_matches_as_none: bool = True,
+    label_matches_as_potential: bool = True,
+    trim_matches_to_keyword: bool = True,
 ) -> str:
     """Persist keyword scan parameters and submit background processing.
 
@@ -319,6 +321,9 @@ def _queue_web_keyword_scan_job(
         user_id: Optional user scope.
         delete_non_matches: When True, delete non-matching clips.
         label_non_matches_as_none: When True, label non-matches as ``none``.
+        label_matches_as_potential: When True, label matches as ``potential``.
+        trim_matches_to_keyword: When True, automatically trim matched
+            clips to the detected keyword region after the scan completes.
 
     Returns:
         The job ID for polling status via
@@ -351,6 +356,11 @@ def _queue_web_keyword_scan_job(
         "deleted_non_matches": 0,
         "label_non_matches_as_none": label_non_matches_as_none,
         "labeled_non_matches": 0,
+        "label_matches_as_potential": label_matches_as_potential,
+        "labeled_matches": 0,
+        "trim_matches_to_keyword": trim_matches_to_keyword,
+        "trimmed_matches": 0,
+        "failed_trim_matches": 0,
         "error": None,
         "created_at": created_at,
         "finished_at": None,
@@ -381,6 +391,8 @@ def _queue_web_keyword_scan_job(
         user_id=user_id,
         delete_non_matches=delete_non_matches,
         label_non_matches_as_none=label_non_matches_as_none,
+        label_matches_as_potential=label_matches_as_potential,
+        trim_matches_to_keyword=trim_matches_to_keyword,
     )
     return job_id
 
@@ -397,6 +409,8 @@ def _run_web_keyword_scan_job(
     user_id: str | None,
     delete_non_matches: bool = False,
     label_non_matches_as_none: bool = True,
+    label_matches_as_potential: bool = True,
+    trim_matches_to_keyword: bool = True,
 ) -> None:
     """Process one queued keyword scan outside the Flask request thread."""
     from bot.repositories.speech_training import SpeechTrainingRepository
@@ -431,6 +445,11 @@ def _run_web_keyword_scan_job(
                 "deleted_non_matches": 0,
                 "label_non_matches_as_none": label_non_matches_as_none,
                 "labeled_non_matches": 0,
+                "label_matches_as_potential": label_matches_as_potential,
+                "labeled_matches": 0,
+                "trim_matches_to_keyword": trim_matches_to_keyword,
+                "trimmed_matches": 0,
+                "failed_trim_matches": 0,
                 "error": None,
                 "created_at": initial_job_entry.get("created_at"),
                 "finished_at": None,
@@ -444,6 +463,8 @@ def _run_web_keyword_scan_job(
             progress_callback=_on_progress,
             delete_non_matches=delete_non_matches,
             label_non_matches_as_none=label_non_matches_as_none,
+            label_matches_as_potential=label_matches_as_potential,
+            trim_matches_to_keyword=trim_matches_to_keyword,
         )
 
         # Final state with matches
@@ -464,6 +485,11 @@ def _run_web_keyword_scan_job(
             "deleted_non_matches": result.get("deleted_non_matches", 0),
             "label_non_matches_as_none": result.get("label_non_matches_as_none", False),
             "labeled_non_matches": result.get("labeled_non_matches", 0),
+            "label_matches_as_potential": result.get("label_matches_as_potential", False),
+            "labeled_matches": result.get("labeled_matches", 0),
+            "trim_matches_to_keyword": result.get("trim_matches_to_keyword", False),
+            "trimmed_matches": result.get("trimmed_matches", 0),
+            "failed_trim_matches": result.get("failed_trim_matches", 0),
             "error": None,
             "created_at": initial_job_entry.get("created_at"),
             "finished_at": finished_at,
@@ -486,6 +512,11 @@ def _run_web_keyword_scan_job(
             "deleted_non_matches": 0,
             "label_non_matches_as_none": label_non_matches_as_none,
             "labeled_non_matches": 0,
+            "label_matches_as_potential": label_matches_as_potential,
+            "labeled_matches": 0,
+            "trim_matches_to_keyword": trim_matches_to_keyword,
+            "trimmed_matches": 0,
+            "failed_trim_matches": 0,
             "error": str(exc),
             "created_at": initial_job_entry.get("created_at"),
             "finished_at": finished_at,
@@ -509,6 +540,11 @@ def _run_web_keyword_scan_job(
             "deleted_non_matches": 0,
             "label_non_matches_as_none": label_non_matches_as_none,
             "labeled_non_matches": 0,
+            "label_matches_as_potential": label_matches_as_potential,
+            "labeled_matches": 0,
+            "trim_matches_to_keyword": trim_matches_to_keyword,
+            "trimmed_matches": 0,
+            "failed_trim_matches": 0,
             "error": "Internal server error",
             "created_at": initial_job_entry.get("created_at"),
             "finished_at": finished_at,

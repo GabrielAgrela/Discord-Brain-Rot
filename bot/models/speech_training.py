@@ -44,3 +44,5 @@ class SpeechTrainingClip:
     detection_min_confidence: Optional[float] = None  # threshold used for the scan
     detection_error: Optional[str] = None
     detection_scanned_at: Optional[str] = None
+    detected_start_seconds: Optional[float] = None  # Vosk word start within clip
+    detected_end_seconds: Optional[float] = None  # Vosk word end within clip

@@ -7,10 +7,12 @@ playing back, labeling, and deleting captured speech clips.
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from flask import Flask, current_app, jsonify, render_template, request, send_file
 
+from bot.repositories.app_settings import AppSettingsRepository
 from bot.web.route_helpers import (
     _current_web_user_is_admin,
     _get_current_discord_user,
@@ -230,6 +232,63 @@ def register_speech_training_routes(app: Flask) -> None:
         return jsonify({"error": error}), 404
 
     # ------------------------------------------------------------------
+    # API: Trim clip to keyword
+    # ------------------------------------------------------------------
+
+    @app.route("/api/speech_training/clips/<int:clip_id>/trim_to_keyword", methods=["POST"])
+    @_require_discord_login_api
+    @_require_web_admin_api
+    def api_speech_training_clip_trim_to_keyword(clip_id: int) -> Any:
+        """Trim a clip's audio to the detected keyword region (in-place).
+
+        Request body::
+
+            {"start_seconds": 2.5, "end_seconds": 3.1, "padding_seconds": 0.3}
+
+        ``start_seconds`` and ``end_seconds`` are optional — if omitted the
+        persisted scan timing (``detected_start_seconds`` / ``detected_end_seconds``)
+        is used.  ``padding_seconds`` defaults to 0.30.
+
+        Returns updated clip metadata on success or an error with
+        the appropriate HTTP status code.
+        """
+        svc = _get_web_speech_training_service()
+        data = request.get_json(silent=True) or {}
+
+        start_seconds = data.get("start_seconds")
+        if start_seconds is not None:
+            try:
+                start_seconds = float(start_seconds)
+            except (TypeError, ValueError):
+                return jsonify({"error": "start_seconds must be a number"}), 400
+
+        end_seconds = data.get("end_seconds")
+        if end_seconds is not None:
+            try:
+                end_seconds = float(end_seconds)
+            except (TypeError, ValueError):
+                return jsonify({"error": "end_seconds must be a number"}), 400
+
+        padding_seconds = data.get("padding_seconds")
+        if padding_seconds is not None:
+            try:
+                padding_seconds = float(padding_seconds)
+            except (TypeError, ValueError):
+                return jsonify({"error": "padding_seconds must be a number"}), 400
+
+        success, error, metadata = svc.trim_clip_to_keyword(
+            clip_id=clip_id,
+            start_seconds=start_seconds,
+            end_seconds=end_seconds,
+            padding_seconds=padding_seconds,
+        )
+        if success:
+            return jsonify({"status": "ok", **metadata})
+        if error == "Clip not found":
+            return jsonify({"error": error}), 404
+        return jsonify({"error": error}), 400
+
+    # ------------------------------------------------------------------
     # API: Bulk operations
     # ------------------------------------------------------------------
 
@@ -322,6 +381,8 @@ def register_speech_training_routes(app: Flask) -> None:
             user_id = (data.get("user_id") or "").strip() or None
             delete_non_matches = bool(data.get("delete_non_matches", False))
             label_non_matches_as_none = bool(data.get("label_non_matches_as_none", True))
+            label_matches_as_potential = bool(data.get("label_matches_as_potential", True))
+            trim_matches_to_keyword = bool(data.get("trim_matches_to_keyword", True))
 
             # When all_keywords is true, fetch configured trigger keywords
             if all_keywords:
@@ -357,6 +418,8 @@ def register_speech_training_routes(app: Flask) -> None:
                 "user_id": user_id,
                 "delete_non_matches": delete_non_matches,
                 "label_non_matches_as_none": label_non_matches_as_none,
+                "label_matches_as_potential": label_matches_as_potential,
+                "trim_matches_to_keyword": trim_matches_to_keyword,
             }
             if keywords is not None:
                 job_kwargs["keywords"] = keywords
@@ -384,6 +447,82 @@ def register_speech_training_routes(app: Flask) -> None:
         if job is None:
             return jsonify({"error": "Job not found"}), 404
         return jsonify(job)
+
+    @app.route("/api/speech_training/keyword_scan/schedule", methods=["GET"])
+    @_require_discord_login_api
+    @_require_web_admin_api
+    def api_speech_training_keyword_scan_schedule() -> Any:
+        """Return automatic keyword scan schedule metadata.
+
+        Reads schedule timestamps, status, and summary that the
+        background service persists to ``app_settings`` after each
+        automatic daily scan run.  Falls back to environment defaults
+        for ``enabled`` and ``interval_seconds`` when no settings have
+        been written yet.
+
+        Response keys:
+
+        - ``enabled`` (bool): Whether the automatic scan is enabled.
+        - ``interval_seconds`` (int | None): Configured interval.
+        - ``last_started_at`` (str | None): ISO 8601 UTC timestamp.
+        - ``last_finished_at`` (str | None): ISO 8601 UTC timestamp.
+        - ``last_status`` (str | None): ``running``, ``completed``,
+          ``skipped``, ``error``, or ``None``.
+        - ``last_summary`` (str | None): Human-readable summary of the
+          last scan run.
+        - ``next_run_at`` (str | None): ISO 8601 UTC timestamp of the
+          next scheduled run.
+        - ``updated_at`` (str | None): When the metadata was last updated.
+        """
+        db_path = current_app.config.get("DATABASE_PATH", "")
+        repo = AppSettingsRepository(db_path=db_path, use_shared=False)
+        repo.ensure_schema()
+
+        keys = [
+            "speech_training_keyword_scan.enabled",
+            "speech_training_keyword_scan.interval_seconds",
+            "speech_training_keyword_scan.last_started_at",
+            "speech_training_keyword_scan.last_finished_at",
+            "speech_training_keyword_scan.last_status",
+            "speech_training_keyword_scan.last_summary",
+            "speech_training_keyword_scan.next_run_at",
+            "speech_training_keyword_scan.updated_at",
+        ]
+        values = repo.get_settings(keys)
+
+        # Fall back to env defaults for enabled / interval if not persisted
+        enabled_raw = values.get("speech_training_keyword_scan.enabled")
+        interval_raw = values.get("speech_training_keyword_scan.interval_seconds")
+
+        if enabled_raw is None:
+            enabled_str = os.environ.get("SPEECH_TRAINING_KEYWORD_SCAN_ENABLED", "true")
+            enabled = enabled_str.lower() in ("1", "true", "yes")
+        else:
+            enabled = enabled_raw == "1"
+
+        if interval_raw is not None:
+            try:
+                interval_seconds = int(interval_raw)
+            except (ValueError, TypeError):
+                interval_seconds = None
+        else:
+            try:
+                interval_seconds = int(os.environ.get(
+                    "SPEECH_TRAINING_KEYWORD_SCAN_INTERVAL_SECONDS", "86400"
+                ))
+            except (ValueError, TypeError):
+                interval_seconds = None
+
+        return jsonify({
+            "enabled": enabled,
+            "interval_seconds": interval_seconds,
+            "last_started_at": values.get("speech_training_keyword_scan.last_started_at"),
+            "last_finished_at": values.get("speech_training_keyword_scan.last_finished_at"),
+            "last_status": values.get("speech_training_keyword_scan.last_status"),
+            "last_summary": values.get("speech_training_keyword_scan.last_summary"),
+            "next_run_at": values.get("speech_training_keyword_scan.next_run_at"),
+            "updated_at": values.get("speech_training_keyword_scan.updated_at"),
+        })
 
     # ------------------------------------------------------------------
     # API: Auto-transcribe empty clips (async job)

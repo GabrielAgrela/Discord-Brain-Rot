@@ -5635,7 +5635,9 @@ tbody.page-swap-active {
     font-weight: 600;
     color: var(--ink-muted);
     padding: 0.3rem 0.4rem 0.1rem;
-    white-space: nowrap;
+    white-space: normal;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
 }
 
 .dataset-user-list {
@@ -5987,7 +5989,8 @@ html.theme-dark .dataset-label-filter-select option {
 .dataset-quick-play,
 .dataset-quick-label-apply,
 .dataset-quick-delete,
-.dataset-quick-more {
+.dataset-quick-more,
+.dataset-quick-trim {
     font-size: 0.7rem;
     font-weight: 600;
     padding: 0.25rem 0.55rem;
@@ -6041,6 +6044,16 @@ html.theme-dark .dataset-label-filter-select option {
     background: var(--error);
     color: var(--paper);
     border-color: var(--error);
+}
+
+.dataset-quick-trim {
+    color: var(--accent-olive);
+}
+
+.dataset-quick-trim:hover {
+    background: var(--accent-olive);
+    color: var(--paper);
+    border-color: var(--accent-olive);
 }
 
 .dataset-clip-details {
@@ -6316,6 +6329,19 @@ html.theme-dark .dataset-label-filter-select option {
     transition: background 0.12s ease, border-color 0.12s ease, opacity 0.12s ease;
 }
 
+#scanKeywordBtn {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    line-height: 1.3;
+    padding: 0.25rem 0.65rem;
+    gap: 0.1rem;
+}
+
+.dataset-scan-btn-label {
+    /* inherits button font: uppercase, bold, olive */
+}
+
 .dataset-scan-btn:hover:not(:disabled) {
     background: var(--accent-olive);
     color: var(--paper);
@@ -6344,6 +6370,22 @@ html.theme-dark .dataset-label-filter-select option {
     color: var(--ink);
     font: inherit;
     cursor: pointer;
+}
+
+.dataset-scan-schedule {
+    font-size: 0.58rem;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    text-transform: none;
+    color: var(--ink-muted);
+    white-space: nowrap;
+    cursor: help;
+    padding: 0;
+    transition: color 0.12s ease;
+}
+
+#scanKeywordBtn:hover .dataset-scan-schedule {
+    color: var(--paper);
 }
 
 /* ── Speech training toast ──────────────────────────────────────── */
@@ -6497,7 +6539,8 @@ html.theme-dark .dataset-label-filter-select option {
     .dataset-quick-play,
     .dataset-quick-label-apply,
     .dataset-quick-delete,
-    .dataset-quick-more {
+    .dataset-quick-more,
+    .dataset-quick-trim {
         font-size: 0.65rem;
         padding: 0.2rem 0.4rem;
     }

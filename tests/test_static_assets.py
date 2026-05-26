@@ -75,3 +75,42 @@ class TestJavaScriptSyntax:
         assert "onTranscriptError" in content
         assert "cancelTranscriptPoll" in content
         assert "transcribeBtn" in content
+
+    @pytest.mark.parametrize("filename", JS_FILES)
+    def test_trim_keyword_uses_persisted_timing(self, filename):
+        """Verify Trim kw button uses both scan (keyword_*) and persisted (detected_*) timing fields."""
+        filepath = os.path.join(STATIC_DIR, filename)
+        assert os.path.exists(filepath), f"JS file not found: {filepath}"
+        with open(filepath, "r", encoding="utf-8") as fh:
+            content = fh.read()
+        # Helper that resolves timing from either source
+        assert "getClipKeywordTiming" in content
+        # Must reference persisted fields so Trim kw appears on normal list rows
+        assert "detected_start_seconds" in content
+        assert "detected_end_seconds" in content
+        # Must also still reference scan-only fields for scan-mode rows
+        assert "keyword_start_seconds" in content
+        assert "keyword_end_seconds" in content
+        # Scan-mode-only comment should be removed
+        assert "scan results only" not in content
+
+    @pytest.mark.parametrize("filename", JS_FILES)
+    def test_trim_updates_row_in_place(self, filename):
+        """Verify trimClipToKeyword updates the row in-place with cache-busting instead of full reload."""
+        filepath = os.path.join(STATIC_DIR, filename)
+        assert os.path.exists(filepath), f"JS file not found: {filepath}"
+        with open(filepath, "r", encoding="utf-8") as fh:
+            content = fh.read()
+        # In-place row update helper must exist
+        assert "function updateTrimmedClipRow" in content
+        # Audio source must use cache-busting query param after trim
+        assert "audio?v=" in content
+        # Must call audio.load() after replacing source
+        assert "audio.load()" in content
+        # Must pause audio before replacing source
+        assert "audio.pause()" in content
+        # Must reset quick progress after trim
+        assert "resetQuickProgress(audio)" in content
+        # Normal-mode full loadClips() reload should not be the primary path;
+        # it should only appear as a fallback inside an else block
+        assert "loadClips();" in content

@@ -1,3 +1,4 @@
+import os
 import sqlite3
 import io
 import time
@@ -3802,7 +3803,7 @@ class TestSpeechTrainingRoutes:
         assert resp.status_code == 403
 
     def test_api_storage_returns_data(self, web_client):
-        """Admin can fetch storage summary."""
+        """Admin can fetch storage summary with disk info."""
         client, db_path = web_client
         _login_web_user(client, username="admin", admin_guild_ids=["111"])
 
@@ -3851,31 +3852,48 @@ class TestSpeechTrainingRoutes:
         finally:
             conn.close()
 
-        # Fetch with guild filter
-        resp = client.get("/api/speech_training/storage?guild_id=111")
-        assert resp.status_code == 200
-        data = resp.get_json()
-        assert data["total_bytes"] == 75000  # 30000 + 45000
-        assert data["clip_count"] == 2
-        assert data["total_size"] == "73.2 KB"
+        with patch("bot.services.web_speech_training.shutil.disk_usage") as mock_du:
+            mock_du.return_value.total = 512_000_000_000
+            mock_du.return_value.free = 200_000_000_000
 
-        # Fetch without filter (all guilds)
-        resp = client.get("/api/speech_training/storage")
-        assert resp.status_code == 200
-        data = resp.get_json()
-        assert data["total_bytes"] == 87000  # 30000 + 45000 + 12000
-        assert data["clip_count"] == 3
+            # Fetch with guild filter
+            resp = client.get("/api/speech_training/storage?guild_id=111")
+            assert resp.status_code == 200
+            data = resp.get_json()
+            assert data["total_bytes"] == 75000  # 30000 + 45000
+            assert data["clip_count"] == 2
+            assert data["total_size"] == "73.2 KB"
+            assert data["available_bytes"] == 200_000_000_000
+            assert data["available_size"] == "186.3 GB"
+            assert data["disk_total_bytes"] == 512_000_000_000
+            assert data["disk_total_size"] == "476.8 GB"
+
+            # Fetch without filter (all guilds)
+            resp = client.get("/api/speech_training/storage")
+            assert resp.status_code == 200
+            data = resp.get_json()
+            assert data["total_bytes"] == 87000  # 30000 + 45000 + 12000
+            assert data["clip_count"] == 3
+            assert data["available_bytes"] == 200_000_000_000
+            assert data["available_size"] == "186.3 GB"
 
     def test_api_storage_no_data(self, web_client):
-        """Storage API returns zeros when no clips exist."""
+        """Storage API returns zeros when no clips exist, plus disk info."""
         client, _ = web_client
         _login_web_user(client, username="admin", admin_guild_ids=["111"])
-        resp = client.get("/api/speech_training/storage")
-        assert resp.status_code == 200
-        data = resp.get_json()
-        assert data["total_bytes"] == 0
-        assert data["clip_count"] == 0
-        assert data["total_size"] == "0 B"
+        with patch("bot.services.web_speech_training.shutil.disk_usage") as mock_du:
+            mock_du.return_value.total = 1_000_000_000_000
+            mock_du.return_value.free = 800_000_000_000
+            resp = client.get("/api/speech_training/storage")
+            assert resp.status_code == 200
+            data = resp.get_json()
+            assert data["total_bytes"] == 0
+            assert data["clip_count"] == 0
+            assert data["total_size"] == "0 B"
+            assert data["available_bytes"] == 800_000_000_000
+            assert data["available_size"] == "745.1 GB"
+            assert data["disk_total_bytes"] == 1_000_000_000_000
+            assert data["disk_total_size"] == "931.3 GB"
 
     def test_api_storage_page_renders_with_element(self, web_client):
         """Speech training page includes the storage element."""
@@ -3892,6 +3910,7 @@ class TestSpeechTrainingRoutes:
         html = resp.get_data(as_text=True)
         assert 'id="storageUsed"' in html
         assert 'MP3 storage:' in html
+        assert 'Machine: —' in html
 
     def test_analytics_page_shows_dataset_link_for_admin(self, web_client):
         """Analytics page includes Dataset link in nav for admin users."""
@@ -4077,6 +4096,11 @@ class TestSpeechTrainingRoutes:
         assert "scanned" in payload
         assert "matched" in payload
         assert "matches" in payload
+        assert payload["label_matches_as_potential"] is True
+        assert "labeled_matches" in payload
+        assert payload["trim_matches_to_keyword"] is True
+        assert "trimmed_matches" in payload
+        assert "failed_trim_matches" in payload
 
     @patch("bot.repositories.keyword.KeywordRepository.get_all")
     def test_api_keyword_scan_all_keywords_no_keywords(self, mock_get_all, web_client):
@@ -4128,6 +4152,113 @@ class TestSpeechTrainingRoutes:
         assert payload["keyword"] == "keywords"
         assert "keywords" in payload
         assert payload["keyword_count"] == 2
+
+    # ── Keyword scan schedule API ────────────────────────────────────
+
+    def test_api_keyword_scan_schedule_requires_auth(self, web_client):
+        """GET schedule returns 401 when not logged in."""
+        client, _ = web_client
+        resp = client.get("/api/speech_training/keyword_scan/schedule")
+        assert resp.status_code == 401
+
+    def test_api_keyword_scan_schedule_requires_admin(self, web_client):
+        """GET schedule returns 403 for non-admin."""
+        client, _ = web_client
+        _login_web_user(client, username="nonadmin", admin_guild_ids=[])
+        resp = client.get("/api/speech_training/keyword_scan/schedule")
+        assert resp.status_code == 403
+
+    def test_api_keyword_scan_schedule_defaults(self, web_client):
+        """GET schedule returns defaults/None when no settings exist."""
+        client, db_path = web_client
+        _login_web_user(client, username="admin", admin_guild_ids=["111"])
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("INSERT OR IGNORE INTO guild_settings (guild_id) VALUES ('111')")
+            conn.commit()
+        finally:
+            conn.close()
+        with patch.dict(os.environ, {
+            "SPEECH_TRAINING_KEYWORD_SCAN_ENABLED": "false",
+        }):
+            resp = client.get("/api/speech_training/keyword_scan/schedule")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["enabled"] is False
+        assert data["interval_seconds"] == 86400
+        assert data["last_started_at"] is None
+        assert data["last_finished_at"] is None
+        assert data["last_status"] is None
+        assert data["last_summary"] is None
+        assert data["next_run_at"] is None
+        assert data["updated_at"] is None
+
+    def test_api_keyword_scan_schedule_returns_persisted(self, web_client):
+        """GET schedule returns persisted timestamps/status/summary."""
+        client, db_path = web_client
+        _login_web_user(client, username="admin", admin_guild_ids=["111"])
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("INSERT OR IGNORE INTO guild_settings (guild_id) VALUES ('111')")
+            # Manually create app_settings table and insert test data
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS app_settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updated_by TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.executemany(
+                "INSERT OR REPLACE INTO app_settings (key, value, updated_by) VALUES (?, ?, 'test')",
+                [
+                    ("speech_training_keyword_scan.enabled", "1"),
+                    ("speech_training_keyword_scan.interval_seconds", "3600"),
+                    ("speech_training_keyword_scan.last_started_at", "2026-05-26T10:00:00"),
+                    ("speech_training_keyword_scan.last_finished_at", "2026-05-26T10:30:00"),
+                    ("speech_training_keyword_scan.last_status", "completed"),
+                    ("speech_training_keyword_scan.last_summary", "3 guilds, 83 scanned, 5 matches"),
+                    ("speech_training_keyword_scan.next_run_at", "2026-05-27T10:00:00"),
+                    ("speech_training_keyword_scan.updated_at", "2026-05-26T10:30:00"),
+                ],
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        resp = client.get("/api/speech_training/keyword_scan/schedule")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["enabled"] is True
+        assert data["interval_seconds"] == 3600
+        assert data["last_started_at"] == "2026-05-26T10:00:00"
+        assert data["last_finished_at"] == "2026-05-26T10:30:00"
+        assert data["last_status"] == "completed"
+        assert data["last_summary"] == "3 guilds, 83 scanned, 5 matches"
+        assert data["next_run_at"] == "2026-05-27T10:00:00"
+        assert data["updated_at"] == "2026-05-26T10:30:00"
+
+    def test_speech_training_page_has_schedule_element(self, web_client):
+        """Template should include the keywordScanSchedule span inside the Find Keywords button."""
+        client, db_path = web_client
+        _login_web_user(client, username="admin", admin_guild_ids=["111"])
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("INSERT OR IGNORE INTO guild_settings (guild_id) VALUES ('111')")
+            conn.commit()
+        finally:
+            conn.close()
+        resp = client.get("/speech-training")
+        assert resp.status_code == 200
+        html = resp.get_data(as_text=True)
+        assert 'id="keywordScanSchedule"' in html
+        assert 'id="scanKeywordBtn"' in html
+        # Verify the schedule span is inside the button
+        btn_start = html.index('id="scanKeywordBtn"')
+        btn_close = html.index('</button>', btn_start)
+        schedule_section = html[btn_start:btn_close]
+        assert 'id="keywordScanSchedule"' in schedule_section
 
     # ── clip IDs endpoint (unpaginated select-all) ─────────────────────
 
@@ -4351,3 +4482,128 @@ class TestSpeechTrainingRoutes:
             assert "total" in payload
         elif last_status == "error":
             assert "GROQ_API_KEY" in (payload.get("error") or "")
+
+    # ── Trim-to-keyword API ────────────────────────────────────────────
+
+    def test_api_trim_to_keyword_requires_auth(self, web_client):
+        """POST trim_to_keyword returns 401 when not logged in."""
+        client, _ = web_client
+        resp = client.post("/api/speech_training/clips/1/trim_to_keyword", json={})
+        assert resp.status_code == 401
+
+    def test_api_trim_to_keyword_requires_admin(self, web_client):
+        """POST trim_to_keyword returns 403 for non-admin."""
+        client, _ = web_client
+        _login_web_user(client, username="nonadmin", admin_guild_ids=[])
+        resp = client.post("/api/speech_training/clips/1/trim_to_keyword", json={})
+        assert resp.status_code == 403
+
+    def test_api_trim_to_keyword_success(self, web_client):
+        """POST trim_to_keyword returns updated metadata on success."""
+        client, db_path = web_client
+        _login_web_user(client, username="admin", admin_guild_ids=["111"])
+
+        # Ensure guild settings exist
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("INSERT OR IGNORE INTO guild_settings (guild_id) VALUES ('111')")
+            conn.commit()
+        finally:
+            conn.close()
+
+        mock_metadata = {
+            "duration_seconds": 0.8,
+            "byte_size": 12000,
+            "keyword_start_seconds": 0.15,
+            "keyword_end_seconds": 0.55,
+            "trim_start_seconds": 1.7,
+            "trim_end_seconds": 3.4,
+        }
+
+        with patch(
+            "bot.services.web_speech_training.WebSpeechTrainingService.trim_clip_to_keyword",
+            return_value=(True, "", mock_metadata),
+        ):
+            resp = client.post(
+                "/api/speech_training/clips/1/trim_to_keyword",
+                json={},
+            )
+
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["status"] == "ok"
+        assert data["duration_seconds"] == 0.8
+        assert data["byte_size"] == 12000
+        assert data["keyword_start_seconds"] == 0.15
+        assert data["keyword_end_seconds"] == 0.55
+
+    def test_api_trim_to_keyword_clip_not_found(self, web_client):
+        """POST trim_to_keyword returns 404 when clip not found."""
+        client, db_path = web_client
+        _login_web_user(client, username="admin", admin_guild_ids=["111"])
+
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("INSERT OR IGNORE INTO guild_settings (guild_id) VALUES ('111')")
+            conn.commit()
+        finally:
+            conn.close()
+
+        with patch(
+            "bot.services.web_speech_training.WebSpeechTrainingService.trim_clip_to_keyword",
+            return_value=(False, "Clip not found", {}),
+        ):
+            resp = client.post(
+                "/api/speech_training/clips/99999/trim_to_keyword",
+                json={},
+            )
+
+        assert resp.status_code == 404
+        assert "error" in resp.get_json()
+
+    def test_api_trim_to_keyword_no_timing(self, web_client):
+        """POST trim_to_keyword returns 400 when timing is missing."""
+        client, db_path = web_client
+        _login_web_user(client, username="admin", admin_guild_ids=["111"])
+
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("INSERT OR IGNORE INTO guild_settings (guild_id) VALUES ('111')")
+            conn.commit()
+        finally:
+            conn.close()
+
+        with patch(
+            "bot.services.web_speech_training.WebSpeechTrainingService.trim_clip_to_keyword",
+            return_value=(False, "Keyword timing not available. Run a keyword scan first.", {}),
+        ):
+            resp = client.post(
+                "/api/speech_training/clips/1/trim_to_keyword",
+                json={},
+            )
+
+        assert resp.status_code == 400
+        data = resp.get_json()
+        assert "error" in data
+        assert "timing" in data["error"].lower()
+
+    def test_api_trim_to_keyword_invalid_params(self, web_client):
+        """POST trim_to_keyword with invalid start_seconds returns 400."""
+        client, db_path = web_client
+        _login_web_user(client, username="admin", admin_guild_ids=["111"])
+
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("INSERT OR IGNORE INTO guild_settings (guild_id) VALUES ('111')")
+            conn.commit()
+        finally:
+            conn.close()
+
+        resp = client.post(
+            "/api/speech_training/clips/1/trim_to_keyword",
+            json={"start_seconds": "not-a-number"},
+        )
+        assert resp.status_code == 400
+        data = resp.get_json()
+        assert "error" in data
+        assert "start_seconds" in data["error"]

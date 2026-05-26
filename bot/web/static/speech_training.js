@@ -26,7 +26,9 @@
         _transcriptPollTimer: null, // setTimeout handle for polling
         _transcriptProcessing: false, // true while transcript job is running
         _scanConfidence: 0.5, // fixed min confidence (always 50%)
-        labelOptions: ['chapada', 'ventura', 'none'],
+        _scanMaxDurationSeconds: null, // preserved for re-render after trim
+        _scanKeywordCount: 1, // preserved for re-render after trim
+        labelOptions: ['chapada', 'ventura', 'none', 'potential'],
     };
 
     // ── Passive refresh guards / toast timer (module-level) ──────────
@@ -54,6 +56,7 @@
     const bulkDelete = $('bulkDelete');
     const scanKeywordBtn = $('scanKeywordBtn');
     const transcribeBtn = $('transcribeBtn');
+    const keywordScanSchedule = $('keywordScanSchedule');
 
     // ── Theme toggle ───────────────────────────────────────────────────
     const themeToggle = document.querySelector('.theme-toggle');
@@ -214,7 +217,12 @@
                 return;
             }
             const data = await resp.json();
-            storageUsed.textContent = 'MP3 storage: ' + (data.total_size || '—');
+            var mp3Part = 'MP3 storage: ' + (data.total_size || '—');
+            if (data.available_size && data.disk_total_size) {
+                storageUsed.textContent = mp3Part + ' \u00B7 Machine: ' + data.available_size + ' free of ' + data.disk_total_size;
+            } else {
+                storageUsed.textContent = mp3Part;
+            }
         } catch (e) {
             storageUsed.textContent = 'MP3 storage: —';
         }
@@ -617,6 +625,24 @@
         });
     }
 
+    // ── Keyword timing helper ──────────────────────────────────────────
+    function getClipKeywordTiming(clip) {
+        // Check transient scan fields first, then persisted DB fields.
+        // Treat 0 as valid; reject null/undefined/non-numeric.
+        var start = clip.keyword_start_seconds;
+        var end = clip.keyword_end_seconds;
+        if (start === undefined || start === null || end === undefined || end === null) {
+            start = clip.detected_start_seconds;
+            end = clip.detected_end_seconds;
+        }
+        if (start !== undefined && start !== null && end !== undefined && end !== null
+            && typeof start === 'number' && typeof end === 'number'
+            && !isNaN(start) && !isNaN(end)) {
+            return { start: start, end: end };
+        }
+        return null;
+    }
+
     function renderClips(items) {
         if (!clipList) return;
         if (items.length === 0) {
@@ -682,6 +708,11 @@
             html += '<button type="button" class="dataset-quick-play" data-id="' + clip.id + '" title="Play clip" aria-label="Play clip">&#9654;</button>';
             html += '<select class="dataset-quick-label-select" data-id="' + clip.id + '" aria-label="Quick label">' + buildLabelOptionsHtml(label, true, true) + '</select>';
             html += '<button type="button" class="dataset-quick-label-apply" data-id="' + clip.id + '" title="Apply label" aria-label="Apply label">Label</button>';
+            // Trim-to-keyword button: available when keyword timing exists (scan results or persisted detection)
+            var kwTiming = getClipKeywordTiming(clip);
+            html += kwTiming
+                ? '<button type="button" class="dataset-quick-trim" data-id="' + clip.id + '" data-keyword-start="' + kwTiming.start + '" data-keyword-end="' + kwTiming.end + '" title="Remove audio before/after the detected keyword" aria-label="Trim to keyword">Trim kw</button>'
+                : '';
             html += '<button type="button" class="dataset-quick-delete" data-id="' + clip.id + '" title="Delete clip" aria-label="Delete clip">Delete</button>';
             html += '<button type="button" class="dataset-quick-more" data-id="' + clip.id + '" aria-expanded="false" title="More options" aria-label="More options">&#9660;</button>';
             html += '</div>';
@@ -833,6 +864,16 @@
             });
         });
 
+        // Trim to keyword
+        container.querySelectorAll('.dataset-quick-trim').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                const id = parseInt(btn.dataset.id, 10);
+                if (confirm('Permanently trim this clip to the detected keyword region?')) {
+                    trimClipToKeyword(id, btn);
+                }
+            });
+        });
+
         // More (expand details)
         container.querySelectorAll('.dataset-quick-more').forEach(function (btn) {
             btn.addEventListener('click', function () {
@@ -978,6 +1019,99 @@
         }
     }
 
+    // ── In-place row update after trim ────────────────────────────────
+    function updateTrimmedClipRow(clipEl, data) {
+        // 1. Pause audio if playing and reset progress so stale audio is not heard
+        var audio = clipEl.querySelector('.dataset-clip-player');
+        if (audio) {
+            if (!audio.paused) {
+                audio.pause();
+            }
+            resetQuickProgress(audio);
+            // Bust the browser cache so the next play uses the new MP3
+            var source = audio.querySelector('source');
+            if (source) {
+                source.src = '/api/speech_training/clips/' + clipEl.dataset.id + '/audio?v=' + Date.now();
+                audio.load();
+            }
+        }
+
+        // 2. Update displayed duration in the meta text (first part before &middot;)
+        var metaEl = clipEl.querySelector('.dataset-clip-meta');
+        if (metaEl && data.duration_seconds != null) {
+            var newDur = data.duration_seconds.toFixed(1) + 's';
+            var parts = metaEl.innerHTML.split(' &middot; ');
+            parts[0] = escapeHtml(newDur);
+            metaEl.innerHTML = parts.join(' &middot; ');
+        }
+
+        // 3. Update trim button data attributes so re-trim uses correct timing
+        var trimBtn = clipEl.querySelector('.dataset-quick-trim');
+        if (trimBtn && data.keyword_start_seconds != null && data.keyword_end_seconds != null) {
+            trimBtn.dataset.keywordStart = data.keyword_start_seconds;
+            trimBtn.dataset.keywordEnd = data.keyword_end_seconds;
+        }
+    }
+
+    // ── Trim clip to keyword ──────────────────────────────────────────
+    async function trimClipToKeyword(id, btn) {
+        const originalText = btn.textContent;
+        btn.textContent = '\u2026';
+        btn.disabled = true;
+
+        try {
+            const resp = await fetch('/api/speech_training/clips/' + id + '/trim_to_keyword', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({}),
+            });
+            const data = await resp.json();
+            if (data.status === 'ok') {
+                showScanToast('Clip trimmed to keyword', 'success');
+                // Update in-memory clip data for both scan and persisted timing fields
+                for (var i = 0; i < state._scanClips.length; i++) {
+                    if (state._scanClips[i].id === id) {
+                        state._scanClips[i].duration_seconds = data.duration_seconds;
+                        state._scanClips[i].keyword_start_seconds = data.keyword_start_seconds;
+                        state._scanClips[i].keyword_end_seconds = data.keyword_end_seconds;
+                        state._scanClips[i].detected_start_seconds = data.keyword_start_seconds;
+                        state._scanClips[i].detected_end_seconds = data.keyword_end_seconds;
+                        break;
+                    }
+                }
+                // Update the current row in-place so the user sees new duration,
+                // fresh audio (cache-busted), and does not need a manual refresh.
+                var clipEl = btn.closest('.dataset-clip');
+                if (clipEl) {
+                    updateTrimmedClipRow(clipEl, data);
+                } else if (state._scanMode) {
+                    // Fallback: re-render scan mode if row is missing from DOM
+                    enterScanMode(state._scanClips, state._scanKeyword, state._scanMaxDurationSeconds, state._scanKeywordCount);
+                } else {
+                    // Fallback: reload list if row is missing from DOM
+                    loadClips();
+                }
+                // Refresh users/storage (byte sizes changed)
+                loadUsers();
+                loadStorage();
+                // Brief visual confirmation on the button
+                btn.textContent = 'Trimmed';
+                setTimeout(function () {
+                    btn.textContent = originalText;
+                    btn.disabled = false;
+                }, 1500);
+            } else {
+                showScanToast(data.error || 'Failed to trim clip', 'error');
+                btn.textContent = originalText;
+                btn.disabled = false;
+            }
+        } catch (e) {
+            showScanToast('Network error while trimming clip', 'error');
+            btn.textContent = originalText;
+            btn.disabled = false;
+        }
+    }
+
     // ── Scan toast helpers ──────────────────────────────────────────
     function getOrCreateToastRegion() {
         var region = document.getElementById('speechToastRegion');
@@ -1076,6 +1210,8 @@
         state._scanMode = true;
         state._scanClips = clips;
         state._scanKeyword = keyword;
+        state._scanMaxDurationSeconds = maxDurationSeconds != null ? maxDurationSeconds : null;
+        state._scanKeywordCount = keywordCount > 1 ? keywordCount : 1;
         state.selectedIds.clear();
         updateBulkUI();
         var pct = Math.round((state._scanConfidence || 0.5) * 100);
@@ -1123,7 +1259,7 @@
 
         state._scanConfidence = 0.5;
 
-        var body = { all_keywords: true, min_confidence: 0.5, label_non_matches_as_none: true };
+        var body = { all_keywords: true, min_confidence: 0.5, label_non_matches_as_none: true, label_matches_as_potential: true, trim_matches_to_keyword: true };
         var gid = getSelectedGuildId();
         if (gid) body.guild_id = gid;
         if (state.selectedUserId) body.user_id = state.selectedUserId;
@@ -1216,12 +1352,23 @@
         if (scanKeywordBtn) scanKeywordBtn.disabled = false;
         if (transcribeBtn) transcribeBtn.disabled = false;
 
+        // Refresh schedule metadata after scan completes
+        loadKeywordScanSchedule();
+
         // Build suffix for non-matches action
         var nonMatchNote = '';
         if (data.delete_non_matches && data.deleted_non_matches > 0) {
             nonMatchNote = ' \u00b7 ' + data.deleted_non_matches + ' non-match' + (data.deleted_non_matches !== 1 ? 'es' : '') + ' deleted';
         } else if (data.label_non_matches_as_none && data.labeled_non_matches > 0) {
             nonMatchNote = ' \u00b7 ' + data.labeled_non_matches + ' non-match' + (data.labeled_non_matches !== 1 ? 'es' : '') + ' labeled as none';
+        }
+        // Add suffix for matches labeled potential
+        if (data.label_matches_as_potential && data.labeled_matches > 0) {
+            nonMatchNote += ' \u00b7 ' + data.labeled_matches + ' match' + (data.labeled_matches !== 1 ? 'es' : '') + ' labeled potential';
+        }
+        // Add suffix for auto-trimmed matches
+        if (data.trim_matches_to_keyword && data.trimmed_matches > 0) {
+            nonMatchNote += ' \u00b7 ' + data.trimmed_matches + ' trimmed';
         }
 
         // Refresh users and storage after potential deletion/labeling
@@ -1253,6 +1400,7 @@
         state._scanJobId = null;
         if (scanKeywordBtn) scanKeywordBtn.disabled = false;
         if (transcribeBtn) transcribeBtn.disabled = false;
+        loadKeywordScanSchedule();
         showScanToast(message, 'error');
     }
 
@@ -1262,6 +1410,104 @@
             state._scanPollTimer = null;
         }
         state._scanJobId = null;
+    }
+
+    // ── Keyword scan schedule ──────────────────────────────────────────
+
+    function formatScheduleDate(isoString) {
+        if (!isoString) return null;
+        try {
+            var d = new Date(isoString);
+            if (isNaN(d.getTime())) return null;
+            return d;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function formatScheduleDateShort(isoString) {
+        var d = formatScheduleDate(isoString);
+        if (!d) return null;
+        return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    }
+
+    function formatScheduleDateFull(isoString) {
+        var d = formatScheduleDate(isoString);
+        if (!d) return null;
+        return d.toLocaleString(undefined, {
+            weekday: 'long', year: 'numeric', month: 'long',
+            day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit',
+        });
+    }
+
+    function _updateScheduleDisplay(text, tooltip) {
+        keywordScanSchedule.textContent = text;
+        keywordScanSchedule.title = tooltip;
+        if (scanKeywordBtn) scanKeywordBtn.title = tooltip;
+    }
+
+    async function loadKeywordScanSchedule() {
+        if (!keywordScanSchedule) return;
+        try {
+            var resp = await fetch('/api/speech_training/keyword_scan/schedule');
+            if (!resp.ok) {
+                _updateScheduleDisplay('Schedule unavailable', '');
+                return;
+            }
+            var data = await resp.json();
+            var enabled = data.enabled;
+            var status = data.last_status || null;
+            var lastStart = data.last_started_at || null;
+            var lastFinish = data.last_finished_at || null;
+            var nextRun = data.next_run_at || null;
+            var summary = data.last_summary || null;
+
+            if (!enabled) {
+                _updateScheduleDisplay('Auto disabled', 'Automatic keyword scanning is disabled');
+                return;
+            }
+
+            if (status === 'running') {
+                var nextStr = nextRun ? formatScheduleDateShort(nextRun) : null;
+                var parts = ['Running now'];
+                if (nextStr) parts.push('next ' + nextStr);
+                var tooltip = 'Started: ' + (formatScheduleDateFull(lastStart) || 'unknown');
+                if (nextRun) tooltip += ' | Next: ' + (formatScheduleDateFull(nextRun) || 'unknown');
+                _updateScheduleDisplay(parts.join(' \u00b7 '), tooltip);
+                return;
+            }
+
+            if (lastStart || lastFinish || nextRun) {
+                var parts = [];
+                if (lastFinish) {
+                    var finishStr = formatScheduleDateShort(lastFinish);
+                    parts.push(finishStr ? 'last ' + finishStr : 'last run');
+                    if (status === 'error') parts.push('error');
+                } else if (lastStart) {
+                    var startStr = formatScheduleDateShort(lastStart);
+                    parts.push(startStr ? 'last ' + startStr : 'last run');
+                } else {
+                    parts.push('last run not recorded');
+                }
+                if (nextRun) {
+                    var nextStr = formatScheduleDateShort(nextRun);
+                    parts.push(nextStr ? 'next ' + nextStr : 'next run not scheduled');
+                }
+                var tooltip = '';
+                if (lastStart) tooltip += 'Started: ' + (formatScheduleDateFull(lastStart) || 'unknown');
+                if (lastFinish) tooltip += (tooltip ? ' | ' : '') + 'Finished: ' + (formatScheduleDateFull(lastFinish) || 'unknown');
+                if (nextRun) tooltip += (tooltip ? ' | ' : '') + 'Next: ' + (formatScheduleDateFull(nextRun) || 'unknown');
+                if (summary) tooltip += (tooltip ? ' | ' : '') + summary;
+                _updateScheduleDisplay(parts.join(' \u00b7 '), tooltip);
+                return;
+            }
+
+            _updateScheduleDisplay('No auto runs yet', 'Automatic keyword scanning has not run yet');
+        } catch (e) {
+            if (keywordScanSchedule) {
+                keywordScanSchedule.textContent = 'Schedule unavailable';
+            }
+        }
     }
 
     // ── Auto-transcript job ───────────────────────────────────────────
@@ -1789,6 +2035,7 @@
     loadStorage();
     loadLabels();
     loadClips();
+    loadKeywordScanSchedule();
     // Start passive refresh chain after a brief initial delay
     scheduleNextPassiveRefresh();
 

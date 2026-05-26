@@ -9,7 +9,7 @@ import resource
 import shutil
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional, Tuple
 import discord
 from discord.ext import tasks
@@ -22,6 +22,7 @@ from bot.repositories import (
 )
 from bot.repositories.keyword import KeywordRepository
 from bot.repositories.speech_training import SpeechTrainingRepository
+from bot.repositories.app_settings import AppSettingsRepository
 from bot.downloaders.sound import SoundDownloader
 from bot.services.guild_settings import GuildSettingsService
 from bot.services.system_monitor import HostSystemMonitorService
@@ -112,6 +113,77 @@ class BackgroundService:
         )
         self._keyword_scan_in_progress = False
 
+        # Lazy app settings repository (same DB path as the scan loop).
+        self._app_settings_repo: AppSettingsRepository | None = None
+        self._app_settings_db_path: str | None = None
+
+    # ── Keyword scan schedule metadata keys ─────────────────────────────
+
+    KEYWORD_SCAN_SETTING_ENABLED = "speech_training_keyword_scan.enabled"
+    KEYWORD_SCAN_SETTING_INTERVAL = "speech_training_keyword_scan.interval_seconds"
+    KEYWORD_SCAN_SETTING_NEXT_RUN = "speech_training_keyword_scan.next_run_at"
+    KEYWORD_SCAN_SETTING_LAST_STARTED = "speech_training_keyword_scan.last_started_at"
+    KEYWORD_SCAN_SETTING_LAST_FINISHED = "speech_training_keyword_scan.last_finished_at"
+    KEYWORD_SCAN_SETTING_LAST_STATUS = "speech_training_keyword_scan.last_status"
+    KEYWORD_SCAN_SETTING_LAST_SUMMARY = "speech_training_keyword_scan.last_summary"
+    KEYWORD_SCAN_SETTING_UPDATED_AT = "speech_training_keyword_scan.updated_at"
+
+    def _init_app_settings_repo(self, db_path: str) -> None:
+        """Ensure the app settings repo is created for *db_path*."""
+        if self._app_settings_repo is not None and self._app_settings_db_path == db_path:
+            return
+        self._app_settings_db_path = db_path
+        self._app_settings_repo = AppSettingsRepository(
+            db_path=db_path, use_shared=False,
+        )
+        self._app_settings_repo.ensure_schema()
+
+    def _persist_keyword_scan_schedule(
+        self,
+        *,
+        enabled: bool | None = None,
+        interval_seconds: int | None = None,
+        next_run_at: str | None = None,
+        last_started_at: str | None = None,
+        last_finished_at: str | None = None,
+        last_status: str | None = None,
+        last_summary: str | None = None,
+    ) -> None:
+        """Write keyword scan schedule metadata to ``app_settings``.
+
+        Only the provided keyword arguments are persisted; omitted keys
+        are not touched.  All values are stored as ISO 8601 UTC strings
+        for timestamps.
+        """
+        if self._app_settings_repo is None:
+            return
+        settings: dict[str, str] = {}
+        now_iso = datetime.now(timezone.utc).isoformat()
+        if enabled is not None:
+            settings[self.KEYWORD_SCAN_SETTING_ENABLED] = "1" if enabled else "0"
+        if interval_seconds is not None:
+            settings[self.KEYWORD_SCAN_SETTING_INTERVAL] = str(interval_seconds)
+        if next_run_at is not None:
+            settings[self.KEYWORD_SCAN_SETTING_NEXT_RUN] = next_run_at
+        if last_started_at is not None:
+            settings[self.KEYWORD_SCAN_SETTING_LAST_STARTED] = last_started_at
+        if last_finished_at is not None:
+            settings[self.KEYWORD_SCAN_SETTING_LAST_FINISHED] = last_finished_at
+        if last_status is not None:
+            settings[self.KEYWORD_SCAN_SETTING_LAST_STATUS] = last_status
+        if last_summary is not None:
+            settings[self.KEYWORD_SCAN_SETTING_LAST_SUMMARY] = last_summary
+        settings[self.KEYWORD_SCAN_SETTING_UPDATED_AT] = now_iso
+        try:
+            self._app_settings_repo.set_settings(
+                settings, updated_by="BackgroundService",
+            )
+        except Exception as exc:
+            logger.error(
+                "[BackgroundService] Failed to persist keyword scan metadata: %s",
+                exc,
+            )
+
     def start_tasks(self):
         """Schedule tasks to start when the bot is ready."""
         if self._started:
@@ -159,6 +231,28 @@ class BackgroundService:
                     seconds=self._keyword_scan_daily_interval
                 )
                 self.speech_training_keyword_scan_loop.start()
+
+            # Persist initial keyword scan schedule metadata
+            try:
+                self._init_app_settings_repo(str(self._resolve_db_path()))
+                if self._keyword_scan_daily_enabled:
+                    next_run = datetime.now(timezone.utc).isoformat()
+                    self._persist_keyword_scan_schedule(
+                        enabled=True,
+                        interval_seconds=self._keyword_scan_daily_interval,
+                        next_run_at=next_run,
+                    )
+                else:
+                    self._persist_keyword_scan_schedule(
+                        enabled=False,
+                        interval_seconds=self._keyword_scan_daily_interval,
+                        next_run_at=None,
+                    )
+            except Exception as exc:
+                logger.error(
+                    "[BackgroundService] Failed to persist initial keyword scan metadata: %s",
+                    exc,
+                )
             
             asyncio.create_task(self._auto_join_channels())
             print("[BackgroundService] Background tasks started.")
@@ -1378,7 +1472,8 @@ class BackgroundService:
         For each guild with configured trigger keywords, scans unlabeled
         clips (≤30s) using offline Vosk and labels non-matches as ``none``.
         Progress is reported to the guild's bot channel with a self-editing
-        message.
+        message.  Schedule metadata (last run, next run, status, summary)
+        is persisted to ``app_settings`` for display on the Dataset page.
         """
         if self._keyword_scan_in_progress:
             logger.debug(
@@ -1389,7 +1484,24 @@ class BackgroundService:
             return
 
         self._keyword_scan_in_progress = True
+        now_utc = datetime.now(timezone.utc)
+        now_iso = now_utc.isoformat()
+        next_run_iso = (now_utc + timedelta(seconds=self._keyword_scan_daily_interval)).isoformat()
+
         try:
+            db_path = self._resolve_db_path()
+            self._init_app_settings_repo(db_path)
+
+            # Persist start-of-scan metadata
+            self._persist_keyword_scan_schedule(
+                enabled=True,
+                interval_seconds=self._keyword_scan_daily_interval,
+                last_started_at=now_iso,
+                next_run_at=next_run_iso,
+                last_status="running",
+                last_summary=None,
+            )
+
             speech_training_data_dir = os.getenv(
                 "SPEECH_TRAINING_DATA_DIR",
                 os.path.abspath(
@@ -1399,22 +1511,6 @@ class BackgroundService:
                     )
                 ),
             )
-            db_path = os.getenv(
-                "DATABASE_PATH",
-                os.path.abspath(
-                    os.path.join(
-                        os.path.dirname(__file__),
-                        "..", "..", "data", "database.db",
-                    )
-                ),
-            )
-            # Override with config if available
-            try:
-                from config import DATABASE_PATH
-
-                db_path = DATABASE_PATH
-            except Exception:
-                pass
 
             repo = SpeechTrainingRepository(
                 db_path=db_path, use_shared=False
@@ -1435,19 +1531,28 @@ class BackgroundService:
                     "[BackgroundService] No trigger keywords configured, skipping "
                     "speech training keyword scan"
                 )
+                self._persist_keyword_scan_schedule(
+                    last_finished_at=now_iso,
+                    last_status="skipped",
+                    last_summary="No trigger keywords configured",
+                )
                 return
 
             from bot.services.web_speech_training import WebSpeechTrainingService
 
             svc = WebSpeechTrainingService(repo, speech_training_data_dir)
+            guild_results: list[dict] = []
+            loop_error: str | None = None
 
             for guild in self.bot.guilds:
                 try:
-                    await self._run_guild_keyword_scan(
+                    result = await self._run_guild_keyword_scan(
                         guild=guild,
                         svc=svc,
                         keywords=trigger_keywords,
                     )
+                    if result is not None:
+                        guild_results.append(result)
                 except Exception as exc:
                     logger.error(
                         "[BackgroundService] Speech training keyword scan failed "
@@ -1456,12 +1561,73 @@ class BackgroundService:
                         exc,
                         exc_info=True,
                     )
+                    guild_results.append({
+                        "guild_id": str(guild.id),
+                        "guild_name": guild.name,
+                        "total": 0,
+                        "scanned": 0,
+                        "matched": 0,
+                        "skipped": 0,
+                        "labeled_non": 0,
+                        "status": "error",
+                    })
+
+            # Build summary string from aggregated results
+            total_clips = sum(r.get("total", 0) for r in guild_results)
+            total_scanned = sum(r.get("scanned", 0) for r in guild_results)
+            total_matched = sum(r.get("matched", 0) for r in guild_results)
+            total_skipped = sum(r.get("skipped", 0) for r in guild_results)
+            total_labeled_non = sum(r.get("labeled_non", 0) for r in guild_results)
+            total_trimmed = sum(r.get("trimmed", 0) for r in guild_results)
+            guilds_with_clips = sum(1 for r in guild_results if r.get("total", 0) > 0)
+            guilds_scanned = sum(1 for r in guild_results if r.get("status") in ("completed", "timeout"))
+            guilds_errored = sum(1 for r in guild_results if r.get("status") == "error")
+
+            summary_parts: list[str] = []
+            if guilds_scanned:
+                summary_parts.append(f"{guilds_scanned} guild(s)")
+            if total_scanned:
+                summary_parts.append(f"{total_scanned} scanned")
+            if total_matched:
+                summary_parts.append(f"{total_matched} match{'es' if total_matched != 1 else ''}")
+            if total_skipped:
+                summary_parts.append(f"{total_skipped} skipped")
+            if total_labeled_non:
+                summary_parts.append(f"{total_labeled_non} labeled as none")
+            if total_trimmed:
+                summary_parts.append(f"{total_trimmed} trimmed")
+            if guilds_errored:
+                summary_parts.append(f"{guilds_errored} error{'s' if guilds_errored != 1 else ''}")
+            if guilds_with_clips and not guilds_scanned:
+                summary_parts.append("no guilds scanned")
+
+            summary = " · ".join(summary_parts) if summary_parts else "No guilds processed"
+            final_status = "completed"
+            if guilds_errored and not guilds_scanned:
+                final_status = "error"
+            elif loop_error:
+                final_status = "error"
+
+            self._persist_keyword_scan_schedule(
+                last_finished_at=now_iso,
+                last_status=final_status,
+                last_summary=summary,
+            )
+
         except Exception as exc:
             logger.error(
                 "[BackgroundService] Speech training keyword scan error: %s",
                 exc,
                 exc_info=True,
             )
+            try:
+                self._persist_keyword_scan_schedule(
+                    last_finished_at=datetime.now(timezone.utc).isoformat(),
+                    last_status="error",
+                    last_summary=f"Scan error: {exc}",
+                )
+            except Exception:
+                pass
         finally:
             self._keyword_scan_in_progress = False
 
@@ -1478,6 +1644,8 @@ class BackgroundService:
         matched: int,
         skipped: int,
         labeled_non: int = 0,
+        labeled_potential: int = 0,
+        trimmed: int = 0,
         keywords: Optional[list[str]] = None,
     ) -> str:
         """Build a compact description line for keyword scan progress/completion cards.
@@ -1488,6 +1656,8 @@ class BackgroundService:
             matched: Number of keyword matches found.
             skipped: Number of clips skipped.
             labeled_non: Number of clips labeled as ``none`` (completion only).
+            labeled_potential: Number of clips labeled as ``potential`` (completion only).
+            trimmed: Number of matches auto-trimmed to keyword (completion only).
             keywords: The keyword list used for the scan (included once at start).
 
         Returns:
@@ -1506,6 +1676,10 @@ class BackgroundService:
             parts.append(f"{skipped} skipped")
         if labeled_non:
             parts.append(f"{labeled_non} labeled as none")
+        if labeled_potential:
+            parts.append(f"{labeled_potential} labeled potential")
+        if trimmed:
+            parts.append(f"{trimmed} trimmed")
         return " · ".join(parts)
 
     async def _send_keyword_scan_card(
@@ -1734,6 +1908,8 @@ class BackgroundService:
                 min_confidence=0.5,
                 guild_id=str(guild.id),
                 label_non_matches_as_none=True,
+                label_matches_as_potential=True,
+                trim_matches_to_keyword=True,
                 progress_callback=_on_progress,
             ),
         )
@@ -1755,33 +1931,60 @@ class BackgroundService:
                 ),
                 message_service=message_service,
             )
-            return
+            return {
+                "guild_id": str(guild.id),
+                "guild_name": guild.name,
+                "total": total,
+                "scanned": progress_state["scanned"],
+                "matched": progress_state["matched"],
+                "skipped": progress_state["skipped"],
+                "labeled_non": 0,
+                "status": "timeout",
+            }
 
         # Final update
         scanned = result.get("scanned", 0)
         matched = result.get("matched", 0)
         skipped = result.get("skipped", 0)
         labeled_non = result.get("labeled_non_matches", 0)
+        labeled_potential = result.get("labeled_matches", 0)
+        trimmed = result.get("trimmed_matches", 0)
 
         await self._edit_keyword_scan_card(
             message=progress_msg,
             title="✅ Keyword scan complete",
             description=self._format_keyword_scan_description(
                 total=total, scanned=scanned, matched=matched, skipped=skipped,
-                labeled_non=labeled_non,
+                labeled_non=labeled_non, labeled_potential=labeled_potential,
+                trimmed=trimmed,
             ),
             message_service=message_service,
         )
 
         logger.info(
             "[BackgroundService] Keyword scan complete for guild '%s': "
-            "scanned=%d matched=%d skipped=%d labeled_none=%d",
+            "scanned=%d matched=%d skipped=%d labeled_none=%d labeled_potential=%d trimmed=%d",
             guild.name,
             scanned,
             matched,
             skipped,
             labeled_non,
+            labeled_potential,
+            trimmed,
         )
+
+        return {
+            "guild_id": str(guild.id),
+            "guild_name": guild.name,
+            "total": total,
+            "scanned": scanned,
+            "matched": matched,
+            "skipped": skipped,
+            "labeled_non": labeled_non,
+            "labeled_potential": labeled_potential,
+            "trimmed": trimmed,
+            "status": "completed",
+        }
 
     @staticmethod
     def _parse_guild_id(raw: object) -> int | None:
@@ -1792,6 +1995,25 @@ class BackgroundService:
             return int(str(raw).strip())
         except (ValueError, TypeError):
             return None
+
+    @staticmethod
+    def _resolve_db_path() -> str:
+        """Resolve the database path using the same priority as the scan loop."""
+        db_path = os.getenv(
+            "DATABASE_PATH",
+            os.path.abspath(
+                os.path.join(
+                    os.path.dirname(__file__),
+                    "..", "..", "data", "database.db",
+                )
+            ),
+        )
+        try:
+            from config import DATABASE_PATH
+            db_path = DATABASE_PATH
+        except Exception:
+            pass
+        return str(db_path)
 
     @tasks.loop(seconds=30)
     async def keyword_detection_health_check(self):

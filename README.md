@@ -138,7 +138,7 @@ Create a `.env` file in the project root. Only `DISCORD_BOT_TOKEN` is strictly r
 | `WEB_TTS_ENHANCER_PROVIDER` | — | OpenRouter provider for web TTS enhancer |
 | `WEB_TTS_ENHANCER_MAX_TOKENS` | `8192` | Max tokens for enhance response |
 | `WEB_TTS_ENHANCER_REASONING_ENABLED` | `true` | Enable reasoning for web TTS enhancer |
-| `SPEECH_TRAINING_KEYWORD_SCAN_ENABLED` | `true` | Enable daily (24h) scheduled keyword scan of unlabeled speech training clips via the bot (labels non-matches as ``none``) |
+| `SPEECH_TRAINING_KEYWORD_SCAN_ENABLED` | `true` | Enable daily (24h) scheduled keyword scan of unlabeled speech training clips via the bot (labels non-matches as ``none``, labels matches as ``potential``) |
 | `SPEECH_TRAINING_KEYWORD_SCAN_INTERVAL_SECONDS` | `86400` | Interval for the scheduled keyword scan, default 24h (range `300`–`86400`) |
 
 ## Slash Commands
@@ -241,15 +241,18 @@ The optional web dashboard is served by a separate `web` container (Docker profi
 | `GET /api/uploads` | Upload inbox (admin/mod) |
 | `POST /api/uploads/<id>/moderation` | Approve/reject upload (admin/mod) |
 | `GET /api/analytics/summary\|top_users\|top_sounds\|activity_heatmap\|activity_timeline\|recent_activity` | Analytics data |
-| `GET /speech-training` | Speech training dataset labeling page (admin-only, auto-refreshes every 5 s) |
+| `GET /speech-training` | Speech training dataset labeling page (admin-only, auto-refreshes every 5 s). Shows the automatic keyword scan schedule (last run, next run, status) as a compact tip inside the Find Keywords button. |
+| `GET /api/speech_training/storage` | MP3 dataset usage + machine disk free/total capacity (admin-only) |
 | `GET /api/speech_training/users` | Per-user clip aggregation (admin-only) |
 | `GET /api/speech_training/clips` | Paginated clip list with filters (admin-only) |
 | `GET /api/speech_training/clips/<id>/audio` | Stream a captured MP3 (admin-only) |
 | `POST /api/speech_training/clips/<id>/label` | Update label/transcript/notes (admin-only) |
 | `DELETE /api/speech_training/clips/<id>` | Delete a single clip (admin-only) |
+| `POST /api/speech_training/clips/<id>/trim_to_keyword` | Trim a clip's audio in-place to the detected keyword region (admin-only). Reads persisted scan timing (`detected_start_seconds` / `detected_end_seconds`) or accepts explicit `start_seconds`/`end_seconds`/`padding_seconds` in the JSON body. Returns updated `duration_seconds`, `byte_size`, `keyword_start_seconds`, `keyword_end_seconds`, `trim_start_seconds`, `trim_end_seconds`. Matched clips are auto-trimmed by default during scan via `trim_matches_to_keyword`; this manual endpoint is available for further adjustments. |
 | `POST /api/speech_training/clips/bulk` | Bulk label or delete clips (admin-only) |
-| `POST /api/speech_training/keyword_scan` | Start async keyword scan (admin-only, returns `202` + `job_id`; poll with GET below). Only unlabeled clips ≤30s are eligible. Supports `all_keywords: true` to scan all configured trigger keywords from the `keywords` table, or a specific `keyword`. |
-| `GET /api/speech_training/keyword_scan/<job_id>` | Poll keyword scan progress & results (admin-only). Response includes `max_duration_seconds`. When multiple keywords were scanned, includes `keywords` (list) and `keyword_count`. |
+| `POST /api/speech_training/keyword_scan` | Start async keyword scan (admin-only, returns `202` + `job_id`; poll with GET below). Only unlabeled clips ≤30s are eligible. Supports `all_keywords: true` to scan all configured trigger keywords from the `keywords` table, or a specific `keyword`. When `label_matches_as_potential` (default `true`) matches are bulk-labeled as `potential`; when `label_non_matches_as_none` (default `true`) non-matches are labeled as `none`. When `trim_matches_to_keyword` (default `true`) matched clips with valid Vosk word timing are auto-trimmed to the detected keyword region. |
+| `GET /api/speech_training/keyword_scan/<job_id>` | Poll keyword scan progress & results (admin-only). Response includes `max_duration_seconds`. When multiple keywords were scanned, includes `keywords` (list) and `keyword_count`. Job result includes `trim_matches_to_keyword`, `trimmed_matches`, and `failed_trim_matches` counts. |
+| `GET /api/speech_training/keyword_scan/schedule` | Automatic keyword scan schedule metadata (admin-only). Returns `enabled`, `interval_seconds`, `last_started_at`, `last_finished_at`, `last_status`, `last_summary`, `next_run_at`, `updated_at`. The Dataset page shows this info inline. |
 | `POST /api/speech_training/transcribe_empty` | Start async auto-transcript job (admin-only, returns `202` + `job_id`). Transcribes empty-transcript clips via Groq Whisper (`GROQ_API_KEY` required). Poll with GET below. |
 | `GET /api/speech_training/transcribe_empty/<job_id>` | Poll auto-transcript progress & results (admin-only). Response includes `total`, `processed`, `updated`, `empty_marked`, `skipped`. |
 

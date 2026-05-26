@@ -44,7 +44,7 @@
                 <h2 class="dataset-sidebar-title">Speakers</h2>
                 <div class="dataset-sidebar-count" id="userCount">0</div>
             </header>
-            <div class="dataset-sidebar-storage" id="storageUsed">MP3 storage: —</div>
+            <div class="dataset-sidebar-storage" id="storageUsed">MP3 storage: — · Machine: —</div>
             <div class="dataset-user-list" id="userList" role="listbox" aria-label="Select a speaker">
                 <!-- populated by JS -->
             </div>
@@ -88,7 +88,8 @@
                     </div>
                     <div class="dataset-scan-group" id="scanGroup">
                         <button type="button" class="dataset-scan-btn" id="scanKeywordBtn">
-                            Find Keywords
+                            <span class="dataset-scan-btn-label">Find Keywords</span>
+                            <span class="dataset-scan-schedule" id="keywordScanSchedule" aria-live="polite">Loading schedule&hellip;</span>
                         </button>
                         <button type="button" class="dataset-scan-btn" id="transcribeBtn">
                             Auto transcript

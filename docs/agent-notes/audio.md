@@ -54,7 +54,7 @@ Read this when changing uploads, sound ingest, playback, generated sound cards, 
 
 ## Speech Training Dataset Capture & Labeling
 
-- **Labels vs detection metadata**: `label` is always human ground truth (`ventura`, `chapada`, `none`). `transcript` is the human transcript. Vosk scan results are stored separately in `detected_*`/`detection_*` columns and never overwrite human fields.
+- **Labels vs detection metadata**: `label` is always human ground truth (`ventura`, `chapada`, `none`, `potential`). `transcript` is the human transcript. Vosk scan results are stored separately in `detected_*`/`detection_*` columns and never overwrite human fields. When keyword scan labels matches as ``potential``, they are moved from unlabeled to the ``potential`` label for human review, not stored as detection metadata.
 - **False positives** are derivable as `label='none' AND detected_keyword IS NOT NULL`. **False negatives** as `label='<keyword>' AND (detected_keyword IS NULL OR detected_keyword != label)`. The `detection_keywords_json` column preserves which keywords were targeted in the scan so past scans remain interpretable.
 - Schema migration (adding `detected_*` columns) is idempotent in `SpeechTrainingRepository.ensure_schema()` via `PRAGMA table_info`.
 - `update_detection_metadata()` in the repository sets `detection_scanned_at = CURRENT_TIMESTAMP` and is safe to call on labeled or unlabeled clips — it never touches `label`, `transcript`, or `notes`.
