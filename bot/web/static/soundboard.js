@@ -3832,14 +3832,14 @@
         // Instead of bursting 5 fetches every 2 s, spread work across time:
         //   - Table data (actions/favorites/all_sounds): one table per tick,
         //     ~3.5 s apart, full cycle ~10.5 s (reduces burst CPU & SQL load).
-        //   - Control room status: ~4 s loop.
+        //   - Control room status: ~1 s loop.
         //   - Web control state: ~5 s loop.
         //   - System monitor (next section): adaptive cadence.
         // All loops use setTimeout chains (not setInterval) so each next tick
         // is scheduled after the previous one fires, preventing pile-up.
 
         const TABLE_POLL_MS = 3500;
-        const STATUS_POLL_MS = 4000;
+        const STATUS_POLL_MS = 1000;
         const WEBCTRL_POLL_MS = 5000;
         const SYS_MON_SUMMARY_MS = 4000;   // dropdown closed
         const SYS_MON_DETAILED_MS = 1500;  // dropdown open
@@ -3848,7 +3848,7 @@
         // Cross-tab shared-cache TTLs (slightly less than poll interval
         // so the next poll usually gets a fresh response).
         const SYS_MON_SHARED_CACHE_MS = 1200;
-        const STATUS_SHARED_CACHE_MS = 1800;
+        const STATUS_SHARED_CACHE_MS = 900;
         const WEBCTRL_SHARED_CACHE_MS = 1800;
         const TABLE_SHARED_CACHE_MS = 3000;
 

@@ -185,14 +185,14 @@ def register_playback_routes(app: Flask) -> None:
         try:
             payload = cache.get_or_set(
                 key,
-                ttl=1.5,
+                ttl=0.9,
                 producer=lambda: _get_web_control_room_service().get_status(
                     request.args,
                     current_user=current_user,
                 ),
             )
             response = jsonify(payload)
-            response.headers["Cache-Control"] = "private, max-age=1"
+            response.headers["Cache-Control"] = "private, max-age=0, must-revalidate"
             return response, 200
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400

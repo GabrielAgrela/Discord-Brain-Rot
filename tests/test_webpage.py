@@ -3115,6 +3115,27 @@ def test_control_room_status_cache_returns_same_payload(web_client):
         WebControlRoomService.get_status = original
 
 
+def test_control_room_status_cache_control_header(web_client):
+    """The /api/control_room/status endpoint sets no-cache headers."""
+    client, db_path = web_client
+    _clear_response_cache()
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO guild_settings (guild_id) VALUES (?)",
+            ("111",),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    response = client.get("/api/control_room/status")
+    assert response.status_code == 200
+    cc = response.headers.get("Cache-Control", "")
+    assert "max-age=0" in cc or "no-cache" in cc or "must-revalidate" in cc
+
+
 def test_web_control_state_cache_returns_same_payload(web_client):
     """Two identical calls within TTL hit control-state service only once."""
     client, db_path = web_client

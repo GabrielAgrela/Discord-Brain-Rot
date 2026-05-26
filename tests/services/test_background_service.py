@@ -1337,6 +1337,12 @@ class TestBotStatusCpu:
 
         assert BackgroundService.update_bot_status_loop.seconds == 4
 
+    def test_web_control_room_status_loop_uses_one_second_interval(self):
+        """Verify web control-room status is persisted every second."""
+        from bot.services.background import BackgroundService
+
+        assert BackgroundService.web_control_room_status_loop.seconds == 1
+
     @pytest.mark.asyncio
     @patch("bot.services.background.ActionRepository")
     @patch("bot.services.background.SoundRepository")

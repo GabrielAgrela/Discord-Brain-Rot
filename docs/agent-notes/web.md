@@ -8,7 +8,7 @@ Read this when changing `web_page.py`, `bot/web/`, web repositories/services, te
 - Flask-owned page templates and static assets live under `bot/web/templates/` and `bot/web/static/`. Root `templates/sound_card.html` and `templates/rl_store_card.html` are image-card templates used by `ImageGeneratorService`, not Flask page templates.
 - SQL/business logic belongs in `bot/repositories/web_*.py` and `bot/services/web_*.py`; route modules should stay thin request/response adapters.
 - Web routes should read SQLite through `app.config["DATABASE_PATH"]`, not a hardcoded `data/database.db`, so tests and alternate DB configs use the same paths.
-- The web control-room panel is backed by `web_bot_status`, written by `BackgroundService.web_control_room_status_loop()` every 2 seconds. Flask reads it through `WebControlRoomRepository`/`WebControlRoomService`; do not inspect live Discord objects from Flask.
+- The web control-room panel is backed by `web_bot_status`, written by `BackgroundService.web_control_room_status_loop()` every 1 second. Flask reads it through `WebControlRoomRepository`/`WebControlRoomService`; do not inspect live Discord objects from Flask.
 
 ## Guilds And Auth
 
@@ -133,7 +133,7 @@ The control-room page no longer uses setInterval bursts. Instead it uses stagger
 | What | Cadence (dropdown closed) | Cadence (dropdown open) | Hidden tab |
 |---|---|---|---|
 | Table data (actions/favorites/all_sounds) | One table every 3.5 s, round-robin | Same | Same (no additional slowdown) |
-| Control room status | 4 s | 4 s | N/A |
+| Control room status | 1 s | 1 s | N/A |
 | Web control (mute) state | 5 s | 5 s | N/A |
 | System monitor | 4 s | 1.5 s | 20 s |
 
@@ -155,7 +155,7 @@ Since every open tab runs its own polling loops, 10 tabs could fire 10 identical
    | Endpoint | Shared-cache TTL |
    |---|---|
    | System monitor | 1200 ms |
-   | Control room status | 1800 ms |
+   | Control room status | 900 ms |
    | Web control (mute) state | 1800 ms |
    | Table data (actions/favorites/all_sounds) | 3000 ms |
 
@@ -163,11 +163,11 @@ Since every open tab runs its own polling loops, 10 tabs could fire 10 identical
 
 5. **Failure handling** — non-ok HTTP responses are never cached. Failed fetches silently fall through (the calling function already handled errors gracefully).
 
-6. **Server-side headers** — the following JSON endpoints also set ``Cache-Control: private, max-age=1`` so the browser can serve a cached response within the same tab without a network round-trip:
-   - ``/api/system_monitor/status``
-   - ``/api/control_room/status``
-   - ``/api/web_control_state``
-   - ``/api/actions``, ``/api/favorites``, ``/api/all_sounds``
+6. **Server-side headers** — JSON endpoints set ``Cache-Control`` so the browser can serve a cached response within the same tab without a network round-trip:
+   - ``/api/system_monitor/status`` — ``Cache-Control: private, max-age=1``
+   - ``/api/control_room/status`` — ``Cache-Control: private, max-age=0, must-revalidate`` (1s browser polling, server-side 0.9s cache; this header prevents the browser HTTP cache from masking the 1s cadence)
+   - ``/api/web_control_state`` — ``Cache-Control: private, max-age=1``
+   - ``/api/actions``, ``/api/favorites``, ``/api/all_sounds`` — ``Cache-Control: private, max-age=1``
 
 7. **What is NOT cached** — POST/mutation requests (play, mute, TTS, slap, upload, sound-options) bypass the shared cache entirely. ``forceNetwork: true`` is passed for user-triggered searches, pagination clicks, and mutation-response refreshes.
 
@@ -195,10 +195,10 @@ The browser cross-tab dedupe (BroadcastChannel + localStorage) only helps within
 | ``/api/actions`` | 1.5 s | anon / auth_censored / auth_uncensored | Full query (page, filters, search) + scope in key |
 | ``/api/favorites`` | 1.5 s | anon / auth_censored / auth_uncensored | Same keying as actions |
 | ``/api/all_sounds`` | 1.5 s | anon / auth_censored / auth_uncensored | Same keying as actions |
-| ``/api/control_room/status`` | 1.5 s | anon / auth | ``current_user is None`` vs authenticated (only username censorship differs) |
+| ``/api/control_room/status`` | 0.9 s | anon / auth | ``current_user is None`` vs authenticated (only username censorship differs) |
 | ``/api/web_control_state`` | 1.0 s | auth | Already requires login; share across all authenticated users for same guild |
 
-The TTLs are intentionally short (1.0–1.5 s) so that user-triggered searches, pagination clicks, and mutations do not see stale data for long.
+The TTLs are intentionally short (0.9–1.5 s) so that user-triggered searches, pagination clicks, and mutations do not see stale data for long.
 
 **Not cached**: POST/mutation/upload/TTS/play/sound-options endpoints.  Error responses are never cached (the producer is simply not called when the service raises).
 

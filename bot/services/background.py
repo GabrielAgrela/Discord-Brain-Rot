@@ -1314,7 +1314,7 @@ class BackgroundService:
                 exc_info=True,
             )
 
-    @tasks.loop(seconds=2)
+    @tasks.loop(seconds=1)
     async def web_control_room_status_loop(self):
         """Persist live bot status for the optional web soundboard panel."""
         try:
