@@ -3,6 +3,7 @@ Tests for bot/repositories/action.py - ActionRepository.
 """
 
 import pytest
+from unittest.mock import MagicMock
 from datetime import datetime, timedelta
 
 
@@ -27,6 +28,40 @@ class TestActionRepository:
         assert row["username"] == "testuser"
         assert row["action"] == "play_random_sound"
     
+    def test_insert_publishes_soundboard_event(self, action_repository, db_connection):
+        """Test insert publishes actions_changed event."""
+        from bot.repositories import action as action_module
+        original = action_module._publish_soundboard_event
+        mock_publish = MagicMock(return_value=True)
+        action_module._publish_soundboard_event = mock_publish
+        try:
+            action_repository.insert(
+                username="testuser",
+                action="play_random_sound",
+                target="456",
+                guild_id="789",
+            )
+            mock_publish.assert_called_once()
+            args, kwargs = mock_publish.call_args
+            assert args[0] == action_repository.db_path
+            assert args[1] == "actions_changed"
+            assert args[2]["action"] == "play_random_sound"
+            assert args[2]["guild_id"] == "789"
+        finally:
+            action_module._publish_soundboard_event = original
+
+    def test_insert_publishes_event_fallback_gracefully(self, action_repository, db_connection):
+        """Test insert does not crash when event publishing fails."""
+        from bot.repositories import action as action_module
+        original = action_module._publish_soundboard_event
+        action_module._publish_soundboard_event = MagicMock(side_effect=RuntimeError("Honker unavailable"))
+        try:
+            action_id = action_repository.insert("user", "play_request", "sound", guild_id="789")
+            assert action_id is not None
+            assert action_id > 0
+        finally:
+            action_module._publish_soundboard_event = original
+
     def test_get_by_id(self, action_repository, db_connection):
         """Test getting an action by ID."""
         # Insert an action first

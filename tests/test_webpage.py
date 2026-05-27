@@ -2550,6 +2550,259 @@ def test_sound_options_rejects_event_for_other_user_without_admin(web_client):
     assert response.get_json()["error"] == "You can only assign events for yourself."
 
 
+# ============================================================================
+# Sound option routes: SSE event publishing and cache invalidation
+# ============================================================================
+
+
+def _seed_sound_for_options(db_path: str) -> None:
+    """Insert a single sound row so sound option tests can target it."""
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "INSERT OR IGNORE INTO sounds (id, originalfilename, Filename, guild_id, favorite, slap, is_elevenlabs, timestamp) "
+            "VALUES (1, 'opts.mp3', 'opts.mp3', '111', 0, 0, 0, '2026-04-04 12:00:00')"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_sound_rename_publishes_events_and_invalidates_cache(web_client):
+    """After a successful rename, SSE events are published and the response cache is cleared."""
+    client, db_path = web_client
+    _login_web_user(client, username="test-user")
+    _seed_sound_for_options(db_path)
+
+    events_published: list[str] = []
+
+    def _fake_publish(event_type: str, data: dict | None = None) -> None:
+        events_published.append(event_type)
+
+    import bot.web.soundboard_routes as sr
+    original = sr.publish_soundboard_event
+    sr.publish_soundboard_event = _fake_publish
+
+    # Populate cache by calling a read endpoint.
+    resp1 = client.get("/api/actions?guild_id=111")
+    assert resp1.status_code == 200
+    cache = app.extensions.get("web_response_cache")
+    assert cache is not None
+    pre_size = cache.size
+    assert pre_size > 0, "expected cache to be populated before mutation"
+
+    try:
+        response = client.post("/api/sounds/1/rename", json={"new_name": "renamed", "guild_id": "111"})
+    finally:
+        sr.publish_soundboard_event = original
+
+    assert response.status_code == 200
+    assert "sounds_changed" in events_published, (
+        f"expected sounds_changed in {events_published}"
+    )
+    assert "actions_changed" in events_published, (
+        f"expected actions_changed in {events_published}"
+    )
+
+    # Cache should have been invalidated (cleared).
+    assert cache.size == 0, f"expected cache to be cleared after mutation, size={cache.size}"
+
+
+def test_sound_favorite_publishes_events_and_invalidates_cache(web_client):
+    """After a favorite toggle, SSE events are published and cache cleared."""
+    client, db_path = web_client
+    _login_web_user(client, username="test-user")
+    _seed_sound_for_options(db_path)
+
+    events_published: list[str] = []
+
+    def _fake_publish(event_type: str, data: dict | None = None) -> None:
+        events_published.append(event_type)
+
+    import bot.web.soundboard_routes as sr
+    original = sr.publish_soundboard_event
+    sr.publish_soundboard_event = _fake_publish
+
+    # Populate cache
+    resp1 = client.get("/api/actions?guild_id=111")
+    assert resp1.status_code == 200
+    cache = app.extensions.get("web_response_cache")
+    assert cache is not None
+    pre_size = cache.size
+    assert pre_size > 0
+
+    try:
+        response = client.post("/api/sounds/1/favorite", json={"guild_id": "111"})
+    finally:
+        sr.publish_soundboard_event = original
+
+    assert response.status_code == 200
+    assert response.get_json()["favorite"] is True
+    assert "sounds_changed" in events_published
+    assert "actions_changed" in events_published
+    assert cache.size == 0, "cache should be cleared after mutation"
+
+
+def test_sound_slap_publishes_events_and_invalidates_cache(web_client):
+    """After a slap toggle, SSE events are published and cache cleared."""
+    client, db_path = web_client
+    _login_web_user(client, username="test-user", admin_guild_ids=["111"])
+    _seed_sound_for_options(db_path)
+
+    events_published: list[str] = []
+
+    def _fake_publish(event_type: str, data: dict | None = None) -> None:
+        events_published.append(event_type)
+
+    import bot.web.soundboard_routes as sr
+    original = sr.publish_soundboard_event
+    sr.publish_soundboard_event = _fake_publish
+
+    # Populate cache
+    resp1 = client.get("/api/actions?guild_id=111")
+    assert resp1.status_code == 200
+    cache = app.extensions.get("web_response_cache")
+    assert cache is not None
+    pre_size = cache.size
+    assert pre_size > 0
+
+    try:
+        response = client.post("/api/sounds/1/slap", json={"guild_id": "111"})
+    finally:
+        sr.publish_soundboard_event = original
+
+    assert response.status_code == 200
+    assert "sounds_changed" in events_published
+    assert "actions_changed" in events_published
+    assert cache.size == 0, "cache should be cleared after mutation"
+
+
+def test_sound_add_to_list_publishes_events_when_added(web_client):
+    """When a sound is newly added to a list, SSE events are published and cache cleared."""
+    client, db_path = web_client
+    _login_web_user(client, username="test-user")
+    _seed_sound_for_options(db_path)
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO sound_lists (id, list_name, creator, guild_id, created_at) "
+            "VALUES (10, 'TestList', 'test-user', '111', '2026-04-04 12:00:00')"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    events_published: list[str] = []
+
+    def _fake_publish(event_type: str, data: dict | None = None) -> None:
+        events_published.append(event_type)
+
+    import bot.web.soundboard_routes as sr
+    original = sr.publish_soundboard_event
+    sr.publish_soundboard_event = _fake_publish
+
+    # Populate cache
+    resp1 = client.get("/api/actions?guild_id=111")
+    assert resp1.status_code == 200
+    cache = app.extensions.get("web_response_cache")
+    assert cache is not None
+
+    try:
+        response = client.post(
+            "/api/sounds/1/lists",
+            json={"list_id": 10, "guild_id": "111"},
+        )
+    finally:
+        sr.publish_soundboard_event = original
+
+    assert response.status_code == 200
+    assert response.get_json()["added"] is True
+    assert "sounds_changed" in events_published
+    assert "actions_changed" in events_published
+    assert cache.size == 0, "cache should be cleared after mutation"
+
+
+def test_sound_add_to_list_skips_events_when_already_added(web_client):
+    """When a sound is already in the list, no events are published (no DB mutation)."""
+    client, db_path = web_client
+    _login_web_user(client, username="test-user")
+    _seed_sound_for_options(db_path)
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO sound_lists (id, list_name, creator, guild_id, created_at) "
+            "VALUES (10, 'TestList', 'test-user', '111', '2026-04-04 12:00:00')"
+        )
+        conn.execute(
+            "INSERT INTO sound_list_items (list_id, sound_filename, added_at) "
+            "VALUES (10, 'opts.mp3', '2026-04-04 12:00:00')"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    events_published: list[str] = []
+
+    def _fake_publish(event_type: str, data: dict | None = None) -> None:
+        events_published.append(event_type)
+
+    import bot.web.soundboard_routes as sr
+    original = sr.publish_soundboard_event
+    sr.publish_soundboard_event = _fake_publish
+
+    try:
+        response = client.post(
+            "/api/sounds/1/lists",
+            json={"list_id": 10, "guild_id": "111"},
+        )
+    finally:
+        sr.publish_soundboard_event = original
+
+    assert response.status_code == 200
+    assert response.get_json()["added"] is False
+    assert events_published == [], f"expected no events for no-op add, got {events_published}"
+
+
+def test_sound_event_toggle_publishes_actions_changed(web_client):
+    """After toggling a user event, actions_changed is published and cache cleared."""
+    client, db_path = web_client
+    _login_web_user(client, username="test-user")
+    _seed_sound_for_options(db_path)
+
+    events_published: list[str] = []
+
+    def _fake_publish(event_type: str, data: dict | None = None) -> None:
+        events_published.append(event_type)
+
+    import bot.web.soundboard_routes as sr
+    original = sr.publish_soundboard_event
+    sr.publish_soundboard_event = _fake_publish
+
+    # Populate cache
+    resp1 = client.get("/api/actions?guild_id=111")
+    assert resp1.status_code == 200
+    cache = app.extensions.get("web_response_cache")
+    assert cache is not None
+    pre_size = cache.size
+    assert pre_size > 0
+
+    try:
+        response = client.post(
+            "/api/sounds/1/events",
+            json={"event": "join", "target_user": "test-user", "guild_id": "111"},
+        )
+    finally:
+        sr.publish_soundboard_event = original
+
+    assert response.status_code == 200
+    assert "actions_changed" in events_published
+    # sounds_changed should NOT be published for event toggles
+    assert "sounds_changed" not in events_published
+    assert cache.size == 0, "cache should be cleared after mutation"
+
+
 def test_favorites_endpoint_returns_and_applies_user_filter(web_client):
     client, db_path = web_client
 

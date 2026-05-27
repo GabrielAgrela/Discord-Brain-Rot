@@ -2,6 +2,7 @@
 Tests for TikTok favorite collection watcher service behavior.
 """
 
+import sqlite3
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -49,6 +50,17 @@ class FakeFavoriteWatcherRepository:
     def get_known_video_ids(self, watcher_id):
         """Return fake known video IDs."""
         return set(self.known[watcher_id].keys())
+
+    def claim_video_seen(self, *, watcher_id, video_id, video_url):
+        """Claim a video. Returns True only when the ID was not yet known."""
+        if video_id in self.known.get(watcher_id, {}):
+            return False
+        self.known.setdefault(watcher_id, {})[video_id] = {
+            "video_url": video_url,
+            "imported_at": None,
+            "sound_filename": None,
+        }
+        return True
 
     def record_video_seen(
         self,
@@ -154,6 +166,91 @@ async def test_poll_once_imports_only_videos_missing_from_baseline():
     assert kwargs["image_requester"] == "Favorite Watcher"
     assert kwargs["image_border_color"] == "#5865F2"
     assert kwargs["view"].children
+
+
+@pytest.mark.asyncio
+async def test_poll_once_handles_db_lock_after_import():
+    """Regression: a failed metadata write after import must NOT trigger re-download."""
+    repo = FakeFavoriteWatcherRepository()
+    watcher_id = repo.add_watcher(
+        url="https://www.tiktok.com/@u/collection/bot-123",
+        guild_id=42,
+        added_by_user_id=7,
+        added_by_username="Admin",
+    )
+    sound_service = Mock()
+    sound_service.import_sound_from_video = AsyncMock(return_value="/sounds/imported.mp3")
+    action_repo = Mock()
+
+    service = FavoriteWatcherService(
+        sound_service,
+        watcher_repo=repo,
+        action_repo=action_repo,
+    )
+    service.fetch_collection_videos = AsyncMock(
+        return_value=[
+            FavoriteCollectionVideo("111", "https://www.tiktok.com/@u/video/111"),
+        ]
+    )
+
+    # First poll: import succeeds, but record_video_seen raises DB locked.
+    original_record = repo.record_video_seen
+
+    def _fail_on_metadata(*, watcher_id, video_id, video_url, imported_at=None, sound_filename=None):
+        raise sqlite3.OperationalError("database is locked")
+
+    repo.record_video_seen = _fail_on_metadata
+    imported_count = await service.poll_once()
+    assert imported_count == 1
+    sound_service.import_sound_from_video.assert_awaited_once()
+
+    # The claim succeeded even though metadata update failed.
+    assert repo.known[watcher_id]["111"]["imported_at"] is None  # metadata not updated
+    assert repo.known[watcher_id]["111"]["sound_filename"] is None
+
+    # Restore record_video_seen and run poll_once again.
+    repo.record_video_seen = original_record
+    sound_service.import_sound_from_video.reset_mock()
+
+    imported_count = await service.poll_once()
+    assert imported_count == 0  # nothing new
+    sound_service.import_sound_from_video.assert_not_awaited()  # NOT re-downloaded!
+
+
+@pytest.mark.asyncio
+async def test_poll_once_skips_duplicate_video_ids_in_single_scan():
+    """Duplicate video IDs in one fetch must be imported only once."""
+    repo = FakeFavoriteWatcherRepository()
+    watcher_id = repo.add_watcher(
+        url="https://www.tiktok.com/@u/collection/bot-123",
+        guild_id=42,
+        added_by_user_id=7,
+        added_by_username="Admin",
+    )
+    sound_service = Mock()
+    sound_service.import_sound_from_video = AsyncMock(return_value="/sounds/imported.mp3")
+    action_repo = Mock()
+
+    service = FavoriteWatcherService(
+        sound_service,
+        watcher_repo=repo,
+        action_repo=action_repo,
+    )
+    # Return the same video_id twice.
+    service.fetch_collection_videos = AsyncMock(
+        return_value=[
+            FavoriteCollectionVideo("111", "https://www.tiktok.com/@u/video/111"),
+            FavoriteCollectionVideo("111", "https://www.tiktok.com/@u/video/111"),
+        ]
+    )
+
+    imported_count = await service.poll_once()
+
+    assert imported_count == 1
+    sound_service.import_sound_from_video.assert_awaited_once_with(
+        "https://www.tiktok.com/@u/video/111",
+        guild_id=42,
+    )
 
 
 def test_fetch_collection_videos_reconstructs_flat_tiktok_entry_urls():

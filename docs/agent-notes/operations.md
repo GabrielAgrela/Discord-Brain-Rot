@@ -14,6 +14,17 @@ Read this when changing deployment, Docker, dependencies, logging, verification 
 - The preferred standalone test command is `./venv/bin/python -m pytest -q tests/`.
 - Testing artifacts such as `.pytest_cache/`, `.coverage`, and `htmlcov/` are ignored.
 
+## Honker (Required in Docker)
+
+- Honker is a SQLite extension (alpha) that adds NOTIFY/LISTEN, durable queues, streams, and named locks. **Docker containers enable and require Honker.** Local Python 3.10 development gracefully degrades. See `bot/services/honker_integration.py` for the centralised API layer.
+- All Honker helpers in `honker_integration.py` check `availability()`, which caches the import result. If Honker fails mid-session, the fallback paths are safe.
+- `listen_notifications()` accepts an optional `fallback_poll_s` parameter (default `None`) that controls Honker's internal SQLite-poll interval when file-watch wake-ups are unavailable. Important channels (`soundboard_events`, `playback_queue`, `sound_import_notifications`) pass `fallback_poll_s=1.0` to reduce notification latency from the default ~15 s to ~1 s.
+- Named locks use `HONKER_WORKER_ID` (default `hostname-pid`) for owner identity. Lock TTL defaults to 60 seconds. Lock helpers use SQL functions `honker_lock_acquire(name, owner, ttl_s)` / `honker_lock_release(name, owner)`.
+- The `/api/events` SSE endpoint requires `text/event-stream` in the Accept header; it returns a JSON status response otherwise. When Honker is available, events are consumed via a background daemon thread with its own asyncio event loop.
+- Queue helpers use `queue.claim_batch(worker, batch_size)` for claiming and `job.ack()` for completion (not `queue.claim(worker, count=...)` or `job.complete()`).
+- `Dockerfile` includes `libsqlite3-dev` so Honker's sdist can link against SQLite at build time. `honker==0.2.4; python_version >= "3.11"` is in `requirements.txt`.
+- When the Docker image changes (Dockerfile, requirements.txt), run `docker-compose build` then `docker-compose up -d --force-recreate` because `restart` alone uses the old image.
+
 ## Docker Restart Rules
 
 - The bot runs in Docker, so Python changes do not take effect until the container restarts.

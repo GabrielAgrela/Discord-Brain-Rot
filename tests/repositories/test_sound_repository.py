@@ -3,6 +3,7 @@ Tests for bot/repositories/sound.py - SoundRepository.
 """
 
 import pytest
+from unittest.mock import MagicMock
 from datetime import datetime
 import sqlite3
 
@@ -27,6 +28,67 @@ class TestSoundRepository:
         assert row is not None
         assert row["Filename"] == "new_sound.mp3"
     
+    def test_insert_sound_publishes_soundboard_event(self, sound_repository, db_connection):
+        """Test insert_sound publishes sounds_changed event."""
+        from bot.repositories import sound as sound_module
+        original = sound_module._publish_soundboard_event
+        mock_publish = MagicMock(return_value=True)
+        sound_module._publish_soundboard_event = mock_publish
+        try:
+            sound_repository.insert_sound(
+                original_filename="test_event.mp3",
+                filename="test_event.mp3",
+                guild_id="789",
+            )
+            mock_publish.assert_called_once()
+            args, kwargs = mock_publish.call_args
+            assert args[1] == "sounds_changed"
+            assert args[2]["filename"] == "test_event.mp3"
+            assert args[2]["guild_id"] == "789"
+        finally:
+            sound_module._publish_soundboard_event = original
+
+    def test_insert_sound_event_fallback_gracefully(self, sound_repository, db_connection):
+        """Test insert_sound does not crash when event publish fails."""
+        from bot.repositories import sound as sound_module
+        original = sound_module._publish_soundboard_event
+        sound_module._publish_soundboard_event = MagicMock(side_effect=RuntimeError("Honker error"))
+        try:
+            sound_id = sound_repository.insert_sound("x.mp3", "x.mp3")
+            assert sound_id is not None
+            assert sound_id > 0
+        finally:
+            sound_module._publish_soundboard_event = original
+
+    def test_update_sound_by_id_publishes_event(self, sound_repository, sample_sounds):
+        """Test update_sound_by_id publishes sounds_changed event."""
+        from bot.repositories import sound as sound_module
+        original = sound_module._publish_soundboard_event
+        mock_publish = MagicMock(return_value=True)
+        sound_module._publish_soundboard_event = mock_publish
+        try:
+            sound_repository.update_sound_by_id(sample_sounds[0], favorite=1)
+            mock_publish.assert_called_once()
+            args, kwargs = mock_publish.call_args
+            assert args[1] == "sounds_changed"
+            assert args[2]["sound_id"] == sample_sounds[0]
+        finally:
+            sound_module._publish_soundboard_event = original
+
+    def test_update_publishes_event(self, sound_repository, sample_sounds):
+        """Test update publishes sounds_changed event."""
+        from bot.repositories import sound as sound_module
+        original = sound_module._publish_soundboard_event
+        mock_publish = MagicMock(return_value=True)
+        sound_module._publish_soundboard_event = mock_publish
+        try:
+            sound_repository.update(sample_sounds[0], favorite=True)
+            mock_publish.assert_called_once()
+            args, kwargs = mock_publish.call_args
+            assert args[1] == "sounds_changed"
+        finally:
+            sound_module._publish_soundboard_event = original
+
     def test_get_by_id(self, sound_repository, sample_sounds):
         """Test getting a sound by ID."""
         sound = sound_repository.get_by_id(sample_sounds[0])

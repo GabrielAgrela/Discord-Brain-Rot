@@ -13,7 +13,9 @@ Read this when changing uploads, sound ingest, playback, generated sound cards, 
 - Keep normalization best-effort: log failures and continue saving so ffmpeg/pydub edge cases do not block uploads/imports.
 - TikTok/YouTube/Instagram downloads passing through `downloads/` are normalized in `SoundDownloader.move_sounds`; keep env knobs consistent with `SoundService`.
 - TikTok collection favorite watchers use `FavoriteWatcherService` and `SoundService.import_sound_from_video()` to import directly into the guild-scoped sound library. Adding a watcher seeds current collection videos as already seen so only future additions import, then each successful future import posts a `DownloadedSoundView` image-card notification.
+- **Favorite watcher re-download spam gotcha**: The watcher must claim/record a video in the database **before** downloading it. `FavoriteWatcherRepository.claim_video_seen()` does an `INSERT OR IGNORE` and returns `True` only for a new row. The service calls this before `import_sound_from_video()`, so even if subsequent metadata writes (`record_video_seen`, `action_repo.insert`) fail with `database is locked`, the claim row already exists and the video will never be re-downloaded. Videos within a single scan are also deduplicated by `video_id` to avoid double-importing duplicate entries from yt-dlp.
 - All sound import notifications (scraper `move_sounds`, favorite watcher, web upload, manual Discord upload) share the same `SoundImportNotificationService.send_notification()` method. Each source has a default title template, requester label, and accent colour. Web uploads and favorite watchers use blue (`#5865F2`); scraper/manual use red (`#ED4245`). Cross-process web upload notifications are queued in `sound_import_notifications` and drained by `BackgroundService.sound_import_notification_drain_loop`.
+- When Honker is available, `SoundImportNotificationRepository.enqueue()` publishes a NOTIFY so the drain loop wakes immediately instead of waiting for the 3-second poll. `BackgroundService._start_honker_sound_import_listener()` is an async listener task that calls `drain_sound_import_notifications_once()` on each notification. Polling remains as fallback.
 
 ## Generated Sound Cards
 
@@ -22,6 +24,16 @@ Read this when changing uploads, sound ingest, playback, generated sound cards, 
 - When changing card layout/styling, verify behavior by running the bot and checking generated cards after deploy.
 - Emoji rendering depends on container fonts and CSS fallback. Keep `fonts-noto-color-emoji` installed in Docker and include emoji-capable families in the template `font-family` stack.
 - Keep a normal text font first, such as `DejaVu Sans`, and place emoji fonts later. `Noto Color Emoji` first can make normal text spacing look odd.
+
+## Cross-Process Playback Event Publishing
+
+- `AudioService._publish_playback_event()` is the central, safe helper that publishes a Honker `control_room_changed` SSE event on every actual playback start and finish.
+- It is called from `_mark_playback_started()` (covers `play_audio`, `play_slap`, and `play_tts_live_stream`) and `_mark_playback_finished()` (covers all `after_playing` callbacks).
+- This ensures the web control room (`refreshControlRoomStatus` / `refreshWebControlState`) updates consistently across all playback code paths — normal play, slap, live TTS, Discord random button, web play button, and scheduled/periodic sounds.
+- The method never blocks or fails playback: all exceptions (missing Honker, unavailable db_path, Honker publish failures) are caught and logged at `DEBUG` level.
+- `db_path` is obtained from `self.sound_repo.db_path` (inherited from `BaseRepository`).
+- Event payload includes `guild_id`, `audio_file`, `user`, `play_id`, `duration_seconds`, and a `reason` flag (`playback_started` / `playback_finished`).
+- Only `control_room_changed` is published — action tables are not refreshed on playback events. Action-driven table updates continue to come from `actions_changed` events in `ActionRepository.insert()` / `Database.log_action()`.
 
 ## Playback And FFmpeg
 

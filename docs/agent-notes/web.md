@@ -18,6 +18,45 @@ Read this when changing `web_page.py`, `bot/web/`, web repositories/services, te
 - Web playback requires Discord OAuth login. `web_page.py` expects `DISCORD_OAUTH_CLIENT_ID`, `DISCORD_OAUTH_CLIENT_SECRET`, and stable `WEB_SESSION_SECRET`; set `DISCORD_OAUTH_REDIRECT_URI` explicitly in production if Flask cannot infer the public callback URL.
 - Web upload moderation should mirror `BotBehavior.is_admin_or_mod`: OAuth requests `identify guilds`, stores `DiscordWebUser.admin_guild_ids`, and treats users as web admins for a selected guild when they are owners or Discord reports Administrator / Manage Server / Manage Channels. If a known admin cannot see the inbox, have them log out/in to refresh scopes and admin guild IDs.
 
+## Honker Integration (Required in Docker)
+
+- Docker containers enable and require Honker via `HONKER_ENABLED=true` and `HONKER_REQUIRED=true` in `docker-compose.yml`. Local Python 3.10 development gracefully skips Honker.
+- `bot/services/honker_integration.py` centralises all Honker API calls. Every public helper has a no-op fallback when Honker is absent; `HONKER_REQUIRED=true` makes failures hard errors.
+- Honker connections are cached per-thread in `_thread_honker.connections` to avoid re-running `Database.__init__` schema/bootstrap DDL on every helper call. `_get_honker_connection()` returns the cached connection on subsequent calls from the same thread. A bounded retry (5 attempts, exp backoff up to 1s) handles transient `database is locked` on first open. `_close_honker_connection(db_path)` removes a cached connection for tests/clean shutdown.
+- `queue_playback_request()` / `queue_control_request()` publish a Honker NOTIFY on `playback_queue` after inserting the row. `_drain_playback_queue_once()` (extracted from `check_playback_queue`) is called by both the polling loop and the Honker listener task. The drain is serialized with a module-level `asyncio.Lock` (`_playback_queue_drain_lock`) so concurrent calls from both paths cannot fetch and process the same unplayed row twice. The lock is acquired non-blocking — if it is already held, the second call returns immediately.
+- `SoundImportNotificationRepository.enqueue()` publishes a Honker NOTIFY on `sound_import_notifications`. `BackgroundService._start_honker_sound_import_listener()` listens and calls `drain_sound_import_notifications_once()` immediately.
+- `publish_soundboard_event()` in `bot/web/event_routes.py` publishes coarse change notifications on the `soundboard_events` Honker channel via both NOTIFY and stream publish. These drive the SSE `/api/events` endpoint.
+- The SSE `/api/events` endpoint uses a background daemon thread with its own asyncio event loop to consume Honker NOTIFY events via `listen_notifications()` from the integration layer (rather than calling `honker.open()` or `stream.subscribe()` directly). This ensures the per-thread Honker connection cache is used. Event payloads are pushed to a thread-safe `queue.Queue` and consumed by the Flask SSE generator. A `threading.Event` signals the listener to stop when the generator exits.
+- Web upload jobs (`_queue_web_upload_job`) are enqueued to the Honker `web_upload_jobs` durable queue when available. The web process runs background Honker worker threads that claim and process these jobs via `_run_web_upload_job`. The legacy `ThreadPoolExecutor` fallback is used only when Honker is unavailable.
+- `BackgroundService` has optional Honker named-lock protection (`_run_with_honker_lock()`) around duplicate-sensitive scheduler loops (weekly wrapped, rlstore notification, backup, favourite watcher). Polling and fallback loops are preserved.
+- Lock helpers use SQL functions `honker_lock_acquire(name, owner, ttl_s)` / `honker_lock_release(name, owner)` via `conn.transaction().query(...)`.
+- `ensure_available(db_path)` is called during both bot and web container startup to validate Honker availability. With `HONKER_REQUIRED=true`, a missing/broken Honker fails the container with a clear RuntimeError.
+
+## SSE / Live Updates
+
+- `/api/events` streams Server-Sent Events. When Honker is available, events are driven by Honker LISTEN on `soundboard_events`; otherwise the stream sends only periodic heartbeats.
+- The frontend `soundboard.js` creates an `EventSource` to `/api/events` on load. Events trigger targeted refresh calls (`fetchActions`, `fetchAllSounds`, `refreshControlRoomStatus`, etc.).
+- **SSE connection state** (`sseConnected`, `sseLastMessageAt`) is tracked client-side. The `connected` event sets both; every event/heartbeat updates `sseLastMessageAt`. On `onerror`, `sseConnected` is set to `false` but the EventSource is **not closed** — the browser auto-reconnects with backoff. When the connection resumes, a fresh `connected` event restores healthy state.
+- **Debounce**: SSE event handlers use `scheduleSseRefresh(key, fn, delayMs=150)` to coalesce multiple events into a single refresh, preventing fetch storms from batched mutations.
+- Tables are **strictly SSE-driven**: no passive polling occurs regardless of SSE health, and no reconnect resync happens on SSE connect/reconnect. Missed events require fixing event publication on the server, not client-side polling fallback. Control room and system monitor continue their normal polling cadence regardless of SSE health.
+- SSE auto-reconnect: on error the frontend marks unhealthy but does NOT close the EventSource; the browser automatically retries with backoff. The `connected` event restores SSE health tracking but does **not** trigger table resyncs.
+- Honker NOTIFY listeners use `fallback_poll_s=1.0` for important channels (`soundboard_events`, `playback_queue`, `sound_import_notifications`) so that SQLite-poll-based wake-ups have at most 1 s latency even when file-watch notifications are unavailable in Docker.
+- Events are published from multiple layers:
+  - **ActionRepository.insert()** and **Database.insert_action()** — both publish `actions_changed` after each new action row.
+  - **SoundRepository.insert_sound()/update_sound_by_id()/update()/insert()/update_sound()** — publishes `sounds_changed` after sound mutations.
+  - **playback_routes.py** — publishes `playback_queued` on play/control requests (already existed).
+  - **upload_routes.py** — publishes `upload_job_changed` on initial queue (already existed).
+  - **_run_web_upload_job()** — publishes `upload_job_changed` on every status transition (processing → approved/error).
+  - **BackgroundService.web_control_room_status_loop()** — publishes `control_room_changed` when a per-guild signature of significant fields changes (ignoring fast-changing elapsed seconds). Signature includes: voice_connected, voice_channel_id, voice_member_count, is_playing, is_paused, current_sound, current_requester, muted.
+  - **BackgroundService.drain_sound_import_notifications_once()** — publishes `sound_imported` and `sounds_changed` after each successful notification send.
+- `publish_soundboard_event()` is safe to call from any Flask route, background thread, or repository; it degrades to no-op when Honker is unavailable.
+- **Actions table refresh** (strictly SSE-driven — no passive polling, no reconnect resync, no local post-play fallback):
+    1. **`actions_changed` event** — published by `ActionRepository.insert()` after every action row is committed. The frontend calls `_scheduleAuthoritativeActionsRefresh()`, which records a timestamp, cancels any pending delayed fallback timers, and calls `fetchActions()` with `showLoading=true`.
+    2. **`playback_queued` event** — published by `playback_routes.py` immediately after queueing. The frontend checks both `data.action` (controls) and `data.play_action` (sound plays) and calls `_scheduleActionsFallbackRefresh(800)`.
+    3. **`control_room_changed` event** — published by `AudioService._mark_playback_started()` for all real playback paths. The frontend parses `data.reason === 'playback_started'` and calls `_scheduleActionsFallbackRefresh(1200)`.
+
+    The delayed fallback helpers use a shared timer and `fetchActions()` with `showLoading=false` to avoid forcing a repaint when data is unchanged. If an authoritative `actions_changed` event has arrived since the fallback was scheduled, the fallback is skipped entirely — preventing duplicate table repaints from overlapping web playback events.
+
 ## Playback Queue Transport
 
 - `playback_queue` is an internal Flask-to-bot transport table, not a user-facing sound queue. Do not show pending queue counts or "Queue/Queued" wording in the UI.
@@ -34,7 +73,7 @@ Read this when changing `web_page.py`, `bot/web/`, web repositories/services, te
 - Web uploads use the same user-facing fields as `UploadSoundWithFileModal`: URL, MP3 file, custom name, and video time limit. File upload takes priority. Supported URLs are MP3/TikTok/YouTube/Instagram.
 - Uploads are approved by default and recorded in `web_uploads`. Rejected uploads should remain auditable and should blacklist the linked sound when `sounds.blacklist` exists.
 - Web uploads are queued through in-process Flask background jobs. `/api/upload_sound` returns `202` with `job_id`; clients poll `/api/upload_sound/<job_id>` until `approved` or `error`. Keep request handlers fast.
-- Job status is in-memory; a web restart can drop active status polling even when already-started processing completed or failed.
+- Job status is now persistent via `WebUploadJobRepository` (`web_upload_jobs` table). On restart, `_resume_pending_upload_jobs()` in `app.py` recovers queued/stale processing jobs. File-upload jobs whose temp file is gone are marked as error; URL-based jobs are re-submitted from `source_url`.
 - Docker web uploads must write to the same host-mounted `sounds/` directory the bot reads (`/app/sounds` in both containers).
 - Do not put `.play-button` on the web upload submit button. Soundboard JS initializes every `.play-button` as an audio control and can rewrite upload text to the play icon.
 
@@ -128,19 +167,44 @@ The ``/api/system_monitor/status`` route also sets ``Cache-Control: private, max
 
 ### Browser polling policy
 
-The control-room page no longer uses setInterval bursts. Instead it uses staggered setTimeout chains with adaptive cadences:
+The control-room page never uses setInterval. Instead it uses staggered setTimeout chains. Tables are strictly SSE-driven — no passive polling, no reconnect resync fallback. Control room polls on a fixed 1 s cadence regardless of SSE health. SSE events provide fast-path acceleration atop active polling for control room and system monitor. The paths are:
 
-| What | Cadence (dropdown closed) | Cadence (dropdown open) | Hidden tab |
+1. **Control room network poll** — `/api/control_room/status` is fetched every 1 s regardless of SSE health. A local client-side progress tick updates the elapsed time between fetches for smooth progress display. SSE events (`control_room_changed`, `playback_queued`) trigger immediate refreshes with `forceNetwork: true`.
+2. **Tables (actions, favorites, all-sounds)** — strictly SSE-driven. No passive polling occurs regardless of SSE health. No reconnect resync happens on SSE connect/reconnect. SSE events (`actions_changed`, `sounds_changed`) trigger immediate targeted fetches. Missed events must be fixed by publishing the correct event server-side.
+3. **Web control state** — SSE-driven with a 5 s health-check fallback. When SSE is healthy, only the health-check timer runs. When SSE is unhealthy, full state polling resumes.
+4. **System monitor** — host telemetry has no event-driven path, so it always polls at 1 s when visible (20 s when hidden), regardless of SSE health.
+5. **Upload jobs** — SSE-driven with 1.2 s network polling fallback when SSE is unhealthy.
+
+**When SSE is unhealthy / unavailable**:
+
+| What | Cadence (visible) | Hidden tab |
+|---|---|---|
+| Table data (actions/favorites/all_sounds) | **No fetch** — strictly SSE-driven | Same |
+| Control room status | 1 s network poll | N/A |
+| Web control (mute) state | 5 s | N/A |
+| System monitor | 1 s | 20 s |
+| Upload job polling | 1.2 s | Same |
+
+**When SSE is healthy** — tables are strictly SSE-driven; control room continues polling at 1 s. SSE events provide fast-path acceleration. Web control and upload jobs rely on SSE with fallback:
+
+| What | Cadence (visible) | Hidden tab | Why |
 |---|---|---|---|
-| Table data (actions/favorites/all_sounds) | One table every 3.5 s, round-robin | Same | Same (no additional slowdown) |
-| Control room status | 1 s | 1 s | N/A |
-| Web control (mute) state | 5 s | 5 s | N/A |
-| System monitor | 4 s | 1.5 s | 20 s |
+| Table data (actions/favorites/all_sounds) | **No fetch** — strictly SSE-driven | Same | SSE events (`actions_changed`, `sounds_changed`) drive updates; no reconnect resync or polling fallback |
+| Control room status | 1 s network poll + local progress tick | N/A | SSE events provide immediate refresh; 1 s polling ensures correctness even if events are missed |
+| Web control (mute) state | **No fetch** — health check only (~5 s) | N/A | Events (`control_room_changed`, `actions_changed`) drive state; low priority |
+| System monitor | **1 s** (unchanged, no event path) | 20 s | Host telemetry is NOT event-driven |
+| Upload job polling | Event-driven, 1.2 s fallback when SSE unhealthy | Same | `upload_job_changed` event triggers the next poll |
 
+- **Control room local progress tick**: When SSE is healthy, the 1 s `_scheduleStatusPoll` timer runs `_controlRoomProgressTick()` instead of fetching. This function increments a local elapsed counter and re-renders the progress bar. On the next SSE event or visibility change, `refreshControlRoomStatus()` fetches fresh server data and resets the local counter. When SSE becomes unhealthy (detected by the health-check tick), polling resumes with a full network fetch every 1 s.
+- **System monitor 1 s cadence**: Unlike previous behaviour where system monitor slowed down during SSE health (paranoia intervals up to 15 s/60 s), it now always polls at 1 s when the tab is visible and 20 s when hidden. There is no event-driven path for host telemetry.
+- **Health-check tick**: The web-control loop schedules a 5 s health-check tick that calls `isSseHealthy()`. When SSE is healthy, web-control state is not fetched (events drive updates). When SSE is unhealthy, the next tick starts polling web-control state. This ensures automatic recovery without network overhead for the lowest-priority data.
+- **Upload job fallback**: After submitting an upload, the initial `pollUploadJob()` call fetches status once. If the job is still processing and SSE is healthy, no timeout is scheduled — the next `upload_job_changed` SSE event drives the check. When SSE is unhealthy, polling resumes at 1.2 s.
+- **SSE health check**: `isSseHealthy()` returns true when `sseConnected` is true AND the last event/heartbeat was received within `SSE_HEALTHY_TIMEOUT_MS` (45 s). If `sseConnected` is true but no event arrives for >45 s, SSE is considered unhealthy. The health-check tick (5 s) detects this faster.
 - Each loop uses `setTimeout` chains so the next tick is scheduled only after the previous tick fires (``setInterval`` would pile up if a fetch stalls).
-- Passive table refresh skips while a filter select or pagination input is focused.
-- Opening the system monitor dropdown triggers an immediate refresh and switches to the faster cadence. Closing it resets to the slow cadence.
+- Table data has no passive polling loop — tables are strictly SSE-driven. Missed events must be fixed by publishing the correct event server-side.
+- Opening the system monitor dropdown triggers an immediate refresh. The cadence is 1 s regardless of dropdown state.
 - ``visibilitychange`` triggers an immediate refresh of all key state when the tab becomes visible.
+- User-triggered fetches (search, pagination, play response, mutation response) are always immediate with `forceNetwork: true` and are **not** affected by SSE health or paranoia intervals.
 
 ### Cross-tab request deduplication
 

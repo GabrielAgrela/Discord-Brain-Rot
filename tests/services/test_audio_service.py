@@ -3495,3 +3495,290 @@ class TestSpeechTrainingSinkIntegration:
         assert 111 not in sink._speech_segment_pcm
         assert sink._speech_recorder.enqueue_segment.called
 
+
+# ============================================================================
+# Playback event publishing tests
+# ============================================================================
+
+
+class TestPlaybackEventPublishing:
+    """Test _publish_playback_event and its integration with mark methods."""
+
+    @pytest.fixture
+    def audio_service(self):
+        """Create an AudioService instance with minimal state for publishing tests."""
+        from bot.services.audio import AudioService
+
+        service = AudioService.__new__(AudioService)
+        service._last_gear_message_by_channel = {}
+        service._progress_update_task = None
+        service.playback_done = asyncio.Event()
+        service.playback_done.set()
+        service.keyword_sinks = {}
+        service._keyword_detection_restart_tasks = {}
+        # Per-guild playback state dicts (normally set in __init__)
+        service._guild_current_audio_file = {}
+        service._guild_current_requester = {}
+        service._guild_current_play_id = {}
+        service._guild_current_play_started_at = {}
+        service._guild_current_duration_seconds = {}
+        service._guild_last_played_time = {}
+        service._guild_current_sound_message = {}
+        service._guild_stop_progress_update = {}
+        service._guild_cooldown_message = {}
+        service._guild_current_similar_sounds = {}
+        service._guild_playback_done = {}
+        service._guild_progress_update_task = {}
+        service._guild_current_view = {}
+        service._connection_locks = {}
+        service._pending_connections = {}
+        service._reconnection_timestamps = {}
+        service._connection_timestamps = {}
+        service._guild_live_tts_interrupt_events = {}
+        service._keyword_detection_restart_tasks = {}
+        # Track guild playback request counts (for rate limiting)
+        service._guild_play_requests = {}
+        return service
+
+    # ------------------------------------------------------------------
+    # _publish_playback_event
+    # ------------------------------------------------------------------
+
+    def test_publish_playback_event_calls_honker(
+        self, audio_service
+    ):
+        """_publish_playback_event calls publish_soundboard_event with correct args."""
+        mock_repo = Mock()
+        mock_repo.db_path = "/fake/db.sqlite"
+        audio_service.sound_repo = mock_repo
+
+        with patch(
+            "bot.services.honker_integration.publish_soundboard_event"
+        ) as mock_publish:
+            audio_service._publish_playback_event(
+                "control_room_changed",
+                12345,
+                audio_file="test.mp3",
+                user="TestUser",
+                play_id="play-123",
+                duration_seconds=10.5,
+                flags={"reason": "playback_started"},
+            )
+
+        mock_publish.assert_called_once_with(
+            "/fake/db.sqlite",
+            "control_room_changed",
+            {
+                "guild_id": "12345",
+                "audio_file": "test.mp3",
+                "user": "TestUser",
+                "play_id": "play-123",
+                "duration_seconds": 10.5,
+                "reason": "playback_started",
+            },
+        )
+
+    def test_publish_playback_event_no_ops_without_db_path(
+        self, audio_service
+    ):
+        """_publish_playback_event no-ops when db_path is empty."""
+        mock_repo = Mock()
+        mock_repo.db_path = ""
+        audio_service.sound_repo = mock_repo
+
+        with patch(
+            "bot.services.honker_integration.publish_soundboard_event"
+        ) as mock_publish:
+            audio_service._publish_playback_event(
+                "control_room_changed", 12345
+            )
+
+        mock_publish.assert_not_called()
+
+    def test_publish_playback_event_no_ops_when_publisher_raises(
+        self, audio_service
+    ):
+        """_publish_playback_event does not raise when publish_soundboard_event fails."""
+        mock_repo = Mock()
+        mock_repo.db_path = "/fake/db.sqlite"
+        audio_service.sound_repo = mock_repo
+
+        with patch(
+            "bot.services.honker_integration.publish_soundboard_event",
+            side_effect=RuntimeError("Honker not available"),
+        ):
+            # Should not raise
+            audio_service._publish_playback_event(
+                "control_room_changed", 12345
+            )
+
+    def test_publish_playback_event_no_ops_when_import_fails(
+        self, audio_service
+    ):
+        """_publish_playback_event no-ops when honker import fails."""
+        mock_repo = Mock()
+        mock_repo.db_path = "/fake/db.sqlite"
+        audio_service.sound_repo = mock_repo
+
+        with patch(
+            "bot.services.honker_integration.publish_soundboard_event",
+            side_effect=ImportError("No module named honker"),
+        ):
+            # Should not raise
+            audio_service._publish_playback_event(
+                "control_room_changed", 12345
+            )
+
+    def test_publish_playback_event_user_object(
+        self, audio_service
+    ):
+        """_publish_playback_event converts user objects to name string."""
+        mock_repo = Mock()
+        mock_repo.db_path = "/fake/db.sqlite"
+        audio_service.sound_repo = mock_repo
+
+        class FakeUser:
+            name = "FakeUser"
+
+        with patch(
+            "bot.services.honker_integration.publish_soundboard_event"
+        ) as mock_publish:
+            audio_service._publish_playback_event(
+                "control_room_changed",
+                12345,
+                audio_file="test.mp3",
+                user=FakeUser(),
+            )
+
+        mock_publish.assert_called_once()
+        args = mock_publish.call_args[0]
+        data = args[2]
+        assert data["user"] == "FakeUser"
+
+    def test_publish_playback_event_minimal_data(
+        self, audio_service
+    ):
+        """_publish_playback_event works with only required args."""
+        mock_repo = Mock()
+        mock_repo.db_path = "/fake/db.sqlite"
+        audio_service.sound_repo = mock_repo
+
+        with patch(
+            "bot.services.honker_integration.publish_soundboard_event"
+        ) as mock_publish:
+            audio_service._publish_playback_event(
+                "control_room_changed", 12345
+            )
+
+        mock_publish.assert_called_once_with(
+            "/fake/db.sqlite",
+            "control_room_changed",
+            {"guild_id": "12345"},
+        )
+
+    # ------------------------------------------------------------------
+    # _mark_playback_started integration
+    # ------------------------------------------------------------------
+
+    def test_mark_playback_started_publishes_event(
+        self, audio_service
+    ):
+        """_mark_playback_started calls _publish_playback_event after setting state."""
+        mock_repo = Mock()
+        mock_repo.db_path = "/fake/db.sqlite"
+        audio_service.sound_repo = mock_repo
+
+        guild_id = 999
+        audio_service._ensure_guild_playback_state(guild_id)
+
+        with patch.object(
+            audio_service, "_publish_playback_event"
+        ) as mock_publish:
+            audio_service._mark_playback_started(
+                guild_id, "sound.mp3", "Tester", "pid-1", 5.0
+            )
+
+        # State should be set
+        assert audio_service._guild_current_audio_file[guild_id] == "sound.mp3"
+        assert audio_service._guild_current_requester[guild_id] == "Tester"
+        assert audio_service._guild_current_play_id[guild_id] == "pid-1"
+        assert audio_service._guild_current_duration_seconds[guild_id] == 5.0
+
+        # Event should be published
+        mock_publish.assert_called_once_with(
+            "control_room_changed",
+            guild_id,
+            audio_file="sound.mp3",
+            user="Tester",
+            play_id="pid-1",
+            duration_seconds=5.0,
+            flags={"reason": "playback_started"},
+        )
+
+    # ------------------------------------------------------------------
+    # _mark_playback_finished integration
+    # ------------------------------------------------------------------
+
+    def test_mark_playback_finished_publishes_event(
+        self, audio_service
+    ):
+        """_mark_playback_finished calls _publish_playback_event after clearing state."""
+        mock_repo = Mock()
+        mock_repo.db_path = "/fake/db.sqlite"
+        audio_service.sound_repo = mock_repo
+
+        guild_id = 999
+        audio_service._ensure_guild_playback_state(guild_id)
+        # Set pre-existing state
+        audio_service._guild_current_audio_file[guild_id] = "sound.mp3"
+        audio_service._guild_current_requester[guild_id] = "Tester"
+        audio_service._guild_current_play_id[guild_id] = "pid-1"
+        audio_service._guild_current_duration_seconds[guild_id] = 5.0
+
+        with patch.object(
+            audio_service, "_publish_playback_event"
+        ) as mock_publish:
+            audio_service._mark_playback_finished(guild_id, "pid-1")
+
+        # State should be cleared
+        assert audio_service._guild_current_audio_file[guild_id] is None
+        assert audio_service._guild_current_requester[guild_id] is None
+        assert audio_service._guild_current_play_id[guild_id] is None
+        assert audio_service._guild_current_duration_seconds[guild_id] is None
+
+        # Event should be published with old values
+        mock_publish.assert_called_once_with(
+            "control_room_changed",
+            guild_id,
+            audio_file="sound.mp3",
+            user="Tester",
+            play_id="pid-1",
+            duration_seconds=5.0,
+            flags={"reason": "playback_finished"},
+        )
+
+    def test_mark_playback_finished_no_op_on_mismatched_play_id(
+        self, audio_service
+    ):
+        """_mark_playback_finished does nothing when play_id doesn't match."""
+        mock_repo = Mock()
+        mock_repo.db_path = "/fake/db.sqlite"
+        audio_service.sound_repo = mock_repo
+
+        guild_id = 999
+        audio_service._ensure_guild_playback_state(guild_id)
+        audio_service._guild_current_audio_file[guild_id] = "sound.mp3"
+        audio_service._guild_current_play_id[guild_id] = "pid-1"
+
+        with patch.object(
+            audio_service, "_publish_playback_event"
+        ) as mock_publish:
+            audio_service._mark_playback_finished(guild_id, "wrong-pid")
+
+        # State should be unchanged
+        assert audio_service._guild_current_audio_file[guild_id] == "sound.mp3"
+        assert audio_service._guild_current_play_id[guild_id] == "pid-1"
+
+        # No event should be published
+        mock_publish.assert_not_called()
+

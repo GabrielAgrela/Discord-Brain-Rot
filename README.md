@@ -82,6 +82,47 @@ Create a `.env` file in the project root. Only `DISCORD_BOT_TOKEN` is strictly r
 | `EL_voice_id_costa` | — | ElevenLabs "costa" voice ID |
 | `EL_TTS_QUOTA_COOLDOWN_SECONDS` | `3600` | Cooldown (seconds) after ElevenLabs quota_exceeded before retrying TTS |
 
+### Honker (Required in Docker — Cross-Process Notifications and Locks)
+
+The **Honker** SQLite extension provides fast cross-process NOTIFY/LISTEN,
+durable queues, and named locks. **Docker containers enable and require Honker
+by default.** When Honker is missing or broken in a container, the process fails
+at startup with a clear error.
+
+For local Python 3.10 development, Honker is not available (it requires
+Python >= 3.11). All features degrade gracefully to their original
+polling/fallback behaviour in that case.
+
+| Variable | Default | Description |
+|---|---|---|
+| `HONKER_ENABLED` | `true` (Docker) / `auto` (local) | When `true` or `auto` with available module, Honker features are active |
+| `HONKER_REQUIRED` | `true` (Docker) / `false` (local) | When `true`, startup hard-fails if Honker cannot be loaded |
+| `HONKER_WORKER_ID` | `hostname-pid` | Worker identifier for queue claim groups and lock identity |
+
+**What uses Honker when available:**
+
+- **Playback queue fast path:** After `queue_playback_request()` / `queue_control_request()`
+  inserts a row, a Honker NOTIFY wakes the bot drain listener immediately.
+  Existing polling (`PLAYBACK_QUEUE_INTERVAL`, default 0.25s) remains as
+  fallback. See `bot/services/honker_integration.py`.
+- **Sound import notifications:** After
+  `SoundImportNotificationRepository.enqueue()` inserts a row, a Honker NOTIFY
+  wakes the bot's notification drain loop immediately instead of waiting for the
+  3-second poll.
+- **Web upload jobs:** Job status is persisted to the `web_upload_jobs` table.
+  When Honker is available, jobs are enqueued to a Honker durable queue and
+  processed by Honker-backed workers in the web container. The direct
+  `ThreadPoolExecutor` fallback is used only when Honker is unavailable.
+  On container restart, queued or stale-processing jobs are recovered.
+- **SSE live updates:** The `/api/events` Server-Sent Events endpoint is driven
+  by a background Honker stream listener (using an async-to-sync daemon thread
+  and queue bridge) when available; otherwise it sends only keep-alive
+  heartbeats and the frontend falls back to staggered polling.
+- **Scheduled-work locking:** Named-lock guards around duplicate-sensitive
+  scheduler loops (weekly wrapped, RL store notification, backup, favourite
+  watcher) prevent double execution when multiple bot processes are running.
+  When Honker is unavailable, the locks are no-ops (original behaviour).
+
 ### Voice Commands & STT
 
 | Variable | Default | Description |
@@ -254,6 +295,7 @@ The optional web dashboard is served by a separate `web` container (Docker profi
 | `GET /api/speech_training/keyword_scan/<job_id>` | Poll keyword scan progress & results (admin-only). Response includes `max_duration_seconds`. When multiple keywords were scanned, includes `keywords` (list) and `keyword_count`. Job result includes `trim_matches_to_keyword`, `trimmed_matches`, and `failed_trim_matches` counts. |
 | `GET /api/speech_training/keyword_scan/schedule` | Automatic keyword scan schedule metadata (admin-only). Returns `enabled`, `interval_seconds`, `last_started_at`, `last_finished_at`, `last_status`, `last_summary`, `next_run_at`, `updated_at`. The Dataset page shows this info inline. |
 | `POST /api/speech_training/transcribe_empty` | Start async auto-transcript job (admin-only, returns `202` + `job_id`). Transcribes empty-transcript clips via Groq Whisper (`GROQ_API_KEY` required). Poll with GET below. |
+| `GET /api/events` | Server-Sent Events stream for live UI updates. Driven by Honker LISTEN when available; otherwise sends keep-alive heartbeats. |
 | `GET /api/speech_training/transcribe_empty/<job_id>` | Poll auto-transcript progress & results (admin-only). Response includes `total`, `processed`, `updated`, `empty_marked`, `skipped`. |
 
 Unauthenticated buttons show a locked state prompting Discord login. Web playback requires authentication so actions are logged as the real user.
