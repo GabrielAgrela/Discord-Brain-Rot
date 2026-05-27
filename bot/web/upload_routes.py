@@ -8,6 +8,8 @@ from typing import Any
 
 from flask import Flask, current_app, jsonify, request
 
+from bot.repositories.web_upload_job import WebUploadJobRepository
+from bot.web.event_routes import publish_soundboard_event
 from bot.web.route_helpers import (
     _get_current_discord_user,
     _get_selected_guild_id,
@@ -50,6 +52,10 @@ def register_upload_routes(app: Flask) -> None:
                 source_url=source_url,
                 time_limit=_parse_optional_positive_int(request.form.get("time_limit")),
             )
+            publish_soundboard_event(
+                "upload_job_changed",
+                {"job_id": job_id, "status": "queued"},
+            )
             return jsonify(
                 {
                     "message": "Upload queued",
@@ -70,10 +76,22 @@ def register_upload_routes(app: Flask) -> None:
     @_require_discord_login_api
     def get_upload_sound_job(job_id: str) -> Any:
         """Return status for a background web upload job."""
+        # Check in-memory dict first (fastest path).
         job = current_app.extensions.get("web_upload_jobs", {}).get(job_id)
-        if not job:
-            return jsonify({"error": "Upload job not found"}), 404
-        return jsonify(dict(job)), 200
+        if job:
+            return jsonify(dict(job)), 200
+
+        # Fall back to persistent DB for jobs that survived a restart.
+        try:
+            db_path = current_app.config["DATABASE_PATH"]
+            repo = WebUploadJobRepository(db_path=db_path, use_shared=False)
+            row = repo.get_by_id(job_id)
+            if row:
+                return jsonify(dict(row)), 200
+        except Exception:
+            logger.exception("Error reading persistent upload job %s", job_id)
+
+        return jsonify({"error": "Upload job not found"}), 404
 
     @app.route("/api/uploads")
     @_require_discord_login_api

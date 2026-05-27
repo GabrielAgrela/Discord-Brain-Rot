@@ -6,6 +6,7 @@ from flask import Flask
 
 from bot.web.analytics_routes import register_analytics_routes
 from bot.web.auth_routes import register_auth_routes
+from bot.web.event_routes import register_event_routes
 from bot.web.playback_routes import register_playback_routes
 from bot.web.soundboard_routes import register_soundboard_routes
 from bot.web.speech_training_routes import register_speech_training_routes
@@ -27,3 +28,4 @@ def register_web_routes(app: Flask) -> None:
     register_system_routes(app)
     register_analytics_routes(app)
     register_speech_training_routes(app)
+    register_event_routes(app)

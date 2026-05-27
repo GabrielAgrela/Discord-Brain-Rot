@@ -8,6 +8,7 @@ from typing import Any
 
 from flask import Flask, jsonify, request
 
+from bot.web.event_routes import publish_soundboard_event
 from bot.web.route_helpers import (
     _build_read_cache_key,
     _get_current_discord_user,
@@ -20,6 +21,16 @@ from bot.web.route_helpers import (
     _require_discord_login_api,
     _require_web_admin_api,
 )
+
+
+def _invalidate_playback_caches() -> None:
+    """Clear the per-process response cache after a mutating playback action.
+
+    Invalidate so that ``/api/web_control_state`` and other cached read
+    endpoints return fresh data on the next SSE-triggered fetch.
+    """
+    cache = _get_response_cache()
+    cache.invalidate()
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +50,11 @@ def register_playback_routes(app: Flask) -> None:
 
         try:
             _get_web_playback_service().queue_request(data, current_user)
+            event_data: dict = {"guild_id": data.get("guild_id")}
+            if data.get("play_action"):
+                event_data["play_action"] = data.get("play_action")
+            publish_soundboard_event("playback_queued", event_data)
+            _invalidate_playback_caches()
             return jsonify({"message": "Playback request sent"}), 200
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
@@ -61,6 +77,11 @@ def register_playback_routes(app: Flask) -> None:
 
         try:
             _get_web_playback_service().queue_control_request(data, current_user)
+            publish_soundboard_event(
+                "playback_queued",
+                {"guild_id": data.get("guild_id"), "action": data.get("action")},
+            )
+            _invalidate_playback_caches()
             return jsonify({"message": "Control request sent"}), 200
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400

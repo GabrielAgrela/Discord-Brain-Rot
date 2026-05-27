@@ -8,6 +8,7 @@ from typing import Any
 
 from flask import Flask, jsonify, render_template, request
 
+from bot.web.event_routes import publish_soundboard_event
 from bot.web.route_helpers import (
     _build_initial_soundboard_data,
     _build_paginated_query,
@@ -27,6 +28,18 @@ from bot.web.route_helpers import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _invalidate_response_cache() -> None:
+    """Clear the per-process response cache after a mutation.
+
+    The response cache is a small TTL cache for read-only endpoints.
+    After any DB-mutating route succeeds, we clear it so the next
+    SSE-triggered or user-initiated fetch returns fresh data rather
+    than stale payload from the previous TTL window.
+    """
+    cache = _get_response_cache()
+    cache.invalidate()
 
 
 def register_soundboard_routes(app: Flask) -> None:
@@ -151,17 +164,26 @@ def register_soundboard_routes(app: Flask) -> None:
         data = request.get_json(silent=True) or {}
         _remember_selected_guild_id(data.get("guild_id"))
         current_user = _get_current_discord_user()
+        guild_id = _get_selected_guild_id(data)
         if current_user is None:
             return jsonify({"error": "Discord login required"}), 401
         try:
-            return jsonify(
-                _get_web_sound_options_service().rename_sound(
-                    sound_id,
-                    str(data.get("new_name") or ""),
-                    current_user,
-                    guild_id=_get_selected_guild_id(data),
-                )
-            ), 200
+            result = _get_web_sound_options_service().rename_sound(
+                sound_id,
+                str(data.get("new_name") or ""),
+                current_user,
+                guild_id=guild_id,
+            )
+            publish_soundboard_event(
+                "sounds_changed",
+                {"sound_id": sound_id, "guild_id": guild_id},
+            )
+            publish_soundboard_event(
+                "actions_changed",
+                {"sound_id": sound_id, "guild_id": guild_id},
+            )
+            _invalidate_response_cache()
+            return jsonify(result), 200
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
         except sqlite3.Error:
@@ -178,16 +200,25 @@ def register_soundboard_routes(app: Flask) -> None:
         data = request.get_json(silent=True) or {}
         _remember_selected_guild_id(data.get("guild_id"))
         current_user = _get_current_discord_user()
+        guild_id = _get_selected_guild_id(data)
         if current_user is None:
             return jsonify({"error": "Discord login required"}), 401
         try:
-            return jsonify(
-                _get_web_sound_options_service().toggle_favorite(
-                    sound_id,
-                    current_user,
-                    guild_id=_get_selected_guild_id(data),
-                )
-            ), 200
+            result = _get_web_sound_options_service().toggle_favorite(
+                sound_id,
+                current_user,
+                guild_id=guild_id,
+            )
+            publish_soundboard_event(
+                "sounds_changed",
+                {"sound_id": sound_id, "guild_id": guild_id},
+            )
+            publish_soundboard_event(
+                "actions_changed",
+                {"sound_id": sound_id, "guild_id": guild_id},
+            )
+            _invalidate_response_cache()
+            return jsonify(result), 200
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
         except sqlite3.Error:
@@ -204,17 +235,26 @@ def register_soundboard_routes(app: Flask) -> None:
         data = request.get_json(silent=True) or {}
         _remember_selected_guild_id(data.get("guild_id"))
         current_user = _get_current_discord_user()
+        guild_id = _get_selected_guild_id(data)
         if current_user is None:
             return jsonify({"error": "Discord login required"}), 401
         try:
-            return jsonify(
-                _get_web_sound_options_service().toggle_slap(
-                    sound_id,
-                    current_user,
-                    guild_id=_get_selected_guild_id(data),
-                    current_user_is_admin=_current_web_user_is_admin(),
-                )
-            ), 200
+            result = _get_web_sound_options_service().toggle_slap(
+                sound_id,
+                current_user,
+                guild_id=guild_id,
+                current_user_is_admin=_current_web_user_is_admin(),
+            )
+            publish_soundboard_event(
+                "sounds_changed",
+                {"sound_id": sound_id, "guild_id": guild_id},
+            )
+            publish_soundboard_event(
+                "actions_changed",
+                {"sound_id": sound_id, "guild_id": guild_id},
+            )
+            _invalidate_response_cache()
+            return jsonify(result), 200
         except PermissionError as exc:
             return jsonify({"error": str(exc)}), 403
         except ValueError as exc:
@@ -233,18 +273,28 @@ def register_soundboard_routes(app: Flask) -> None:
         data = request.get_json(silent=True) or {}
         _remember_selected_guild_id(data.get("guild_id"))
         current_user = _get_current_discord_user()
+        guild_id = _get_selected_guild_id(data)
         if current_user is None:
             return jsonify({"error": "Discord login required"}), 401
         try:
             list_id = int(data.get("list_id"))
-            return jsonify(
-                _get_web_sound_options_service().add_to_list(
-                    sound_id,
-                    list_id,
-                    current_user,
-                    guild_id=_get_selected_guild_id(data),
+            result = _get_web_sound_options_service().add_to_list(
+                sound_id,
+                list_id,
+                current_user,
+                guild_id=guild_id,
+            )
+            if result.get("added"):
+                publish_soundboard_event(
+                    "sounds_changed",
+                    {"sound_id": sound_id, "guild_id": guild_id},
                 )
-            ), 200
+                publish_soundboard_event(
+                    "actions_changed",
+                    {"sound_id": sound_id, "guild_id": guild_id},
+                )
+                _invalidate_response_cache()
+            return jsonify(result), 200
         except (TypeError, ValueError) as exc:
             return jsonify({"error": str(exc) or "Choose a list."}), 400
         except sqlite3.Error:
@@ -261,19 +311,24 @@ def register_soundboard_routes(app: Flask) -> None:
         data = request.get_json(silent=True) or {}
         _remember_selected_guild_id(data.get("guild_id"))
         current_user = _get_current_discord_user()
+        guild_id = _get_selected_guild_id(data)
         if current_user is None:
             return jsonify({"error": "Discord login required"}), 401
         try:
-            return jsonify(
-                _get_web_sound_options_service().toggle_user_event(
-                    sound_id,
-                    str(data.get("target_user") or ""),
-                    str(data.get("event") or ""),
-                    current_user,
-                    guild_id=_get_selected_guild_id(data),
-                    current_user_is_admin=_current_web_user_is_admin(),
-                )
-            ), 200
+            result = _get_web_sound_options_service().toggle_user_event(
+                sound_id,
+                str(data.get("target_user") or ""),
+                str(data.get("event") or ""),
+                current_user,
+                guild_id=guild_id,
+                current_user_is_admin=_current_web_user_is_admin(),
+            )
+            publish_soundboard_event(
+                "actions_changed",
+                {"sound_id": sound_id, "guild_id": guild_id},
+            )
+            _invalidate_response_cache()
+            return jsonify(result), 200
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
         except sqlite3.Error:

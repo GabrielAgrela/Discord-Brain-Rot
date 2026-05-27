@@ -9,6 +9,7 @@ import os
 import tempfile
 import uuid
 from datetime import datetime, timezone
+import json
 from functools import wraps
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -28,7 +29,14 @@ from bot.repositories.web_content import WebContentRepository
 from bot.repositories.web_control_room import WebControlRoomRepository
 from bot.repositories.web_guild import WebGuildRepository
 from bot.repositories.sound_import_notification import SoundImportNotificationRepository
+
+# Optional Honker soundboard event publishing for background workers.
+try:
+    from bot.services.honker_integration import publish_soundboard_event as _publish_upload_event
+except ImportError:
+    _publish_upload_event = None
 from bot.repositories.web_upload import WebUploadRepository
+from bot.repositories.web_upload_job import WebUploadJobRepository
 from bot.repositories.web_user_access import WebUserAccessRepository
 from bot.repositories.web_tts_settings import WebTtsSettingsRepository
 from bot.repositories.speech_training import SpeechTrainingRepository
@@ -218,21 +226,56 @@ def _queue_web_upload_job(
     jobs[job_id] = {"job_id": job_id, "status": "processing"}
 
     db_path = current_app.config["DATABASE_PATH"]
-    executor = current_app.extensions["web_upload_executor"]
-    executor.submit(
-        _run_web_upload_job,
-        job_id=job_id,
-        jobs=jobs,
-        db_path=db_path,
-        sounds_dir=str(sounds_dir),
-        temp_upload_path=temp_upload_path,
-        original_filename=original_filename,
-        current_user_payload=current_user.to_session_payload(),
-        guild_id=guild_id,
-        custom_name=custom_name,
-        source_url=source_url,
-        time_limit=time_limit,
-    )
+
+    # Persist job to DB so it survives process restarts.
+    try:
+        job_repo = WebUploadJobRepository(db_path=db_path, use_shared=False)
+        job_repo.create_job(
+            job_id=job_id,
+            guild_id=guild_id,
+            temp_upload_path=temp_upload_path,
+            original_filename=original_filename,
+            current_user_json=json.dumps(current_user.to_session_payload()),
+            custom_name=custom_name,
+            source_url=source_url,
+            time_limit=time_limit,
+        )
+    except Exception:
+        logger.exception("[WebUpload] Failed to persist job %s", job_id)
+
+    # Try Honker durable queue first; fall back to direct executor when
+    # Honker is unavailable or enqueue fails.
+    honker_enqueued = False
+    try:
+        from bot.services.honker_integration import enqueue_job as _enqueue_honker
+        if _enqueue_honker(
+            db_path,
+            "web_upload_jobs",
+            {"job_id": job_id, "source_url": source_url or ""},
+        ):
+            honker_enqueued = True
+            logger.info(
+                "[WebUpload] Job %s enqueued via Honker", job_id
+            )
+    except Exception:
+        logger.debug("[WebUpload] Honker enqueue unavailable for %s", job_id)
+
+    if not honker_enqueued:
+        executor = current_app.extensions["web_upload_executor"]
+        executor.submit(
+            _run_web_upload_job,
+            job_id=job_id,
+            jobs=jobs,
+            db_path=db_path,
+            sounds_dir=str(sounds_dir),
+            temp_upload_path=temp_upload_path,
+            original_filename=original_filename,
+            current_user_payload=current_user.to_session_payload(),
+            guild_id=guild_id,
+            custom_name=custom_name,
+            source_url=source_url,
+            time_limit=time_limit,
+        )
     return job_id
 
 
@@ -251,8 +294,50 @@ def _run_web_upload_job(
     time_limit: int | None,
 ) -> None:
     """Process one queued web upload outside the Flask request thread."""
+    # Helper to update both in-memory dict and persistent DB.
+    def _set_job(status: str, **fields: Any) -> None:
+        entry: dict[str, Any] = {"job_id": job_id, "status": status}
+        entry.update(fields)
+        jobs[job_id] = entry
+        try:
+            job_repo = WebUploadJobRepository(db_path=db_path, use_shared=False)
+            result_json = None
+            error = None
+            attempts = None
+            if status == "approved":
+                result_json = json.dumps(
+                    {k: v for k, v in fields.items() if k != "error"}
+                )
+            if status == "error":
+                error = str(fields.get("error", "Unknown error"))
+            job_repo.update_status(
+                job_id,
+                status=status,
+                result_json=result_json,
+                error=error,
+            )
+            # Publish Honker event for live SSE updates.
+            if _publish_upload_event is not None:
+                try:
+                    _publish_upload_event(
+                        db_path,
+                        "upload_job_changed",
+                        {"job_id": job_id, "status": status},
+                    )
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
     file_handle = None
     try:
+        # Mark processing in DB.
+        try:
+            job_repo = WebUploadJobRepository(db_path=db_path, use_shared=False)
+            job_repo.update_status(job_id, status="processing")
+        except Exception:
+            pass
+
         uploaded_file = None
         if temp_upload_path:
             file_handle = open(temp_upload_path, "rb")
@@ -281,16 +366,14 @@ def _run_web_upload_job(
             source_url=source_url,
             time_limit=time_limit,
         )
-        jobs[job_id] = {"job_id": job_id, "status": "approved", **payload}
+        # Ensure payload does not contain a 'status' key that would conflict.
+        payload.pop("status", None)
+        _set_job("approved", **payload)
     except ValueError as exc:
-        jobs[job_id] = {"job_id": job_id, "status": "error", "error": str(exc)}
+        _set_job("error", error=str(exc))
     except Exception:
         logger.exception("Unexpected error processing web upload job")
-        jobs[job_id] = {
-            "job_id": job_id,
-            "status": "error",
-            "error": "Internal server error",
-        }
+        _set_job("error", error="Internal server error")
     finally:
         if file_handle is not None:
             file_handle.close()
