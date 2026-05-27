@@ -9,6 +9,12 @@ from datetime import datetime
 from bot.repositories.base import BaseRepository
 from bot.models.sound import Sound, SoundList
 
+# Optional Honker soundboard event publishing for live web UI updates.
+try:
+    from bot.services.honker_integration import publish_soundboard_event as _publish_soundboard_event
+except ImportError:
+    _publish_soundboard_event = None
+
 
 class SoundRepository(BaseRepository[Sound]):
     """
@@ -134,6 +140,19 @@ class SoundRepository(BaseRepository[Sound]):
             f"UPDATE sounds SET {', '.join(updates)} WHERE id = ?{guild_clause}",
             tuple(params),
         )
+        # Publish soundboard event for live web UI updates.
+        if _publish_soundboard_event is not None:
+            try:
+                _publish_soundboard_event(
+                    self._db_path,
+                    "sounds_changed",
+                    {
+                        "sound_id": sound_id,
+                        "guild_id": str(guild_id) if guild_id is not None else None,
+                    },
+                )
+            except Exception:
+                pass
         return True
     
     def get_by_filename(self, filename: str, guild_id: Optional[int | str] = None) -> Optional[Sound]:
@@ -498,13 +517,28 @@ class SoundRepository(BaseRepository[Sound]):
         )
 
         try:
-            return self._execute_write(
+            result = self._execute_write(
                 """
                 INSERT INTO sounds (originalfilename, filename, favorite, blacklist, timestamp, slap, is_elevenlabs, guild_id)
                 VALUES (?, ?, ?, 0, ?, 0, ?, ?)
                 """,
                 params,
             )
+            # Publish soundboard event for live web UI updates.
+            if _publish_soundboard_event is not None:
+                try:
+                    _publish_soundboard_event(
+                        self._db_path,
+                        "sounds_changed",
+                        {
+                            "sound_id": result,
+                            "filename": filename,
+                            "guild_id": str(guild_id) if guild_id is not None else None,
+                        },
+                    )
+                except Exception:
+                    pass
+            return result
         except sqlite3.OperationalError as exc:
             # Legacy compatibility for schemas that still use `date` instead of `timestamp`.
             if "no column named timestamp" not in str(exc).lower():
@@ -545,6 +579,16 @@ class SoundRepository(BaseRepository[Sound]):
             f"UPDATE sounds SET {', '.join(updates)} WHERE filename = ?",
             tuple(params)
         )
+        # Publish soundboard event for live web UI updates.
+        if _publish_soundboard_event is not None:
+            try:
+                _publish_soundboard_event(
+                    self._db_path,
+                    "sounds_changed",
+                    {"filename": filename},
+                )
+            except Exception:
+                pass
         return True
     
     def search(self, query: str, limit: int = 25) -> List[Tuple[Sound, int]]:
@@ -601,23 +645,50 @@ class SoundRepository(BaseRepository[Sound]):
         params = (original_filename, filename, int(favorite), time_value)
 
         try:
-            return self._execute_write(
+            result = self._execute_write(
                 """
                 INSERT INTO sounds (originalfilename, filename, favorite, blacklist, timestamp)
                 VALUES (?, ?, ?, 0, ?)
                 """,
                 params,
             )
+            # Publish soundboard event for live web UI updates.
+            if _publish_soundboard_event is not None:
+                try:
+                    _publish_soundboard_event(
+                        self._db_path,
+                        "sounds_changed",
+                        {
+                            "sound_id": result,
+                            "filename": filename,
+                        },
+                    )
+                except Exception:
+                    pass
+            return result
         except sqlite3.OperationalError as exc:
             if "no column named timestamp" not in str(exc).lower():
                 raise
-            return self._execute_write(
+            result = self._execute_write(
                 """
                 INSERT INTO sounds (originalfilename, filename, favorite, blacklist, date)
                 VALUES (?, ?, ?, 0, ?)
                 """,
                 params,
             )
+            if _publish_soundboard_event is not None:
+                try:
+                    _publish_soundboard_event(
+                        self._db_path,
+                        "sounds_changed",
+                        {
+                            "sound_id": result,
+                            "filename": filename,
+                        },
+                    )
+                except Exception:
+                    pass
+            return result
     
     def update(self, sound_id: int, filename: Optional[str] = None,
                favorite: Optional[bool] = None, 
@@ -651,6 +722,16 @@ class SoundRepository(BaseRepository[Sound]):
             f"UPDATE sounds SET {', '.join(updates)} WHERE id = ?",
             tuple(params)
         )
+        # Publish soundboard event for live web UI updates.
+        if _publish_soundboard_event is not None:
+            try:
+                _publish_soundboard_event(
+                    self._db_path,
+                    "sounds_changed",
+                    {"sound_id": sound_id},
+                )
+            except Exception:
+                pass
         return True
     
     def delete(self, sound_id: int) -> bool:

@@ -4,6 +4,9 @@ Repository for the sound import notification outbox.
 Cross-process notifications (e.g. from the Flask web upload background worker)
 cannot use BotBehavior directly. This repository provides a simple queue table
 that the bot process drains in its own background loop.
+
+When Honker is available, a NOTIFY is published after each enqueue so the
+bot drain loop can wake up immediately instead of waiting for the 3-second poll.
 """
 
 from __future__ import annotations
@@ -14,6 +17,14 @@ from typing import Any
 import sqlite3
 
 from bot.repositories.base import BaseRepository
+
+# Optional Honker notification for fast cross-process wake-up.
+try:
+    from bot.services.honker_integration import (
+        publish_notification as _publish_honker,
+    )
+except ImportError:
+    _publish_honker = None
 
 
 class SoundImportNotificationRepository(BaseRepository[dict[str, Any]]):
@@ -94,7 +105,7 @@ class SoundImportNotificationRepository(BaseRepository[dict[str, Any]]):
         Returns:
             Inserted row ID.
         """
-        return self._execute_write(
+        row_id = self._execute_write(
             """
             INSERT INTO sound_import_notifications (
                 guild_id, filename, source, requester_username,
@@ -111,6 +122,21 @@ class SoundImportNotificationRepository(BaseRepository[dict[str, Any]]):
                 accent_color,
             ),
         )
+        # Publish Honker notification for fast cross-process wake-up.
+        if _publish_honker is not None:
+            try:
+                _publish_honker(
+                    self._db_path,
+                    "sound_import_notifications",
+                    {
+                        "id": row_id,
+                        "guild_id": guild_id,
+                        "source": source,
+                    },
+                )
+            except Exception:
+                pass  # Non-critical; polling fallback covers this.
+        return row_id
 
     def get_pending(self, limit: int = 10) -> list[dict[str, Any]]:
         """

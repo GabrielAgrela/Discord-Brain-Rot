@@ -19,6 +19,12 @@ from config import TTS_PROFILES
 from bot.models.web import DiscordWebUser
 from bot.repositories.sound import SoundRepository
 
+# Optional Honker notification for fast cross-process wake-ups.
+try:
+    from bot.services.honker_integration import publish_notification as _publish_honker
+except ImportError:
+    _publish_honker = None
+
 
 WEB_QUEUE_PLAY_SOUND = "play_sound"
 WEB_QUEUE_SLAP = "slap"
@@ -277,7 +283,23 @@ def queue_playback_request(
             ),
         )
         conn.commit()
-        return int(cursor.lastrowid)
+        row_id = int(cursor.lastrowid)
+        # Publish Honker notification for fast cross-process wake-up.
+        if _publish_honker is not None:
+            try:
+                _publish_honker(
+                    db_path,
+                    "playback_queue",
+                    {
+                        "id": row_id,
+                        "guild_id": guild_id,
+                        "request_type": WEB_QUEUE_PLAY_SOUND,
+                        "play_action": normalized_play_action,
+                    },
+                )
+            except Exception:
+                pass  # Non-critical; polling fallback covers this.
+        return row_id
     finally:
         conn.close()
 
@@ -362,7 +384,23 @@ def queue_control_request(
             ),
         )
         conn.commit()
-        return int(cursor.lastrowid)
+        row_id = int(cursor.lastrowid)
+        # Publish Honker notification for fast cross-process wake-up.
+        if _publish_honker is not None:
+            try:
+                _publish_honker(
+                    db_path,
+                    "playback_queue",
+                    {
+                        "id": row_id,
+                        "guild_id": guild_id,
+                        "request_type": action,
+                        "control_action": action,
+                    },
+                )
+            except Exception:
+                pass  # Non-critical; polling fallback covers this.
+        return row_id
     finally:
         conn.close()
 

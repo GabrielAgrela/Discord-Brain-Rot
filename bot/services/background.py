@@ -117,6 +117,10 @@ class BackgroundService:
         self._app_settings_repo: AppSettingsRepository | None = None
         self._app_settings_db_path: str | None = None
 
+        # Control room signature cache for SSE event dedup.
+        # Maps guild_id → tuple of significant fields; publish only on change.
+        self._ctrl_room_signatures: dict[int, tuple] = {}
+
     # ── Keyword scan schedule metadata keys ─────────────────────────────
 
     KEYWORD_SCAN_SETTING_ENABLED = "speech_training_keyword_scan.enabled"
@@ -226,6 +230,11 @@ class BackgroundService:
                 self.bot_self_heal_watchdog_loop.start()
             if not self.sound_import_notification_drain_loop.is_running():
                 self.sound_import_notification_drain_loop.start()
+            if self._honker_sound_import_listener_task is None:
+                loop = asyncio.get_event_loop()
+                self._honker_sound_import_listener_task = loop.create_task(
+                    self._start_honker_sound_import_listener()
+                )
             if self._keyword_scan_daily_enabled and not self.speech_training_keyword_scan_loop.is_running():
                 self.speech_training_keyword_scan_loop.change_interval(
                     seconds=self._keyword_scan_daily_interval
@@ -1344,6 +1353,26 @@ class BackgroundService:
                     muted=muted,
                     mute_remaining_seconds=mute_remaining,
                 )
+                # Compute a signature of significant fields (excluding fast-changing
+                # elapsed seconds and full voice_members list). Publish a Honker
+                # event only when the signature changes.
+                sig = (
+                    snapshot["voice_connected"],
+                    snapshot["voice_channel_id"],
+                    snapshot["voice_member_count"],
+                    snapshot["is_playing"],
+                    snapshot["is_paused"],
+                    snapshot["current_sound"],
+                    snapshot["current_requester"],
+                    muted,
+                )
+                if self._ctrl_room_signatures.get(guild.id) != sig:
+                    self._ctrl_room_signatures[guild.id] = sig
+                    try:
+                        from bot.services.honker_integration import publish_soundboard_event as _pub
+                        _pub(self.sound_repo.db_path, "control_room_changed", {"guild_id": guild.id})
+                    except Exception:
+                        pass
         except Exception as e:
             print(f"[BackgroundService] Error updating web control room status: {e}")
 
@@ -1367,7 +1396,10 @@ class BackgroundService:
     async def weekly_wrapped_scheduler_loop(self):
         """Send weekly wrapped summaries once per week at the configured UTC time."""
         try:
-            sent_count = await self._run_weekly_wrapped_scheduler_tick()
+            sent_count = await self._run_with_honker_lock(
+                "weekly_wrapped",
+                self._run_weekly_wrapped_scheduler_tick,
+            )
             if sent_count > 0:
                 print(f"[BackgroundService] Weekly wrapped sent in {sent_count} guild(s)")
         except Exception as e:
@@ -1377,7 +1409,10 @@ class BackgroundService:
     async def rlstore_notification_loop(self):
         """Send the daily rlstore notification shortly after the store reset window."""
         try:
-            sent_count = await self._run_rlstore_notification_tick()
+            sent_count = await self._run_with_honker_lock(
+                "rlstore_notification",
+                self._run_rlstore_notification_tick,
+            )
             if sent_count > 0:
                 print(f"[BackgroundService] rlstore notification sent in {sent_count} guild(s)")
         except Exception as e:
@@ -1387,7 +1422,10 @@ class BackgroundService:
     async def backup_scheduler_loop(self):
         """Create a weekly backup at the configured UTC time."""
         try:
-            result = await self._run_backup_scheduler_tick()
+            result = await self._run_with_honker_lock(
+                "backup_scheduler",
+                self._run_backup_scheduler_tick,
+            )
             if result > 0:
                 logger.info("[BackgroundService] Scheduled backup created successfully")
         except Exception as e:
@@ -1417,22 +1455,22 @@ class BackgroundService:
                 exc_info=True,
             )
 
-    @tasks.loop(seconds=3)
-    async def sound_import_notification_drain_loop(self) -> None:
+    async def drain_sound_import_notifications_once(self, limit: int = 5) -> None:
         """
-        Drain the cross-process sound import notification outbox.
+        Drain pending sound import notifications.
 
-        Web upload background workers cannot use BotBehavior directly, so they
-        insert rows into the ``sound_import_notifications`` table instead. This
-        loop picks up pending rows and sends the Discord image-card notification
-        using the shared notification service.
+        This is the core drain logic shared by the polling loop and the
+        optional Honker notification listener.
+
+        Args:
+            limit: Maximum pending notifications to process per call.
         """
         if self.behavior is None:
             return
         if self._sound_import_notification_repo is None:
             self._sound_import_notification_repo = SoundImportNotificationRepository()
         try:
-            pending = self._sound_import_notification_repo.get_pending(limit=5)
+            pending = self._sound_import_notification_repo.get_pending(limit=limit)
             for notification in pending:
                 nid = int(notification["id"])
                 try:
@@ -1448,6 +1486,27 @@ class BackgroundService:
                         accent_color=str(raw_accent) if raw_accent is not None else None,
                     )
                     self._sound_import_notification_repo.mark_sent(nid)
+                    # Publish soundboard events for live SSE updates.
+                    try:
+                        from bot.services.honker_integration import publish_soundboard_event as _pub
+                        _pub(
+                            self.sound_repo.db_path,
+                            "sound_imported",
+                            {
+                                "filename": str(notification["filename"]),
+                                "guild_id": notification.get("guild_id"),
+                                "source": str(notification.get("source", "")),
+                            },
+                        )
+                        _pub(
+                            self.sound_repo.db_path,
+                            "sounds_changed",
+                            {
+                                "guild_id": notification.get("guild_id"),
+                            },
+                        )
+                    except Exception:
+                        pass
                 except Exception as exc:
                     logger.error(
                         "[BackgroundService] Failed to send import notification %s: %s",
@@ -1460,10 +1519,47 @@ class BackgroundService:
                     )
         except Exception as exc:
             logger.error(
-                "[BackgroundService] Error in import notification drain loop: %s",
+                "[BackgroundService] Error in import notification drain: %s",
                 exc,
                 exc_info=True,
             )
+
+    _honker_sound_import_listener_task: Any = None
+
+    async def _start_honker_sound_import_listener(self) -> None:
+        """Start a Honker listener for sound_import_notifications."""
+        try:
+            from bot.services.honker_integration import (
+                availability as _honker_available,
+                listen_notifications as _honker_listen,
+            )
+        except ImportError:
+            return
+
+        if not _honker_available():
+            return
+
+        db_path = self._resolve_db_path()
+        logger.info("[Honker] Starting sound_import_notifications listener...")
+        try:
+            async for _notification in _honker_listen(db_path, "sound_import_notifications", fallback_poll_s=1.0):
+                await self.drain_sound_import_notifications_once(limit=5)
+        except Exception as exc:
+            logger.warning(
+                "[Honker] Sound import notification listener stopped: %s", exc
+            )
+
+    @tasks.loop(seconds=3)
+    async def sound_import_notification_drain_loop(self) -> None:
+        """
+        Drain the cross-process sound import notification outbox.
+
+        Web upload background workers cannot use BotBehavior directly, so they
+        insert rows into the ``sound_import_notifications`` table instead. This
+        loop picks up pending rows and sends the Discord image-card notification
+        using the shared notification service.
+        """
+        await self.drain_sound_import_notifications_once(limit=5)
 
     @tasks.loop(seconds=86400)
     async def speech_training_keyword_scan_loop(self):
@@ -1995,6 +2091,36 @@ class BackgroundService:
             return int(str(raw).strip())
         except (ValueError, TypeError):
             return None
+
+    async def _run_with_honker_lock(
+        self,
+        lock_name: str,
+        callback: Any,
+        *args: Any,
+        **kwargs: Any,
+    ) -> Any:
+        """Execute *callback* under a named Honker lock when available.
+
+        When Honker is unavailable, the callback runs immediately (same
+        behaviour as today).  When the lock is held by another process,
+        the tick is skipped.
+        """
+        try:
+            from bot.services.honker_integration import lock_acquire, lock_release
+        except ImportError:
+            return await callback(*args, **kwargs)
+
+        db_path = self._resolve_db_path()
+        if not lock_acquire(db_path, lock_name, ttl_seconds=60.0):
+            logger.debug(
+                "[BackgroundService] Lock '%s' held by another process — skipping tick",
+                lock_name,
+            )
+            return
+        try:
+            return await callback(*args, **kwargs)
+        finally:
+            lock_release(db_path, lock_name)
 
     @staticmethod
     def _resolve_db_path() -> str:

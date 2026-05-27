@@ -376,6 +376,69 @@ class AudioService:
         self._progress_update_task = self._guild_progress_update_task.get(guild_id)
         self.current_view = self._guild_current_view.get(guild_id)
 
+    def _publish_playback_event(
+        self,
+        event_type: str,
+        guild_id: int,
+        *,
+        audio_file: Optional[str] = None,
+        user: Any = None,
+        play_id: Optional[str] = None,
+        duration_seconds: Optional[float] = None,
+        flags: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Publish a soundboard event for cross-process SSE updates.
+
+        Called after playback starts or finishes to wake the web control
+        room and tables.  Never blocks or fails playback — all exceptions
+        are caught and logged at debug level.
+
+        Args:
+            event_type: Honker soundboard event type (e.g. ``control_room_changed``).
+            guild_id: Discord guild ID.
+            audio_file: Currently playing filename.
+            user: Requester user or name.
+            play_id: Unique play identifier.
+            duration_seconds: Audio duration if known.
+            flags: Additional metadata such as ``{"reason": "playback_started"}``.
+        """
+        try:
+            from bot.services.honker_integration import (
+                publish_soundboard_event as _publish,
+            )
+        except ImportError:
+            return
+
+        try:
+            db_path = self.sound_repo.db_path
+        except Exception:
+            logger.debug("[AudioService] Cannot get db_path for playback event")
+            return
+
+        if not db_path:
+            return
+
+        data: Dict[str, Any] = {"guild_id": str(guild_id)}
+        if audio_file:
+            data["audio_file"] = audio_file
+        if user is not None:
+            data["user"] = getattr(user, "name", str(user))
+        if play_id is not None:
+            data["play_id"] = play_id
+        if duration_seconds is not None:
+            data["duration_seconds"] = duration_seconds
+        if flags:
+            data.update(flags)
+
+        try:
+            _publish(db_path, event_type, data)
+        except Exception:
+            logger.debug(
+                "[AudioService] Failed to publish playback event %s for guild %s",
+                event_type,
+                guild_id,
+            )
+
     def _mark_playback_started(
         self,
         guild_id: int,
@@ -391,16 +454,38 @@ class AudioService:
         self._guild_current_play_id[guild_id] = play_id
         self._guild_current_play_started_at[guild_id] = datetime.now()
         self._guild_current_duration_seconds[guild_id] = duration_seconds
+        self._publish_playback_event(
+            "control_room_changed",
+            guild_id,
+            audio_file=audio_file,
+            user=user,
+            play_id=play_id,
+            duration_seconds=duration_seconds,
+            flags={"reason": "playback_started"},
+        )
 
     def _mark_playback_finished(self, guild_id: int, play_id: str) -> None:
         """Clear current playback tracking when the active player ends."""
         if self._guild_current_play_id.get(guild_id) != play_id:
             return
+        # Capture values before clearing so we can publish them
+        old_audio_file = self._guild_current_audio_file.get(guild_id)
+        old_requester = self._guild_current_requester.get(guild_id)
+        old_duration = self._guild_current_duration_seconds.get(guild_id)
         self._guild_current_audio_file[guild_id] = None
         self._guild_current_requester[guild_id] = None
         self._guild_current_play_id[guild_id] = None
         self._guild_current_play_started_at[guild_id] = None
         self._guild_current_duration_seconds[guild_id] = None
+        self._publish_playback_event(
+            "control_room_changed",
+            guild_id,
+            audio_file=old_audio_file,
+            user=old_requester,
+            play_id=play_id,
+            duration_seconds=old_duration,
+            flags={"reason": "playback_finished"},
+        )
 
     def get_guild_playback_snapshot(self, guild: discord.Guild) -> Dict[str, Any]:
         """

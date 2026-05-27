@@ -23,6 +23,7 @@ from bot.repositories.sound_import_notification import SoundImportNotificationRe
 from bot.repositories.app_settings import AppSettingsRepository
 from bot.repositories.web_tts_settings import WebTtsSettingsRepository
 from bot.repositories.speech_training import SpeechTrainingRepository
+from bot.repositories.web_upload_job import WebUploadJobRepository
 
 __all__ = [
     "BaseRepository",
@@ -41,4 +42,5 @@ __all__ = [
     "AppSettingsRepository",
     "WebTtsSettingsRepository",
     "SpeechTrainingRepository",
+    "WebUploadJobRepository",
 ]

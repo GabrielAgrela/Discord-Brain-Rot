@@ -8,6 +8,12 @@ from datetime import datetime, timedelta
 
 from bot.repositories.base import BaseRepository
 
+# Optional Honker soundboard event publishing for live web UI updates.
+try:
+    from bot.services.honker_integration import publish_soundboard_event as _publish_soundboard_event
+except ImportError:
+    _publish_soundboard_event = None
+
 
 class ActionRepository(BaseRepository):
     """
@@ -45,7 +51,7 @@ class ActionRepository(BaseRepository):
         Returns:
             ID of the inserted action
         """
-        return self._execute_write(
+        result = self._execute_write(
             "INSERT INTO actions (username, action, target, timestamp, guild_id) VALUES (?, ?, ?, ?, ?)",
             (
                 username,
@@ -55,6 +61,21 @@ class ActionRepository(BaseRepository):
                 str(guild_id) if guild_id is not None else None,
             ),
         )
+        # Publish soundboard event for live web UI updates.
+        if _publish_soundboard_event is not None:
+            try:
+                _publish_soundboard_event(
+                    self._db_path,
+                    "actions_changed",
+                    {
+                        "action": action,
+                        "target": str(target),
+                        "guild_id": str(guild_id) if guild_id is not None else None,
+                    },
+                )
+            except Exception:
+                pass  # Non-critical; polling fallback covers this.
+        return result
 
     def has_action_for_target(
         self,
