@@ -262,6 +262,7 @@
         let controlRoomRequestInFlight = false;
         let systemMonitorRequestInFlight = false;
         let latestControlRoomStatus = {};
+        let _controlRoomLocalElapsed = null;
         let previousNowPlayingText = '';
         let currentPageActions = 1;
         let currentPageFavorites = 1;
@@ -685,6 +686,7 @@
         function updateControlRoomStatus(payload) {
             const status = payload?.status || {};
             latestControlRoomStatus = status;
+            _controlRoomLocalElapsed = null;  // reset local progress tick, next tick uses fresh data
             const mute = payload?.mute || {};
             const dot = document.getElementById('controlRoomStateDot');
             const isPlaying = Boolean(status.is_playing || status.is_paused);
@@ -3347,7 +3349,12 @@
                 }
                 updateUploadQueueItem(jobId, 'processing', 'Processing');
                 setUploadStatus('Processing audio in the background...', 'loading');
-                window.setTimeout(() => pollUploadJob(jobId), 1200);
+                // When SSE is healthy, the 'upload_job_changed' event triggers
+                // the next poll — no recurring timeout needed.
+                // Fallback to recurring 1.2 s timeout when SSE is unhealthy.
+                if (!isSseHealthy()) {
+                    window.setTimeout(() => pollUploadJob(jobId), 1200);
+                }
             } catch (error) {
                 console.error('Upload status failed:', error);
                 updateUploadQueueItem(jobId, 'error', 'Status check failed');
@@ -3828,21 +3835,207 @@
         setupBackendSearch('searchFavorites', fetchFavorites);
         setupBackendSearch('searchAllSounds', fetchAllSounds);
 
-        // ── Staggered passive polling ────────────────────────────────────
-        // Instead of bursting 5 fetches every 2 s, spread work across time:
-        //   - Table data (actions/favorites/all_sounds): one table per tick,
-        //     ~3.5 s apart, full cycle ~10.5 s (reduces burst CPU & SQL load).
-        //   - Control room status: ~1 s loop.
-        //   - Web control state: ~5 s loop.
-        //   - System monitor (next section): adaptive cadence.
+        // ── SSE connection state ────────────────────────────────────────
+        // Track EventSource health so passive polling can drop to paranoia
+        // intervals when SSE is actively pushing events.
+        var sseConnected = false;
+        var sseLastMessageAt = 0;
+        const SSE_HEALTHY_TIMEOUT_MS = 45000;
+
+        function isSseHealthy() {
+            return sseConnected && (Date.now() - sseLastMessageAt) < SSE_HEALTHY_TIMEOUT_MS;
+        }
+
+        // Debounce SSE-triggered refreshes: coalesce multiple events into one fetch.
+        var _sseRefreshTimers = {};
+
+        function scheduleSseRefresh(key, fn, delayMs) {
+            if (delayMs === undefined) delayMs = 150;
+            if (_sseRefreshTimers[key]) {
+                clearTimeout(_sseRefreshTimers[key]);
+            }
+            _sseRefreshTimers[key] = setTimeout(function () {
+                _sseRefreshTimers[key] = null;
+                fn();
+            }, delayMs);
+        }
+
+        // ── Actions-table SSE refresh coordination ───────────────────
+        // Authoritative actions_changed events cancel pending fallback
+        // timers and use showLoading=true for visible repaint. Delayed
+        // fallback refreshes (from playback_queued / playback_started)
+        // are skipped when actions_changed has already arrived, and use
+        // showLoading=false to avoid forcing a repaint when data is
+        // unchanged.
+        var _lastActionsChangedAt = 0;
+        var _actionsFallbackTimer = null;
+
+        function _scheduleAuthoritativeActionsRefresh() {
+            _lastActionsChangedAt = Date.now();
+            if (_actionsFallbackTimer) {
+                clearTimeout(_actionsFallbackTimer);
+                _actionsFallbackTimer = null;
+            }
+            scheduleSseRefresh('actions', function () {
+                fetchActions(null, false, true);
+            });
+        }
+
+        function _scheduleActionsFallbackRefresh(delayMs) {
+            if (_actionsFallbackTimer) {
+                clearTimeout(_actionsFallbackTimer);
+            }
+            var scheduledAt = Date.now();
+            _actionsFallbackTimer = setTimeout(function () {
+                _actionsFallbackTimer = null;
+                if (_lastActionsChangedAt > scheduledAt) return;
+                fetchActions(null, false, false);
+            }, delayMs);
+        }
+
+        // ── Server-Sent Events (SSE) fast path ──────────────────────────
+        // SSE pushes events to the browser for immediate refresh
+        // acceleration.  Tables are strictly SSE-driven (no passive
+        // polling, no reconnect resync).  Control room status polls
+        // every 1 s regardless of SSE health.  Web-control state and
+        // upload jobs are SSE-driven with fallback polling when SSE is
+        // unhealthy.
+        // SSE auto-reconnect: on error we mark unhealthy but do NOT close;
+        // the browser automatically retries with backoff.  When the
+        // connection resumes, the server sends a fresh 'connected' event.
+        var _eventSource = null;
+
+        function _tryConnectEventSource() {
+            if (_eventSource) {
+                _eventSource.close();
+                _eventSource = null;
+            }
+
+            try {
+                var es = new EventSource('/api/events');
+
+                es.addEventListener('connected', function () {
+                    sseConnected = true;
+                    sseLastMessageAt = Date.now();
+                });
+
+                es.addEventListener('playback_queued', function (e) {
+                    sseLastMessageAt = Date.now();
+                    try {
+                        var data = JSON.parse(e.data);
+                        // SSE payload is {type, data: {...}}; extract nested
+                        // detail and fall back to top-level for backwards
+                        // compatibility with test-only / legacy payloads.
+                        var detail = (data && data.data && typeof data.data === 'object') ? data.data : data;
+                        scheduleSseRefresh('controlRoom', function () {
+                            refreshControlRoomStatus({ forceNetwork: true });
+                        });
+                        // Play and control actions are queued for async
+                        // processing.  The action row is inserted later by
+                        // the bot, so schedule a delayed actions refresh to
+                        // pick it up.  Web sound plays carry play_action,
+                        // controls carry action.
+                        if (detail && (detail.action || detail.play_action)) {
+                            _scheduleActionsFallbackRefresh(800);
+                        }
+                    } catch (_) {}
+                });
+
+                es.addEventListener('sound_imported', function (e) {
+                    sseLastMessageAt = Date.now();
+                    try {
+                        var data = JSON.parse(e.data);
+                        scheduleSseRefresh('allSounds', function () {
+                            fetchAllSounds(null, true, true);
+                        });
+                    } catch (_) {}
+                });
+
+                es.addEventListener('upload_job_changed', function (e) {
+                    sseLastMessageAt = Date.now();
+                    try {
+                        var data = JSON.parse(e.data);
+                        if (data.data && data.data.job_id) {
+                            pollUploadJob(data.data.job_id);
+                        }
+                        scheduleSseRefresh('uploadInbox', function () {
+                            if (webUserIsAdmin) {
+                                loadUploadInbox();
+                            }
+                        }, 300);
+                    } catch (_) {}
+                });
+
+                es.addEventListener('control_room_changed', function (e) {
+                    sseLastMessageAt = Date.now();
+                    scheduleSseRefresh('controlRoom', function () {
+                        refreshControlRoomStatus({ forceNetwork: true });
+                        refreshWebControlState({ forceNetwork: true });
+                    });
+                    // Safety net: all real playback paths publish
+                    // control_room_changed with reason playback_started
+                    // shortly before the action row is committed.
+                    // Refresh actions after a delay so the row has time.
+                    try {
+                        var data = JSON.parse(e.data);
+                        // SSE payload is {type, data: {...}}; extract nested
+                        // detail and fall back to top-level for backwards
+                        // compatibility with test-only / legacy payloads.
+                        var detail = (data && data.data && typeof data.data === 'object') ? data.data : data;
+                        if (detail && detail.reason === 'playback_started') {
+                            _scheduleActionsFallbackRefresh(1200);
+                        }
+                    } catch (_) {}
+                });
+
+                es.addEventListener('actions_changed', function (e) {
+                    sseLastMessageAt = Date.now();
+                    _scheduleAuthoritativeActionsRefresh();
+                });
+
+                es.addEventListener('sounds_changed', function (e) {
+                    sseLastMessageAt = Date.now();
+                    scheduleSseRefresh('sounds', function () {
+                        fetchAllSounds(null, true, true);
+                        fetchFavorites(null, false, true);
+                    });
+                });
+
+                es.addEventListener('heartbeat', function () {
+                    sseLastMessageAt = Date.now();
+                });
+
+                es.onerror = function () {
+                    // SSE connection failed — mark unhealthy but do NOT close
+                    // the EventSource.  The browser will auto-reconnect with
+                    // backoff.  When the connection resumes the server will
+                    // send a fresh 'connected' event.
+                    sseConnected = false;
+                };
+
+                _eventSource = es;
+            } catch (_) {
+                // EventSource not supported or connection failed.
+                // Polling fallback already handles this.
+            }
+        }
+
+        _tryConnectEventSource();
+
+        // ── Passive polling loops ────────────────────────────────────────
+        // Tables are strictly SSE-driven — no passive polling and no
+        // reconnect resync fallback.  Missed events require fixing event
+        // publication, not polling fallback.
+        // Control room status continues network polling every 1 s regardless
+        // of SSE health (local progress tick keeps elapsed smooth between
+        // network fetches).  SSE events provide fast-path acceleration.
         // All loops use setTimeout chains (not setInterval) so each next tick
         // is scheduled after the previous one fires, preventing pile-up.
 
-        const TABLE_POLL_MS = 3500;
+        const SSE_HEALTH_CHECK_MS = 5000;   // how often to check if SSE recovered
         const STATUS_POLL_MS = 1000;
         const WEBCTRL_POLL_MS = 5000;
-        const SYS_MON_SUMMARY_MS = 4000;   // dropdown closed
-        const SYS_MON_DETAILED_MS = 1500;  // dropdown open
+        const SYS_MON_VISIBLE_MS = 1000;   // 1/s when visible
         const SYS_MON_HIDDEN_MS = 20000;   // tab hidden
 
         // Cross-tab shared-cache TTLs (slightly less than poll interval
@@ -3852,29 +4045,36 @@
         const WEBCTRL_SHARED_CACHE_MS = 1800;
         const TABLE_SHARED_CACHE_MS = 3000;
 
-        // ── Table round-robin ──
-        const _tableFetchers = [fetchActions, fetchFavorites, fetchAllSounds];
-        var _tablePollIndex = Math.floor(Math.random() * _tableFetchers.length); // jitter
-        var _tablePollTimer = null;
-
-        function _scheduleTablePoll() {
-            const el = document.activeElement;
-            const skip = el && (
-                el.classList.contains('filter-select') ||
-                el.classList.contains('pagination-page-input')
-            );
-            if (!skip) {
-                _tableFetchers[_tablePollIndex]();
-            }
-            _tablePollIndex = (_tablePollIndex + 1) % _tableFetchers.length;
-            _tablePollTimer = setTimeout(_scheduleTablePoll, TABLE_POLL_MS);
-        }
-
         // ── Control room status ──
         var _statusPollTimer = null;
 
+        function _controlRoomProgressTick() {
+            var status = latestControlRoomStatus || {};
+            if (status.is_playing && Number.isFinite(Number(status.current_duration_seconds)) && Number(status.current_duration_seconds) > 0) {
+                var duration = Number(status.current_duration_seconds);
+                var elapsed;
+                if (_controlRoomLocalElapsed === null) {
+                    elapsed = Number(status.current_elapsed_seconds || 0);
+                } else {
+                    elapsed = _controlRoomLocalElapsed + 1;
+                }
+                if (elapsed > duration) elapsed = duration;
+                _controlRoomLocalElapsed = elapsed;
+                var requester = status.current_requester ? 'Requested by ' + status.current_requester : 'No active requester';
+                var progressStatus = {};
+                for (var k in status) { if (status.hasOwnProperty(k)) progressStatus[k] = status[k]; }
+                progressStatus.current_elapsed_seconds = elapsed;
+                renderControlRoomProgress(progressStatus, requester);
+            } else {
+                _controlRoomLocalElapsed = null;
+            }
+        }
+
         function _scheduleStatusPoll() {
             _statusPollTimer = setTimeout(function () {
+                // Always poll control room status every 1 s regardless of SSE
+                // health.  SSE events provide fast-path immediate refreshes, but
+                // missed events must not stall the status display.
                 refreshControlRoomStatus().then(_scheduleStatusPoll);
             }, STATUS_POLL_MS);
         }
@@ -3883,24 +4083,22 @@
         var _webCtrlPollTimer = null;
 
         function _scheduleWebCtrlPoll() {
+            if (isSseHealthy()) {
+                // SSE is healthy — skip passive fetch; events drive updates.
+                _webCtrlPollTimer = setTimeout(_scheduleWebCtrlPoll, SSE_HEALTH_CHECK_MS);
+                return;
+            }
             _webCtrlPollTimer = setTimeout(function () {
                 refreshWebControlState().then(_scheduleWebCtrlPoll);
             }, WEBCTRL_POLL_MS);
         }
 
-        // ── System monitor (adaptive cadence) ──
+        // ── System monitor (1 s when visible, slower when hidden) ──
         var _sysMonPollTimer = null;
         var _sysMonDropdownOpen = false;
 
         function _scheduleSysMonPoll() {
-            var interval;
-            if (document.hidden) {
-                interval = SYS_MON_HIDDEN_MS;
-            } else if (_sysMonDropdownOpen) {
-                interval = SYS_MON_DETAILED_MS;
-            } else {
-                interval = SYS_MON_SUMMARY_MS;
-            }
+            var interval = document.hidden ? SYS_MON_HIDDEN_MS : SYS_MON_VISIBLE_MS;
             _sysMonPollTimer = setTimeout(function () {
                 refreshSystemMonitorStatus().then(_scheduleSysMonPoll);
             }, interval);
@@ -3989,7 +4187,6 @@
                 refreshSystemMonitorStatus();
                 refreshControlRoomStatus();
                 refreshWebControlState();
-                _tableFetchers[_tablePollIndex]();
             }
         });
 
@@ -4008,7 +4205,6 @@
         refreshSystemMonitorStatus();
 
         // Start staggered polling loops (initial fetches done above).
-        _scheduleTablePoll();
         _scheduleStatusPoll();
         _scheduleWebCtrlPoll();
         _scheduleSysMonPoll();
