@@ -123,30 +123,89 @@ class FavoriteWatcherService:
         watcher_id = int(watcher["id"])
         videos = await self.fetch_collection_videos(str(watcher["url"]))
         known_ids = self.watcher_repo.get_known_video_ids(watcher_id)
-        new_videos = [video for video in videos if video.video_id not in known_ids]
+
+        # Dedupe by video_id within this single scan so that duplicate entries
+        # returned by yt-dlp are not imported more than once.
+        seen_in_scan: set[str] = set()
+        new_videos: list[FavoriteCollectionVideo] = []
+        for video in videos:
+            if video.video_id not in known_ids and video.video_id not in seen_in_scan:
+                seen_in_scan.add(video.video_id)
+                new_videos.append(video)
+
         imported_count = 0
 
         for video in reversed(new_videos):
             guild_id = int(watcher["guild_id"]) if watcher["guild_id"] else None
-            final_path = await self.sound_service.import_sound_from_video(
-                video.url,
-                guild_id=guild_id,
-            )
-            filename = final_path.rsplit("/", 1)[-1]
-            imported_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-            self.watcher_repo.record_video_seen(
+
+            # CLAIM the video as seen BEFORE the expensive download/import.
+            # This is the critical fix for the re-download-spam bug: if the
+            # claim succeeds the video will never be re-downloaded on the next
+            # poll even if a subsequent DB write (metadata update, action log)
+            # fails due to a database-lock or any other transient error.
+            if not self.watcher_repo.claim_video_seen(
                 watcher_id=watcher_id,
                 video_id=video.video_id,
                 video_url=video.url,
-                imported_at=imported_at,
-                sound_filename=filename,
-            )
-            self.action_repo.insert(
-                "favorite_watcher",
-                "favorite_watcher_import",
-                filename,
-                guild_id=guild_id,
-            )
+            ):
+                # Another poll iteration already claimed this video.
+                continue
+
+            # Download and import.
+            try:
+                final_path = await self.sound_service.import_sound_from_video(
+                    video.url,
+                    guild_id=guild_id,
+                )
+            except Exception as exc:
+                logger.error(
+                    "[FavoriteWatcherService] Failed to import video %s: %s",
+                    video.video_id,
+                    exc,
+                    exc_info=True,
+                )
+                # Keep the claim row — persistent download failures must not
+                # create 10-second retry spam. The video stays "seen but not
+                # imported", matching existing seeded-video semantics.
+                continue
+
+            filename = final_path.rsplit("/", 1)[-1]
+            imported_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+            # Update import metadata in the claim row.  If this write fails
+            # (e.g. DB locked) the claim already exists, so the video will
+            # NOT be re-downloaded.  Log and carry on.
+            try:
+                self.watcher_repo.record_video_seen(
+                    watcher_id=watcher_id,
+                    video_id=video.video_id,
+                    video_url=video.url,
+                    imported_at=imported_at,
+                    sound_filename=filename,
+                )
+            except Exception as exc:
+                logger.error(
+                    "[FavoriteWatcherService] Failed to record import metadata for %s: %s",
+                    video.video_id,
+                    exc,
+                    exc_info=True,
+                )
+
+            try:
+                self.action_repo.insert(
+                    "favorite_watcher",
+                    "favorite_watcher_import",
+                    filename,
+                    guild_id=guild_id,
+                )
+            except Exception as exc:
+                logger.error(
+                    "[FavoriteWatcherService] Failed to record action for %s: %s",
+                    video.video_id,
+                    exc,
+                    exc_info=True,
+                )
+
             await self._notify_import(filename, guild_id=guild_id)
             imported_count += 1
             logger.info(

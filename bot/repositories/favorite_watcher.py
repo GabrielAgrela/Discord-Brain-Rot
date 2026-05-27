@@ -159,6 +159,42 @@ class FavoriteWatcherRepository(BaseRepository[sqlite3.Row]):
         )
         return {str(row["video_id"]) for row in rows}
 
+    def claim_video_seen(
+        self,
+        *,
+        watcher_id: int,
+        video_id: str,
+        video_url: str,
+    ) -> bool:
+        """
+        Atomically claim a video as seen for a watcher.
+
+        Uses ``INSERT OR IGNORE`` so this is safe to call concurrently.
+        Returns ``True`` only when a new row was inserted (first time this
+        video is claimed for this watcher).  Returns ``False`` if the video
+        was already claimed (UNIQUE constraint hit).
+
+        After a successful claim the caller can safely proceed to download;
+        the claim row persists so the video will never be re-downloaded even
+        if subsequent metadata updates fail.
+        """
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT OR IGNORE INTO favorite_watcher_videos
+                    (watcher_id, video_id, video_url)
+                VALUES (?, ?, ?)
+                """,
+                (watcher_id, video_id, video_url),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+        finally:
+            if not self._use_shared:
+                conn.close()
+
     def record_video_seen(
         self,
         *,
