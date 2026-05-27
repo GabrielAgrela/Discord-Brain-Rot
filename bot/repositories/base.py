@@ -60,12 +60,17 @@ class BaseRepository(ABC, Generic[T]):
         Get a database connection.
         
         If shared connection is available and enabled, returns it.
-        Otherwise creates a new connection.
+        Otherwise creates a new connection with a modest busy timeout
+        to avoid immediate ``database is locked`` errors under contention.
         """
         if self._use_shared and BaseRepository._shared_connection is not None:
             return BaseRepository._shared_connection
-        conn = sqlite3.connect(self._db_path)
+        conn = sqlite3.connect(self._db_path, timeout=5.0)
         conn.row_factory = sqlite3.Row
+        # Explicit busy_timeout pragma ensures the connection waits the
+        # full timeout before raising ``database is locked``, even when
+        # concurrent writers from other processes hold the lock.
+        conn.execute("PRAGMA busy_timeout = 5000")
         return conn
     
     def _execute(self, query: str, params: tuple = ()) -> List[sqlite3.Row]:
@@ -110,6 +115,10 @@ class BaseRepository(ABC, Generic[T]):
         """
         Execute a write query (INSERT, UPDATE, DELETE).
         
+        Retries up to 3 times on ``sqlite3.OperationalError`` with
+        ``database is locked`` to survive transient cross-process write
+        contention (e.g. bot background loops vs web Honker workers).
+
         Args:
             query: SQL query string
             params: Query parameters
@@ -117,20 +126,43 @@ class BaseRepository(ABC, Generic[T]):
         Returns:
             Last row ID for INSERT, or rows affected for UPDATE/DELETE
         """
-        if self._use_shared and BaseRepository._shared_connection is not None:
-            cursor = BaseRepository._shared_connection.cursor()
-            cursor.execute(query, params)
-            BaseRepository._shared_connection.commit()
-            return cursor.lastrowid
-        
-        conn = self._get_connection()
-        try:
-            cursor = conn.cursor()
-            cursor.execute(query, params)
-            conn.commit()
-            return cursor.lastrowid
-        finally:
-            conn.close()
+        import time as _time
+
+        max_attempts = 3
+        last_exc: Exception | None = None
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                if self._use_shared and BaseRepository._shared_connection is not None:
+                    cursor = BaseRepository._shared_connection.cursor()
+                    cursor.execute(query, params)
+                    BaseRepository._shared_connection.commit()
+                    return cursor.lastrowid
+
+                conn = self._get_connection()
+                try:
+                    cursor = conn.cursor()
+                    cursor.execute(query, params)
+                    conn.commit()
+                    return cursor.lastrowid
+                finally:
+                    conn.close()
+            except sqlite3.OperationalError as exc:
+                error_str = str(exc).lower()
+                if "database is locked" in error_str or "locked" in error_str:
+                    last_exc = exc
+                    if attempt < max_attempts:
+                        delay = 0.1 * (2 ** (attempt - 1))  # 0.1, 0.2, 0.4
+                        _time.sleep(delay)
+                        continue
+                # Not a lock error or final attempt — re-raise immediately.
+                raise
+            # Non-OperationalError — re-raise immediately.
+            except Exception:
+                raise
+
+        # All retries exhausted.
+        raise last_exc  # type: ignore[return-value]
     
     def _execute_many(self, query: str, params_list: List[tuple]) -> int:
         """

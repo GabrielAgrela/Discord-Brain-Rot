@@ -19,6 +19,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libffi-dev \
     libssl-dev \
     sqlite3 \
+    libsqlite3-dev \
     util-linux \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 

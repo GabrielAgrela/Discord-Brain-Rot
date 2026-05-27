@@ -28,6 +28,8 @@ database copy.db
 .idea/
 *.swp
 *.log
+*.log.*
+/logs/
 .DS_Store
 
 # Testing

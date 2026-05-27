@@ -43,8 +43,14 @@ class Database:
         self.db_path = str(config.DATABASE_PATH)
         # Allow usage from background threads with reasonable timeout
         self.conn = sqlite3.connect(self.db_path, check_same_thread=False, timeout=5.0)
-        
-        # Retry enabling WAL mode
+
+        # Set a busy timeout so that writes wait up to 5 s instead of
+        # immediately failing with ``database is locked`` when another
+        # process (e.g. the web container's Honker workers) holds the
+        # write lock.
+        self.conn.execute("PRAGMA busy_timeout = 5000")
+
+        # Retry enabling WAL mode (allows concurrent readers during writes).
         for attempt in range(3):
             try:
                 self.conn.execute("PRAGMA journal_mode=WAL;")
@@ -55,7 +61,7 @@ class Database:
                     time.sleep(1)
                 else:
                     print(f"[Database] Warning: Could not set journal_mode=WAL after 3 attempts: {e}")
-        
+
         self.cursor = self.conn.cursor()
         self.behavior = behavior
         
@@ -352,7 +358,8 @@ class Database:
             script_dir = os.path.dirname(os.path.abspath(__file__))
             db_path = os.path.join(script_dir, "..", "database.db")
             # Create a connection to the SQLite database
-            conn = sqlite3.connect(db_path)
+            conn = sqlite3.connect(db_path, timeout=5.0)
+            conn.execute("PRAGMA busy_timeout = 5000")
             cursor = conn.cursor()
 
             # Create actions table
@@ -495,6 +502,22 @@ class Database:
             self.conn.commit()
         except sqlite3.Error as e:
             print(f"An error occurred: {e}")
+            return
+
+        # Publish soundboard event for live web UI updates.
+        try:
+            from bot.services.honker_integration import publish_soundboard_event
+            publish_soundboard_event(
+                self.db_path,
+                "actions_changed",
+                {
+                    "action": action,
+                    "target": str(target),
+                    "guild_id": str(guild_id) if guild_id is not None else None,
+                },
+            )
+        except Exception:
+            pass  # Non-critical; polling fallback covers this.
 
     def insert_sound(self, originalfilename, filename, favorite=0, date=None, is_elevenlabs=0, guild_id=None):
         if date is None:

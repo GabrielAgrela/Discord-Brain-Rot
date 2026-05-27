@@ -215,3 +215,21 @@ DEFAULT_GUILD_ID = os.getenv("DEFAULT_GUILD_ID", "")
 # Web server settings
 WEB_HOST = '0.0.0.0'
 WEB_PORT = 8080
+
+# ============================================================================
+# Honker (Optional) Settings
+# ============================================================================
+
+# Honker is an optional SQLite extension that adds NOTIFY/LISTEN, durable
+# queues, streams, and named locks.  When unavailable, all features degrade
+# gracefully to no-ops (existing polling/fallback behaviour preserved).
+
+# HONKER_ENABLED: "auto" (default) — enabled when the module imports
+# successfully.  Set "true" or "false" to force.
+HONKER_ENABLED = os.getenv("HONKER_ENABLED", "auto").strip().lower()
+
+# HONKER_REQUIRED: When true, the bot will hard-fail if Honker cannot be
+# imported or loaded.  Useful for deployment validation.
+HONKER_REQUIRED = os.getenv("HONKER_REQUIRED", "false").strip().lower() in (
+    "1", "true", "yes"
+)

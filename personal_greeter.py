@@ -76,53 +76,108 @@ bot.add_cog(SettingsCog(bot, behavior))
 db = Database(behavior=behavior)
 voice_activity_repo = VoiceActivityRepository()
 
+# Validate Honker availability early (will fail fast if HONKER_REQUIRED=true).
+try:
+    from bot.services.honker_integration import ensure_available as _ensure_honker
+    _ensure_honker(db.db_path)
+except ImportError:
+    pass
+
+
+# --- Playback queue drain helpers ---
+
+# Serialize concurrent drains from the polling loop and Honker listener
+# so that a Honker-triggered drain and the polling tick do not fetch
+# and process the same unplayed row twice.
+_playback_queue_drain_lock = asyncio.Lock()
+
+
+async def _drain_playback_queue_once() -> None:
+    """Process all unplayed playback_queue rows.
+
+    This is the core drain logic shared by the polling loop and the
+    optional Honker notification listener. Serialized with a module-level
+    lock so concurrent calls from both paths do not process the same
+    row twice.
+    """
+    if _playback_queue_drain_lock.locked():
+        return
+
+    async with _playback_queue_drain_lock:
+        try:
+            ensure_playback_queue_identity_columns(db.db_path)
+            cursor = db.cursor
+            cursor.execute(
+                """
+                SELECT
+                    id,
+                    guild_id,
+                    sound_filename,
+                    request_username,
+                    request_user_id,
+                    request_type,
+                    control_action,
+                    play_action
+                FROM playback_queue
+                WHERE played_at IS NULL
+                ORDER BY requested_at ASC
+            """
+            )
+            pending_requests = cursor.fetchall()
+
+            if not pending_requests:
+                return
+
+            print(f"[Playback Queue] Found {len(pending_requests)} pending requests.")
+
+            sound_folder = os.path.abspath(
+                os.path.join(os.path.dirname(__file__), "sounds")
+            )
+            for request in pending_requests:
+                await process_playback_queue_request(
+                    request,
+                    bot=bot,
+                    behavior=behavior,
+                    db=db,
+                    sound_folder=sound_folder,
+                    action_logger_factory=ActionRepository,
+                )
+        except sqlite3.Error as db_err:
+            print(f"[Playback Queue] Database error: {db_err}")
+        except Exception as e:
+            print(f"[Playback Queue] Unexpected error in drain: {e}")
+
 
 # --- Background Task to Handle Web Playback Requests ---
 @tasks.loop(seconds=PLAYBACK_QUEUE_INTERVAL)
 async def check_playback_queue():
     """Process queued playback requests from the web interface."""
+    await _drain_playback_queue_once()
+
+
+# --- Optional Honker listener for fast playback-queue wake-up ---
+_honker_playback_listener_task = None
+
+
+async def _playback_queue_honker_listener() -> None:
+    """Listen for Honker playback_queue notifications and drain immediately."""
     try:
-        ensure_playback_queue_identity_columns(db.db_path)
-        cursor = db.cursor
-        cursor.execute(
-            """
-            SELECT
-                id,
-                guild_id,
-                sound_filename,
-                request_username,
-                request_user_id,
-                request_type,
-                control_action,
-                play_action
-            FROM playback_queue
-            WHERE played_at IS NULL
-            ORDER BY requested_at ASC
-        """
+        from bot.services.honker_integration import (
+            availability as _honker_available,
+            listen_notifications as _honker_listen,
         )
-        pending_requests = cursor.fetchall()
+    except ImportError:
+        return
 
-        if not pending_requests:
-            return
+    if not _honker_available():
+        return
 
-        print(f"[Playback Queue] Found {len(pending_requests)} pending requests.")
-
-        sound_folder = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "sounds")
-        )
-        for request in pending_requests:
-            await process_playback_queue_request(
-                request,
-                bot=bot,
-                behavior=behavior,
-                db=db,
-                sound_folder=sound_folder,
-                action_logger_factory=ActionRepository,
-            )
-    except sqlite3.Error as db_err:
-        print(f"[Playback Queue] Database error: {db_err}")
-    except Exception as e:
-        print(f"[Playback Queue] Unexpected error in background task: {e}")
+    print("[Honker] Starting playback_queue notification listener...")
+    try:
+        async for _notification in _honker_listen(db.db_path, "playback_queue", fallback_poll_s=1.0):
+            await _drain_playback_queue_once()
+    except Exception as exc:
+        print(f"[Honker] Playback queue listener stopped: {exc}")
 
 
 @bot.event
@@ -171,6 +226,12 @@ async def on_ready():
     # Background tasks are handled by BackgroundService (started automatically in BotBehavior)
     bot.loop.create_task(SoundDownloader(behavior, behavior.db, os.getenv("CHROMEDRIVER_PATH")).move_sounds())
     check_playback_queue.start()
+
+    # Start optional Honker playback queue listener for fast wake-up.
+    global _honker_playback_listener_task
+    _honker_playback_listener_task = bot.loop.create_task(
+        _playback_queue_honker_listener()
+    )
 
 
 @bot.event
@@ -476,6 +537,10 @@ async def on_close():
     print("Bot is closing, cleaning up resources...")
 
     check_playback_queue.cancel()
+    global _honker_playback_listener_task
+    if _honker_playback_listener_task is not None:
+        _honker_playback_listener_task.cancel()
+        _honker_playback_listener_task = None
     print("Cleanup complete.")
 
 # --- New DM Video Link Handler ---

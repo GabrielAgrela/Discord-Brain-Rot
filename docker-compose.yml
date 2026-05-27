@@ -15,6 +15,8 @@ services:
       - FFMPEG_PATH=/usr/bin/ffmpeg
       - CHROMEDRIVER_PATH=/usr/bin/chromedriver
       - BACKUP_SOURCE_DIR=/backup-source/Discord-Brain-Rot
+      - HONKER_ENABLED=true
+      - HONKER_REQUIRED=true
     volumes:
       - /home/gabi/github/Discord-Brain-Rot/bot:/app/bot
       - /home/gabi/github/Discord-Brain-Rot/personal_greeter.py:/app/personal_greeter.py
@@ -46,6 +48,9 @@ services:
       - "8080:8080"
     env_file:
       - .env
+    environment:
+      - HONKER_ENABLED=true
+      - HONKER_REQUIRED=true
     volumes:
       - /home/gabi/github/Discord-Brain-Rot/bot:/app/bot
       - /home/gabi/github/Discord-Brain-Rot/web_page.py:/app/web_page.py
