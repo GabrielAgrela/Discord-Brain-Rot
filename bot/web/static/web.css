@@ -5604,6 +5604,523 @@ tbody.page-swap-active {
     gap: 0.4rem;
 }
 
+/* ── Scribbly Cartoon Redesign Layer ─────────────────────────────── */
+
+:root {
+    --paper: oklch(98.8% 0.006 95);
+    --paper-strong: oklch(96.4% 0.012 92);
+    --paper-soft: oklch(99.4% 0.004 95 / 0.98);
+    --paper-muted: oklch(97.2% 0.01 92 / 0.92);
+    --ink: oklch(20% 0.045 255);
+    --ink-soft: oklch(28% 0.04 255 / 0.84);
+    --ink-muted: oklch(41% 0.045 248);
+    --ink-faint: oklch(20% 0.045 255 / 0.13);
+    --accent: oklch(61% 0.2 27);
+    --accent-deep: oklch(45% 0.17 27);
+    --accent-soft: oklch(65% 0.19 27 / 0.15);
+    --accent-olive: oklch(58% 0.14 150);
+    --accent-olive-soft: oklch(58% 0.14 150 / 0.16);
+    --accent-amber: oklch(82% 0.13 82);
+    --accent-amber-soft: oklch(82% 0.13 82 / 0.16);
+    --discord: oklch(58% 0.22 280);
+    --discord-deep: oklch(48% 0.2 280);
+    --success: oklch(58% 0.15 150);
+    --error: oklch(52% 0.2 25);
+    --border: oklch(20% 0.045 255 / 0.22);
+    --border-strong: oklch(20% 0.045 255 / 0.48);
+    --shadow: 0.42rem 0.42rem 0 oklch(20% 0.045 255 / 0.18);
+    --shadow-sm: 0.24rem 0.24rem 0 oklch(20% 0.045 255 / 0.15);
+    --scribble-blue: oklch(60% 0.17 244);
+    --scribble-pink: oklch(69% 0.17 355);
+    --scribble-lime: oklch(78% 0.16 142);
+    --scribble-line: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='22' viewBox='0 0 140 22'%3E%3Cpath d='M2 13 C18 4 28 19 42 10 S72 4 85 12 111 19 138 8' fill='none' stroke='%23273564' stroke-opacity='.2' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E");
+    --scribble-paper: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180' viewBox='0 0 180 180'%3E%3Cg fill='none' stroke='%23273564' stroke-opacity='.085' stroke-linecap='round'%3E%3Cpath d='M14 31c21-5 35-4 58 0M8 98c34 6 56 4 82-2M105 48c18 7 38 8 58 2M115 135c15-5 30-4 48 3'/%3E%3Cpath d='M34 151c-9 3-17 5-25 1M148 18c7 7 12 9 20 7M77 119c5-3 10-3 15 0'/%3E%3C/g%3E%3C/svg%3E");
+    --radius-xl: 18px 24px 20px 28px;
+    --radius-lg: 16px 20px 18px 14px;
+    --radius-md: 12px 15px 13px 17px;
+    --radius-sm: 9px 12px 10px 14px;
+}
+
+html.theme-dark {
+    --paper: oklch(18% 0.04 255);
+    --paper-strong: oklch(14.5% 0.038 255);
+    --paper-soft: oklch(22% 0.04 255 / 0.97);
+    --paper-muted: oklch(25% 0.045 255 / 0.9);
+    --ink: oklch(94% 0.025 92);
+    --ink-soft: oklch(88% 0.025 92 / 0.84);
+    --ink-muted: oklch(76% 0.04 92);
+    --ink-faint: oklch(94% 0.025 92 / 0.16);
+    --border: oklch(94% 0.025 92 / 0.2);
+    --border-strong: oklch(94% 0.025 92 / 0.36);
+    --shadow: 0.42rem 0.42rem 0 oklch(5% 0.02 255 / 0.45);
+    --shadow-sm: 0.24rem 0.24rem 0 oklch(5% 0.02 255 / 0.38);
+    --scribble-line: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='22' viewBox='0 0 140 22'%3E%3Cpath d='M2 13 C18 4 28 19 42 10 S72 4 85 12 111 19 138 8' fill='none' stroke='%23f3ead4' stroke-opacity='.24' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E");
+    --scribble-paper: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180' viewBox='0 0 180 180'%3E%3Cg fill='none' stroke='%23f3ead4' stroke-opacity='.09' stroke-linecap='round'%3E%3Cpath d='M14 31c21-5 35-4 58 0M8 98c34 6 56 4 82-2M105 48c18 7 38 8 58 2M115 135c15-5 30-4 48 3'/%3E%3Cpath d='M34 151c-9 3-17 5-25 1M148 18c7 7 12 9 20 7M77 119c5-3 10-3 15 0'/%3E%3C/g%3E%3C/svg%3E");
+}
+
+html,
+body {
+    background-color: var(--paper);
+}
+
+body {
+    background:
+        var(--scribble-paper),
+        radial-gradient(circle at 7% 8%, oklch(60% 0.17 244 / 0.08), transparent 18rem),
+        radial-gradient(circle at 94% 10%, oklch(69% 0.17 355 / 0.1), transparent 18rem),
+        linear-gradient(180deg, var(--paper) 0%, var(--paper-strong) 100%);
+    font-family: "Atkinson Hyperlegible", "Comic Sans MS", "Segoe UI", system-ui, sans-serif;
+    letter-spacing: 0;
+}
+
+html.theme-dark body {
+    background:
+        var(--scribble-paper),
+        radial-gradient(circle at 7% 8%, oklch(78% 0.16 82 / 0.13), transparent 18rem),
+        radial-gradient(circle at 94% 10%, oklch(69% 0.17 355 / 0.16), transparent 18rem),
+        linear-gradient(180deg, var(--paper) 0%, var(--paper-strong) 100%);
+}
+
+body::before {
+    background-image:
+        linear-gradient(var(--ink-faint) 2px, transparent 2px),
+        linear-gradient(90deg, var(--ink-faint) 2px, transparent 2px);
+    background-size: 34px 34px;
+    mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.3), transparent 72%);
+}
+
+body::after {
+    height: 28vh;
+    background:
+        var(--scribble-line) 4% 82% / 170px 28px repeat-x,
+        linear-gradient(180deg, transparent, oklch(60% 0.17 244 / 0.045));
+}
+
+.soundboard-ambient::before,
+.soundboard-ambient::after {
+    background:
+        radial-gradient(circle at 18% 22%, oklch(60% 0.17 244 / 0.12) 0 0.32rem, transparent 0.38rem),
+        radial-gradient(circle at 82% 28%, oklch(78% 0.16 82 / 0.15) 0 0.26rem, transparent 0.34rem),
+        radial-gradient(circle at 55% 82%, oklch(69% 0.17 355 / 0.14) 0 0.28rem, transparent 0.36rem);
+    background-size: 11rem 8rem, 14rem 10rem, 13rem 9rem;
+}
+
+.nav,
+.control-room,
+.card,
+.stat-card,
+.dataset-sidebar,
+.dataset-main,
+.dataset-action-toolbar,
+.dataset-clip-card,
+.web-upload-dialog,
+.web-tts-dialog,
+.sound-rename-dialog,
+.sound-list-dialog,
+.sound-similar-dialog,
+.sound-event-dialog,
+.login-modal-card,
+.error-page {
+    border-width: 3px;
+    border-style: solid;
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow-sm);
+}
+
+.nav {
+    background:
+        var(--scribble-line) 0 100% / 150px 24px repeat-x,
+        linear-gradient(180deg, var(--paper-soft), var(--paper-muted));
+    border-width: 0 0 3px;
+}
+
+.nav-brand-mark,
+.nav-link,
+.auth-button,
+.auth-user-link,
+.guild-selector-shell,
+.theme-toggle,
+.control-room-actions-trigger,
+.web-control-button,
+.web-upload-control-button,
+.play-button,
+.play-btn,
+.sound-options-button,
+.pagination button,
+.time-btn,
+.dataset-action-btn,
+.dataset-sort-select,
+.dataset-search,
+.dataset-label-filter-select {
+    border-width: 2px;
+    border-style: solid;
+    border-color: var(--border-strong);
+    border-radius: 11px 15px 12px 17px;
+    box-shadow: 0.18rem 0.18rem 0 var(--ink-faint);
+}
+
+.nav-brand-label,
+.page-title,
+.card-title,
+.stat-value,
+.dataset-sidebar-title,
+.dataset-main-title,
+.error-page h1,
+.login-modal-title,
+.hero-panel-title {
+    font-family: "DynaPuff", "Comic Sans MS", "Atkinson Hyperlegible", system-ui, sans-serif;
+    letter-spacing: 0;
+}
+
+.nav-brand-label {
+    color: var(--ink);
+    font-size: 1.04rem;
+    text-transform: none;
+}
+
+.nav-brand-subtitle,
+.card-kicker,
+.eyebrow,
+.stat-label,
+.pagination-info,
+.filter-label,
+.table-caption {
+    font-weight: 900;
+    letter-spacing: 0.08em;
+}
+
+.nav-brand-mark {
+    background:
+        radial-gradient(circle at 35% 35%, var(--accent-amber-soft), transparent 42%),
+        var(--paper-soft);
+    color: var(--ink);
+    transform: rotate(-3deg);
+}
+
+.nav-brand:hover .nav-brand-mark {
+    transform: translateY(-1px) rotate(4deg) scale(1.04);
+}
+
+.nav-link,
+.auth-button,
+.guild-selector-shell,
+.theme-toggle {
+    background: var(--paper-soft);
+    color: var(--ink);
+}
+
+.nav-link.active,
+.auth-button {
+    background:
+        radial-gradient(circle at 28% 22%, oklch(98% 0.024 95 / 0.22), transparent 36%),
+        var(--discord);
+    color: oklch(98% 0.018 95);
+}
+
+.nav-link.active {
+    background: var(--accent);
+    border-color: var(--ink);
+    box-shadow: 0.22rem 0.22rem 0 var(--ink);
+}
+
+.nav-link.active::after {
+    background: var(--scribble-line) center / 110px 20px repeat-x;
+    opacity: 0.32;
+    animation: none;
+}
+
+.control-room,
+.card,
+.stat-card,
+.dataset-sidebar,
+.dataset-main,
+.dataset-action-toolbar,
+.dataset-clip-card,
+.error-page {
+    background:
+        var(--scribble-paper),
+        linear-gradient(180deg, var(--paper-soft), var(--paper-muted));
+}
+
+.control-room {
+    border-radius: 18px 26px 20px 16px;
+    transform: rotate(-0.15deg);
+    z-index: 90;
+}
+
+.control-room::before,
+.card::after,
+.stat-card::after,
+.dataset-sidebar::after,
+.dataset-main::after {
+    content: "";
+    position: absolute;
+    inset: 0.42rem;
+    border: 2px dashed oklch(20% 0.045 255 / 0.16);
+    border-radius: inherit;
+    pointer-events: none;
+}
+
+html.theme-dark .control-room::before,
+html.theme-dark .card::after,
+html.theme-dark .stat-card::after,
+html.theme-dark .dataset-sidebar::after,
+html.theme-dark .dataset-main::after {
+    border-color: oklch(94% 0.025 92 / 0.16);
+}
+
+.card {
+    border-radius: 20px 15px 24px 17px;
+}
+
+.card:nth-child(2n),
+.main-grid-column:nth-child(2) .card:nth-child(odd),
+.stats-grid .stat-card:nth-child(2n) {
+    transform: rotate(0.18deg);
+}
+
+.card:nth-child(2n + 1),
+.main-grid-column:nth-child(1) .card:nth-child(even),
+.stats-grid .stat-card:nth-child(2n + 1) {
+    transform: rotate(-0.14deg);
+}
+
+.card::before,
+.stat-card::before {
+    height: 9px;
+    background:
+        var(--scribble-line) center / 140px 22px repeat-x,
+        var(--card-accent, var(--accent));
+}
+
+.page-analytics .card::before,
+.page-analytics .stat-card::before {
+    display: block;
+}
+
+.card-title {
+    font-size: 1.16rem;
+    line-height: 1.05;
+}
+
+.page-heading .page-title,
+.page-title {
+    font-family: "DynaPuff", "Comic Sans MS", "Atkinson Hyperlegible", system-ui, sans-serif;
+    max-width: 16ch;
+    font-size: clamp(2rem, 4vw, 3.75rem);
+    font-weight: 700;
+    letter-spacing: 0;
+    line-height: 1;
+}
+
+.page-heading .page-intro,
+.card-copy,
+.page-intro {
+    color: var(--ink-soft);
+}
+
+.search-input,
+.filter-select,
+.pagination-page-input,
+.dataset-search,
+.dataset-sort-select,
+.dataset-label-filter-select,
+.sound-row-context-menu,
+.voice-members-dropdown,
+.system-monitor-dropdown {
+    background:
+        var(--scribble-paper),
+        oklch(98% 0.024 95 / 0.94);
+    border: 2px solid var(--border-strong);
+    border-radius: 11px 15px 12px 17px;
+    color: var(--ink);
+    box-shadow: inset 0 0 0 2px oklch(98% 0.024 95 / 0.28);
+}
+
+html.theme-dark .search-input,
+html.theme-dark .filter-select,
+html.theme-dark .pagination-page-input,
+html.theme-dark .dataset-search,
+html.theme-dark .dataset-sort-select,
+html.theme-dark .dataset-label-filter-select,
+html.theme-dark .sound-row-context-menu,
+html.theme-dark .voice-members-dropdown,
+html.theme-dark .system-monitor-dropdown {
+    background:
+        var(--scribble-paper),
+        oklch(24% 0.04 255 / 0.96);
+    color: var(--ink);
+}
+
+.select-shell::before {
+    border-color: var(--border-strong);
+    background: var(--accent-amber-soft);
+    border-radius: 9px 12px 8px 13px;
+}
+
+.select-shell::after {
+    border-color: var(--accent-deep);
+}
+
+.table-container,
+.activity-feed,
+.leaderboard-list,
+.heatmap-container {
+    border: 3px solid var(--border-strong);
+    border-radius: 14px 18px 16px 12px;
+    background:
+        linear-gradient(var(--ink-faint) 1px, transparent 1px) 0 0 / 100% var(--table-row-height),
+        var(--paper-soft);
+}
+
+th {
+    background:
+        var(--scribble-line) center / 130px 20px repeat-x,
+        var(--accent-amber-soft),
+        var(--paper-soft);
+    color: var(--ink);
+    font-weight: 900;
+    letter-spacing: 0.07em;
+}
+
+td {
+    font-weight: 700;
+}
+
+tbody tr:nth-child(even) {
+    background: oklch(78% 0.16 82 / 0.08);
+}
+
+tbody tr:hover {
+    background:
+        var(--scribble-line) 50% 50% / 150px 24px repeat-x,
+        var(--accent-soft);
+}
+
+.play-button,
+.play-btn,
+.control-room-actions-trigger,
+.web-control-button,
+.web-upload-control-button {
+    background:
+        radial-gradient(circle at 25% 25%, oklch(98% 0.024 95 / 0.18), transparent 40%),
+        var(--ink);
+    color: var(--paper);
+}
+
+.play-button:hover:not(:disabled),
+.play-btn:hover:not(:disabled),
+.web-control-button:hover:not(:disabled),
+.web-upload-control-button:hover:not(:disabled),
+.control-room-actions-trigger:hover,
+.pagination button:hover:not(:disabled),
+.time-btn:hover,
+.dataset-action-btn:hover {
+    transform: translate(-2px, -2px) rotate(-1deg);
+    box-shadow: 0.34rem 0.34rem 0 var(--ink-faint);
+}
+
+.play-button:active:not(:disabled),
+.play-btn:active:not(:disabled),
+.web-control-button:active:not(:disabled),
+.web-upload-control-button:active:not(:disabled),
+.control-room-actions-trigger:active,
+.pagination button:active:not(:disabled) {
+    transform: translate(1px, 1px) rotate(1deg);
+    box-shadow: 0.08rem 0.08rem 0 var(--ink-faint);
+}
+
+.sound-options-button,
+.pagination button,
+.time-btn,
+.dataset-action-btn {
+    background: var(--paper-soft);
+    color: var(--ink);
+}
+
+.time-btn.active,
+.dataset-action-btn.primary,
+.action-badge.play,
+.action-badge.favorite {
+    background: var(--accent-amber);
+    border-color: var(--ink);
+    color: var(--ink);
+}
+
+.action-badge {
+    border: 2px solid var(--border-strong);
+    border-radius: 8px 11px 9px 12px;
+    font-weight: 900;
+    letter-spacing: 0.02em;
+}
+
+.stat-card {
+    min-height: 8.2rem;
+    border-radius: 18px 14px 22px 16px;
+}
+
+.stat-icon {
+    filter: drop-shadow(2px 2px 0 oklch(20% 0.045 255 / 0.12));
+}
+
+.stat-value {
+    color: var(--accent-deep);
+    letter-spacing: 0;
+}
+
+.leaderboard-item,
+.activity-item,
+.dataset-clip-card,
+.web-upload-item,
+.web-upload-queue-item {
+    border: 2px solid var(--border);
+    border-radius: 12px 16px 13px 15px;
+    background:
+        var(--scribble-paper),
+        oklch(98% 0.024 95 / 0.72);
+}
+
+html.theme-dark .leaderboard-item,
+html.theme-dark .activity-item,
+html.theme-dark .dataset-clip-card,
+html.theme-dark .web-upload-item,
+html.theme-dark .web-upload-queue-item {
+    background:
+        var(--scribble-paper),
+        oklch(24% 0.04 255 / 0.72);
+}
+
+.web-upload-dialog,
+.web-tts-dialog,
+.sound-rename-dialog,
+.sound-list-dialog,
+.sound-similar-dialog,
+.sound-event-dialog,
+.login-modal-card {
+    background:
+        var(--scribble-paper),
+        linear-gradient(180deg, var(--paper-soft), var(--paper-muted));
+    border-radius: 20px 16px 24px 18px;
+}
+
+:focus-visible {
+    outline: 4px dashed var(--accent);
+    outline-offset: 4px;
+}
+
+@media (max-width: 640px) {
+    .control-room,
+    .card,
+    .stat-card {
+        transform: none;
+    }
+
+    .page-heading .page-title,
+    .page-title {
+        font-size: clamp(2rem, 10vw, 3rem);
+    }
+}
+
 .dataset-sidebar-header {
     display: flex;
     align-items: center;
@@ -6570,5 +7087,314 @@ html.theme-dark .dataset-label-filter-select option {
 
     .dataset-bulk-group {
         justify-content: flex-start;
+    }
+}
+
+/* Keep the late dataset rules inside the same scribbly system. */
+.dataset-sidebar,
+.dataset-main,
+.dataset-action-toolbar,
+.dataset-clip,
+.dataset-clip-card,
+.dataset-empty,
+.dataset-pagination {
+    position: relative;
+}
+
+.dataset-sidebar,
+.dataset-main,
+.dataset-action-toolbar,
+.dataset-clip {
+    background:
+        var(--scribble-paper),
+        linear-gradient(180deg, var(--paper-soft), var(--paper-muted));
+    border: 3px solid var(--border-strong);
+    border-radius: 18px 14px 22px 16px;
+    box-shadow: var(--shadow-sm);
+}
+
+.dataset-user-item,
+.dataset-clip-label-select,
+.dataset-clip-transcript,
+.dataset-clip-notes,
+.dataset-quick-play,
+.dataset-quick-label-apply,
+.dataset-quick-delete,
+.dataset-quick-more,
+.dataset-quick-trim,
+.dataset-quick-label-select,
+.pagination-btn,
+.dataset-save-btn {
+    border: 2px solid var(--border-strong);
+    border-radius: 10px 14px 11px 15px;
+    box-shadow: 0.16rem 0.16rem 0 var(--ink-faint);
+}
+
+.dataset-main-title,
+.dataset-sidebar-title {
+    font-family: "DynaPuff", "Comic Sans MS", "Atkinson Hyperlegible", system-ui, sans-serif;
+    letter-spacing: 0;
+    text-transform: none;
+}
+
+.dataset-save-btn,
+.dataset-quick-label-apply.saved {
+    background: var(--accent);
+    color: oklch(98% 0.018 95);
+}
+
+/* ── Scribbly Refinement Pass ───────────────────────────────────── */
+
+.control-room-dot.playing {
+    background: var(--scribble-blue);
+    box-shadow: 0 0 0 5px oklch(60% 0.17 244 / 0.18);
+}
+
+.control-room-dot.playing + .control-room-equalizer span,
+.dot-playing .control-room-equalizer span {
+    background: var(--accent-amber);
+}
+
+.control-room-progress-track {
+    border: 2px solid var(--border);
+    background:
+        repeating-linear-gradient(
+            -12deg,
+            oklch(20% 0.045 255 / 0.09) 0 5px,
+            transparent 5px 10px
+        ),
+        oklch(99.4% 0.004 95 / 0.65);
+}
+
+.control-room-progress-fill {
+    background:
+        repeating-linear-gradient(
+            -18deg,
+            var(--accent) 0 8px,
+            var(--accent-amber) 8px 16px,
+            var(--scribble-blue) 16px 24px
+        );
+}
+
+.control-room-progress-fill::after {
+    background: var(--scribble-line) center / 90px 18px repeat-x;
+    opacity: 0.45;
+}
+
+.system-monitor-dropdown,
+.voice-members-dropdown {
+    z-index: 220;
+    border-width: 3px;
+    box-shadow: 0.3rem 0.3rem 0 var(--ink-faint);
+}
+
+.filter-select option,
+.guild-selector option,
+.dataset-label-filter-select option,
+.dataset-sort-select option,
+.dataset-bulk-label-select option,
+.dataset-quick-label-select option,
+.dataset-scan-select option {
+    background-color: oklch(99.4% 0.004 95);
+    color: var(--ink);
+    font-family: "Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif;
+    font-weight: 700;
+}
+
+.web-upload-dialog,
+.web-tts-dialog,
+.sound-rename-dialog,
+.sound-list-dialog,
+.sound-similar-dialog,
+.sound-event-dialog,
+.login-modal-card,
+.voice-members-card {
+    border: 4px solid var(--border-strong);
+    border-radius: 20px 16px 26px 18px;
+    background:
+        var(--scribble-paper),
+        linear-gradient(180deg, oklch(99.5% 0.004 95), oklch(97.4% 0.01 92));
+    box-shadow: 0.5rem 0.5rem 0 var(--ink-faint);
+}
+
+.web-upload-title,
+.login-modal-title,
+.voice-members-title {
+    font-family: "DynaPuff", "Comic Sans MS", "Atkinson Hyperlegible", system-ui, sans-serif;
+    letter-spacing: 0;
+}
+
+.web-upload-dialog input,
+.web-upload-dialog textarea,
+.web-upload-dialog select,
+.web-tts-dialog input,
+.web-tts-dialog textarea,
+.web-tts-dialog select,
+.sound-options-dialog input,
+.sound-options-dialog select {
+    border: 2px solid var(--border-strong);
+    border-radius: 10px 14px 11px 15px;
+    background:
+        var(--scribble-paper),
+        oklch(99.4% 0.004 95 / 0.92);
+    box-shadow: inset 0 0 0 2px oklch(60% 0.17 244 / 0.04);
+}
+
+.web-upload-submit,
+.web-upload-cancel,
+.web-upload-modal-close,
+.web-tts-submit,
+.sound-options-submit,
+.login-modal-close,
+.login-modal-login:not(.auth-button),
+.voice-members-close {
+    border: 2px solid var(--border-strong);
+    border-radius: 10px 14px 11px 15px;
+    box-shadow: 0.18rem 0.18rem 0 var(--ink-faint);
+}
+
+body.page-dataset {
+    overflow-x: hidden;
+}
+
+.dataset-shell {
+    width: min(1500px, calc(100% - 2rem));
+    grid-template-columns: minmax(15rem, 18rem) minmax(0, 1fr);
+    gap: 1rem;
+}
+
+.dataset-sidebar,
+.dataset-main,
+.dataset-action-toolbar,
+.dataset-clip {
+    background:
+        var(--scribble-paper),
+        linear-gradient(180deg, oklch(99.4% 0.004 95), oklch(97.4% 0.01 92));
+}
+
+.dataset-main {
+    padding: 0.8rem;
+}
+
+.dataset-main::after,
+.dataset-sidebar::after {
+    inset: 0.35rem;
+}
+
+.dataset-toolbar {
+    align-items: flex-start;
+}
+
+.dataset-toolbar-left {
+    flex: 1 1 24rem;
+    min-width: 0;
+}
+
+.dataset-toolbar-right {
+    flex: 0 1 16rem;
+    min-width: min(16rem, 100%);
+}
+
+.dataset-main-title {
+    flex: 1 1 auto;
+    min-width: 14rem;
+    font-family: "Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif;
+    font-size: 1.02rem;
+    font-weight: 900;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+}
+
+.dataset-sidebar-title {
+    font-family: "Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif;
+    font-size: 0.76rem;
+    font-weight: 900;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.dataset-action-toolbar {
+    padding: 0.75rem;
+    border: 3px solid var(--border-strong);
+}
+
+.dataset-action-row {
+    align-items: center;
+    gap: 0.55rem;
+}
+
+.dataset-action-row-primary {
+    justify-content: space-between;
+}
+
+.dataset-sort-group,
+.dataset-bulk-group,
+.dataset-scan-group {
+    min-width: 0;
+}
+
+.dataset-scan-group {
+    margin-left: auto;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.dataset-label-filter-select,
+.dataset-sort-select,
+.dataset-bulk-label-select,
+.dataset-quick-label-select,
+.dataset-scan-select,
+.dataset-search {
+    background:
+        var(--scribble-paper),
+        oklch(99.4% 0.004 95);
+    border: 2px solid var(--border-strong);
+    border-radius: 10px 14px 11px 15px;
+}
+
+.dataset-scan-btn,
+.dataset-bulk-btn,
+.dataset-bulk-apply-btn,
+.dataset-bulk-delete-btn,
+.dataset-quick-play,
+.dataset-quick-label-apply,
+.dataset-quick-delete,
+.dataset-quick-more,
+.dataset-quick-trim,
+.dataset-save-btn {
+    border: 2px solid var(--border-strong);
+    border-radius: 10px 14px 11px 15px;
+    box-shadow: 0.16rem 0.16rem 0 var(--ink-faint);
+}
+
+.dataset-scan-btn {
+    background: oklch(99.4% 0.004 95);
+    color: var(--accent-deep);
+}
+
+.dataset-scan-btn:hover:not(:disabled) {
+    background: var(--accent-amber);
+    color: var(--ink);
+}
+
+.dataset-scan-schedule,
+#scanKeywordBtn:hover .dataset-scan-schedule {
+    color: var(--ink-muted);
+}
+
+.dataset-user-item.active {
+    background: oklch(69% 0.17 355 / 0.15);
+    border-color: var(--accent);
+}
+
+@media (max-width: 768px) {
+    .dataset-shell {
+        width: min(100%, calc(100% - 1rem));
+        grid-template-columns: 1fr;
+    }
+
+    .dataset-toolbar-right,
+    .dataset-search {
+        width: 100%;
     }
 }
