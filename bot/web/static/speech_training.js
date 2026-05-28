@@ -58,6 +58,29 @@
     const transcribeBtn = $('transcribeBtn');
     const keywordScanSchedule = $('keywordScanSchedule');
 
+    // ── Motion bootstrap ─────────────────────────────────────────────
+    (function initMotion() {
+        var mq;
+        try {
+            mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+            if (mq.matches) return;
+        } catch (_e) { return; }
+
+        function deferMotion() {
+            requestAnimationFrame(function () {
+                requestAnimationFrame(function () {
+                    document.documentElement.classList.add('motion-ready');
+                });
+            });
+        }
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', deferMotion);
+        } else {
+            deferMotion();
+        }
+    })();
+
     // ── Theme toggle ───────────────────────────────────────────────────
     const themeToggle = document.querySelector('.theme-toggle');
 
@@ -155,6 +178,8 @@
         allEl.appendChild(allNameSpan);
         allEl.appendChild(allMetaSpan);
 
+        allEl.style.setProperty('--reveal-index', '0');
+
         allEl.addEventListener('click', function () {
             state.selectedUserId = null;
             state.page = 1;
@@ -167,7 +192,10 @@
 
         userList.appendChild(allEl);
 
+        let userIdx = 1;
         for (const u of state.users) {
+            const btnRevealIndex = String(userIdx);
+            userIdx++;
             const el = document.createElement('button');
             el.type = 'button';
             el.className = 'dataset-user-item' + (u.user_id === state.selectedUserId ? ' active' : '');
@@ -185,6 +213,8 @@
 
             el.appendChild(nameSpan);
             el.appendChild(metaSpan);
+
+            el.style.setProperty('--reveal-index', btnRevealIndex);
 
             el.addEventListener('click', function () {
                 if (state.selectedUserId === u.user_id) {
@@ -658,6 +688,7 @@
         }
 
         let html = '';
+        let clipIdx = 0;
         for (const clip of items) {
             const label = clip.label || '';
             const transcript = clip.transcript || '';
@@ -674,7 +705,7 @@
             const displayName = clip.display_name || clip.username || clip.user_id;
             const isSelected = state.selectedIds.has(clip.id);
 
-            html += '<div class="dataset-clip' + (isSelected ? ' selected' : '') + '" data-id="' + clip.id + '">';
+            html += '<div class="dataset-clip' + (isSelected ? ' selected' : '') + '" data-id="' + clip.id + '" style="--reveal-index: ' + clipIdx + '">';
 
             // Quick action row
             html += '<div class="dataset-clip-quick">';
@@ -778,6 +809,7 @@
             html += '</div>'; // .dataset-clip-fields
             html += '</div>'; // .dataset-clip-details
             html += '</div>'; // .dataset-clip
+            clipIdx++;
         }
         clipList.innerHTML = html;
 

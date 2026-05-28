@@ -5536,6 +5536,16 @@ tbody.page-swap-active {
         opacity: 1 !important;
     }
 
+    body.page-dataset .dataset-sidebar,
+    body.page-dataset .dataset-main,
+    body.page-dataset .dataset-action-toolbar,
+    body.page-dataset .dataset-user-item,
+    body.page-dataset .dataset-clip,
+    body.page-dataset .dataset-empty {
+        animation: none !important;
+        opacity: 1 !important;
+    }
+
     .table-container.is-loading::before,
     .table-container.is-loading::after {
         animation: none !important;
@@ -5607,6 +5617,38 @@ tbody.page-swap-active {
     display: flex;
     flex-direction: column;
     gap: 0.4rem;
+}
+
+/* ── Dataset page entrance animations ──────────────────────────────── */
+
+body.page-dataset .dataset-sidebar {
+    animation: riseIn 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: 0.05s;
+}
+
+body.page-dataset .dataset-main {
+    animation: riseIn 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: 0.1s;
+}
+
+body.page-dataset .dataset-action-toolbar {
+    animation: riseIn 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: 0.15s;
+}
+
+body.page-dataset .dataset-user-item {
+    animation: riseIn 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: calc(0.03s * (var(--reveal-index, 0) + 1));
+}
+
+body.page-dataset .dataset-clip {
+    animation: riseIn 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: calc(0.025s * var(--reveal-index, 0));
+}
+
+body.page-dataset .dataset-empty {
+    animation: riseIn 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: 0.12s;
 }
 
 /* ── Scribbly Cartoon Redesign Layer ─────────────────────────────── */
