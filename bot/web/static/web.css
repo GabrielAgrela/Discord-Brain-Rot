@@ -4484,20 +4484,25 @@ html.theme-dark .sound-hover-card-row {
     animation: riseIn 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
+body.page-soundboard .control-room {
+    animation: riseIn 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: 0.05s;
+}
+
 body.page-soundboard .tables-grid > .card {
-    animation: cardEntrance 0.22s ease-out both;
+    animation: riseIn 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 body.page-soundboard .tables-grid > .card:nth-child(1) {
-    animation-delay: 0.02s;
+    animation-delay: 0.12s;
 }
 
 body.page-soundboard .tables-grid > .card:nth-child(2) {
-    animation-delay: 0.06s;
+    animation-delay: 0.2s;
 }
 
 body.page-soundboard .tables-grid > .card:nth-child(3) {
-    animation-delay: 0.1s;
+    animation-delay: 0.28s;
 }
 
 @keyframes riseIn {

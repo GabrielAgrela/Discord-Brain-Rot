@@ -1559,7 +1559,7 @@
 
                                 if (endpoint === 'actions') {
                                     if (item.sound_id) {
-                                        row.className = 'sound-options-row';
+                                        row.classList.add('sound-options-row');
                                         row.dataset.soundId = item.sound_id;
                                         row.dataset.favorite = item.favorite ? 'true' : 'false';
                                         row.dataset.slap = item.slap ? 'true' : 'false';
@@ -1587,7 +1587,7 @@
                                     timestampCell.title = item.timestamp;
                                     row.appendChild(timestampCell);
                                 } else if (endpoint === 'favorites') {
-                                    row.className = 'sound-options-row';
+                                    row.classList.add('sound-options-row');
                                     row.dataset.soundId = item.sound_id;
                                     row.dataset.favorite = 'true';
                                     row.dataset.slap = item.slap ? 'true' : 'false';
@@ -1607,7 +1607,7 @@
                                     optionsCell.appendChild(buildSoundOptionsButton(item));
                                     row.appendChild(optionsCell);
                                 } else if (endpoint === 'all_sounds') {
-                                    row.className = 'sound-options-row';
+                                    row.classList.add('sound-options-row');
                                     row.dataset.soundId = item.sound_id;
                                     row.dataset.favorite = item.favorite ? 'true' : 'false';
                                     row.dataset.slap = item.slap ? 'true' : 'false';
