@@ -31,18 +31,13 @@
     {% endif %}
 
     {% set active_page = 'analytics' %}
-    {% set nav_subtitle = 'Signal Report' %}
+    {% set nav_subtitle = 'Analytics' %}
     {% set logout_next = '/analytics' %}
     {% set show_upload_inbox = false %}
     {% include "shared/nav.html" %}
 
     <main class="page-shell">
         <header class="page-heading">
-            <div class="page-heading-copy">
-                <p class="eyebrow">Signal Report</p>
-                <h1 class="page-title">Server noise, mapped.</h1>
-                <p class="page-intro">Track who is driving the soundboard, which clips keep resurfacing, and when the bot turns chat into a control-room incident.</p>
-            </div>
             <div class="analytics-toolbar analytics-toolbar-standalone" aria-label="Analytics time range">
                 <div class="time-selector">
                     <button class="time-btn" data-days="1">24h</button>

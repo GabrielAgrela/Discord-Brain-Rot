@@ -1719,6 +1719,9 @@ def test_analytics_page_renders_shared_redesign(web_client):
     assert "Activity Heatmap" in html
     assert "🔒" in script
     assert "Watch the server’s taste evolve in real time." not in html
+    assert "Signal Report" not in html
+    assert "Server noise, mapped." not in html
+    assert "control-room incident" not in html
 
 
 def test_web_static_stylesheet_is_served(web_client):

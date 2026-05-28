@@ -653,6 +653,13 @@
         }
 
         function openVoiceMembersDropdown() {
+            // Close other control-room flyouts to prevent overlap
+            closeSystemMonitorDropdown();
+            closeActionDock();
+            if (sysMonHoverTimeout !== null) {
+                clearTimeout(sysMonHoverTimeout);
+                sysMonHoverTimeout = null;
+            }
             const dropdown = document.getElementById('voiceMembersDropdown');
             if (!dropdown) return;
             renderVoiceMembersDropdown();
@@ -945,6 +952,13 @@
         }
 
         function openSystemMonitorDropdown() {
+            // Close other control-room flyouts to prevent overlap
+            closeVoiceMembersDropdown();
+            closeActionDock();
+            if (voiceDropdownHideTimer !== null) {
+                clearTimeout(voiceDropdownHideTimer);
+                voiceDropdownHideTimer = null;
+            }
             const dropdown = document.getElementById('systemMonitorDropdown');
             const button = document.getElementById('systemMonitorButton');
             if (!dropdown) return;
@@ -1872,6 +1886,7 @@
         const controlRoomVoiceMetric = document.getElementById('controlRoomVoiceMetric');
         const voiceMembersDropdown = document.getElementById('voiceMembersDropdown');
         let voiceDropdownHideTimer = null;
+        let sysMonHoverTimeout = null;
 
         function showVoiceDropdown() {
             if (voiceDropdownHideTimer) {
@@ -2854,6 +2869,17 @@
         const actionMenu = document.getElementById('controlRoomActionMenu');
 
         function openActionDock() {
+            // Close other control-room flyouts to prevent overlap
+            closeVoiceMembersDropdown();
+            closeSystemMonitorDropdown();
+            if (voiceDropdownHideTimer !== null) {
+                clearTimeout(voiceDropdownHideTimer);
+                voiceDropdownHideTimer = null;
+            }
+            if (sysMonHoverTimeout !== null) {
+                clearTimeout(sysMonHoverTimeout);
+                sysMonHoverTimeout = null;
+            }
             if (!actionDock || !actionsTrigger || !actionMenu) return;
             actionDock.classList.add('open');
             actionsTrigger.setAttribute('aria-expanded', 'true');
@@ -4192,23 +4218,21 @@
         // ── System Monitor hover-open (desktop only) ─────────────
         const systemMetric = document.getElementById('controlRoomSystemMetric');
         if (systemMetric && window.matchMedia('(hover: hover) and (pointer: fine)').matches) {
-            let hoverTimeout = null;
-
             function hoverOpen() {
-                if (hoverTimeout !== null) {
-                    clearTimeout(hoverTimeout);
-                    hoverTimeout = null;
+                if (sysMonHoverTimeout !== null) {
+                    clearTimeout(sysMonHoverTimeout);
+                    sysMonHoverTimeout = null;
                 }
                 openSystemMonitorDropdown();
             }
 
             function hoverCloseDelayed() {
-                if (hoverTimeout !== null) {
-                    clearTimeout(hoverTimeout);
+                if (sysMonHoverTimeout !== null) {
+                    clearTimeout(sysMonHoverTimeout);
                 }
-                hoverTimeout = setTimeout(function () {
+                sysMonHoverTimeout = setTimeout(function () {
                     closeSystemMonitorDropdown();
-                    hoverTimeout = null;
+                    sysMonHoverTimeout = null;
                 }, 250);
             }
 
@@ -4217,9 +4241,9 @@
 
             if (systemMonitorDropdown) {
                 systemMonitorDropdown.addEventListener('mouseenter', function () {
-                    if (hoverTimeout !== null) {
-                        clearTimeout(hoverTimeout);
-                        hoverTimeout = null;
+                    if (sysMonHoverTimeout !== null) {
+                        clearTimeout(sysMonHoverTimeout);
+                        sysMonHoverTimeout = null;
                     }
                 });
                 systemMonitorDropdown.addEventListener('mouseleave', hoverCloseDelayed);

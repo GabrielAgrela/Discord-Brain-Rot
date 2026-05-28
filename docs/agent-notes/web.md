@@ -294,7 +294,7 @@ The TTLs are intentionally short (0.9–1.5 s) so that user-triggered searches
 
 ### Shared navigation
 
-A shared nav partial lives at ``bot/web/templates/shared/nav.html``.  All pages (soundboard, analytics, dataset) include it.  The including template sets ``active_page`` (``"soundboard"``, ``"analytics"``, or ``"dataset"``), ``nav_subtitle`` (e.g. ``"Web Sound Desk"``, ``"Signal Report"``, ``"Dataset"``), ``logout_next`` (logout redirect path), and ``show_upload_inbox`` (bool for the admin inbox button).
+A shared nav partial lives at ``bot/web/templates/shared/nav.html``.  All pages (soundboard, analytics, dataset) include it.  The including template sets ``active_page`` (``"soundboard"``, ``"analytics"``, or ``"dataset"``), ``nav_subtitle`` (e.g. ``"Web Sound Desk"``, ``"Analytics"``, ``"Dataset"``), ``logout_next`` (logout redirect path), and ``show_upload_inbox`` (bool for the admin inbox button).
 
 ``bot/web/templates/soundboard/nav.html`` is a compatibility wrapper that defaults ``active_page='soundboard'``, ``nav_subtitle='Web Sound Desk'``, ``show_upload_inbox=true``, and ``logout_next='/'``, then includes ``shared/nav.html``.
 
