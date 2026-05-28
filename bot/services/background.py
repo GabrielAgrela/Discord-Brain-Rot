@@ -2313,6 +2313,40 @@ class BackgroundService:
         except Exception as e:
             print(f"[BackgroundService] Error updating status: {e}")
 
+    async def _play_periodic_sound_for_guild(self, guild) -> None:
+        """Attempt periodic sound playback in a single guild.
+
+        Skips if periodic is disabled, no suitable channel, no users,
+        no random sound available, or if ``play_audio`` returns ``False``
+        (e.g. because ``interrupt_existing=False`` found audio already active).
+        Only inserts the action record on successful playback.
+        """
+        settings = self.guild_settings_service.get(guild.id)
+        if not settings.periodic_enabled:
+            return
+        channel = self.audio_service.get_largest_voice_channel(guild)
+        if not channel:
+            return
+        # Skip if channel is empty (no non-bot members)
+        non_bot_members = [m for m in channel.members if not m.bot]
+        if not non_bot_members:
+            print(f"[BackgroundService] Skipping periodic sound in {guild.name} - no users in channel")
+            return
+
+        random_sounds = self.sound_repo.get_random_sounds(num_sounds=1, guild_id=guild.id)
+        if not random_sounds:
+            return
+        sound = random_sounds[0]
+        result = await self.audio_service.play_audio(
+            channel, sound[2], "periodic function",
+            interrupt_existing=False,
+        )
+        if result:
+            print(f"[BackgroundService] Playing periodic sound: {sound[2]} in {guild.name}")
+            self.action_repo.insert("admin", "play_sound_periodically", sound[0], guild_id=guild.id)
+        else:
+            print(f"[BackgroundService] Skipped periodic sound in {guild.name} - audio already playing")
+
     @tasks.loop(count=1)
     async def play_sound_periodically_loop(self):
         """Randomly play sounds at random intervals (10-30 minutes)."""
@@ -2328,23 +2362,7 @@ class BackgroundService:
                 
                 # Play sound in each guild
                 for guild in self.bot.guilds:
-                    settings = self.guild_settings_service.get(guild.id)
-                    if not settings.periodic_enabled:
-                        continue
-                    channel = self.audio_service.get_largest_voice_channel(guild)
-                    if channel:
-                        # Skip if channel is empty (no non-bot members)
-                        non_bot_members = [m for m in channel.members if not m.bot]
-                        if not non_bot_members:
-                            print(f"[BackgroundService] Skipping periodic sound in {guild.name} - no users in channel")
-                            continue
-                        
-                        random_sounds = self.sound_repo.get_random_sounds(num_sounds=1, guild_id=guild.id)
-                        if random_sounds:
-                            sound = random_sounds[0]
-                            print(f"[BackgroundService] Playing periodic sound: {sound[2]} in {guild.name}")
-                            await self.audio_service.play_audio(channel, sound[2], "periodic function")
-                            self.action_repo.insert("admin", "play_sound_periodically", sound[0], guild_id=guild.id)
+                    await self._play_periodic_sound_for_guild(guild)
                             
             except Exception as e:
                 print(f"[BackgroundService] Error in periodic playback: {e}")

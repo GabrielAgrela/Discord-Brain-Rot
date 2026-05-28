@@ -1975,3 +1975,194 @@ class TestKeywordScanSchedulePersistence:
             "SELECT name FROM sqlite_master WHERE type='table' AND name='app_settings'",
         )
         assert row is not None
+
+    # --- Periodic sound playback ---
+
+    @pytest.mark.asyncio
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    async def test_play_periodic_sound_for_guild_skips_when_disabled(
+        self, _mock_sound_repo, _mock_action_repo
+    ):
+        """When periodic_enabled is False, nothing is played."""
+        from bot.services.background import BackgroundService
+
+        guild = Mock(id=1, name="Guild1")
+        settings = Mock(periodic_enabled=False)
+        audio_service = Mock()
+        audio_service.get_largest_voice_channel = Mock()
+
+        service = BackgroundService(
+            bot=Mock(),
+            audio_service=audio_service,
+            sound_service=Mock(),
+            behavior=Mock(),
+        )
+        service.guild_settings_service = Mock()
+        service.guild_settings_service.get = Mock(return_value=settings)
+
+        await service._play_periodic_sound_for_guild(guild)
+
+        audio_service.get_largest_voice_channel.assert_not_called()
+        audio_service.play_audio.assert_not_called()
+
+    @pytest.mark.asyncio
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    async def test_play_periodic_sound_for_guild_skips_no_channel(
+        self, _mock_sound_repo, _mock_action_repo
+    ):
+        """When no largest voice channel found, nothing is played."""
+        from bot.services.background import BackgroundService
+
+        guild = Mock(id=2, name="Guild2")
+        settings = Mock(periodic_enabled=True)
+        audio_service = Mock()
+        audio_service.get_largest_voice_channel = Mock(return_value=None)
+
+        service = BackgroundService(
+            bot=Mock(),
+            audio_service=audio_service,
+            sound_service=Mock(),
+            behavior=Mock(),
+        )
+        service.guild_settings_service = Mock()
+        service.guild_settings_service.get = Mock(return_value=settings)
+
+        await service._play_periodic_sound_for_guild(guild)
+
+        audio_service.play_audio.assert_not_called()
+
+    @pytest.mark.asyncio
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    async def test_play_periodic_sound_for_guild_skips_empty_channel(
+        self, _mock_sound_repo, _mock_action_repo
+    ):
+        """When the channel has no non-bot members, nothing is played."""
+        from bot.services.background import BackgroundService
+
+        guild = Mock(id=3, name="Guild3")
+        settings = Mock(periodic_enabled=True)
+        channel = Mock(members=[Mock(bot=True)])
+        audio_service = Mock()
+        audio_service.get_largest_voice_channel = Mock(return_value=channel)
+
+        service = BackgroundService(
+            bot=Mock(),
+            audio_service=audio_service,
+            sound_service=Mock(),
+            behavior=Mock(),
+        )
+        service.guild_settings_service = Mock()
+        service.guild_settings_service.get = Mock(return_value=settings)
+
+        await service._play_periodic_sound_for_guild(guild)
+
+        audio_service.play_audio.assert_not_called()
+
+    @pytest.mark.asyncio
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    async def test_play_periodic_sound_for_guild_skips_no_random_sounds(
+        self, _mock_sound_repo, _mock_action_repo
+    ):
+        """When no random sound is returned, nothing is played."""
+        from bot.services.background import BackgroundService
+
+        guild = Mock(id=4, name="Guild4")
+        settings = Mock(periodic_enabled=True)
+        channel = Mock(members=[Mock(bot=False)])
+        audio_service = Mock()
+        audio_service.get_largest_voice_channel = Mock(return_value=channel)
+        # Mock get_random_sounds via the repo created inside __init__
+        mock_sound_repo = _mock_sound_repo.return_value
+        mock_sound_repo.get_random_sounds.return_value = []
+
+        service = BackgroundService(
+            bot=Mock(),
+            audio_service=audio_service,
+            sound_service=Mock(),
+            behavior=Mock(),
+        )
+        service.guild_settings_service = Mock()
+        service.guild_settings_service.get = Mock(return_value=settings)
+
+        await service._play_periodic_sound_for_guild(guild)
+
+        audio_service.play_audio.assert_not_called()
+
+    @pytest.mark.asyncio
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    async def test_play_periodic_sound_for_guild_skips_when_play_audio_returns_false(
+        self, _mock_sound_repo, _mock_action_repo
+    ):
+        """When play_audio returns False, no action is inserted."""
+        from bot.services.background import BackgroundService
+
+        guild = Mock(id=5, name="Guild5")
+        settings = Mock(periodic_enabled=True)
+        channel = Mock(members=[Mock(bot=False)])
+        audio_service = Mock()
+        audio_service.get_largest_voice_channel = Mock(return_value=channel)
+        audio_service.play_audio = AsyncMock(return_value=False)
+
+        mock_sound_repo = _mock_sound_repo.return_value
+        mock_sound_repo.get_random_sounds.return_value = [(99, "file.mp3", "file.mp3")]
+
+        mock_action_repo_instance = _mock_action_repo.return_value
+
+        service = BackgroundService(
+            bot=Mock(),
+            audio_service=audio_service,
+            sound_service=Mock(),
+            behavior=Mock(),
+        )
+        service.guild_settings_service = Mock()
+        service.guild_settings_service.get = Mock(return_value=settings)
+
+        await service._play_periodic_sound_for_guild(guild)
+
+        audio_service.play_audio.assert_awaited_once()
+        # Verify play_audio was called with interrupt_existing=False
+        _call_kwargs = audio_service.play_audio.call_args.kwargs
+        assert _call_kwargs.get("interrupt_existing") is False
+        mock_action_repo_instance.insert.assert_not_called()
+
+    @pytest.mark.asyncio
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    async def test_play_periodic_sound_for_guild_inserts_action_on_success(
+        self, _mock_sound_repo, _mock_action_repo
+    ):
+        """When play_audio returns True, the action record is inserted."""
+        from bot.services.background import BackgroundService
+
+        guild = Mock(id=6, name="Guild6")
+        settings = Mock(periodic_enabled=True)
+        channel = Mock(members=[Mock(bot=False)])
+        audio_service = Mock()
+        audio_service.get_largest_voice_channel = Mock(return_value=channel)
+        audio_service.play_audio = AsyncMock(return_value=True)
+
+        mock_sound_repo = _mock_sound_repo.return_value
+        mock_sound_repo.get_random_sounds.return_value = [(99, "file.mp3", "file.mp3")]
+
+        mock_action_repo_instance = _mock_action_repo.return_value
+
+        service = BackgroundService(
+            bot=Mock(),
+            audio_service=audio_service,
+            sound_service=Mock(),
+            behavior=Mock(),
+        )
+        service.guild_settings_service = Mock()
+        service.guild_settings_service.get = Mock(return_value=settings)
+
+        await service._play_periodic_sound_for_guild(guild)
+
+        audio_service.play_audio.assert_awaited_once()
+        mock_action_repo_instance.insert.assert_called_once_with(
+            "admin", "play_sound_periodically", 99, guild_id=guild.id,
+        )

@@ -601,6 +601,22 @@ class AudioService:
             await asyncio.sleep(0.02)
         return not player.is_alive()
 
+    @staticmethod
+    def _is_voice_client_active(voice_client) -> bool:
+        """Check if a voice client is currently playing or paused.
+
+        Returns False defensively for None or disconnected voice clients.
+        """
+        if voice_client is None:
+            return False
+        try:
+            return bool(
+                voice_client.is_playing()
+                or (hasattr(voice_client, "is_paused") and voice_client.is_paused())
+            )
+        except Exception:
+            return False
+
     def _voice_client_state_summary(self, voice_client) -> str:
         """Return a compact voice-client/player state snapshot for debugging."""
         if voice_client is None:
@@ -2039,7 +2055,8 @@ class AudioService:
                         sts_thumbnail_url: str = None,
                         loading_message: 'discord.Message' = None,
                         allow_tts_interrupt: bool = False,
-                        request_note: Optional[str] = None):
+                        request_note: Optional[str] = None,
+                        interrupt_existing: bool = True):
         """Play an audio file in the specified voice channel."""
         play_start_time = time.time()
         guild_id = channel.guild.id
@@ -2065,6 +2082,17 @@ class AudioService:
             if sound is not None and getattr(sound, "blacklist", False) is True:
                 if self.message_service:
                     await self.message_service.send_error(f"Sound '{audio_file}' has been rejected.")
+                return False
+
+        # Early skip for non-interrupting playback if audio is already active.
+        # Check before rate limiting so we don't consume a pending slot.
+        if not interrupt_existing:
+            existing_vc = channel.guild.voice_client
+            if self._is_voice_client_active(existing_vc):
+                print(
+                    "[AudioService] Skipping non-interrupting playback - "
+                    f"audio already active in {channel.guild.name}"
+                )
                 return False
 
         # Per-guild rate limiting and backpressure for non-TTS plays.
@@ -2101,7 +2129,16 @@ class AudioService:
             )
 
             # Check if we're actually interrupting playback
-            is_currently_playing = voice_client.is_playing() or (hasattr(voice_client, "is_paused") and voice_client.is_paused())
+            is_currently_playing = self._is_voice_client_active(voice_client)
+
+            # Non-interrupting play: skip if audio is still active after connecting.
+            if is_currently_playing and not interrupt_existing:
+                print(
+                    "[AudioService] Skipping non-interrupting playback - "
+                    f"audio still active in {channel.guild.name} after connect"
+                )
+                self._release_guild_play_request(guild_id)
+                return False
 
             if is_currently_playing:
                 if is_tts and not allow_tts_interrupt:

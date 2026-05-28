@@ -184,6 +184,139 @@ class TestAudioService:
         audio_service.ensure_voice_connected.assert_awaited_once_with(channel)
         audio_service.message_service.get_bot_channel.assert_not_called()
 
+    # --- _is_voice_client_active ---
+
+    def test_is_voice_client_active_none(self, audio_service):
+        """Returns False for None."""
+        assert audio_service._is_voice_client_active(None) is False
+
+    def test_is_voice_client_active_idle(self, audio_service):
+        """Returns False when neither playing nor paused."""
+        vc = Mock(is_playing=Mock(return_value=False), is_paused=Mock(return_value=False))
+        assert audio_service._is_voice_client_active(vc) is False
+
+    def test_is_voice_client_active_playing(self, audio_service):
+        """Returns True when is_playing is True."""
+        vc = Mock(is_playing=Mock(return_value=True))
+        assert audio_service._is_voice_client_active(vc) is True
+
+    def test_is_voice_client_active_paused(self, audio_service):
+        """Returns True when is_paused is True."""
+        vc = Mock(is_playing=Mock(return_value=False), is_paused=Mock(return_value=True))
+        assert audio_service._is_voice_client_active(vc) is True
+
+    def test_is_voice_client_active_no_is_paused(self, audio_service):
+        """Returns False when is_playing is False and client has no is_paused."""
+        vc = Mock(spec=["is_playing"], is_playing=Mock(return_value=False))
+        assert audio_service._is_voice_client_active(vc) is False
+
+    # --- interrupt_existing=False early skip ---
+
+    @pytest.mark.asyncio
+    async def test_play_audio_interrupt_existing_false_skips_when_busy_before_connect(self, audio_service):
+        """interrupt_existing=False returns False early when voice client is already playing."""
+        from bot.services.audio import AudioService
+
+        guild = Mock(id=456, name="TestGuild")
+        busy_vc = Mock(is_playing=Mock(return_value=True), is_paused=Mock(return_value=False))
+        channel = Mock(guild=guild)
+        channel.guild.voice_client = busy_vc
+
+        audio_service.playback_done = asyncio.Event()
+        audio_service.playback_done.set()
+        AudioService._ensure_guild_playback_state(audio_service, guild.id)
+        audio_service._guild_last_played_time[guild.id] = datetime.now()
+        audio_service.mute_service = SimpleNamespace(is_muted=False)
+        audio_service.message_service = Mock()
+        audio_service._track_guild_play_request = Mock()
+        audio_service.ensure_voice_connected = AsyncMock()
+
+        result = await AudioService.play_audio(
+            audio_service, channel, "clip.mp3", "tester",
+            interrupt_existing=False,
+        )
+
+        assert result is False
+        audio_service._track_guild_play_request.assert_not_called()
+        audio_service.ensure_voice_connected.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_play_audio_interrupt_existing_false_skips_when_busy_after_connect(self, audio_service):
+        """interrupt_existing=False skips after ensure_voice_connected if busy in race window."""
+        from bot.services.audio import AudioService
+
+        guild = Mock(id=789, name="TestGuild2")
+        busy_vc = Mock(is_playing=Mock(return_value=True), is_paused=Mock(return_value=False))
+        channel = Mock(guild=guild)
+        # No voice_client before connect, so early check passes
+        channel.guild.voice_client = None
+
+        audio_service.playback_done = asyncio.Event()
+        audio_service.playback_done.set()
+        AudioService._ensure_guild_playback_state(audio_service, guild.id)
+        audio_service._guild_last_played_time[guild.id] = datetime.now()
+        audio_service.mute_service = SimpleNamespace(is_muted=False)
+        audio_service.message_service = Mock()
+        audio_service._track_guild_play_request = Mock(return_value=True)
+        audio_service._release_guild_play_request = Mock()
+        # After connection, voice client becomes busy
+        audio_service.ensure_voice_connected = AsyncMock(return_value=busy_vc)
+
+        result = await AudioService.play_audio(
+            audio_service, channel, "clip.mp3", "tester",
+            interrupt_existing=False,
+        )
+
+        assert result is False
+        audio_service._track_guild_play_request.assert_called_once()
+        audio_service._release_guild_play_request.assert_called_once_with(guild.id)
+        audio_service.ensure_voice_connected.assert_awaited_once_with(channel)
+
+    @pytest.mark.asyncio
+    async def test_play_audio_interrupt_existing_true_still_interrupts(self, audio_service):
+        """interrupt_existing=True (default) still proceeds to normal interrupt path."""
+        from bot.services.audio import AudioService
+
+        guild = Mock(id=101112, name="TestGuild3")
+        busy_vc = Mock(is_playing=Mock(return_value=True), is_paused=Mock(return_value=False))
+        channel = Mock(guild=guild)
+        channel.guild.voice_client = busy_vc
+
+        audio_service.playback_done = asyncio.Event()
+        audio_service.playback_done.set()
+        AudioService._ensure_guild_playback_state(audio_service, guild.id)
+        audio_service._guild_last_played_time[guild.id] = datetime.now()
+        audio_service.mute_service = SimpleNamespace(is_muted=False)
+        audio_service.message_service = Mock()
+        audio_service.message_service.get_bot_channel = Mock(return_value=None)
+        audio_service._track_guild_play_request = Mock(return_value=True)
+        audio_service._release_guild_play_request = Mock()
+        # Return a busy voice client so we enter the interrupt path
+        audio_service.ensure_voice_connected = AsyncMock(return_value=busy_vc)
+        # Need to set up sound repo to avoid AttributeError
+        audio_service.sound_repo = Mock()
+        audio_service.image_generator = Mock()
+        audio_service._behavior = None
+        audio_service._ffmpeg_semaphore = Mock()
+        audio_service.ffmpeg_path = "/nonexistent"
+
+        # Manually mock internal methods called during interrupt path
+        audio_service._interrupt_live_tts_stream = Mock()
+        audio_service._cancel_progress_update_task = Mock()
+        audio_service._stop_voice_client_and_wait = AsyncMock()
+
+        # Patch os.path.exists so the file resolution doesn't fall back to DB
+        with patch("bot.services.audio.os.path.exists", return_value=True):
+            result = await AudioService.play_audio(
+                audio_service, channel, "clip.mp3", "tester",
+            )
+
+        # With no ffmpeg, this will fail after the interrupt but before actual playback.
+        # Our focus is on verifying the interrupt path was taken.
+        audio_service.ensure_voice_connected.assert_awaited_once_with(channel)
+        audio_service._interrupt_live_tts_stream.assert_called_once()
+        audio_service._stop_voice_client_and_wait.assert_awaited_once()
+
     @pytest.mark.asyncio
     async def test_remove_send_controls_button_from_message_no_gear_no_edit(self, audio_service):
         """Ensure no message edit occurs when no gear button exists."""
