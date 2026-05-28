@@ -2005,6 +2005,115 @@ def test_soundboard_index_does_not_read_mp3_durations(web_client, monkeypatch):
     assert "alpha" in response.get_data(as_text=True)
 
 
+def test_api_sound_durations_returns_formatted_duration(web_client, monkeypatch):
+    client, db_path = web_client
+    sounds_dir = Path(app.config["SOUNDS_DIR"])
+    (sounds_dir / "alpha.mp3").write_bytes(b"fake mp3")
+
+    class FakeAudioInfo:
+        length = 72.2
+
+    class FakeMp3:
+        info = FakeAudioInfo()
+
+        def __init__(self, path: str):
+            assert path.endswith("alpha.mp3")
+
+    monkeypatch.setattr("bot.services.web_content.MP3", FakeMp3)
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            INSERT INTO sounds (id, originalfilename, Filename, is_elevenlabs, blacklist, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (1, "alpha.mp3", "alpha.mp3", 0, 0, "2026-04-01 12:00:00"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    response = client.get("/api/sound_durations?sound_id=1")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload == {"durations": {"1": "1:12"}}
+
+
+def test_api_sound_durations_uses_original_file_after_rename(web_client, monkeypatch):
+    client, db_path = web_client
+    sounds_dir = Path(app.config["SOUNDS_DIR"])
+    (sounds_dir / "original.mp3").write_bytes(b"fake mp3")
+
+    class FakeAudioInfo:
+        length = 15.4
+
+    class FakeMp3:
+        info = FakeAudioInfo()
+
+        def __init__(self, path: str):
+            assert path.endswith("original.mp3")
+
+    monkeypatch.setattr("bot.services.web_content.MP3", FakeMp3)
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            INSERT INTO sounds (id, originalfilename, Filename, is_elevenlabs, blacklist, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (1, "original.mp3", "renamed.mp3", 0, 0, "2026-04-01 12:00:00"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    response = client.get("/api/sound_durations?sound_id=1")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload == {"durations": {"1": "0:15"}}
+
+
+def test_api_sound_durations_returns_empty_for_invalid_ids(web_client):
+    client, db_path = web_client
+
+    response = client.get("/api/sound_durations?sound_id=0&sound_id=-1&sound_id=abc")
+    assert response.status_code == 200
+    assert response.get_json() == {"durations": {}}
+
+    response = client.get("/api/sound_durations")
+    assert response.status_code == 200
+    assert response.get_json() == {"durations": {}}
+
+
+def test_api_sound_durations_skips_missing_file(web_client, monkeypatch):
+    client, db_path = web_client
+
+    # No actual MP3 file created – file does not exist on disk
+    def fail_on_read(path: str):
+        raise AssertionError(f"Should not read MP3: {path}")
+
+    monkeypatch.setattr("bot.services.web_content.MP3", fail_on_read)
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            INSERT INTO sounds (id, originalfilename, Filename, is_elevenlabs, blacklist, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (1, "missing.mp3", "missing.mp3", 0, 0, "2026-04-01 12:00:00"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    response = client.get("/api/sound_durations?sound_id=1")
+    assert response.status_code == 200
+    assert response.get_json() == {"durations": {}}
+
+
 def test_web_sound_rows_include_upload_hover_metadata(web_client):
     client, db_path = web_client
 

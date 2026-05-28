@@ -681,6 +681,45 @@ class WebContentRepository(BaseRepository[dict[str, Any]]):
         """Return whether an action count must join sounds for filters/search."""
         return bool(query.search_query or query.filters.get("sound"))
 
+    def get_sound_duration_rows(
+        self,
+        sound_ids: Sequence[int],
+        guild_id: int | str | None = None,
+    ) -> list[dict[str, Any]]:
+        """
+        Fetch filename and originalfilename for given sound IDs to compute durations.
+
+        Args:
+            sound_ids: Sound primary keys to look up.
+            guild_id: Optional guild scope to filter by.
+
+        Returns:
+            List of rows with ``sound_id``, ``filename``, ``original_filename``.
+        """
+        if not sound_ids:
+            return []
+
+        conditions = [
+            "s.id IN ({})".format(", ".join("?" for _ in sound_ids)),
+            "s.is_elevenlabs = 0",
+            "s.blacklist = 0",
+        ]
+        params: list[object] = [str(sid) for sid in sound_ids]
+        self._append_sound_guild_condition(conditions, params, guild_id, alias="s")
+
+        rows = self._execute(
+            f"""
+            SELECT
+                s.id AS sound_id,
+                s.Filename AS filename,
+                s.originalfilename AS original_filename
+            FROM sounds s
+            WHERE {' AND '.join(conditions)}
+            """,
+            tuple(params),
+        )
+        return [self._row_to_entity(row) for row in rows]
+
     @staticmethod
     def _append_sound_guild_condition(
         conditions: list[str],

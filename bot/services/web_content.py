@@ -5,6 +5,7 @@ Service layer for web soundboard content endpoints.
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -179,6 +180,53 @@ class WebContentService:
             "total_pages": self._calculate_total_pages(total_count, query.per_page),
             "filters": self._get_all_sound_filters(query, include_filters, filter_keys),
         }
+
+    def get_sound_durations(
+        self,
+        sound_ids: Sequence[int],
+        guild_id: int | str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Read MP3 durations for a batch of sound IDs from disk and return them.
+
+        Deduplicates input IDs, caps the batch to 50, and silently skips
+        IDs whose file is missing or whose metadata cannot be read.
+
+        Args:
+            sound_ids: Sound database IDs to look up.
+            guild_id: Optional guild scope for repository filtering.
+
+        Returns:
+            JSON-friendly payload with a ``durations`` mapping, e.g.
+            ``{"durations": {"1": "1:12", "2": "0:15"}}``.
+        """
+        # Deduplicate and validate
+        seen: set[int] = set()
+        unique_ids: list[int] = []
+        for sid in sound_ids:
+            sid_int = int(sid) if not isinstance(sid, int) else sid
+            if sid_int > 0 and sid_int not in seen:
+                seen.add(sid_int)
+                unique_ids.append(sid_int)
+
+        if not unique_ids:
+            return {"durations": {}}
+
+        # Cap batch size
+        unique_ids = unique_ids[:50]
+
+        rows = self.repository.get_sound_duration_rows(unique_ids, guild_id=guild_id)
+        durations: dict[str, str] = {}
+        for row in rows:
+            sound_id = str(row["sound_id"])
+            duration_seconds = self._read_sound_duration_seconds(
+                row.get("filename"),
+                fallback_filename=row.get("original_filename"),
+            )
+            if duration_seconds is not None:
+                durations[sound_id] = self._format_duration(duration_seconds)
+
+        return {"durations": durations}
 
     def _get_action_filters(
         self,

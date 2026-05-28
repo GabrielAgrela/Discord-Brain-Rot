@@ -134,6 +134,38 @@ def register_soundboard_routes(app: Flask) -> None:
         response.headers["Cache-Control"] = "private, max-age=1"
         return response
 
+    @app.route("/api/sound_durations")
+    def get_sound_durations() -> Any:
+        """Return MP3 durations for a batch of sound IDs.
+
+        Accepts repeated ``sound_id`` query parameters and returns a
+        mapping of sound ID to formatted duration string (e.g. ``1:12``).
+        Silently skips IDs whose file is missing or unreadable.
+        """
+        raw_ids = request.args.getlist("sound_id")
+        sound_ids: list[int] = []
+        for raw in raw_ids:
+            # Also support comma-separated values in a single arg
+            for part in raw.split(","):
+                part = part.strip()
+                try:
+                    parsed = int(part)
+                    if parsed > 0:
+                        sound_ids.append(parsed)
+                except (TypeError, ValueError):
+                    continue
+
+        selected_guild_id = _get_selected_guild_id(request.args)
+        _remember_selected_guild_id(selected_guild_id)
+
+        payload = _get_web_content_service().get_sound_durations(
+            sound_ids,
+            guild_id=selected_guild_id,
+        )
+        response = jsonify(payload)
+        response.headers["Cache-Control"] = "private, max-age=10"
+        return response
+
     @app.route("/api/sounds/<int:sound_id>/options")
     @_require_discord_login_api
     def get_sound_options(sound_id: int) -> Any:

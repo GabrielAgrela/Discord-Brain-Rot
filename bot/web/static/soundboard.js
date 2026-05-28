@@ -1293,6 +1293,50 @@
             return lines.filter(Boolean).join('\n');
         }
 
+        function hydrateSoundDurations() {
+            const soundRows = document.querySelectorAll(
+                '#favoritesTableBody tr.sound-options-row, #allSoundsTableBody tr.sound-options-row'
+            );
+            const missingIds = [];
+            const rowMap = {};
+
+            soundRows.forEach(row => {
+                const soundId = row.dataset.soundId;
+                if (!soundId) return;
+                if (row.querySelector('.sound-duration')) return;
+                missingIds.push(soundId);
+                rowMap[soundId] = row;
+            });
+
+            if (missingIds.length === 0) return;
+
+            const params = new URLSearchParams();
+            missingIds.forEach(id => params.append('sound_id', id));
+            const guildId = getSelectedGuildId();
+            if (guildId) {
+                params.set('guild_id', guildId);
+            }
+
+            fetch('/api/sound_durations?' + params.toString(), { cache: 'no-cache' })
+                .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+                .then(data => {
+                    const durations = data.durations || {};
+                    Object.entries(durations).forEach(([soundId, duration]) => {
+                        const row = rowMap[soundId];
+                        if (!row) return;
+                        const filenameCell = row.querySelector('.filename');
+                        if (!filenameCell) return;
+                        const title = filenameCell.querySelector('.sound-title');
+                        if (!title) return;
+                        const span = document.createElement('span');
+                        span.className = 'sound-duration';
+                        span.textContent = duration;
+                        title.after(span);
+                    });
+                })
+                .catch(() => {});
+        }
+
         function formatSoundAddedDate(timestamp) {
             const text = String(timestamp || '').trim();
             if (!text) return '';
@@ -1594,6 +1638,7 @@
 
                             applyTableGeometry(endpoint);
                             fitActionBadges(tableBody);
+                            hydrateSoundDurations();
 
                             const pageSizeChanged = updateItemsPerPage(endpoint);
                             if (pageSizeChanged) {
@@ -4200,6 +4245,7 @@
         });
         document.querySelectorAll('.play-button').forEach(applyPlayButtonState);
         document.querySelectorAll('.web-control-button').forEach(applyWebControlButtonState);
+        hydrateSoundDurations();
         refreshWebControlState();
         refreshControlRoomStatus();
         refreshSystemMonitorStatus();
