@@ -7,6 +7,7 @@ repositories, external APIs, and other services.
 
 from bot.services.message import MessageService
 from bot.services.mute import MuteService
+from bot.services import backup
 from bot.services.backup import BackupService
 from bot.services.image_generator import ImageGeneratorService
 from bot.services.year_review_video import YearReviewVideoService
