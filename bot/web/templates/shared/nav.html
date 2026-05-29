@@ -1,6 +1,5 @@
     {% set _nav_subtitle = nav_subtitle or 'Web Sound Desk' %}
     {% set _logout_next = logout_next or '/' %}
-    {% set _show_inbox = show_upload_inbox|default(false) %}
     <nav class="nav">
         <div class="nav-container">
             <a href="/" class="nav-brand">
@@ -50,9 +49,14 @@
                             <span class="auth-user-logout">Logout</span>
                         </span>
                     </a>
-                    {% if _show_inbox and web_user_is_admin %}
+                    {% if web_user_is_admin %}
+                    {% if active_page == 'soundboard' %}
                     <button type="button" id="webUploadInboxOpenButton" class="auth-inbox-button"
                         aria-label="Open moderation inbox" title="Moderation inbox">&#9993;&#65038;</button>
+                    {% else %}
+                    <a href="/?upload_inbox=1" class="auth-inbox-button"
+                        aria-label="Open moderation inbox" title="Moderation inbox">&#9993;&#65038;</a>
+                    {% endif %}
                     {% endif %}
                 </div>
                 {% elif discord_oauth_configured %}

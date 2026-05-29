@@ -1,132 +1,100 @@
-<!DOCTYPE html>
-<html lang="en">
+{% extends "base.html" %}
 
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Brain Rot Dataset</title>
-    <link rel="icon"
-        href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ctext y='50' x='50%25' text-anchor='middle' font-size='48'%3E%F0%9F%A7%A0%3C/text%3E%3C/svg%3E">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link
-        href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=DynaPuff:wght@500;700&display=optional"
-        rel="stylesheet">
-    <script>
-        try {
-            if (localStorage.getItem('brainrot-theme') === 'dark') {
-                document.documentElement.classList.add('theme-dark');
-            }
-        } catch (error) {
-            document.documentElement.classList.remove('theme-dark');
-        }
-    </script>
-    <link rel="stylesheet" href="{{ url_for('static', filename='web.css') }}">
-</head>
+{% set body_class = "page-dataset" %}
+{% set active_page = "dataset" %}
+{% set logout_next = "/speech-training" %}
 
-<body class="page page-dataset">
-    {% if discord_user %}
-    {% set display_name = discord_user.global_name or discord_user.username %}
-    {% set avatar_url = 'https://cdn.discordapp.com/avatars/' ~ discord_user.id ~ '/' ~
-    discord_user.avatar ~
-    '.png?size=128' if discord_user.avatar else 'https://cdn.discordapp.com/embed/avatars/0.png' %}
-    {% endif %}
+{% block title %}Brain Rot Dataset{% endblock %}
 
-    {% set active_page = 'dataset' %}
-    {% set nav_subtitle = 'Dataset' %}
-    {% set logout_next = '/speech-training' %}
-    {% set show_upload_inbox = false %}
-    {% include "shared/nav.html" %}
+{% block content %}
+<div class="page-shell dataset-shell">
+    <aside class="dataset-sidebar" id="datasetSidebar">
+        <header class="dataset-sidebar-header">
+            <h2 class="dataset-sidebar-title">Speakers</h2>
+            <div class="dataset-sidebar-count" id="userCount">0</div>
+        </header>
+        <div class="dataset-sidebar-storage" id="storageUsed">MP3 storage: — · Machine: —</div>
+        <div class="dataset-user-list" id="userList" role="listbox" aria-label="Select a speaker">
+            <!-- populated by JS -->
+        </div>
+    </aside>
 
-    <div class="page-shell dataset-shell">
-        <aside class="dataset-sidebar" id="datasetSidebar">
-            <header class="dataset-sidebar-header">
-                <h2 class="dataset-sidebar-title">Speakers</h2>
-                <div class="dataset-sidebar-count" id="userCount">0</div>
-            </header>
-            <div class="dataset-sidebar-storage" id="storageUsed">MP3 storage: — · Machine: —</div>
-            <div class="dataset-user-list" id="userList" role="listbox" aria-label="Select a speaker">
-                <!-- populated by JS -->
+    <main class="dataset-main">
+        <header class="dataset-toolbar">
+            <div class="dataset-toolbar-left">
+                <h2 class="dataset-main-title" id="datasetTitle">Unlabeled clips</h2>
+                <div class="dataset-label-filters" id="labelFilters">
+                    <select id="labelFilterSelect" class="dataset-label-filter-select" aria-label="Filter by label">
+                        <option value="">All</option>
+                        <option value="unlabeled" selected>Unlabeled</option>
+                        <option value="none">None</option>
+                    </select>
+                </div>
             </div>
-        </aside>
+            <div class="dataset-toolbar-right">
+                <input type="search" class="dataset-search" id="datasetSearch" placeholder="Search clips..."
+                    aria-label="Search clips">
+            </div>
+        </header>
 
-        <main class="dataset-main">
-            <header class="dataset-toolbar">
-                <div class="dataset-toolbar-left">
-                    <h2 class="dataset-main-title" id="datasetTitle">Unlabeled clips</h2>
-                    <div class="dataset-label-filters" id="labelFilters">
-                        <select id="labelFilterSelect" class="dataset-label-filter-select" aria-label="Filter by label">
-                            <option value="">All</option>
-                            <option value="unlabeled" selected>Unlabeled</option>
+        <div class="dataset-action-toolbar" id="datasetActionToolbar">
+            <div class="dataset-action-row dataset-action-row-primary">
+                <div class="dataset-sort-group">
+                    <label for="datasetSort" class="dataset-sort-label">Sort</label>
+                    <select id="datasetSort" class="dataset-sort-select" aria-label="Sort clips">
+                        <option value="newest">Newest first</option>
+                        <option value="oldest">Oldest first</option>
+                        <option value="longest">Longest</option>
+                        <option value="shortest">Shortest</option>
+                        <option value="unlabeled_first">Unlabeled first</option>
+                        <option value="label_asc">Label A-Z</option>
+                        <option value="label_desc">Label Z-A</option>
+                        <option value="speaker_asc">Speaker A-Z</option>
+                        <option value="speaker_desc">Speaker Z-A</option>
+                        <option value="reviewed_desc">Reviewed latest</option>
+                    </select>
+                </div>
+                <div class="dataset-scan-group" id="scanGroup">
+                    <button type="button" class="dataset-scan-btn" id="scanKeywordBtn">
+                        <span class="dataset-scan-btn-label">Find Keywords</span>
+                        <span class="dataset-scan-schedule" id="keywordScanSchedule" aria-live="polite">Loading schedule&hellip;</span>
+                    </button>
+                    <button type="button" class="dataset-scan-btn" id="transcribeBtn">
+                        Auto transcript
+                    </button>
+                </div>
+            </div>
+            <div class="dataset-action-row dataset-action-row-bulk">
+                <div class="dataset-bulk-group" id="bulkGroup">
+                    <span class="dataset-bulk-count" id="bulkCount">0 selected</span>
+                    <button type="button" class="dataset-bulk-btn" id="bulkSelectAll" title="Select all matching filters">Select all</button>
+                    <button type="button" class="dataset-bulk-btn" id="bulkClear" title="Clear selection">Clear</button>
+                    <div class="dataset-bulk-actions">
+                        <select id="bulkLabelSelect" class="dataset-bulk-label-select" aria-label="Bulk label" disabled>
+                            <option value="">Label…</option>
+                            <option value="chapada">Chapada</option>
+                            <option value="ventura">Ventura</option>
                             <option value="none">None</option>
+                            <option value="__custom__">Custom…</option>
                         </select>
-                    </div>
-                </div>
-                <div class="dataset-toolbar-right">
-                    <input type="search" class="dataset-search" id="datasetSearch" placeholder="Search clips..."
-                        aria-label="Search clips">
-                </div>
-            </header>
-
-            <!-- Sort & Bulk toolbar -->
-            <div class="dataset-action-toolbar" id="datasetActionToolbar">
-                <div class="dataset-action-row dataset-action-row-primary">
-                    <div class="dataset-sort-group">
-                        <label for="datasetSort" class="dataset-sort-label">Sort</label>
-                        <select id="datasetSort" class="dataset-sort-select" aria-label="Sort clips">
-                            <option value="newest">Newest first</option>
-                            <option value="oldest">Oldest first</option>
-                            <option value="longest">Longest</option>
-                            <option value="shortest">Shortest</option>
-                            <option value="unlabeled_first">Unlabeled first</option>
-                            <option value="label_asc">Label A-Z</option>
-                            <option value="label_desc">Label Z-A</option>
-                            <option value="speaker_asc">Speaker A-Z</option>
-                            <option value="speaker_desc">Speaker Z-A</option>
-                            <option value="reviewed_desc">Reviewed latest</option>
-                        </select>
-                    </div>
-                    <div class="dataset-scan-group" id="scanGroup">
-                        <button type="button" class="dataset-scan-btn" id="scanKeywordBtn">
-                            <span class="dataset-scan-btn-label">Find Keywords</span>
-                            <span class="dataset-scan-schedule" id="keywordScanSchedule" aria-live="polite">Loading schedule&hellip;</span>
-                        </button>
-                        <button type="button" class="dataset-scan-btn" id="transcribeBtn">
-                            Auto transcript
-                        </button>
-                    </div>
-                </div>
-                <div class="dataset-action-row dataset-action-row-bulk">
-                    <div class="dataset-bulk-group" id="bulkGroup">
-                        <span class="dataset-bulk-count" id="bulkCount">0 selected</span>
-                        <button type="button" class="dataset-bulk-btn" id="bulkSelectAll" title="Select all matching filters">Select all</button>
-                        <button type="button" class="dataset-bulk-btn" id="bulkClear" title="Clear selection">Clear</button>
-                        <div class="dataset-bulk-actions">
-                            <select id="bulkLabelSelect" class="dataset-bulk-label-select" aria-label="Bulk label" disabled>
-                                <option value="">Label…</option>
-                                <option value="chapada">Chapada</option>
-                                <option value="ventura">Ventura</option>
-                                <option value="none">None</option>
-                                <option value="__custom__">Custom…</option>
-                            </select>
-                            <button type="button" class="dataset-bulk-apply-btn" id="bulkApplyLabel" disabled>Apply</button>
-                            <button type="button" class="dataset-bulk-delete-btn" id="bulkDelete" disabled>Delete</button>
-                        </div>
+                        <button type="button" class="dataset-bulk-apply-btn" id="bulkApplyLabel" disabled>Apply</button>
+                        <button type="button" class="dataset-bulk-delete-btn" id="bulkDelete" disabled>Delete</button>
                     </div>
                 </div>
             </div>
+        </div>
 
-            <div class="dataset-clips" id="clipList">
-                <!-- populated by JS -->
-            </div>
+        <div class="dataset-clips" id="clipList">
+            <!-- populated by JS -->
+        </div>
 
-            <footer class="dataset-pagination" id="datasetPagination">
-                <!-- populated by JS -->
-            </footer>
-        </main>
-    </div>
+        <footer class="dataset-pagination" id="datasetPagination">
+            <!-- populated by JS -->
+        </footer>
+    </main>
+</div>
+{% endblock %}
 
-    <script src="{{ url_for('static', filename='speech_training.js') }}"></script>
-</body>
-
-</html>
+{% block scripts %}
+<script src="{{ url_for('static', filename='speech_training.js') }}"></script>
+{% endblock %}

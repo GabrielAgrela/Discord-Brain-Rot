@@ -13,6 +13,8 @@ from bot.web.route_helpers import (
     _current_web_user_is_admin,
     _get_auth_service,
     _get_current_discord_user,
+    _get_selected_guild_id,
+    _get_web_guild_service,
 )
 
 
@@ -22,11 +24,16 @@ def register_auth_routes(app: Flask) -> None:
     @app.context_processor
     def inject_auth_context() -> dict[str, Any]:
         """Expose Discord auth state to templates."""
+        selected_guild_id = _get_selected_guild_id(request.args)
         return {
             "discord_user": _get_current_discord_user(),
             "web_user_is_admin": _current_web_user_is_admin(),
             "discord_oauth_configured": _get_auth_service().oauth_is_configured(),
             "discord_login_url": url_for("login", next=request.path),
+            "guild_options": _get_web_guild_service().get_guild_options(
+                selected_guild_id
+            ),
+            "selected_guild_id": selected_guild_id,
         }
 
     @app.route("/login")

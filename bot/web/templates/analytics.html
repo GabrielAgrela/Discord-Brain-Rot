@@ -1,166 +1,135 @@
-<!DOCTYPE html>
-<html lang="en">
+{% extends "base.html" %}
 
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Brain Rot Analytics</title>
-    <link rel="icon"
-        href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ctext y='50' x='50%25' text-anchor='middle' font-size='48'%3E%F0%9F%A7%A0%3C/text%3E%3C/svg%3E">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link
-        href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=DynaPuff:wght@500;700&display=optional"
-        rel="stylesheet">
-    <script>
-        try {
-            if (localStorage.getItem('brainrot-theme') === 'dark') {
-                document.documentElement.classList.add('theme-dark');
-            }
-        } catch (error) {
-            document.documentElement.classList.remove('theme-dark');
-        }
-    </script>
-    <link rel="stylesheet" href="{{ url_for('static', filename='web.css') }}">
-</head>
+{% set body_class = "page-analytics" %}
+{% set active_page = "analytics" %}
+{% set logout_next = "/analytics" %}
 
-<body class="page page-analytics">
-    {% if discord_user %}
-    {% set display_name = discord_user.global_name or discord_user.username %}
-    {% set avatar_url = 'https://cdn.discordapp.com/avatars/' ~ discord_user.id ~ '/' ~ discord_user.avatar ~ '.png?size=128' if discord_user.avatar else 'https://cdn.discordapp.com/embed/avatars/0.png' %}
-    {% endif %}
+{% block title %}Brain Rot Analytics{% endblock %}
 
-    {% set active_page = 'analytics' %}
-    {% set nav_subtitle = 'Analytics' %}
-    {% set logout_next = '/analytics' %}
-    {% set show_upload_inbox = false %}
-    {% include "shared/nav.html" %}
+{% block content %}
+<main class="page-shell">
+    <header class="page-heading">
+        <div class="analytics-toolbar analytics-toolbar-standalone" aria-label="Analytics time range">
+            <div class="time-selector">
+                <button class="time-btn" data-days="1">24h</button>
+                <button class="time-btn active" data-days="7">7 days</button>
+                <button class="time-btn" data-days="30">30 days</button>
+                <button class="time-btn" data-days="0">All time</button>
+            </div>
+        </div>
+    </header>
 
-    <main class="page-shell">
-        <header class="page-heading">
-            <div class="analytics-toolbar analytics-toolbar-standalone" aria-label="Analytics time range">
-                <div class="time-selector">
-                    <button class="time-btn" data-days="1">24h</button>
-                    <button class="time-btn active" data-days="7">7 days</button>
-                    <button class="time-btn" data-days="30">30 days</button>
-                    <button class="time-btn" data-days="0">All time</button>
+    <div class="stats-grid">
+        <section class="stat-card">
+            <div class="stat-icon">🎵</div>
+            <div class="stat-value" id="totalSounds">-</div>
+            <div class="stat-label">Total Sounds</div>
+        </section>
+        <section class="stat-card">
+            <div class="stat-icon">▶</div>
+            <div class="stat-value" id="totalPlays">-</div>
+            <div class="stat-label">Total Plays</div>
+        </section>
+        <section class="stat-card">
+            <div class="stat-icon">👥</div>
+            <div class="stat-value" id="activeUsers">-</div>
+            <div class="stat-label">Active Users</div>
+        </section>
+        <section class="stat-card">
+            <div class="stat-icon">✚</div>
+            <div class="stat-value" id="soundsThisWeek">-</div>
+            <div class="stat-label">New This Week</div>
+        </section>
+    </div>
+
+    <div class="main-grid">
+        <div class="main-grid-column">
+            <section class="card card--top-users">
+                <div class="card-header">
+                    <div class="card-title-stack">
+                        <p class="card-kicker">Leaderboard</p>
+                        <h2 class="card-title">Top Users</h2>
+                        <p class="card-copy">The people playing the most sounds in the selected window.</p>
+                    </div>
                 </div>
-            </div>
-        </header>
+                <div class="leaderboard-list" id="topUsers">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                    </div>
+                </div>
+            </section>
 
-        <div class="stats-grid">
-            <section class="stat-card">
-                <div class="stat-icon">🎵</div>
-                <div class="stat-value" id="totalSounds">-</div>
-                <div class="stat-label">Total Sounds</div>
+            <section class="card card--timeline timeline-container">
+                <div class="card-header">
+                    <div class="card-title-stack">
+                        <p class="card-kicker">Trend Line</p>
+                        <h2 class="card-title">Activity Timeline</h2>
+                        <p class="card-copy">Daily volume across the selected range, with longer buckets for archive view.</p>
+                    </div>
+                </div>
+                <div class="chart-container">
+                    <canvas id="timelineChart"></canvas>
+                </div>
             </section>
-            <section class="stat-card">
-                <div class="stat-icon">▶</div>
-                <div class="stat-value" id="totalPlays">-</div>
-                <div class="stat-label">Total Plays</div>
-            </section>
-            <section class="stat-card">
-                <div class="stat-icon">👥</div>
-                <div class="stat-value" id="activeUsers">-</div>
-                <div class="stat-label">Active Users</div>
-            </section>
-            <section class="stat-card">
-                <div class="stat-icon">✚</div>
-                <div class="stat-value" id="soundsThisWeek">-</div>
-                <div class="stat-label">New This Week</div>
+
+            <section class="card card--heatmap">
+                <div class="card-header">
+                    <div class="card-title-stack">
+                        <p class="card-kicker">Rhythm</p>
+                        <h2 class="card-title">Activity Heatmap</h2>
+                        <p class="card-copy">A compact grid showing when the bot gets hit the hardest.</p>
+                    </div>
+                </div>
+                <div class="heatmap-container">
+                    <div class="heatmap" id="heatmap">
+                        <div class="loading">
+                            <div class="spinner"></div>
+                        </div>
+                    </div>
+                </div>
             </section>
         </div>
 
-        <div class="main-grid">
-            <div class="main-grid-column">
-                <section class="card card--top-users">
-                    <div class="card-header">
-                        <div class="card-title-stack">
-                            <p class="card-kicker">Leaderboard</p>
-                            <h2 class="card-title">Top Users</h2>
-                            <p class="card-copy">The people playing the most sounds in the selected window.</p>
-                        </div>
+        <div class="main-grid-column">
+            <section class="card card--top-sounds">
+                <div class="card-header">
+                    <div class="card-title-stack">
+                        <p class="card-kicker">Hot List</p>
+                        <h2 class="card-title">Top Sounds</h2>
+                        <p class="card-copy">The clips dominating repeats, requests, and random plays.</p>
                     </div>
-                    <div class="leaderboard-list" id="topUsers">
-                        <div class="loading">
-                            <div class="spinner"></div>
-                        </div>
+                </div>
+                <div class="leaderboard-list" id="topSounds">
+                    <div class="loading">
+                        <div class="spinner"></div>
                     </div>
-                </section>
+                </div>
+            </section>
 
-                <section class="card card--timeline timeline-container">
-                    <div class="card-header">
-                        <div class="card-title-stack">
-                            <p class="card-kicker">Trend Line</p>
-                            <h2 class="card-title">Activity Timeline</h2>
-                            <p class="card-copy">Daily volume across the selected range, with longer buckets for archive view.</p>
-                        </div>
+            <section class="card card--activity">
+                <div class="card-header">
+                    <div class="card-title-stack">
+                        <p class="card-kicker">Live Feed</p>
+                        <h2 class="card-title">Recent Activity</h2>
+                        <p class="card-copy">The latest joins, leaves, favorites, and playback actions.</p>
                     </div>
-                    <div class="chart-container">
-                        <canvas id="timelineChart"></canvas>
+                </div>
+                <div class="activity-feed" id="activityFeed">
+                    <div class="loading">
+                        <div class="spinner"></div>
                     </div>
-                </section>
-
-                <section class="card card--heatmap">
-                    <div class="card-header">
-                        <div class="card-title-stack">
-                            <p class="card-kicker">Rhythm</p>
-                            <h2 class="card-title">Activity Heatmap</h2>
-                            <p class="card-copy">A compact grid showing when the bot gets hit the hardest.</p>
-                        </div>
-                    </div>
-                    <div class="heatmap-container">
-                        <div class="heatmap" id="heatmap">
-                            <div class="loading">
-                                <div class="spinner"></div>
-                            </div>
-                        </div>
-                    </div>
-                </section>
-            </div>
-
-            <div class="main-grid-column">
-                <section class="card card--top-sounds">
-                    <div class="card-header">
-                        <div class="card-title-stack">
-                            <p class="card-kicker">Hot List</p>
-                            <h2 class="card-title">Top Sounds</h2>
-                            <p class="card-copy">The clips dominating repeats, requests, and random plays.</p>
-                        </div>
-                    </div>
-                    <div class="leaderboard-list" id="topSounds">
-                        <div class="loading">
-                            <div class="spinner"></div>
-                        </div>
-                    </div>
-                </section>
-
-                <section class="card card--activity">
-                    <div class="card-header">
-                        <div class="card-title-stack">
-                            <p class="card-kicker">Live Feed</p>
-                            <h2 class="card-title">Recent Activity</h2>
-                            <p class="card-copy">The latest joins, leaves, favorites, and playback actions.</p>
-                        </div>
-                    </div>
-                    <div class="activity-feed" id="activityFeed">
-                        <div class="loading">
-                            <div class="spinner"></div>
-                        </div>
-                    </div>
-                </section>
-            </div>
-
+                </div>
+            </section>
         </div>
-    </main>
+    </div>
+</main>
+{% endblock %}
 
-    <script id="analytics-config" type="application/json">{{ {
-        "discord_user": discord_user,
-        "discord_login_url": discord_login_url,
-    }|tojson }}</script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="{{ url_for('static', filename='analytics.js') }}" defer></script>
-
-</body>
-
-</html>
+{% block scripts %}
+<script id="analytics-config" type="application/json">{{ {
+    "discord_user": discord_user,
+    "discord_login_url": discord_login_url,
+}|tojson }}</script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="{{ url_for('static', filename='analytics.js') }}" defer></script>
+{% endblock %}

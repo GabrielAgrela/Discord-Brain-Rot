@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Discord Brain Rot{% endblock %}</title>
+    <link rel="icon"
+        href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ctext y='50' x='50%25' text-anchor='middle' font-size='48'%3E%F0%9F%A7%A0%3C/text%3E%3C/svg%3E">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=DynaPuff:wght@500;700&display=optional"
+        rel="stylesheet">
+    <script>
+        try {
+            if (localStorage.getItem('brainrot-theme') === 'dark') {
+                document.documentElement.classList.add('theme-dark');
+            }
+        } catch (error) {
+            document.documentElement.classList.remove('theme-dark');
+        }
+    </script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='web.css') }}">
+    {% block head_extra %}{% endblock %}
+</head>
+
+<body class="page {{ body_class|default('') }}">
+    {% if discord_user %}
+    {% set display_name = discord_user.global_name or discord_user.username %}
+    {% set avatar_url = 'https://cdn.discordapp.com/avatars/' ~ discord_user.id ~ '/' ~ discord_user.avatar ~
+    '.png?size=128' if discord_user.avatar else 'https://cdn.discordapp.com/embed/avatars/0.png' %}
+    {% endif %}
+
+    {% set active_page = active_page|default('') %}
+    {% set nav_subtitle = nav_subtitle|default('Web Sound Desk') %}
+    {% set logout_next = logout_next|default(request.path) %}
+    {% include "shared/nav.html" %}
+    <script>
+        document.addEventListener('change', function (event) {
+            var selector = event.target && event.target.closest && event.target.closest('#guildSelector');
+            if (!selector || document.body.classList.contains('page-soundboard') || document.body.classList.contains('page-dataset')) {
+                return;
+            }
+            var url = new URL(window.location.href);
+            if (selector.value) {
+                url.searchParams.set('guild_id', selector.value);
+            } else {
+                url.searchParams.delete('guild_id');
+            }
+            window.location.href = url.toString();
+        });
+    </script>
+
+    {% block content %}{% endblock %}
+    {% block scripts %}{% endblock %}
+</body>
+
+</html>
