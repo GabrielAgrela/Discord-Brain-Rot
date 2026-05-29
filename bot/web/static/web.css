@@ -1157,6 +1157,10 @@ html.theme-dark .web-control-button.sent {
     box-shadow: var(--shadow-sm), inset 0 1px 0 oklch(99% 0.012 82 / 0.82);
 }
 
+.control-room.system-monitor-open {
+    z-index: 1400;
+}
+
 html.theme-dark .control-room {
     background:
         radial-gradient(circle at 0 0, var(--accent-soft), transparent 15rem),
@@ -1710,10 +1714,11 @@ html.theme-dark .control-room-actions-trigger:active {
     position: absolute;
     top: calc(100% + 0.45rem);
     right: 0;
-    z-index: 60;
+    z-index: 1300;
     display: none;
-    width: min(18rem, calc(100vw - 1.5rem));
+    width: min(21rem, calc(100vw - 1.5rem));
     max-height: min(24rem, calc(100vh - 8rem));
+    overflow-y: auto;
     flex-direction: column;
     padding: 0.75rem;
     border-radius: var(--radius-lg);
@@ -1759,9 +1764,23 @@ html.theme-dark .system-monitor-dropdown {
     display: flex;
     justify-content: space-between;
     align-items: baseline;
+    gap: 0.75rem;
     font-size: 0.85rem;
     font-weight: 600;
     line-height: 1.2;
+    border-radius: 0.35rem;
+    outline: none;
+}
+
+.system-monitor-total-row[data-monitor-graph-target] {
+    cursor: default;
+}
+
+.system-monitor-total-row[data-monitor-graph-target]:hover,
+.system-monitor-total-row[data-monitor-graph-target]:focus-visible,
+.system-monitor-process-row[data-monitor-process-key]:hover,
+.system-monitor-process-row[data-monitor-process-key]:focus-visible {
+    background: rgba(47, 132, 82, 0.08);
 }
 
 .system-monitor-total-label {
@@ -1773,7 +1792,210 @@ html.theme-dark .system-monitor-dropdown {
 }
 
 .system-monitor-total-value {
+    min-width: 0;
+    text-align: right;
     font-variant-numeric: tabular-nums;
+}
+
+#systemMonitorTotalDisk {
+    white-space: nowrap;
+}
+
+.system-monitor-chart {
+    border-top: 1px solid rgba(23, 18, 13, 0.1);
+    padding-top: 0.5rem;
+    margin-bottom: 0.55rem;
+}
+
+html.theme-dark .system-monitor-chart {
+    border-top-color: rgba(244, 240, 232, 0.1);
+}
+
+.system-monitor-chart-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 0.75rem;
+    margin-bottom: 0.35rem;
+}
+
+.system-monitor-chart-header .card-kicker {
+    margin-bottom: 0;
+}
+
+.system-monitor-chart-header--secondary {
+    margin-top: 0.5rem;
+}
+
+.system-monitor-chart-value {
+    color: var(--ink-soft);
+    font-size: 0.72rem;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+}
+
+.system-monitor-resource-chart {
+    position: relative;
+    height: 4.9rem;
+    overflow: hidden;
+    border: 1px solid rgba(23, 18, 13, 0.12);
+    border-radius: 0.6rem;
+    background:
+        linear-gradient(180deg, rgba(47, 132, 82, 0.1), rgba(47, 132, 82, 0.02)),
+        rgba(255, 250, 242, 0.46);
+}
+
+.system-monitor-resource-chart--temp {
+    height: 4rem;
+}
+
+.system-monitor-hover-chart {
+    display: none;
+    border-top: 1px solid rgba(23, 18, 13, 0.1);
+    padding-top: 0.5rem;
+    margin-bottom: 0.55rem;
+}
+
+.system-monitor-hover-chart.open {
+    display: block;
+}
+
+html.theme-dark .system-monitor-hover-chart {
+    border-top-color: rgba(244, 240, 232, 0.1);
+}
+
+html.theme-dark .system-monitor-resource-chart {
+    border-color: rgba(244, 240, 232, 0.12);
+    background:
+        linear-gradient(180deg, rgba(94, 234, 142, 0.1), rgba(94, 234, 142, 0.02)),
+        rgba(5, 8, 20, 0.18);
+}
+
+.system-monitor-chart-grid {
+    position: absolute;
+    inset: 0;
+    background:
+        linear-gradient(to right, rgba(23, 18, 13, 0.08) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(23, 18, 13, 0.08) 1px, transparent 1px);
+    background-size: 20% 100%, 100% 50%;
+    opacity: 0.55;
+}
+
+html.theme-dark .system-monitor-chart-grid {
+    background:
+        linear-gradient(to right, rgba(244, 240, 232, 0.08) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(244, 240, 232, 0.08) 1px, transparent 1px);
+    background-size: 20% 100%, 100% 50%;
+}
+
+.system-monitor-resource-chart svg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+}
+
+.system-monitor-chart-area {
+    fill: rgba(47, 132, 82, 0.18);
+}
+
+.system-monitor-chart-line {
+    fill: none;
+    stroke-width: 3;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    vector-effect: non-scaling-stroke;
+}
+
+.system-monitor-chart-line--cpu {
+    stroke: var(--accent-deep);
+}
+
+.system-monitor-chart-line--ram {
+    stroke: #7a5cff;
+}
+
+.system-monitor-chart-line--disk {
+    stroke: #d27824;
+}
+
+.system-monitor-chart-line--temp {
+    stroke: #c2410c;
+}
+
+.system-monitor-chart-marker {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: var(--system-monitor-marker-x, 0);
+    display: none;
+    width: 1px;
+    background: rgba(23, 18, 13, 0.38);
+    pointer-events: none;
+}
+
+.system-monitor-chart-marker::after {
+    content: "";
+    position: absolute;
+    top: var(--system-monitor-marker-y, 50%);
+    left: 50%;
+    width: 0.42rem;
+    height: 0.42rem;
+    border: 2px solid var(--accent-deep);
+    border-radius: 999px;
+    background: oklch(98% 0.024 95);
+    transform: translate(-50%, -50%);
+}
+
+.system-monitor-chart-marker.open {
+    display: block;
+}
+
+html.theme-dark .system-monitor-chart-marker {
+    background: rgba(244, 240, 232, 0.35);
+}
+
+.system-monitor-chart-readout {
+    position: absolute;
+    top: 0.35rem;
+    left: var(--system-monitor-readout-x, 0.35rem);
+    display: none;
+    max-width: calc(100% - 0.7rem);
+    padding: 0.18rem 0.38rem;
+    border: 1px solid rgba(23, 18, 13, 0.18);
+    border-radius: 0.4rem;
+    background: rgba(255, 250, 242, 0.94);
+    color: var(--ink);
+    box-shadow: 0 6px 18px rgba(23, 18, 13, 0.14);
+    font-size: 0.64rem;
+    font-weight: 800;
+    line-height: 1.15;
+    white-space: nowrap;
+    pointer-events: none;
+}
+
+.system-monitor-chart-readout.open {
+    display: block;
+}
+
+html.theme-dark .system-monitor-chart-readout {
+    border-color: rgba(244, 240, 232, 0.16);
+    background: rgba(20, 24, 22, 0.94);
+}
+
+.system-monitor-chart-empty {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    color: var(--ink-muted);
+    font-size: 0.72rem;
+    font-weight: 700;
+    pointer-events: none;
+}
+
+.system-monitor-chart-empty[hidden] {
+    display: none;
 }
 
 .system-monitor-processes {
@@ -5240,7 +5462,24 @@ body.page-soundboard .tables-grid > .card:nth-child(3) {
         width: auto;
         max-width: none;
         max-height: var(--system-monitor-dropdown-max-height, 60vh);
-        z-index: 70;
+        z-index: 1300;
+    }
+
+    .system-monitor-total-row {
+        gap: 0.5rem;
+        font-size: 0.78rem;
+    }
+
+    .system-monitor-total-label {
+        font-size: 0.66rem;
+    }
+
+    .system-monitor-total-value {
+        overflow-wrap: anywhere;
+    }
+
+    #systemMonitorTotalDisk {
+        overflow-wrap: normal;
     }
 
     .control-room-metric + .control-room-metric {
@@ -5997,6 +6236,20 @@ html.theme-dark .system-monitor-dropdown {
         var(--scribble-paper),
         oklch(24% 0.04 255 / 0.96);
     color: var(--ink);
+}
+
+.system-monitor-dropdown {
+    background:
+        var(--scribble-paper),
+        oklch(98% 0.024 95);
+    background-color: #fffaf2;
+}
+
+html.theme-dark .system-monitor-dropdown {
+    background:
+        var(--scribble-paper),
+        oklch(24% 0.04 255);
+    background-color: #1f2521;
 }
 
 .select-shell::before {

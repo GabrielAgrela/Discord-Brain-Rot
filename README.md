@@ -14,7 +14,7 @@ Discord bot for soundboard playback, live voice keyword triggers, TTS/STS, sound
 - **Analytics & wrapped** — `/top` leaderboards (users, sounds, voice users, voice channels), `/weeklywrapped` and `/yearreview` as Remotion-rendered GIF digests, `/sendyearreview` admin DM flow. Voice session analytics from `voice_activity` rows.
 - **On This Day** — `/onthisday` shows sounds popular on this day 1 month or 1 year ago.
 - **Rocket League store** — `/rlstore` shows the daily Rocket League item shop with paginated image cards and a configurable notification.
-- **Web dashboard (optional)** — Flask-based web soundboard, analytics dashboard, control room (live bot status, CPU/RAM, playback progress), and upload moderation. Requires Discord OAuth login. See [Web Dashboard & API](#web-dashboard--api) below.
+- **Web dashboard (optional)** — Flask-based web soundboard, analytics dashboard, control room (live bot status, CPU/RAM/disk with hover history graphs and sample readouts, playback progress), and upload moderation. Requires Discord OAuth login. See [Web Dashboard & API](#web-dashboard--api) below.
 - **Voice connection resilience** — Per-guild locks, zombie detection/recovery, DAVE compatibility patch, auto-follow (never into AFK), auto-disconnect, configurable auto-join.
 - **Background automations** — Periodic sound playback loop, MyInstants scraping, TikTok favorite watcher, weekly wrapped/guild digest scheduler, weekly backup scheduler, daily RL store notification, keyword health check, self-heal watchdog, performance telemetry.
 
@@ -181,6 +181,7 @@ polling/fallback behaviour in that case.
 | `WEB_TTS_ENHANCER_REASONING_ENABLED` | `true` | Enable reasoning for web TTS enhancer |
 | `SPEECH_TRAINING_KEYWORD_SCAN_ENABLED` | `true` | Enable daily (24h) scheduled keyword scan of unlabeled speech training clips via the bot (labels non-matches as ``none``, labels matches as ``potential``) |
 | `SPEECH_TRAINING_KEYWORD_SCAN_INTERVAL_SECONDS` | `86400` | Interval for the scheduled keyword scan, default 24h (range `300`–`86400`) |
+| `SPEECH_TRAINING_KEYWORD_SCAN_WORKERS` | `1` | Worker count for the automatic bot-side keyword scan (range `1`–`4`; manual web scans keep their own worker setting) |
 
 ## Slash Commands
 
@@ -275,8 +276,8 @@ The optional web dashboard is served by a separate `web` container (Docker profi
 | `POST /api/tts/enhance` | TTS message enhancement via OpenRouter |
 | `GET /api/tts/enhancer-settings` | Read enhancer model/provider (admin) |
 | `POST /api/tts/enhancer-settings` | Update enhancer model/provider (admin) |
-| `GET /api/control_room/status` | Live bot status, progress, CPU/RAM |
-| `GET /api/system_monitor/status` | Host process & resource data |
+| `GET /api/control_room/status` | Live bot status, progress, CPU/RAM summary |
+| `GET /api/system_monitor/status` | Host CPU, RAM, disk I/O, and process resource data |
 | `POST /api/upload_sound` | Queue a sound upload |
 | `GET /api/upload_sound/<job_id>` | Poll upload progress |
 | `GET /api/uploads` | Upload inbox (admin/mod) |

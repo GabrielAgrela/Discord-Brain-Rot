@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 from typing import Any, Optional
 
@@ -77,6 +78,7 @@ class WebSystemMonitorService:
         # Two-sample state for the optional web /proc fallback.
         self._prev_cpu: dict[str, int] | None = None
         self._prev_proc_info: dict[int, tuple[str, int]] = {}
+        self._prev_disk_stats: dict[str, int] | None = None
         self._prev_timestamp: float | None = None
         self._fallback_mode = os.getenv(
             "WEB_SYSTEM_MONITOR_ALLOW_WEB_PROC_FALLBACK", "0"
@@ -116,6 +118,14 @@ class WebSystemMonitorService:
             - ``sample_interval_seconds`` (*float*)
             - ``updated_at_unix`` (*float*)
             - ``top_processes`` (*list*)
+            - ``cpu_history`` (*list*)
+            - ``ram_history`` (*list*)
+            - ``disk_history`` (*list*)
+            - ``temp_history`` (*list*)
+            - ``process_cpu_history`` (*list*)
+            - ``disk_active_percent`` (*float* | *None*)
+            - ``disk_read_bytes_per_second`` (*float*)
+            - ``disk_write_bytes_per_second`` (*float*)
             - ``status_label`` (*str*, only when *available* is *False*)
             - ``error`` (*str*, only when *available* is *False*)
         """
@@ -159,8 +169,16 @@ class WebSystemMonitorService:
                 "sample_interval_seconds": 0.0,
                 "updated_at_unix": time.time(),
                 "top_processes": [],
+                "cpu_history": [],
+                "ram_history": [],
+                "disk_history": [],
+                "temp_history": [],
+                "process_cpu_history": [],
                 "cpu_temperature_celsius": None,
                 "cpu_fan_rpm": None,
+                "disk_active_percent": None,
+                "disk_read_bytes_per_second": 0.0,
+                "disk_write_bytes_per_second": 0.0,
             }
 
         # No repository — try fallback /proc reading if enabled.
@@ -180,8 +198,16 @@ class WebSystemMonitorService:
             "sample_interval_seconds": 0.0,
             "updated_at_unix": time.time(),
             "top_processes": [],
+            "cpu_history": [],
+            "ram_history": [],
+            "disk_history": [],
+            "temp_history": [],
+            "process_cpu_history": [],
             "cpu_temperature_celsius": None,
             "cpu_fan_rpm": None,
+            "disk_active_percent": None,
+            "disk_read_bytes_per_second": 0.0,
+            "disk_write_bytes_per_second": 0.0,
         }
 
     # ------------------------------------------------------------------
@@ -226,6 +252,7 @@ class WebSystemMonitorService:
                     warming = False
 
             processes = self._read_processes_fallback(cur_cpu, prev_cpu, top_limit)
+            disk = self._read_disk_io_fallback(interval)
 
             return {
                 "available": True,
@@ -238,8 +265,14 @@ class WebSystemMonitorService:
                 "sample_interval_seconds": _r(interval),
                 "updated_at_unix": ts,
                 "top_processes": processes,
+                "cpu_history": [],
+                "ram_history": [],
+                "disk_history": [],
+                "temp_history": [],
+                "process_cpu_history": [],
                 "cpu_temperature_celsius": None,
                 "cpu_fan_rpm": None,
+                **disk,
             }
         except Exception as exc:
             logger.warning("Web fallback system monitor unavailable: %s", exc)
@@ -256,9 +289,83 @@ class WebSystemMonitorService:
                 "sample_interval_seconds": 0.0,
                 "updated_at_unix": time.time(),
                 "top_processes": [],
+                "cpu_history": [],
+                "ram_history": [],
+                "disk_history": [],
+                "temp_history": [],
+                "process_cpu_history": [],
                 "cpu_temperature_celsius": None,
                 "cpu_fan_rpm": None,
+                "disk_active_percent": None,
+                "disk_read_bytes_per_second": 0.0,
+                "disk_write_bytes_per_second": 0.0,
             }
+
+    def _read_disk_io_fallback(self, interval_seconds: float) -> dict[str, float | None]:
+        """Return aggregate disk active percent and read/write byte rates."""
+        cur = self._read_disk_stats_fallback()
+        prev = self._prev_disk_stats
+        self._prev_disk_stats = cur
+
+        if prev is None or interval_seconds <= 0 or not cur:
+            return {
+                "disk_active_percent": None,
+                "disk_read_bytes_per_second": 0.0,
+                "disk_write_bytes_per_second": 0.0,
+            }
+
+        read_sector_delta = max(
+            0, cur["read_sectors"] - prev.get("read_sectors", cur["read_sectors"])
+        )
+        write_sector_delta = max(
+            0, cur["write_sectors"] - prev.get("write_sectors", cur["write_sectors"])
+        )
+        io_ms_delta = max(0, cur["io_ms"] - prev.get("io_ms", cur["io_ms"]))
+
+        return {
+            "disk_active_percent": _r(min(100.0, io_ms_delta / (interval_seconds * 10.0))),
+            "disk_read_bytes_per_second": _r(read_sector_delta * 512 / interval_seconds),
+            "disk_write_bytes_per_second": _r(write_sector_delta * 512 / interval_seconds),
+        }
+
+    @staticmethod
+    def _read_disk_stats_fallback() -> dict[str, int]:
+        """Read aggregate whole-disk counters from the fallback /proc root."""
+        totals = {"read_sectors": 0, "write_sectors": 0, "io_ms": 0}
+        proc_root = WebSystemMonitorService._proc_root()
+        try:
+            with open(f"{proc_root}/diskstats", encoding="utf-8") as f:
+                for line in f:
+                    parts = line.split()
+                    if len(parts) < 14:
+                        continue
+                    name = parts[2]
+                    if not WebSystemMonitorService._looks_like_whole_disk(name):
+                        continue
+                    try:
+                        totals["read_sectors"] += int(parts[5])
+                        totals["write_sectors"] += int(parts[9])
+                        totals["io_ms"] += int(parts[12])
+                    except ValueError:
+                        continue
+        except OSError as exc:
+            logger.debug("Can't read fallback /proc/diskstats: %s", exc)
+        return totals
+
+    @staticmethod
+    def _looks_like_whole_disk(name: str) -> bool:
+        """Best-effort filter for real whole disks, excluding partitions."""
+        if name.startswith(("loop", "ram", "zram", "fd")):
+            return False
+        if re.fullmatch(r"nvme\d+n\d+", name):
+            return True
+        if re.fullmatch(r"mmcblk\d+", name):
+            return True
+        if re.fullmatch(r"(sd|vd|xvd|hd)[a-z]+", name):
+            return True
+        if re.fullmatch(r"dm-\d+", name):
+            return True
+        return bool(name) and not name[-1].isdigit()
 
     @staticmethod
     def _read_meminfo_fallback() -> dict[str, int]:

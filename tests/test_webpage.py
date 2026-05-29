@@ -3315,6 +3315,9 @@ def test_system_monitor_fake_service_returns_expected_payload(web_client):
                 ],
                 "cpu_temperature_celsius": 42.0,
                 "cpu_fan_rpm": 1800,
+                "disk_active_percent": 12.5,
+                "disk_read_bytes_per_second": 1048576.0,
+                "disk_write_bytes_per_second": 524288.0,
             }
 
     original = app.extensions.get("web_system_monitor_service")
@@ -3325,6 +3328,7 @@ def test_system_monitor_fake_service_returns_expected_payload(web_client):
         payload = response.get_json()
         assert payload["total_cpu_percent"] == 23.5
         assert payload["cpu_temperature_celsius"] == 42.0
+        assert payload["disk_active_percent"] == 12.5
         assert len(payload["top_processes"]) == 1
         assert payload["top_processes"][0]["name"] == "test-proc"
     finally:

@@ -54,6 +54,47 @@ class TestBackgroundService:
             image_border_color="#ED4245",
         )
 
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    def test_system_monitor_snapshot_adds_resource_histories(self, _mock_sound_repo, _mock_action_repo):
+        """System monitor snapshots carry rolling histories for hover graphs."""
+        from bot.services.background import BackgroundService
+
+        service = BackgroundService(
+            bot=Mock(),
+            audio_service=Mock(),
+            sound_service=Mock(),
+            behavior=Mock(),
+        )
+
+        snapshot = service._snapshot_with_cpu_history(
+            {
+                "available": True,
+                "cpu_warming": False,
+                "updated_at_unix": 1000.0,
+                "total_cpu_percent": 25.0,
+                "ram_percent": 50.0,
+                "disk_active_percent": 12.5,
+                "cpu_temperature_celsius": 42.0,
+                "top_processes": [
+                    {
+                        "pid": 123,
+                        "display_name": "web_page.py",
+                        "cpu_percent": 7.5,
+                    }
+                ],
+            }
+        )
+
+        assert snapshot["cpu_history"] == [{"time": 1000, "cpu": 25.0}]
+        assert snapshot["ram_history"] == [{"time": 1000, "ram": 50.0}]
+        assert snapshot["disk_history"] == [{"time": 1000, "disk": 12.5}]
+        assert snapshot["temp_history"] == [{"time": 1000, "temp": 42.0}]
+        assert snapshot["top_processes"][0]["process_history_key"] == "123:web_page.py"
+        assert snapshot["process_cpu_history"][0]["history"] == [
+            {"time": 1000, "cpu": 7.5}
+        ]
+
     @pytest.mark.asyncio
     @patch("bot.services.background.ActionRepository")
     @patch("bot.services.background.SoundRepository")
@@ -1342,6 +1383,48 @@ class TestBotStatusCpu:
         from bot.services.background import BackgroundService
 
         assert BackgroundService.web_control_room_status_loop.seconds == 1
+
+    @pytest.mark.asyncio
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    async def test_web_system_monitor_collection_runs_off_event_loop(
+        self, _mock_sound_repo, _mock_action_repo
+    ):
+        """Verify host /proc scanning is dispatched to a worker thread."""
+        from bot.services.background import BackgroundService
+
+        service = BackgroundService(
+            bot=Mock(),
+            audio_service=Mock(),
+            sound_service=Mock(),
+            behavior=Mock(),
+        )
+        service.web_system_status_repo.upsert_snapshot = Mock()
+
+        snapshot = {"available": True, "total_cpu_percent": 42.0}
+        with patch(
+            "bot.services.background.asyncio.to_thread",
+            new=AsyncMock(return_value=snapshot),
+        ) as to_thread:
+            await type(service).web_system_monitor_status_loop.coro(service)
+
+        to_thread.assert_awaited_once_with(
+            service._host_system_monitor.get_snapshot,
+            top_limit=8,
+        )
+        persisted_snapshot = service.web_system_status_repo.upsert_snapshot.call_args.args[0]
+        assert persisted_snapshot["available"] is True
+        assert persisted_snapshot["total_cpu_percent"] == 42.0
+        assert persisted_snapshot["cpu_history"] == [
+            {
+                "time": persisted_snapshot["cpu_history"][0]["time"],
+                "cpu": 42.0,
+            }
+        ]
+        assert persisted_snapshot["ram_history"] == []
+        assert persisted_snapshot["disk_history"] == []
+        assert persisted_snapshot["temp_history"] == []
+        assert persisted_snapshot["process_cpu_history"] == []
 
     @pytest.mark.asyncio
     @patch("bot.services.background.ActionRepository")

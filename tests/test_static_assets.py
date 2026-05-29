@@ -165,6 +165,9 @@ class TestJavaScriptSyntax:
         # New constant present
         assert "SYS_MON_VISIBLE_MS" in content
         assert "SYS_MON_HIDDEN_MS" in content
+        assert "SYSTEM_MONITOR_CPU_HISTORY_SECONDS = 60" in content
+        assert "renderSystemMonitorHoverChart" in content
+        assert "updateSystemMonitorChartReadout" in content
 
     @pytest.mark.parametrize("filename", SPEECH_TRAINING_ONLY)
     def test_keyword_confidence_wording(self, filename):

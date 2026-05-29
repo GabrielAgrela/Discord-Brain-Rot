@@ -261,6 +261,15 @@
         let webControlStateRequestInFlight = false;
         let controlRoomRequestInFlight = false;
         let systemMonitorRequestInFlight = false;
+        const systemMonitorHistories = {
+            cpu: [],
+            ram: [],
+            disk: [],
+            temp: [],
+            process: new Map()
+        };
+        let activeSystemMonitorChart = null;
+        const SYSTEM_MONITOR_CPU_HISTORY_SECONDS = 60;
         let latestControlRoomStatus = {};
         let _controlRoomLocalElapsed = null;
         let previousNowPlayingText = '';
@@ -793,6 +802,11 @@
             return bytes + ' B';
         }
 
+        function formatBytesPerSecondForSystem(bytesPerSecond) {
+            const formatted = formatBytesForSystem(bytesPerSecond);
+            return formatted === '--' ? '--' : formatted + '/s';
+        }
+
         function formatPercentForSystem(value) {
             if (value === null || value === undefined || !Number.isFinite(value)) return '--';
             return value.toFixed(1) + '%';
@@ -808,10 +822,287 @@
             return Math.round(rpm).toLocaleString() + ' RPM';
         }
 
+        function formatSystemMonitorSampleTime(unixSecond) {
+            if (!Number.isFinite(unixSecond)) return '--';
+            return new Date(unixSecond * 1000).toLocaleTimeString([], {
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+        }
+
+        function recordSystemMonitorHistorySample(history, sampleTime, key, rawValue, minValue, maxValue) {
+            const value = Number(rawValue);
+            if (!Number.isFinite(value)) return;
+            const clampedValue = Math.max(minValue, Math.min(maxValue, value));
+            const lastSample = history[history.length - 1];
+            if (lastSample && lastSample.time === sampleTime) {
+                lastSample[key] = clampedValue;
+            } else {
+                history.push({ time: sampleTime, [key]: clampedValue });
+            }
+            const cutoff = sampleTime - SYSTEM_MONITOR_CPU_HISTORY_SECONDS + 1;
+            while (history.length && history[0].time < cutoff) {
+                history.shift();
+            }
+        }
+
+        function syncSystemMonitorHistoryList(history, samples, key, minValue, maxValue) {
+            if (!Array.isArray(samples) || !samples.length) return;
+            history.length = 0;
+            samples.forEach(function(sample) {
+                const sampleTime = Number(sample.time);
+                const value = Number(sample[key]);
+                if (!Number.isFinite(sampleTime) || !Number.isFinite(value)) return;
+                history.push({
+                    time: Math.round(sampleTime),
+                    [key]: Math.max(minValue, Math.min(maxValue, value))
+                });
+            });
+            history.sort(function(left, right) {
+                return left.time - right.time;
+            });
+        }
+
+        function recordSystemMonitorSamples(payload) {
+            if (!payload) return;
+            const sampleTime = Number.isFinite(payload.updated_at_unix)
+                ? Math.round(payload.updated_at_unix)
+                : Math.round(Date.now() / 1000);
+
+            if (!payload.cpu_warming) {
+                recordSystemMonitorHistorySample(
+                    systemMonitorHistories.cpu, sampleTime, 'cpu', payload.total_cpu_percent, 0, 100
+                );
+            }
+            recordSystemMonitorHistorySample(
+                systemMonitorHistories.ram, sampleTime, 'ram', payload.ram_percent, 0, 100
+            );
+            recordSystemMonitorHistorySample(
+                systemMonitorHistories.disk, sampleTime, 'disk', payload.disk_active_percent, 0, 100
+            );
+            recordSystemMonitorHistorySample(
+                systemMonitorHistories.temp, sampleTime, 'temp', payload.cpu_temperature_celsius, 0, 125
+            );
+
+            const processes = Array.isArray(payload.top_processes) ? payload.top_processes : [];
+            processes.forEach(function(proc) {
+                const key = proc.process_history_key || String(proc.pid || proc.display_name || proc.name || '');
+                if (!key) return;
+                if (!systemMonitorHistories.process.has(key)) {
+                    systemMonitorHistories.process.set(key, []);
+                }
+                recordSystemMonitorHistorySample(
+                    systemMonitorHistories.process.get(key), sampleTime, 'cpu', proc.cpu_percent, 0, 100
+                );
+            });
+        }
+
+        function syncSystemMonitorHistories(payload) {
+            if (!payload) return;
+            syncSystemMonitorHistoryList(systemMonitorHistories.cpu, payload.cpu_history, 'cpu', 0, 100);
+            syncSystemMonitorHistoryList(systemMonitorHistories.ram, payload.ram_history, 'ram', 0, 100);
+            syncSystemMonitorHistoryList(systemMonitorHistories.disk, payload.disk_history, 'disk', 0, 100);
+            syncSystemMonitorHistoryList(systemMonitorHistories.temp, payload.temp_history, 'temp', 0, 125);
+
+            if (Array.isArray(payload.process_cpu_history)) {
+                systemMonitorHistories.process.clear();
+                payload.process_cpu_history.forEach(function(processHistory) {
+                    const key = processHistory.key;
+                    if (!key) return;
+                    const history = [];
+                    syncSystemMonitorHistoryList(history, processHistory.history, 'cpu', 0, 100);
+                    systemMonitorHistories.process.set(key, history);
+                });
+            }
+            recordSystemMonitorSamples(payload);
+        }
+
+        function renderSystemMonitorHoverChart(config) {
+            const container = document.getElementById('systemMonitorHoverChart');
+            const chart = document.getElementById('systemMonitorHoverChartPlot');
+            const line = document.getElementById('systemMonitorHoverChartLine');
+            const area = document.getElementById('systemMonitorHoverChartArea');
+            const empty = document.getElementById('systemMonitorHoverChartEmpty');
+            const value = document.getElementById('systemMonitorHoverChartValue');
+            const title = document.getElementById('systemMonitorHoverChartTitle');
+            if (!container || !chart || !line || !area || !empty || !value || !title || !config) return;
+
+            container.classList.add('open');
+            container.setAttribute('aria-hidden', 'false');
+            line.setAttribute('class', 'system-monitor-chart-line system-monitor-chart-line--' + config.tone);
+            title.textContent = config.label + ' Last Minute';
+
+            const latest = config.history[config.history.length - 1];
+            if (!latest) {
+                activeSystemMonitorChart = null;
+                hideSystemMonitorChartReadout();
+                line.setAttribute('d', '');
+                area.setAttribute('d', '');
+                empty.hidden = false;
+                value.textContent = '--';
+                chart.setAttribute('aria-label', 'Collecting ' + config.label + ' history');
+                return;
+            }
+
+            const width = 600;
+            const height = 110;
+            const latestTime = latest.time;
+            const samplesByTime = new Map(config.history.map(function(sample) {
+                return [sample.time, sample[config.key]];
+            }));
+            const points = [];
+            for (let index = 0; index < SYSTEM_MONITOR_CPU_HISTORY_SECONDS; index += 1) {
+                const second = latestTime - SYSTEM_MONITOR_CPU_HISTORY_SECONDS + 1 + index;
+                const sampleValue = samplesByTime.get(second);
+                if (Number.isFinite(sampleValue)) {
+                    const normalized = (sampleValue - config.min) / (config.max - config.min);
+                    points.push({
+                        x: index / (SYSTEM_MONITOR_CPU_HISTORY_SECONDS - 1) * width,
+                        y: height - (Math.max(0, Math.min(1, normalized)) * height),
+                        value: sampleValue,
+                        time: second
+                    });
+                }
+            }
+
+            if (!points.length) {
+                activeSystemMonitorChart = null;
+                hideSystemMonitorChartReadout();
+                line.setAttribute('d', '');
+                area.setAttribute('d', '');
+                empty.hidden = false;
+                value.textContent = '--';
+                chart.setAttribute('aria-label', 'Collecting ' + config.label + ' history');
+                return;
+            }
+
+            const path = points.map(function(point, index) {
+                const command = index === 0 ? 'M' : 'L';
+                return command + point.x.toFixed(1) + ' ' + point.y.toFixed(1);
+            }).join(' ');
+            const areaPath = path + ' L ' + points[points.length - 1].x.toFixed(1) + ' ' + height
+                + ' L ' + points[0].x.toFixed(1) + ' ' + height + ' Z';
+            line.setAttribute('d', path);
+            area.setAttribute('d', areaPath);
+            empty.hidden = points.length >= 2;
+            value.textContent = config.formatter(latest[config.key]);
+            activeSystemMonitorChart = { config, points, width, height };
+            hideSystemMonitorChartReadout();
+            chart.setAttribute(
+                'aria-label',
+                config.label + ' history over the last minute, latest ' + config.formatter(latest[config.key])
+            );
+        }
+
+        function hideSystemMonitorChartReadout() {
+            const marker = document.getElementById('systemMonitorHoverChartMarker');
+            const readout = document.getElementById('systemMonitorHoverChartReadout');
+            if (marker) marker.classList.remove('open');
+            if (readout) {
+                readout.classList.remove('open');
+                readout.textContent = '';
+            }
+        }
+
+        function updateSystemMonitorChartReadout(event) {
+            if (!activeSystemMonitorChart || !activeSystemMonitorChart.points.length) return;
+            const chart = document.getElementById('systemMonitorHoverChartPlot');
+            const marker = document.getElementById('systemMonitorHoverChartMarker');
+            const readout = document.getElementById('systemMonitorHoverChartReadout');
+            if (!chart || !marker || !readout) return;
+
+            const rect = chart.getBoundingClientRect();
+            const pointerX = Math.max(0, Math.min(rect.width, event.clientX - rect.left));
+            const svgX = pointerX / rect.width * activeSystemMonitorChart.width;
+            let nearest = activeSystemMonitorChart.points[0];
+            activeSystemMonitorChart.points.forEach(function(point) {
+                if (Math.abs(point.x - svgX) < Math.abs(nearest.x - svgX)) {
+                    nearest = point;
+                }
+            });
+
+            const markerX = nearest.x / activeSystemMonitorChart.width * rect.width;
+            const markerY = nearest.y / activeSystemMonitorChart.height * rect.height;
+            const readoutX = Math.min(Math.max(markerX + 8, 6), Math.max(6, rect.width - 118));
+            marker.style.setProperty('--system-monitor-marker-x', markerX.toFixed(1) + 'px');
+            marker.style.setProperty('--system-monitor-marker-y', markerY.toFixed(1) + 'px');
+            readout.style.setProperty('--system-monitor-readout-x', readoutX.toFixed(1) + 'px');
+            readout.textContent = formatSystemMonitorSampleTime(nearest.time) + ' \u00B7 '
+                + activeSystemMonitorChart.config.formatter(nearest.value);
+            marker.classList.add('open');
+            readout.classList.add('open');
+        }
+
+        function hideSystemMonitorHoverChart() {
+            const container = document.getElementById('systemMonitorHoverChart');
+            if (!container) return;
+            activeSystemMonitorChart = null;
+            hideSystemMonitorChartReadout();
+            container.classList.remove('open');
+            container.setAttribute('aria-hidden', 'true');
+        }
+
+        function showSystemMonitorMetricHistory(metric) {
+            const configs = {
+                cpu: {
+                    label: 'CPU',
+                    history: systemMonitorHistories.cpu,
+                    key: 'cpu',
+                    min: 0,
+                    max: 100,
+                    tone: 'cpu',
+                    formatter: formatPercentForSystem
+                },
+                ram: {
+                    label: 'RAM',
+                    history: systemMonitorHistories.ram,
+                    key: 'ram',
+                    min: 0,
+                    max: 100,
+                    tone: 'ram',
+                    formatter: formatPercentForSystem
+                },
+                disk: {
+                    label: 'Disk',
+                    history: systemMonitorHistories.disk,
+                    key: 'disk',
+                    min: 0,
+                    max: 100,
+                    tone: 'disk',
+                    formatter: formatPercentForSystem
+                },
+                temp: {
+                    label: 'Temp',
+                    history: systemMonitorHistories.temp,
+                    key: 'temp',
+                    min: 20,
+                    max: 100,
+                    tone: 'temp',
+                    formatter: formatTemperatureForSystem
+                }
+            };
+            renderSystemMonitorHoverChart(configs[metric]);
+        }
+
+        function showSystemMonitorProcessHistory(key, label) {
+            const history = systemMonitorHistories.process.get(key) || [];
+            renderSystemMonitorHoverChart({
+                label: label || 'Process',
+                history,
+                key: 'cpu',
+                min: 0,
+                max: 100,
+                tone: 'cpu',
+                formatter: formatPercentForSystem
+            });
+        }
+
         function updateSystemMonitor(payload) {
             const summary = document.getElementById('systemMonitorSummary');
             const totalCpu = document.getElementById('systemMonitorTotalCpu');
             const totalRam = document.getElementById('systemMonitorTotalRam');
+            const totalDisk = document.getElementById('systemMonitorTotalDisk');
             const totalTemp = document.getElementById('systemMonitorTotalTemp');
             const processList = document.getElementById('systemMonitorProcessList');
             const footnote = document.getElementById('systemMonitorFootnote');
@@ -823,11 +1114,15 @@
                 if (button) button.setAttribute('aria-label', 'System monitor unavailable');
                 if (totalCpu) totalCpu.textContent = '--';
                 if (totalRam) totalRam.textContent = '--';
+                if (totalDisk) totalDisk.textContent = '--';
                 if (totalTemp) totalTemp.textContent = '--';
                 if (processList) processList.innerHTML = '<p class="system-monitor-empty">' + (payload.status_label || 'Unavailable') + '</p>';
                 if (footnote) footnote.textContent = '';
+                hideSystemMonitorHoverChart();
                 return;
             }
+
+            syncSystemMonitorHistories(payload);
 
             const cpuText = payload.cpu_warming
                 ? 'CPU sampling\u2026'
@@ -838,12 +1133,17 @@
                 : '';
             const tempText = formatTemperatureForSystem(payload.cpu_temperature_celsius);
             const fanText = formatFanSpeedForSystem(payload.cpu_fan_rpm);
+            const diskActiveText = formatPercentForSystem(payload.disk_active_percent);
+            const diskReadText = formatBytesPerSecondForSystem(payload.disk_read_bytes_per_second);
+            const diskWriteText = formatBytesPerSecondForSystem(payload.disk_write_bytes_per_second);
+            const diskText = 'Active ' + diskActiveText + ' \u00B7 R ' + diskReadText + ' \u00B7 W ' + diskWriteText;
 
             if (summary) {
                 summary.textContent = cpuText;
             }
             if (button) {
                 var ariaLabel = cpuText + ' \u00B7 ' + ramText + ramPercent;
+                ariaLabel += ' \u00B7 Disk ' + diskText;
                 if (tempText !== '--') {
                     ariaLabel += ' \u00B7 Temp ' + tempText;
                 }
@@ -861,6 +1161,9 @@
             if (totalRam) {
                 totalRam.textContent = ramText + ramPercent;
             }
+            if (totalDisk) {
+                totalDisk.textContent = diskText;
+            }
             if (totalTemp) {
                 totalTemp.textContent = tempText;
             }
@@ -874,10 +1177,14 @@
                         processes.forEach(function(proc) {
                             const row = document.createElement('div');
                             row.className = 'system-monitor-process-row';
+                            row.tabIndex = 0;
+                            const processLabel = proc.display_name || proc.name || 'pid:' + proc.pid;
+                            const processHistoryKey = proc.process_history_key || String(proc.pid || processLabel);
+                            row.dataset.monitorProcessKey = processHistoryKey;
 
                             const name = document.createElement('span');
                             name.className = 'system-monitor-process-name';
-                            name.textContent = proc.display_name || proc.name || 'pid:' + proc.pid;
+                            name.textContent = processLabel;
                             if (proc.detail) {
                                 name.title = proc.detail;
                             }
@@ -891,6 +1198,12 @@
                         mem.textContent = formatBytesForSystem(proc.memory_rss_bytes);
 
                         row.append(name, cpu, mem);
+                        row.addEventListener('mouseenter', function() {
+                            showSystemMonitorProcessHistory(processHistoryKey, processLabel);
+                        });
+                        row.addEventListener('focus', function() {
+                            showSystemMonitorProcessHistory(processHistoryKey, processLabel);
+                        });
                         fragment.appendChild(row);
                     });
                     processList.replaceChildren(fragment);
@@ -962,6 +1275,10 @@
             const dropdown = document.getElementById('systemMonitorDropdown');
             const button = document.getElementById('systemMonitorButton');
             if (!dropdown) return;
+            const controlRoom = document.querySelector('.control-room');
+            if (controlRoom) {
+                controlRoom.classList.add('system-monitor-open');
+            }
             positionSystemMonitorDropdown();
             dropdown.classList.add('open');
             dropdown.setAttribute('aria-hidden', 'false');
@@ -977,6 +1294,10 @@
             const dropdown = document.getElementById('systemMonitorDropdown');
             const button = document.getElementById('systemMonitorButton');
             if (!dropdown) return;
+            const controlRoom = document.querySelector('.control-room');
+            if (controlRoom) {
+                controlRoom.classList.remove('system-monitor-open');
+            }
             dropdown.classList.remove('open');
             dropdown.setAttribute('aria-hidden', 'true');
             if (button) {
@@ -3849,8 +4170,12 @@
                 }
             });
         }
-        if (new URLSearchParams(window.location.search).get('upload') === '1') {
+        const startupParams = new URLSearchParams(window.location.search);
+        if (startupParams.get('upload') === '1') {
             openUploadModal();
+        }
+        if (startupParams.get('upload_inbox') === '1') {
+            openUploadInboxModal();
         }
 
         if (guildSelector) {
@@ -4190,6 +4515,23 @@
             systemMonitorDropdown.addEventListener('click', function(event) {
                 event.stopPropagation();
             });
+            systemMonitorDropdown.addEventListener('mouseover', function(event) {
+                const target = event.target.closest('[data-monitor-graph-target]');
+                if (!target || !systemMonitorDropdown.contains(target)) return;
+                showSystemMonitorMetricHistory(target.dataset.monitorGraphTarget);
+            });
+            systemMonitorDropdown.addEventListener('focusin', function(event) {
+                const target = event.target.closest('[data-monitor-graph-target]');
+                if (!target || !systemMonitorDropdown.contains(target)) return;
+                showSystemMonitorMetricHistory(target.dataset.monitorGraphTarget);
+            });
+            systemMonitorDropdown.addEventListener('mouseleave', hideSystemMonitorHoverChart);
+        }
+
+        const systemMonitorHoverChartPlot = document.getElementById('systemMonitorHoverChartPlot');
+        if (systemMonitorHoverChartPlot) {
+            systemMonitorHoverChartPlot.addEventListener('pointermove', updateSystemMonitorChartReadout);
+            systemMonitorHoverChartPlot.addEventListener('pointerleave', hideSystemMonitorChartReadout);
         }
 
         document.addEventListener('click', function(event) {

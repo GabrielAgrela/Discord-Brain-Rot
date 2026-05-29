@@ -65,6 +65,12 @@ class BackgroundService:
 
         self._host_system_monitor = HostSystemMonitorService()
         self._host_monitor_warmed = False
+        self._host_monitor_cpu_history: list[dict[str, float]] = []
+        self._host_monitor_temp_history: list[dict[str, float]] = []
+        self._host_monitor_ram_history: list[dict[str, float]] = []
+        self._host_monitor_disk_history: list[dict[str, float]] = []
+        self._host_monitor_process_cpu_history: dict[str, list[dict[str, float]]] = {}
+        self._host_monitor_process_labels: dict[str, str] = {}
         
         self._started = False
         self._perf_tick_rate_seconds = max(
@@ -110,6 +116,9 @@ class BackgroundService:
         )
         self._keyword_scan_daily_interval = self._env_int(
             "SPEECH_TRAINING_KEYWORD_SCAN_INTERVAL_SECONDS", 86400, 300, 86400
+        )
+        self._keyword_scan_workers = self._env_int(
+            "SPEECH_TRAINING_KEYWORD_SCAN_WORKERS", 1, 1, 4
         )
         self._keyword_scan_in_progress = False
 
@@ -1380,10 +1389,21 @@ class BackgroundService:
     async def web_system_monitor_status_loop(self):
         """Collect host CPU/RAM/top processes and persist to DB every 1 s."""
         try:
-            snapshot = self._host_system_monitor.get_snapshot(top_limit=8)
+            started = time.monotonic()
+            snapshot = await asyncio.to_thread(
+                self._host_system_monitor.get_snapshot,
+                top_limit=8,
+            )
+            elapsed = time.monotonic() - started
+            if elapsed > 2.0:
+                logger.warning(
+                    "[BackgroundService] Host system monitor collection took %.2fs",
+                    elapsed,
+                )
             if snapshot.get("available"):
                 self._host_monitor_warmed = True
             if self._host_monitor_warmed:
+                snapshot = self._snapshot_with_cpu_history(snapshot)
                 self.web_system_status_repo.upsert_snapshot(snapshot)
         except Exception as e:
             logger.error(
@@ -1391,6 +1411,142 @@ class BackgroundService:
                 e,
                 exc_info=True,
             )
+
+    def _snapshot_with_cpu_history(self, snapshot: dict[str, Any]) -> dict[str, Any]:
+        """Return *snapshot* with rolling 60-second CPU and temp history."""
+        sample_time = self._monitor_sample_time(snapshot)
+
+        if not snapshot.get("cpu_warming"):
+            self._append_monitor_history_sample(
+                self._host_monitor_cpu_history,
+                sample_time=sample_time,
+                value=snapshot.get("total_cpu_percent"),
+                key="cpu",
+                minimum=0.0,
+                maximum=100.0,
+            )
+
+        self._append_monitor_history_sample(
+            self._host_monitor_temp_history,
+            sample_time=sample_time,
+            value=snapshot.get("cpu_temperature_celsius"),
+            key="temp",
+            minimum=0.0,
+            maximum=125.0,
+        )
+        self._append_monitor_history_sample(
+            self._host_monitor_ram_history,
+            sample_time=sample_time,
+            value=snapshot.get("ram_percent"),
+            key="ram",
+            minimum=0.0,
+            maximum=100.0,
+        )
+        self._append_monitor_history_sample(
+            self._host_monitor_disk_history,
+            sample_time=sample_time,
+            value=snapshot.get("disk_active_percent"),
+            key="disk",
+            minimum=0.0,
+            maximum=100.0,
+        )
+        top_processes = []
+        for process in snapshot.get("top_processes") or []:
+            if not isinstance(process, dict):
+                continue
+            process_copy = dict(process)
+            process_key = self._monitor_process_history_key(process_copy)
+            process_label = str(
+                process_copy.get("display_name")
+                or process_copy.get("name")
+                or f"pid:{process_copy.get('pid', '')}"
+            )
+            process_copy["process_history_key"] = process_key
+            top_processes.append(process_copy)
+            self._host_monitor_process_labels[process_key] = process_label
+            history = self._host_monitor_process_cpu_history.setdefault(process_key, [])
+            self._append_monitor_history_sample(
+                history,
+                sample_time=sample_time,
+                value=process_copy.get("cpu_percent"),
+                key="cpu",
+                minimum=0.0,
+                maximum=100.0,
+            )
+
+        process_cutoff = sample_time - 59
+        for process_key in list(self._host_monitor_process_cpu_history):
+            history = self._host_monitor_process_cpu_history[process_key]
+            history[:] = [
+                sample for sample in history if int(sample["time"]) >= process_cutoff
+            ]
+            if not history:
+                self._host_monitor_process_cpu_history.pop(process_key, None)
+                self._host_monitor_process_labels.pop(process_key, None)
+
+        return {
+            **snapshot,
+            "top_processes": top_processes,
+            "cpu_history": list(self._host_monitor_cpu_history),
+            "temp_history": list(self._host_monitor_temp_history),
+            "ram_history": list(self._host_monitor_ram_history),
+            "disk_history": list(self._host_monitor_disk_history),
+            "process_cpu_history": [
+                {
+                    "key": process_key,
+                    "label": self._host_monitor_process_labels.get(process_key, process_key),
+                    "history": list(history),
+                }
+                for process_key, history in self._host_monitor_process_cpu_history.items()
+            ],
+        }
+
+    @staticmethod
+    def _monitor_process_history_key(process: dict[str, Any]) -> str:
+        """Return a stable-enough key for one process history line."""
+        pid = process.get("pid")
+        name = process.get("display_name") or process.get("name") or "process"
+        return f"{pid}:{name}" if pid is not None else str(name)
+
+    @staticmethod
+    def _monitor_sample_time(snapshot: dict[str, Any]) -> int:
+        """Return the integer Unix second for a monitor snapshot."""
+        try:
+            return int(round(float(snapshot.get("updated_at_unix", time.time()))))
+        except (TypeError, ValueError):
+            return int(round(time.time()))
+
+    @staticmethod
+    def _append_monitor_history_sample(
+        history: list[dict[str, float]],
+        *,
+        sample_time: int,
+        value: Any,
+        key: str,
+        minimum: float,
+        maximum: float,
+    ) -> None:
+        """Append or replace one bounded monitor history sample."""
+        try:
+            numeric_value = float(value)
+        except (TypeError, ValueError):
+            return
+        if numeric_value != numeric_value:
+            return
+
+        numeric_value = max(minimum, min(maximum, numeric_value))
+        sample = {"time": sample_time, key: round(numeric_value, 1)}
+        if history and int(history[-1]["time"]) == sample_time:
+            history[-1].update(sample)
+        else:
+            history.append(sample)
+
+        cutoff = sample_time - 59
+        history[:] = [
+            existing
+            for existing in history
+            if int(existing["time"]) >= cutoff
+        ]
 
     @tasks.loop(minutes=5)
     async def weekly_wrapped_scheduler_loop(self):
@@ -1637,6 +1793,7 @@ class BackgroundService:
             from bot.services.web_speech_training import WebSpeechTrainingService
 
             svc = WebSpeechTrainingService(repo, speech_training_data_dir)
+            svc.KEYWORD_SCAN_WORKERS = self._keyword_scan_workers
             guild_results: list[dict] = []
             loop_error: str | None = None
 

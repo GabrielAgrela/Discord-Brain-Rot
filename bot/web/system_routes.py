@@ -51,7 +51,15 @@ def register_system_routes(app: Flask) -> None:
                     "sample_interval_seconds": 0.0,
                     "updated_at_unix": 0.0,
                     "top_processes": [],
+                    "cpu_history": [],
+                    "ram_history": [],
+                    "disk_history": [],
+                    "temp_history": [],
+                    "process_cpu_history": [],
                     "cpu_temperature_celsius": None,
                     "cpu_fan_rpm": None,
+                    "disk_active_percent": None,
+                    "disk_read_bytes_per_second": 0.0,
+                    "disk_write_bytes_per_second": 0.0,
                 }
             ), 500

@@ -136,7 +136,7 @@ Only the bot container has ``pid: host`` in ``docker-compose.yml``, so **all hos
 
 ### Architecture
 
-1. **``HostSystemMonitorService``** (``bot/services/system_monitor.py``) — reads ``/proc/stat``, ``/proc/meminfo``, ``/proc/[pid]/stat``, ``/proc/[pid]/status``, and ``/proc/[pid]/cmdline`` from the **bot's** perspective (which shows real host processes because of ``pid: host``). It is two-sample: the first call warms, subsequent calls compute CPU-percent deltas. It also resolves descriptive display names via cmdline analysis (e.g. "web_page.py" instead of "python"). Instantiated and used by ``BackgroundService.web_system_monitor_status_loop``.
+1. **``HostSystemMonitorService``** (``bot/services/system_monitor.py``) — reads ``/proc/stat``, ``/proc/meminfo``, ``/proc/diskstats``, ``/proc/[pid]/stat``, ``/proc/[pid]/status``, and ``/proc/[pid]/cmdline`` from the **bot's** perspective (which shows real host processes because of ``pid: host``). It is two-sample: the first call warms, subsequent calls compute CPU-percent and disk-I/O deltas. It also resolves descriptive display names via cmdline analysis (e.g. "web_page.py" instead of "python"). Instantiated and used by ``BackgroundService.web_system_monitor_status_loop``.
 
 2. **``WebSystemStatusRepository``** (``bot/repositories/web_system_status.py``) — lightweight singleton table ``web_system_status`` with columns ``id`` (always 1), ``snapshot_json`` (TEXT), and ``updated_at`` (TEXT). The bot background loop writes a snapshot every 1 s. The web endpoint reads it.
 
@@ -153,6 +153,10 @@ Set ``WEB_SYSTEM_MONITOR_ALLOW_WEB_PROC_FALLBACK=1`` to fall back to reading ``/
 ### CPU fan speed
 
 ``HostSystemMonitorService.get_snapshot()`` also includes a ``cpu_fan_rpm`` key (``int | None``). The bot-side service reads CPU fan RPM from sysfs ``/sys/class/hwmon/hwmon*/fan*_input`` values. It prefers sensors whose ``fan*_label`` contains CPU-related keywords (``cpu``, ``processor``, ``package``, ``core``, ``soc``, ``tctl``, ``tdie``), then falls back to fans on known hwmon devices (common motherboard/sensor chip names), then to the first valid fan input. A value of ``0`` RPM is valid — it means a readable (but stopped/idle) fan — and is reported as ``0``. Invalid values (negative, outlandish > 99999 RPM, or unreadable/non-numeric) are ignored. When no fan sensor is available or readable the value is ``None``. Unavailable/fallback/error payloads in ``WebSystemMonitorService`` and route handlers include ``"cpu_fan_rpm": None``.
+
+### Disk I/O
+
+``HostSystemMonitorService.get_snapshot()`` includes ``disk_active_percent`` (``float | None``), ``disk_read_bytes_per_second`` (``float``), and ``disk_write_bytes_per_second`` (``float``). These are two-sample values from ``/proc/diskstats`` and should be collected in the bot container, like CPU/process data. ``disk_active_percent`` is based on ``io_ms`` delta and is capped at 100; read/write speeds use 512-byte sector deltas. First samples and unavailable/error payloads report ``disk_active_percent: None`` and zero read/write rates.
 
 ### Env vars
 
@@ -345,4 +349,4 @@ The keyword scan persists Vosk word-level timing (``detected_start_seconds``, ``
 - Transcript jobs run in a dedicated background thread pool (``WEB_TRANSCRIPT_WORKERS`` env var, default 1, bounded 1–4).  Job state is in-memory and lost on web restart.
 - While a transcript job is running, passive clip refresh is paused and both the scan and transcript buttons are disabled.
 
-The control-room host metric shows ``Host CPU, Temp & RAM`` with a dropdown. CPU fan speed appears in parentheses on the CPU total row (e.g. ``CPU 12.3% (2,500 RPM)`` or ``CPU sampling… (2,500 RPM)``) when available; if fan speed is unavailable, the parentheses are omitted. The process section is labelled ``Top CPU`` (reflecting that these are the top host-wide CPU consumers). The footnote shows the bot-side sample interval (~1 s). When no snapshot is available the dropdown shows "Waiting for host monitor".
+The control-room host metric shows ``Host CPU, Disk & RAM`` with a dropdown. CPU fan speed appears in parentheses on the CPU total row (e.g. ``CPU 12.3% (2,500 RPM)`` or ``CPU sampling… (2,500 RPM)``) when available; if fan speed is unavailable, the parentheses are omitted. Disk is shown as active percentage plus read/write speeds. Hovering/focusing CPU, RAM, DISK, TEMP, or a ``Top CPU`` process row shows one inline last-minute graph for that row; hovering the graph itself shows the nearest sample time and value. The graph uses the history arrays persisted in the bot-side system monitor snapshot. The process section is labelled ``Top CPU`` (reflecting that these are the top host-wide CPU consumers). The footnote shows the bot-side sample interval (~1 s). When no snapshot is available the dropdown shows "Waiting for host monitor".

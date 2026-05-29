@@ -44,6 +44,7 @@ def _make_proc_tree(
     mem_avail_kb: int = 8388608,
     cpu_fields: tuple[int, ...] = (100, 50, 25, 800, 10, 0, 0, 0, 0, 0),
     processes: dict[int, tuple[str, int, int, int]] | None = None,
+    diskstats: str | None = None,
 ) -> None:
     """
     Populate a fake /proc directory under *root*.
@@ -53,6 +54,8 @@ def _make_proc_tree(
     _write_proc(root, "meminfo", f"MemTotal:       {mem_total_kb} kB\nMemAvailable:    {mem_avail_kb} kB\n")
     field_str = " ".join(str(v) for v in cpu_fields)
     _write_proc(root, "stat", f"cpu  {field_str}\n")
+    if diskstats is not None:
+        _write_proc(root, "diskstats", diskstats)
 
     if processes:
         for pid, (name, utime, stime, rss_kb) in processes.items():
@@ -123,6 +126,25 @@ def test_second_cpu_call_computes_percent(tmp_path):
     assert snap["cpu_warming"] is False
     assert snap["total_cpu_percent"] is not None
     assert 30.0 < snap["total_cpu_percent"] < 33.0
+
+
+def test_disk_io_delta_reports_active_percent_and_speeds(tmp_path):
+    cpu1 = (200, 100, 50, 1600, 20, 0, 0, 0, 0, 0)
+    cpu2 = (400, 200, 100, 2400, 40, 0, 0, 0, 0, 0)
+    disk1 = "   8       0 sda 10 0 1000 0 20 0 2000 0 0 100 0\n"
+    disk2 = "   8       0 sda 15 0 3000 0 27 0 5000 0 0 350 0\n"
+    _make_proc_tree(tmp_path, cpu_fields=cpu1, diskstats=disk1)
+
+    svc = HostSystemMonitorService(proc_root=str(tmp_path), sys_root=str(tmp_path))
+    with patch("bot.services.system_monitor.time.time", side_effect=[1000.0, 1001.0]):
+        warm = svc.get_snapshot()
+        _make_proc_tree(tmp_path, cpu_fields=cpu2, diskstats=disk2)
+        snap = svc.get_snapshot()
+
+    assert warm["disk_active_percent"] is None
+    assert snap["disk_active_percent"] == 25.0
+    assert snap["disk_read_bytes_per_second"] == 1_024_000.0
+    assert snap["disk_write_bytes_per_second"] == 1_536_000.0
 
 
 # ======================================================================

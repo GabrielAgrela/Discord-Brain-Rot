@@ -36,20 +36,42 @@
                     <div id="systemMonitorDropdown" class="system-monitor-dropdown" aria-hidden="true">
                         <div class="system-monitor-dropdown-header">
                             <p class="card-kicker">System Resources</p>
-                            <h3 class="system-monitor-dropdown-title">Host CPU, Temp &amp; RAM</h3>
+                            <h3 class="system-monitor-dropdown-title">Host CPU, Disk &amp; RAM</h3>
                         </div>
                         <div id="systemMonitorTotals" class="system-monitor-totals">
-                            <div class="system-monitor-total-row">
+                            <div class="system-monitor-total-row" data-monitor-graph-target="cpu" tabindex="0">
                                 <span class="system-monitor-total-label">CPU</span>
                                 <span class="system-monitor-total-value" id="systemMonitorTotalCpu">--</span>
                             </div>
-                            <div class="system-monitor-total-row">
+                            <div class="system-monitor-total-row" data-monitor-graph-target="ram" tabindex="0">
                                 <span class="system-monitor-total-label">RAM</span>
                                 <span class="system-monitor-total-value" id="systemMonitorTotalRam">--</span>
                             </div>
-                            <div class="system-monitor-total-row">
+                            <div class="system-monitor-total-row" data-monitor-graph-target="disk" tabindex="0">
+                                <span class="system-monitor-total-label">DISK</span>
+                                <span class="system-monitor-total-value" id="systemMonitorTotalDisk">--</span>
+                            </div>
+                            <div class="system-monitor-total-row" data-monitor-graph-target="temp" tabindex="0">
                                 <span class="system-monitor-total-label">TEMP</span>
                                 <span class="system-monitor-total-value" id="systemMonitorTotalTemp">--</span>
+                            </div>
+                        </div>
+                        <div id="systemMonitorHoverChart" class="system-monitor-hover-chart" aria-hidden="true">
+                            <div class="system-monitor-chart-header">
+                                <p id="systemMonitorHoverChartTitle" class="card-kicker">Last Minute</p>
+                                <span id="systemMonitorHoverChartValue" class="system-monitor-chart-value">--</span>
+                            </div>
+                            <div id="systemMonitorHoverChartPlot" class="system-monitor-resource-chart" role="img"
+                                aria-label="Selected system resource history, second by second">
+                                <div class="system-monitor-chart-grid" aria-hidden="true"></div>
+                                <svg id="systemMonitorHoverChartSvg" viewBox="0 0 600 110" preserveAspectRatio="none"
+                                    focusable="false" aria-hidden="true">
+                                    <path id="systemMonitorHoverChartArea" class="system-monitor-chart-area" d=""></path>
+                                    <path id="systemMonitorHoverChartLine" class="system-monitor-chart-line system-monitor-chart-line--cpu" d=""></path>
+                                </svg>
+                                <div id="systemMonitorHoverChartMarker" class="system-monitor-chart-marker" aria-hidden="true"></div>
+                                <div id="systemMonitorHoverChartReadout" class="system-monitor-chart-readout" aria-hidden="true"></div>
+                                <div id="systemMonitorHoverChartEmpty" class="system-monitor-chart-empty">Collecting samples</div>
                             </div>
                         </div>
                         <div id="systemMonitorProcesses" class="system-monitor-processes">

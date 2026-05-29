@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 from typing import Any
 
@@ -148,6 +149,8 @@ class HostSystemMonitorService:
         self._prev_cpu: dict[str, int] | None = None
         # Previous per-process data: {pid: (comm, utime+stime)}
         self._prev_proc_info: dict[int, tuple[str, int]] = {}
+        # Previous aggregate disk counters.
+        self._prev_disk_stats: dict[str, int] | None = None
         self._prev_timestamp: float | None = None
 
     # ------------------------------------------------------------------
@@ -175,6 +178,9 @@ class HostSystemMonitorService:
             - ``sample_interval_seconds`` (*float*)
             - ``updated_at_unix`` (*float*)
             - ``top_processes`` (*list* of *dict*)
+            - ``disk_active_percent`` (*float* | *None*)
+            - ``disk_read_bytes_per_second`` (*float*)
+            - ``disk_write_bytes_per_second`` (*float*)
             - ``error`` (*str*, only when ``available`` is *False*)
         """
         top_limit = max(1, min(8, top_limit))
@@ -212,6 +218,7 @@ class HostSystemMonitorService:
 
             # -- per-process CPU -----------------------------------------------
             processes = self._read_processes(cur_cpu, prev_cpu, top_limit)
+            disk = self._read_disk_io(interval)
 
             return {
                 "available": True,
@@ -226,6 +233,7 @@ class HostSystemMonitorService:
                 "top_processes": processes,
                 "cpu_temperature_celsius": self._read_cpu_temperature(),
                 "cpu_fan_rpm": self._read_cpu_fan_rpm(),
+                **disk,
             }
 
         except Exception as exc:
@@ -244,6 +252,9 @@ class HostSystemMonitorService:
                 "top_processes": [],
                 "cpu_temperature_celsius": None,
                 "cpu_fan_rpm": None,
+                "disk_active_percent": None,
+                "disk_read_bytes_per_second": 0.0,
+                "disk_write_bytes_per_second": 0.0,
             }
 
     # ------------------------------------------------------------------
@@ -488,6 +499,102 @@ class HostSystemMonitorService:
             pass
 
         return None
+
+    # ------------------------------------------------------------------
+    # /proc disk I/O reader
+    # ------------------------------------------------------------------
+
+    def _read_disk_io(self, interval_seconds: float) -> dict[str, float | None]:
+        """Return aggregate disk active percentage and read/write byte rates.
+
+        Uses ``/proc/diskstats`` deltas over the same sample interval as CPU.
+        The active percentage is based on ``io_ms`` (field 13 in Linux
+        diskstats), matching the "active time" style signal users expect from
+        desktop task managers.  Read/write speeds are derived from sector
+        deltas, using the Linux default 512-byte sector accounting.
+        """
+        cur = self._read_disk_stats()
+        prev = self._prev_disk_stats
+        self._prev_disk_stats = cur
+
+        if prev is None or interval_seconds <= 0 or not cur:
+            return {
+                "disk_active_percent": None,
+                "disk_read_bytes_per_second": 0.0,
+                "disk_write_bytes_per_second": 0.0,
+            }
+
+        read_sector_delta = max(
+            0, cur["read_sectors"] - prev.get("read_sectors", cur["read_sectors"])
+        )
+        write_sector_delta = max(
+            0, cur["write_sectors"] - prev.get("write_sectors", cur["write_sectors"])
+        )
+        io_ms_delta = max(0, cur["io_ms"] - prev.get("io_ms", cur["io_ms"]))
+
+        return {
+            "disk_active_percent": _r(min(100.0, io_ms_delta / (interval_seconds * 10.0))),
+            "disk_read_bytes_per_second": _r(read_sector_delta * 512 / interval_seconds),
+            "disk_write_bytes_per_second": _r(write_sector_delta * 512 / interval_seconds),
+        }
+
+    def _read_disk_stats(self) -> dict[str, int]:
+        """Read aggregate whole-disk counters from ``/proc/diskstats``."""
+        totals = {"read_sectors": 0, "write_sectors": 0, "io_ms": 0}
+        devices = self._read_whole_disk_names()
+        try:
+            with open(f"{self._proc_root}/diskstats", encoding="utf-8") as f:
+                for line in f:
+                    parts = line.split()
+                    if len(parts) < 14:
+                        continue
+                    name = parts[2]
+                    if devices is not None:
+                        if name not in devices:
+                            continue
+                    elif not self._looks_like_whole_disk(name):
+                        continue
+                    try:
+                        totals["read_sectors"] += int(parts[5])
+                        totals["write_sectors"] += int(parts[9])
+                        totals["io_ms"] += int(parts[12])
+                    except ValueError:
+                        continue
+        except OSError as exc:
+            logger.debug("Can't read /proc/diskstats: %s", exc)
+        return totals
+
+    def _read_whole_disk_names(self) -> set[str] | None:
+        """Return whole block-device names from sysfs, or ``None`` if unavailable."""
+        block_dir = f"{self._sys_root}/class/block"
+        try:
+            if not os.path.isdir(block_dir):
+                return None
+            devices: set[str] = set()
+            for name in os.listdir(block_dir):
+                if not self._looks_like_whole_disk(name):
+                    continue
+                if os.path.exists(f"{block_dir}/{name}/partition"):
+                    continue
+                devices.add(name)
+            return devices
+        except OSError:
+            return None
+
+    @staticmethod
+    def _looks_like_whole_disk(name: str) -> bool:
+        """Best-effort filter for real whole disks, excluding partitions."""
+        if name.startswith(("loop", "ram", "zram", "fd")):
+            return False
+        if re.fullmatch(r"nvme\d+n\d+", name):
+            return True
+        if re.fullmatch(r"mmcblk\d+", name):
+            return True
+        if re.fullmatch(r"(sd|vd|xvd|hd)[a-z]+", name):
+            return True
+        if re.fullmatch(r"dm-\d+", name):
+            return True
+        return bool(name) and not name[-1].isdigit()
 
     # ------------------------------------------------------------------
     # /proc readers
