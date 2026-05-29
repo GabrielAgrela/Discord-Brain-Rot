@@ -146,11 +146,13 @@
         if (token !== state._userReqToken) return; // stale response
         state.users = await resp.json();
         if (token !== state._userReqToken) return; // stale response
-        renderUsers();
+        renderUsers({ animate: !opts.passive });
     }
 
-    function renderUsers() {
+    function renderUsers(opts) {
+        opts = opts || {};
         if (!userList) return;
+        userList.classList.toggle('dataset-no-reveal', opts.animate === false);
         userList.innerHTML = '';
         userCount.textContent = String(state.users.length);
 
@@ -401,7 +403,7 @@
         const data = await resp.json();
         if (token !== state._clipReqToken) return; // stale response
         state.totalPages = data.total_pages || 1;
-        renderClips(data.items || []);
+        renderClips(data.items || [], { animate: !opts.passive });
         renderPagination();
     }
 
@@ -673,8 +675,10 @@
         return null;
     }
 
-    function renderClips(items) {
+    function renderClips(items, opts) {
+        opts = opts || {};
         if (!clipList) return;
+        clipList.classList.toggle('dataset-no-reveal', opts.animate === false);
         if (items.length === 0) {
             clipList.innerHTML = '<p class="dataset-empty">No clips found.</p>';
             return;

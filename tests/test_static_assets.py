@@ -237,3 +237,23 @@ class TestJavaScriptSyntax:
         # Normal-mode full loadClips() reload should not be the primary path;
         # it should only appear as a fallback inside an else block
         assert "loadClips();" in content
+
+    @pytest.mark.parametrize("filename", SPEECH_TRAINING_ONLY)
+    def test_passive_refresh_suppresses_reveal_animation(self, filename):
+        """Verify speech-training passive refreshes do not replay list reveal animations."""
+        js_path = os.path.join(STATIC_DIR, filename)
+        css_path = os.path.join(STATIC_DIR, "web.css")
+        assert os.path.exists(js_path), f"JS file not found: {js_path}"
+        assert os.path.exists(css_path), f"CSS file not found: {css_path}"
+
+        with open(js_path, "r", encoding="utf-8") as fh:
+            js_content = fh.read()
+        with open(css_path, "r", encoding="utf-8") as fh:
+            css_content = fh.read()
+
+        assert "renderUsers({ animate: !opts.passive })" in js_content
+        assert "renderClips(data.items || [], { animate: !opts.passive })" in js_content
+        assert "dataset-no-reveal" in js_content
+        assert ".dataset-user-list:not(.dataset-no-reveal) .dataset-user-item" in css_content
+        assert ".dataset-clips:not(.dataset-no-reveal) .dataset-clip" in css_content
+        assert ".dataset-clips:not(.dataset-no-reveal) .dataset-empty" in css_content
