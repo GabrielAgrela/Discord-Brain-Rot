@@ -63,3 +63,33 @@ def register_system_routes(app: Flask) -> None:
                     "disk_write_bytes_per_second": 0.0,
                 }
             ), 500
+
+    @app.route("/api/system_monitor/history")
+    def system_monitor_history() -> Any:
+        """Return historical time-series data for a metric."""
+        metric_type = request.args.get("metric", "cpu")
+        range_raw = request.args.get("range", "60")
+        metric_key = request.args.get("key", "")
+
+        try:
+            range_seconds = int(range_raw)
+        except (TypeError, ValueError):
+            range_seconds = 60
+
+        valid_ranges = {60, 3600, 86400}
+        if range_seconds not in valid_ranges:
+            range_seconds = 60
+
+        try:
+            service: WebSystemMonitorService = _get_web_system_monitor_service()
+            payload = service.get_history(
+                metric_type=metric_type,
+                range_seconds=range_seconds,
+                metric_key=metric_key,
+            )
+            response = jsonify(payload)
+            response.headers["Cache-Control"] = "private, max-age=1"
+            return response, 200
+        except Exception:
+            logger.exception("System monitor history error")
+            return jsonify({"samples": [], "range_seconds": range_seconds}), 500

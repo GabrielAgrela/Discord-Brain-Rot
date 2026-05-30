@@ -93,6 +93,53 @@ class WebSystemMonitorService:
     # Public API
     # ------------------------------------------------------------------
 
+    def get_history(
+        self,
+        metric_type: str,
+        range_seconds: int,
+        metric_key: str = "",
+        max_points: int = 500,
+    ) -> dict[str, Any]:
+        """
+        Query historical time-series data for a metric.
+
+        Args:
+            metric_type: One of 'cpu', 'ram', 'disk', 'temp', 'process'.
+            range_seconds: How far back to query (60, 3600, or 86400).
+            metric_key: For 'process' type, the process identifier key.
+            max_points: Maximum number of data points to return.
+
+        Returns:
+            Dict with 'samples' list and 'range_seconds' echoed back.
+        """
+        if self._repo is None:
+            return {"samples": [], "range_seconds": range_seconds}
+
+        valid_ranges = {60, 3600, 86400}
+        if range_seconds not in valid_ranges:
+            range_seconds = 60
+
+        valid_metrics = {"cpu", "ram", "disk", "temp", "process"}
+        if metric_type not in valid_metrics:
+            return {"samples": [], "range_seconds": range_seconds}
+
+        end_time = int(time.time())
+        start_time = end_time - range_seconds
+
+        try:
+            samples = self._repo.get_samples(
+                metric_type=metric_type,
+                metric_key=metric_key,
+                start_time=start_time,
+                end_time=end_time,
+                max_points=max_points,
+            )
+        except Exception as exc:
+            logger.warning("Failed to query history for %s: %s", metric_type, exc)
+            samples = []
+
+        return {"samples": samples, "range_seconds": range_seconds}
+
     def get_snapshot(self, top_limit: int = 4) -> dict[str, Any]:
         """
         Return a JSON-safe system-resource snapshot.

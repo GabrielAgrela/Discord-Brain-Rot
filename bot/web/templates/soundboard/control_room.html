@@ -59,6 +59,11 @@
                         <div id="systemMonitorHoverChart" class="system-monitor-hover-chart" aria-hidden="true">
                             <div class="system-monitor-chart-header">
                                 <p id="systemMonitorHoverChartTitle" class="card-kicker">Last Minute</p>
+                                <div class="system-monitor-range-selector" role="group" aria-label="Time range">
+                                    <button type="button" class="system-monitor-range-btn active" data-range="60">1m</button>
+                                    <button type="button" class="system-monitor-range-btn" data-range="3600">1h</button>
+                                    <button type="button" class="system-monitor-range-btn" data-range="86400">1d</button>
+                                </div>
                                 <span id="systemMonitorHoverChartValue" class="system-monitor-chart-value">--</span>
                             </div>
                             <div id="systemMonitorHoverChartPlot" class="system-monitor-resource-chart" role="img"

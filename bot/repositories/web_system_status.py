@@ -58,6 +58,23 @@ class WebSystemStatusRepository(BaseRepository[dict[str, Any]]):
             )
             """
         )
+        self._execute_write(
+            """
+            CREATE TABLE IF NOT EXISTS system_monitor_samples (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                metric_type TEXT NOT NULL,
+                metric_key TEXT NOT NULL DEFAULT '',
+                timestamp INTEGER NOT NULL,
+                value REAL NOT NULL
+            )
+            """
+        )
+        self._execute_write(
+            """
+            CREATE INDEX IF NOT EXISTS idx_samples_metric_time
+            ON system_monitor_samples(metric_type, metric_key, timestamp)
+            """
+        )
 
     # ------------------------------------------------------------------
     # Public API
@@ -121,3 +138,111 @@ class WebSystemStatusRepository(BaseRepository[dict[str, Any]]):
             return None
 
         return snapshot
+
+    def insert_sample(
+        self,
+        metric_type: str,
+        metric_key: str,
+        timestamp: int,
+        value: float,
+    ) -> None:
+        """
+        Insert a single time-series sample.
+
+        Args:
+            metric_type: One of 'cpu', 'ram', 'disk', 'temp', 'process'.
+            metric_key: Identifier for the metric (e.g., process key for 'process').
+            timestamp: Unix timestamp in seconds.
+            value: Numeric sample value.
+        """
+        self._execute_write(
+            """
+            INSERT INTO system_monitor_samples (metric_type, metric_key, timestamp, value)
+            VALUES (?, ?, ?, ?)
+            """,
+            (metric_type, metric_key, timestamp, value),
+        )
+
+    def insert_samples_batch(
+        self,
+        samples: list[tuple[str, str, int, float]],
+    ) -> int:
+        """
+        Insert multiple samples in a single transaction.
+
+        Args:
+            samples: List of (metric_type, metric_key, timestamp, value) tuples.
+
+        Returns:
+            Number of rows inserted.
+        """
+        if not samples:
+            return 0
+        return self._execute_many(
+            """
+            INSERT INTO system_monitor_samples (metric_type, metric_key, timestamp, value)
+            VALUES (?, ?, ?, ?)
+            """,
+            samples,
+        )
+
+    def get_samples(
+        self,
+        metric_type: str,
+        metric_key: str,
+        start_time: int,
+        end_time: int,
+        max_points: int = 500,
+    ) -> list[dict[str, Any]]:
+        """
+        Query time-series samples for a metric within a time range.
+
+        Returns at most ``max_points`` evenly-spaced samples to avoid overwhelming
+        the frontend with data.
+
+        Args:
+            metric_type: One of 'cpu', 'ram', 'disk', 'temp', 'process'.
+            metric_key: Identifier for the metric.
+            start_time: Start of range (unix seconds, inclusive).
+            end_time: End of range (unix seconds, inclusive).
+            max_points: Maximum number of points to return.
+
+        Returns:
+            List of dicts with 'time' and 'value' keys, sorted by time.
+        """
+        rows = self._execute(
+            """
+            SELECT timestamp, value FROM system_monitor_samples
+            WHERE metric_type = ? AND metric_key = ?
+              AND timestamp >= ? AND timestamp <= ?
+            ORDER BY timestamp ASC
+            """,
+            (metric_type, metric_key, start_time, end_time),
+        )
+        if not rows:
+            return []
+
+        all_samples = [{"time": row["timestamp"], "value": row["value"]} for row in rows]
+
+        if len(all_samples) <= max_points:
+            return all_samples
+
+        step = len(all_samples) / max_points
+        return [all_samples[int(i * step)] for i in range(max_points)]
+
+    def cleanup_old_samples(self, max_age_seconds: int = 86400) -> int:
+        """
+        Delete samples older than ``max_age_seconds``.
+
+        Args:
+            max_age_seconds: Maximum age in seconds (default: 1 day).
+
+        Returns:
+            Number of rows deleted.
+        """
+        cutoff = int(datetime.now().timestamp()) - max_age_seconds
+        cursor = self._execute_write(
+            "DELETE FROM system_monitor_samples WHERE timestamp < ?",
+            (cutoff,),
+        )
+        return cursor.rowcount if cursor else 0

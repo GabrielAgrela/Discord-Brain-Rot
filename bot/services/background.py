@@ -1404,7 +1404,16 @@ class BackgroundService:
                 self._host_monitor_warmed = True
             if self._host_monitor_warmed:
                 snapshot = self._snapshot_with_cpu_history(snapshot)
+                timeseries_samples = snapshot.pop("_timeseries_samples", [])
                 self.web_system_status_repo.upsert_snapshot(snapshot)
+                if timeseries_samples:
+                    try:
+                        self.web_system_status_repo.insert_samples_batch(timeseries_samples)
+                    except Exception as e:
+                        logger.warning(
+                            "[BackgroundService] Failed to insert time-series samples: %s",
+                            e,
+                        )
         except Exception as e:
             logger.error(
                 "[BackgroundService] Error in host system monitor loop: %s",
@@ -1499,7 +1508,59 @@ class BackgroundService:
                 }
                 for process_key, history in self._host_monitor_process_cpu_history.items()
             ],
+            "_timeseries_samples": self._collect_timeseries_samples(
+                sample_time, snapshot, top_processes
+            ),
         }
+
+    def _collect_timeseries_samples(
+        self,
+        sample_time: int,
+        snapshot: dict[str, Any],
+        top_processes: list[dict[str, Any]],
+    ) -> list[tuple[str, str, int, float]]:
+        """Collect current metric values for time-series database storage."""
+        samples: list[tuple[str, str, int, float]] = []
+
+        if not snapshot.get("cpu_warming"):
+            cpu_val = snapshot.get("total_cpu_percent")
+            if cpu_val is not None:
+                try:
+                    samples.append(("cpu", "", sample_time, float(cpu_val)))
+                except (TypeError, ValueError):
+                    pass
+
+        temp_val = snapshot.get("cpu_temperature_celsius")
+        if temp_val is not None:
+            try:
+                samples.append(("temp", "", sample_time, float(temp_val)))
+            except (TypeError, ValueError):
+                pass
+
+        ram_val = snapshot.get("ram_percent")
+        if ram_val is not None:
+            try:
+                samples.append(("ram", "", sample_time, float(ram_val)))
+            except (TypeError, ValueError):
+                pass
+
+        disk_val = snapshot.get("disk_active_percent")
+        if disk_val is not None:
+            try:
+                samples.append(("disk", "", sample_time, float(disk_val)))
+            except (TypeError, ValueError):
+                pass
+
+        for process in top_processes:
+            process_key = process.get("process_history_key", "")
+            cpu_percent = process.get("cpu_percent")
+            if process_key and cpu_percent is not None:
+                try:
+                    samples.append(("process", process_key, sample_time, float(cpu_percent)))
+                except (TypeError, ValueError):
+                    pass
+
+        return samples
 
     @staticmethod
     def _monitor_process_history_key(process: dict[str, Any]) -> str:

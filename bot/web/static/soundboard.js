@@ -270,6 +270,9 @@
         };
         let activeSystemMonitorChart = null;
         const SYSTEM_MONITOR_CPU_HISTORY_SECONDS = 60;
+        let systemMonitorSelectedRange = 60;
+        let systemMonitorSelectedMetric = null;
+        let systemMonitorSelectedMetricKey = '';
         let latestControlRoomStatus = {};
         let _controlRoomLocalElapsed = null;
         let previousNowPlayingText = '';
@@ -928,12 +931,19 @@
             const title = document.getElementById('systemMonitorHoverChartTitle');
             if (!container || !chart || !line || !area || !empty || !value || !title || !config) return;
 
+            systemMonitorSelectedMetric = config.metricType || null;
+            systemMonitorSelectedMetricKey = config.metricKey || '';
+
             container.classList.add('open');
             container.setAttribute('aria-hidden', 'false');
             line.setAttribute('class', 'system-monitor-chart-line system-monitor-chart-line--' + config.tone);
-            title.textContent = config.label + ' Last Minute';
 
-            const latest = config.history[config.history.length - 1];
+            const rangeLabels = { 60: 'Last Minute', 3600: 'Last Hour', 86400: 'Last Day' };
+            const rangeLabel = rangeLabels[systemMonitorSelectedRange] || 'Last Minute';
+            title.textContent = config.label + ' ' + rangeLabel;
+
+            const history = config.history || [];
+            const latest = history[history.length - 1];
             if (!latest) {
                 activeSystemMonitorChart = null;
                 hideSystemMonitorChartReadout();
@@ -947,21 +957,43 @@
 
             const width = 600;
             const height = 110;
+            const rangeSeconds = systemMonitorSelectedRange;
             const latestTime = latest.time;
-            const samplesByTime = new Map(config.history.map(function(sample) {
+            const startTime = latestTime - rangeSeconds + 1;
+
+            const samplesByTime = new Map(history.map(function(sample) {
                 return [sample.time, sample[config.key]];
             }));
+
             const points = [];
-            for (let index = 0; index < SYSTEM_MONITOR_CPU_HISTORY_SECONDS; index += 1) {
-                const second = latestTime - SYSTEM_MONITOR_CPU_HISTORY_SECONDS + 1 + index;
-                const sampleValue = samplesByTime.get(second);
-                if (Number.isFinite(sampleValue)) {
+            if (rangeSeconds === 60) {
+                for (let index = 0; index < SYSTEM_MONITOR_CPU_HISTORY_SECONDS; index += 1) {
+                    const second = latestTime - SYSTEM_MONITOR_CPU_HISTORY_SECONDS + 1 + index;
+                    const sampleValue = samplesByTime.get(second);
+                    if (Number.isFinite(sampleValue)) {
+                        const normalized = (sampleValue - config.min) / (config.max - config.min);
+                        points.push({
+                            x: index / (SYSTEM_MONITOR_CPU_HISTORY_SECONDS - 1) * width,
+                            y: height - (Math.max(0, Math.min(1, normalized)) * height),
+                            value: sampleValue,
+                            time: second
+                        });
+                    }
+                }
+            } else {
+                for (let i = 0; i < history.length; i += 1) {
+                    const sample = history[i];
+                    const sampleTime = sample.time;
+                    if (sampleTime < startTime) continue;
+                    const sampleValue = sample[config.key];
+                    if (!Number.isFinite(sampleValue)) continue;
                     const normalized = (sampleValue - config.min) / (config.max - config.min);
+                    const xRatio = rangeSeconds > 1 ? (sampleTime - startTime) / (rangeSeconds - 1) : 0;
                     points.push({
-                        x: index / (SYSTEM_MONITOR_CPU_HISTORY_SECONDS - 1) * width,
+                        x: xRatio * width,
                         y: height - (Math.max(0, Math.min(1, normalized)) * height),
                         value: sampleValue,
-                        time: second
+                        time: sampleTime
                     });
                 }
             }
@@ -991,7 +1023,7 @@
             hideSystemMonitorChartReadout();
             chart.setAttribute(
                 'aria-label',
-                config.label + ' history over the last minute, latest ' + config.formatter(latest[config.key])
+                config.label + ' history over ' + rangeLabel.toLowerCase() + ', latest ' + config.formatter(latest[config.key])
             );
         }
 
@@ -1052,7 +1084,8 @@
                     min: 0,
                     max: 100,
                     tone: 'cpu',
-                    formatter: formatPercentForSystem
+                    formatter: formatPercentForSystem,
+                    metricType: 'cpu'
                 },
                 ram: {
                     label: 'RAM',
@@ -1061,7 +1094,8 @@
                     min: 0,
                     max: 100,
                     tone: 'ram',
-                    formatter: formatPercentForSystem
+                    formatter: formatPercentForSystem,
+                    metricType: 'ram'
                 },
                 disk: {
                     label: 'Disk',
@@ -1070,7 +1104,8 @@
                     min: 0,
                     max: 100,
                     tone: 'disk',
-                    formatter: formatPercentForSystem
+                    formatter: formatPercentForSystem,
+                    metricType: 'disk'
                 },
                 temp: {
                     label: 'Temp',
@@ -1079,23 +1114,65 @@
                     min: 20,
                     max: 100,
                     tone: 'temp',
-                    formatter: formatTemperatureForSystem
+                    formatter: formatTemperatureForSystem,
+                    metricType: 'temp'
                 }
             };
-            renderSystemMonitorHoverChart(configs[metric]);
+            const config = configs[metric];
+            if (!config) return;
+
+            if (systemMonitorSelectedRange === 60) {
+                renderSystemMonitorHoverChart(config);
+            } else {
+                fetchSystemMonitorHistory(config.metricType, '', config);
+            }
         }
 
         function showSystemMonitorProcessHistory(key, label) {
-            const history = systemMonitorHistories.process.get(key) || [];
-            renderSystemMonitorHoverChart({
+            const config = {
                 label: label || 'Process',
-                history,
+                history: systemMonitorHistories.process.get(key) || [],
                 key: 'cpu',
                 min: 0,
                 max: 100,
                 tone: 'cpu',
-                formatter: formatPercentForSystem
-            });
+                formatter: formatPercentForSystem,
+                metricType: 'process',
+                metricKey: key
+            };
+
+            if (systemMonitorSelectedRange === 60) {
+                renderSystemMonitorHoverChart(config);
+            } else {
+                fetchSystemMonitorHistory('process', key, config);
+            }
+        }
+
+        async function fetchSystemMonitorHistory(metricType, metricKey, config) {
+            try {
+                const params = new URLSearchParams({
+                    metric: metricType,
+                    range: String(systemMonitorSelectedRange)
+                });
+                if (metricKey) {
+                    params.set('key', metricKey);
+                }
+                const response = await fetch('/api/system_monitor/history?' + params.toString());
+                if (!response.ok) {
+                    renderSystemMonitorHoverChart(config);
+                    return;
+                }
+                const data = await response.json();
+                const samples = data.samples || [];
+                const history = samples.map(function(s) {
+                    const obj = { time: s.time };
+                    obj[config.key] = s.value;
+                    return obj;
+                });
+                renderSystemMonitorHoverChart({ ...config, history: history });
+            } catch (err) {
+                renderSystemMonitorHoverChart(config);
+            }
         }
 
         function updateSystemMonitor(payload) {
@@ -4526,6 +4603,26 @@
             systemMonitorHoverChartPlot.addEventListener('pointermove', updateSystemMonitorChartReadout);
             systemMonitorHoverChartPlot.addEventListener('pointerleave', hideSystemMonitorChartReadout);
         }
+
+        const systemMonitorRangeButtons = document.querySelectorAll('.system-monitor-range-btn');
+        systemMonitorRangeButtons.forEach(function(btn) {
+            btn.addEventListener('click', function(event) {
+                event.stopPropagation();
+                const range = parseInt(btn.dataset.range, 10);
+                if (!Number.isFinite(range)) return;
+                systemMonitorSelectedRange = range;
+                systemMonitorRangeButtons.forEach(function(b) {
+                    b.classList.toggle('active', b === btn);
+                });
+                if (systemMonitorSelectedMetric) {
+                    if (systemMonitorSelectedMetric === 'process') {
+                        showSystemMonitorProcessHistory(systemMonitorSelectedMetricKey, '');
+                    } else {
+                        showSystemMonitorMetricHistory(systemMonitorSelectedMetric);
+                    }
+                }
+            });
+        });
 
         document.addEventListener('click', function(event) {
             const button = document.getElementById('systemMonitorButton');
