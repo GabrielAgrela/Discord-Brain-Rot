@@ -1717,8 +1717,6 @@ html.theme-dark .control-room-actions-trigger:active {
     z-index: 1300;
     display: none;
     width: min(21rem, calc(100vw - 1.5rem));
-    max-height: min(24rem, calc(100vh - 8rem));
-    overflow-y: auto;
     flex-direction: column;
     padding: 0.75rem;
     border-radius: var(--radius-lg);
@@ -1773,7 +1771,7 @@ html.theme-dark .system-monitor-dropdown {
 }
 
 .system-monitor-total-row[data-monitor-graph-target] {
-    cursor: default;
+    cursor: pointer;
 }
 
 .system-monitor-total-row[data-monitor-graph-target]:hover,
@@ -2024,6 +2022,7 @@ html.theme-dark .system-monitor-processes {
     gap: 0.35rem;
     font-size: 0.78rem;
     line-height: 1.3;
+    cursor: pointer;
 }
 
 .system-monitor-process-name {
@@ -5461,7 +5460,6 @@ body.page-soundboard .tables-grid > .card:nth-child(3) {
         right: max(0.75rem, env(safe-area-inset-right, 0px));
         width: auto;
         max-width: none;
-        max-height: var(--system-monitor-dropdown-max-height, 60vh);
         z-index: 1300;
     }
 

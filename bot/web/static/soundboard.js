@@ -1198,10 +1198,8 @@
                         mem.textContent = formatBytesForSystem(proc.memory_rss_bytes);
 
                         row.append(name, cpu, mem);
-                        row.addEventListener('mouseenter', function() {
-                            showSystemMonitorProcessHistory(processHistoryKey, processLabel);
-                        });
-                        row.addEventListener('focus', function() {
+                        row.addEventListener('click', function(event) {
+                            event.stopPropagation();
                             showSystemMonitorProcessHistory(processHistoryKey, processLabel);
                         });
                         fragment.appendChild(row);
@@ -1303,7 +1301,7 @@
             if (button) {
                 button.setAttribute('aria-expanded', 'false');
             }
-            // Adaptive polling: slow down to summary cadence.
+            hideSystemMonitorHoverChart();
             _sysMonDropdownOpen = false;
         }
 
@@ -4515,17 +4513,12 @@
             systemMonitorDropdown.addEventListener('click', function(event) {
                 event.stopPropagation();
             });
-            systemMonitorDropdown.addEventListener('mouseover', function(event) {
+            systemMonitorDropdown.addEventListener('click', function(event) {
                 const target = event.target.closest('[data-monitor-graph-target]');
                 if (!target || !systemMonitorDropdown.contains(target)) return;
+                event.stopPropagation();
                 showSystemMonitorMetricHistory(target.dataset.monitorGraphTarget);
             });
-            systemMonitorDropdown.addEventListener('focusin', function(event) {
-                const target = event.target.closest('[data-monitor-graph-target]');
-                if (!target || !systemMonitorDropdown.contains(target)) return;
-                showSystemMonitorMetricHistory(target.dataset.monitorGraphTarget);
-            });
-            systemMonitorDropdown.addEventListener('mouseleave', hideSystemMonitorHoverChart);
         }
 
         const systemMonitorHoverChartPlot = document.getElementById('systemMonitorHoverChartPlot');
