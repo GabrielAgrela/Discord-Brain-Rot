@@ -246,3 +246,54 @@ class WebSystemStatusRepository(BaseRepository[dict[str, Any]]):
             (cutoff,),
         )
         return cursor.rowcount if cursor else 0
+
+    def get_processes_at_time(
+        self,
+        timestamp: int,
+        tolerance_seconds: int = 5,
+        limit: int = 8,
+    ) -> list[dict[str, Any]]:
+        """
+        Query process samples near a specific timestamp.
+
+        Args:
+            timestamp: Target Unix timestamp in seconds.
+            tolerance_seconds: Search window around the timestamp.
+            limit: Maximum number of processes to return.
+
+        Returns:
+            List of dicts with 'key', 'value' (cpu percent), sorted by value desc.
+        """
+        start_time = timestamp - tolerance_seconds
+        end_time = timestamp + tolerance_seconds
+
+        rows = self._execute(
+            """
+            SELECT metric_key, value, timestamp FROM system_monitor_samples
+            WHERE metric_type = 'process'
+              AND timestamp >= ? AND timestamp <= ?
+            ORDER BY timestamp DESC, value DESC
+            """,
+            (start_time, end_time),
+        )
+
+        if not rows:
+            return []
+
+        seen_keys: set[str] = set()
+        processes: list[dict[str, Any]] = []
+        for row in rows:
+            key = row["metric_key"]
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            processes.append({
+                "key": key,
+                "value": row["value"],
+                "time": row["timestamp"],
+            })
+            if len(processes) >= limit:
+                break
+
+        processes.sort(key=lambda p: p["value"], reverse=True)
+        return processes

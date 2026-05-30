@@ -140,6 +140,38 @@ class WebSystemMonitorService:
 
         return {"samples": samples, "range_seconds": range_seconds}
 
+    def get_processes_at_time(
+        self,
+        timestamp: int,
+        tolerance_seconds: int = 5,
+        limit: int = 8,
+    ) -> dict[str, Any]:
+        """
+        Query process data at a specific historical timestamp.
+
+        Args:
+            timestamp: Target Unix timestamp in seconds.
+            tolerance_seconds: Search window around the timestamp.
+            limit: Maximum number of processes to return.
+
+        Returns:
+            Dict with 'processes' list and 'timestamp' echoed back.
+        """
+        if self._repo is None:
+            return {"processes": [], "timestamp": timestamp}
+
+        try:
+            processes = self._repo.get_processes_at_time(
+                timestamp=timestamp,
+                tolerance_seconds=tolerance_seconds,
+                limit=limit,
+            )
+        except Exception as exc:
+            logger.warning("Failed to query processes at time %d: %s", timestamp, exc)
+            processes = []
+
+        return {"processes": processes, "timestamp": timestamp}
+
     def get_snapshot(self, top_limit: int = 4) -> dict[str, Any]:
         """
         Return a JSON-safe system-resource snapshot.

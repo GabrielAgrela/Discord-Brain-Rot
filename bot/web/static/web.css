@@ -2040,6 +2040,24 @@ html.theme-dark .system-monitor-chart-readout {
     display: none;
 }
 
+.system-monitor-resource-chart {
+    cursor: pointer;
+}
+
+.system-monitor-historical-processes {
+    border-top: 1px solid rgba(47, 132, 82, 0.2);
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+}
+
+.system-monitor-historical-processes .card-kicker {
+    color: rgba(47, 132, 82, 0.9);
+}
+
+html.theme-dark .system-monitor-historical-processes {
+    border-top-color: rgba(47, 132, 82, 0.3);
+}
+
 .system-monitor-processes {
     border-top: 1px solid rgba(23, 18, 13, 0.1);
     padding-top: 0.45rem;

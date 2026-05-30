@@ -1066,6 +1066,71 @@
             readout.classList.add('open');
         }
 
+        function handleSystemMonitorChartClick(event) {
+            if (!activeSystemMonitorChart || !activeSystemMonitorChart.points.length) return;
+            const chart = document.getElementById('systemMonitorHoverChartPlot');
+            if (!chart) return;
+
+            const rect = chart.getBoundingClientRect();
+            const pointerX = Math.max(0, Math.min(rect.width, event.clientX - rect.left));
+            const svgX = pointerX / rect.width * activeSystemMonitorChart.width;
+            let nearest = activeSystemMonitorChart.points[0];
+            activeSystemMonitorChart.points.forEach(function(point) {
+                if (Math.abs(point.x - svgX) < Math.abs(nearest.x - svgX)) {
+                    nearest = point;
+                }
+            });
+
+            fetchAndDisplayHistoricalProcesses(nearest.time);
+        }
+
+        async function fetchAndDisplayHistoricalProcesses(timestamp) {
+            const container = document.getElementById('systemMonitorHistoricalProcesses');
+            const title = document.getElementById('systemMonitorHistoricalProcessesTitle');
+            const list = document.getElementById('systemMonitorHistoricalProcessList');
+            if (!container || !title || !list) return;
+
+            try {
+                const params = new URLSearchParams({ time: String(timestamp), limit: '8' });
+                const response = await fetch('/api/system_monitor/processes_at_time?' + params.toString());
+                if (!response.ok) {
+                    container.style.display = 'none';
+                    return;
+                }
+                const data = await response.json();
+                const processes = data.processes || [];
+
+                if (!processes.length) {
+                    container.style.display = 'none';
+                    return;
+                }
+
+                title.textContent = 'Processes at ' + formatSystemMonitorSampleTime(timestamp);
+                list.innerHTML = '';
+
+                processes.forEach(function(proc) {
+                    const row = document.createElement('div');
+                    row.className = 'system-monitor-process-row';
+
+                    const name = document.createElement('span');
+                    name.className = 'system-monitor-process-name';
+                    const displayName = proc.key.split(':').slice(1).join(':') || proc.key;
+                    name.textContent = displayName;
+
+                    const cpu = document.createElement('span');
+                    cpu.className = 'system-monitor-process-cpu';
+                    cpu.textContent = formatPercentForSystem(proc.value);
+
+                    row.append(name, cpu);
+                    list.appendChild(row);
+                });
+
+                container.style.display = 'block';
+            } catch (err) {
+                container.style.display = 'none';
+            }
+        }
+
         function hideSystemMonitorHoverChart() {
             const container = document.getElementById('systemMonitorHoverChart');
             if (!container) return;
@@ -1073,6 +1138,11 @@
             hideSystemMonitorChartReadout();
             container.classList.remove('open');
             container.setAttribute('aria-hidden', 'true');
+
+            const historicalContainer = document.getElementById('systemMonitorHistoricalProcesses');
+            if (historicalContainer) {
+                historicalContainer.style.display = 'none';
+            }
         }
 
         function showSystemMonitorMetricHistory(metric) {
@@ -4602,6 +4672,7 @@
         if (systemMonitorHoverChartPlot) {
             systemMonitorHoverChartPlot.addEventListener('pointermove', updateSystemMonitorChartReadout);
             systemMonitorHoverChartPlot.addEventListener('pointerleave', hideSystemMonitorChartReadout);
+            systemMonitorHoverChartPlot.addEventListener('click', handleSystemMonitorChartClick);
         }
 
         const systemMonitorRangeButtons = document.querySelectorAll('.system-monitor-range-btn');

@@ -93,3 +93,34 @@ def register_system_routes(app: Flask) -> None:
         except Exception:
             logger.exception("System monitor history error")
             return jsonify({"samples": [], "range_seconds": range_seconds}), 500
+
+    @app.route("/api/system_monitor/processes_at_time")
+    def system_monitor_processes_at_time() -> Any:
+        """Return process data at a specific historical timestamp."""
+        timestamp_raw = request.args.get("time", "")
+        limit_raw = request.args.get("limit", "8")
+
+        try:
+            timestamp = int(timestamp_raw)
+        except (TypeError, ValueError):
+            return jsonify({"processes": [], "timestamp": 0}), 400
+
+        try:
+            limit = int(limit_raw)
+        except (TypeError, ValueError):
+            limit = 8
+        limit = max(1, min(16, limit))
+
+        try:
+            service: WebSystemMonitorService = _get_web_system_monitor_service()
+            payload = service.get_processes_at_time(
+                timestamp=timestamp,
+                tolerance_seconds=5,
+                limit=limit,
+            )
+            response = jsonify(payload)
+            response.headers["Cache-Control"] = "private, max-age=60"
+            return response, 200
+        except Exception:
+            logger.exception("System monitor processes_at_time error")
+            return jsonify({"processes": [], "timestamp": timestamp}), 500
