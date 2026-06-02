@@ -103,6 +103,7 @@ class AudioService:
         self._reconnection_timestamps: Dict[int, float] = {}
         self._connection_timestamps: Dict[int, float] = {}  # Track when a connection was fully established
         self.RECONNECTION_GRACE_PERIOD = 15.0  # Seconds to wait before health checks intervene
+        self.VOICE_LIBRARY_RECONNECT_GRACE_SECONDS = 45.0
         
         # Per-guild live TTS stream interrupt events (threading.Event).
         # Set by play_slap / play_audio when they need to unblock a FIFO
@@ -693,6 +694,49 @@ class AudioService:
                 "[AudioService] [PLAY-DEBUG] start_probe_error "
                 f"play_id={play_id} guild_id={guild_id} file={audio_file} error={probe_error}"
             )
+
+    def _build_play_after_timing_debug(
+        self,
+        *,
+        elapsed: float,
+        source_duration_seconds: Optional[float],
+        startup_preroll_ms: int,
+        player: Any,
+    ) -> str:
+        """Build compact playback timing fields for the after-play callback."""
+        expected_audio_seconds: Optional[float] = None
+        try:
+            if source_duration_seconds is not None:
+                expected_audio_seconds = max(0.0, float(source_duration_seconds)) + (
+                    max(0, int(startup_preroll_ms)) / 1000.0
+                )
+        except Exception:
+            expected_audio_seconds = None
+
+        played_frames: Optional[int] = None
+        frame_audio_seconds: Optional[float] = None
+        try:
+            if player is not None and hasattr(player, "played_frames"):
+                played_frames = int(player.played_frames())
+                frame_length_ms = float(getattr(discord.opus.Encoder, "FRAME_LENGTH", 20))
+                frame_audio_seconds = max(0.0, played_frames * frame_length_ms / 1000.0)
+        except Exception:
+            played_frames = None
+            frame_audio_seconds = None
+
+        fields: list[str] = []
+        if expected_audio_seconds is not None:
+            fields.append(f"expected_audio={expected_audio_seconds:.3f}s")
+        if played_frames is not None:
+            fields.append(f"played_frames={played_frames}")
+        if frame_audio_seconds is not None:
+            fields.append(f"frame_audio={frame_audio_seconds:.3f}s")
+
+        reference_seconds = frame_audio_seconds or expected_audio_seconds
+        if reference_seconds and elapsed > max(reference_seconds + 2.0, reference_seconds * 1.5):
+            fields.append("duration_mismatch=True")
+
+        return (" " + " ".join(fields)) if fields else ""
 
     async def _maybe_apply_entrance_playback_warmup(
         self,
@@ -1397,6 +1441,45 @@ class AudioService:
         """Clear reconnection state after successful connection."""
         if guild_id in self._reconnection_timestamps:
             del self._reconnection_timestamps[guild_id]
+
+    def is_voice_library_reconnect_pending(self, voice_client: Any) -> bool:
+        """Return True while py-cord is likely handling a recent voice websocket close."""
+        if voice_client is None:
+            return False
+
+        try:
+            if voice_client.is_connected():
+                return False
+        except Exception:
+            pass
+
+        close_started_at = float(getattr(voice_client, "_voicecompat_last_ws_close_at", 0.0) or 0.0)
+        if close_started_at <= 0:
+            return False
+
+        elapsed = time.monotonic() - close_started_at
+        grace_seconds = float(getattr(self, "VOICE_LIBRARY_RECONNECT_GRACE_SECONDS", 45.0))
+        if elapsed < 0 or elapsed > grace_seconds:
+            return False
+
+        connected_event = getattr(voice_client, "_connected", None)
+        if connected_event is not None and hasattr(connected_event, "is_set"):
+            try:
+                if connected_event.is_set():
+                    return False
+            except Exception:
+                pass
+
+        return True
+
+    def get_voice_library_reconnect_remaining(self, voice_client: Any) -> float:
+        """Return seconds remaining before health checks should override py-cord reconnect."""
+        close_started_at = float(getattr(voice_client, "_voicecompat_last_ws_close_at", 0.0) or 0.0)
+        if close_started_at <= 0:
+            return 0.0
+        elapsed = time.monotonic() - close_started_at
+        grace_seconds = float(getattr(self, "VOICE_LIBRARY_RECONNECT_GRACE_SECONDS", 45.0))
+        return max(0.0, grace_seconds - elapsed)
 
     async def ensure_voice_connected(self, channel: discord.VoiceChannel) -> Optional[discord.VoiceProtocol]:
         """Ensure the bot is connected to the specified voice channel.
@@ -2344,22 +2427,28 @@ class AudioService:
                         f"[AudioService] [PERF] ffmpeg_spawn guild_id={guild_id} duration={ffmpeg_spawn_duration:.4f}s"
                     )
                 self._log_perf("FFmpeg Source Creation", play_start_time, extra=f"guild_id={guild_id}")
-                playback_started_at = time.time()
+                playback_started_at = time.monotonic()
                 active_player = None
 
                 def after_playing(error):
                     try:
-                        elapsed = time.time() - playback_started_at
+                        elapsed = time.monotonic() - playback_started_at
                         try:
                             callback_player_alive = bool(active_player is not None and active_player.is_alive())
                         except Exception:
                             callback_player_alive = False
+                        timing_debug = self._build_play_after_timing_debug(
+                            elapsed=elapsed,
+                            source_duration_seconds=mp3_duration_seconds,
+                            startup_preroll_ms=startup_preroll_ms,
+                            player=active_player,
+                        )
                         if error:
                             print(
                                 "[AudioService] [PLAY-DEBUG] play_after "
                                 f"play_id={play_id} guild_id={guild_id} file={audio_file} "
                                 f"status=error elapsed={elapsed:.3f}s "
-                                f"player_alive={callback_player_alive} error={error}"
+                                f"player_alive={callback_player_alive}{timing_debug} error={error}"
                             )
                             print(f'[AudioService] Error in playback: {error}')
                         else:
@@ -2367,7 +2456,7 @@ class AudioService:
                                 "[AudioService] [PLAY-DEBUG] play_after "
                                 f"play_id={play_id} guild_id={guild_id} file={audio_file} "
                                 f"status=ok elapsed={elapsed:.3f}s "
-                                f"player_alive={callback_player_alive}"
+                                f"player_alive={callback_player_alive}{timing_debug}"
                             )
                     finally:
                         guild_event = self._guild_playback_done.get(guild_id)
@@ -3309,6 +3398,9 @@ class KeywordDetectionSink(sinks.Sink):
                             if self.audio_service.is_reconnection_pending(self.guild.id):
                                 remaining = self.audio_service.get_reconnection_remaining(self.guild.id)
                                 print(f"[VoskWorker] Reconnection in progress ({remaining:.1f}s remaining), skipping health check...")
+                            elif self.audio_service.is_voice_library_reconnect_pending(voice_client):
+                                remaining = self.audio_service.get_voice_library_reconnect_remaining(voice_client)
+                                print(f"[VoskWorker] Voice library reconnect in progress ({remaining:.1f}s remaining), skipping health check...")
                             elif not voice_client.is_connected():
                                 print(f"[VoskWorker] WARNING: Voice client exists but is not connected! Triggering reconnection...")
                                 # Schedule reconnection on the main event loop

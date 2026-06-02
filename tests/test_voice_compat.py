@@ -5,9 +5,11 @@ from __future__ import annotations
 import importlib
 from types import SimpleNamespace
 
+import aiohttp
 import pytest
 from discord import utils
 from discord.enums import SpeakingState
+from discord.errors import ConnectionClosed
 from discord.gateway import DiscordVoiceWebSocket
 
 import bot.voice_compat as voice_compat
@@ -78,6 +80,33 @@ async def test_speak_payload_includes_ssrc(monkeypatch):
     assert payload["op"] == DiscordVoiceWebSocket.SPEAKING
     assert payload["d"]["speaking"] == int(SpeakingState.none)
     assert payload["d"]["ssrc"] == 9999
+
+
+@pytest.mark.asyncio
+async def test_poll_event_marks_recent_voice_ws_close(monkeypatch):
+    """Closed voice websocket frames should mark the voice client for reconnect grace."""
+    module = importlib.reload(voice_compat)
+    module.apply_voice_protocol_compat_patches()
+    monkeypatch.setattr(module.time, "monotonic", lambda: 123.45)
+
+    connection = SimpleNamespace()
+
+    class FakeSocket:
+        close_code = 1006
+
+        async def receive(self):
+            return SimpleNamespace(type=aiohttp.WSMsgType.CLOSED, extra=None)
+
+    ws = SimpleNamespace(
+        ws=FakeSocket(),
+        _close_code=None,
+        _connection=connection,
+    )
+
+    with pytest.raises(ConnectionClosed):
+        await DiscordVoiceWebSocket.poll_event(ws)  # type: ignore[arg-type]
+
+    assert connection._voicecompat_last_ws_close_at == 123.45
 
 
 @pytest.mark.asyncio

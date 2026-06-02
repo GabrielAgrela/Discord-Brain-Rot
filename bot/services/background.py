@@ -2382,6 +2382,11 @@ class BackgroundService:
                     is_zombie = ws is None or str(type(ws)) == "<class 'discord.utils._MissingSentinel'>"
                     
                     if is_zombie:
+                        if self.audio_service.is_voice_library_reconnect_pending(voice_client):
+                            remaining = self.audio_service.get_voice_library_reconnect_remaining(voice_client)
+                            print(f"[BackgroundService] Voice library reconnect in progress ({remaining:.1f}s remaining), skipping zombie cleanup for {guild.name}...")
+                            continue
+
                         # Check if reconnection is already in progress (grace period)
                         if self.audio_service.is_reconnection_pending(guild.id):
                             remaining = self.audio_service.get_reconnection_remaining(guild.id)

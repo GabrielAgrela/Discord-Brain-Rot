@@ -11,6 +11,7 @@ import asyncio
 import logging
 import os
 import struct
+import time
 from typing import Any, Dict, Tuple
 
 import aiohttp
@@ -87,6 +88,8 @@ def _ensure_voice_client_state(client: VoiceClient) -> None:
         client.dave_downgraded = False
     if not hasattr(client, "_voicecompat_active_ws"):
         client._voicecompat_active_ws = None
+    if not hasattr(client, "_voicecompat_last_ws_close_at"):
+        client._voicecompat_last_ws_close_at = 0.0
 
 
 def _voiceclient_can_encrypt(self: VoiceClient) -> bool:
@@ -380,6 +383,9 @@ async def _patched_poll_event(self: DiscordVoiceWebSocket) -> None:
         aiohttp.WSMsgType.CLOSING,
     ):
         close_code = self._close_code if self._close_code is not None else self.ws.close_code
+        connection = getattr(self, "_connection", None)
+        if connection is not None:
+            setattr(connection, "_voicecompat_last_ws_close_at", time.monotonic())
         logger.warning(
             "[VoiceCompat] Voice websocket closed: code=%s reason=%s type=%s",
             close_code,

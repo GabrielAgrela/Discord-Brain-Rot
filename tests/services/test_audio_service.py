@@ -99,6 +99,53 @@ class TestAudioService:
         # bot set by individual tests that need it (e.g. keyword detection retry tests)
         return service
 
+    def test_voice_library_reconnect_pending_uses_recent_close_marker(self, audio_service, monkeypatch):
+        """Recent py-cord voice websocket closes should defer health-check reconnects."""
+        from bot.services import audio as audio_module
+
+        monkeypatch.setattr(audio_module.time, "monotonic", lambda: 100.0)
+        audio_service.VOICE_LIBRARY_RECONNECT_GRACE_SECONDS = 45.0
+
+        voice_client = SimpleNamespace(
+            _voicecompat_last_ws_close_at=80.0,
+            _connected=SimpleNamespace(is_set=lambda: False),
+            is_connected=lambda: False,
+        )
+
+        assert audio_service.is_voice_library_reconnect_pending(voice_client) is True
+        assert audio_service.get_voice_library_reconnect_remaining(voice_client) == 25.0
+
+    def test_voice_library_reconnect_pending_expires(self, audio_service, monkeypatch):
+        """Expired py-cord reconnect grace should allow watchdog cleanup again."""
+        from bot.services import audio as audio_module
+
+        monkeypatch.setattr(audio_module.time, "monotonic", lambda: 150.0)
+        audio_service.VOICE_LIBRARY_RECONNECT_GRACE_SECONDS = 45.0
+
+        voice_client = SimpleNamespace(
+            _voicecompat_last_ws_close_at=100.0,
+            _connected=SimpleNamespace(is_set=lambda: False),
+            is_connected=lambda: False,
+        )
+
+        assert audio_service.is_voice_library_reconnect_pending(voice_client) is False
+        assert audio_service.get_voice_library_reconnect_remaining(voice_client) == 0.0
+
+    def test_voice_library_reconnect_pending_ignores_connected_clients(self, audio_service, monkeypatch):
+        """A successful reconnect should clear the helper result even with a fresh marker."""
+        from bot.services import audio as audio_module
+
+        monkeypatch.setattr(audio_module.time, "monotonic", lambda: 105.0)
+        audio_service.VOICE_LIBRARY_RECONNECT_GRACE_SECONDS = 45.0
+
+        voice_client = SimpleNamespace(
+            _voicecompat_last_ws_close_at=100.0,
+            _connected=SimpleNamespace(is_set=lambda: True),
+            is_connected=lambda: True,
+        )
+
+        assert audio_service.is_voice_library_reconnect_pending(voice_client) is False
+
     @pytest.mark.asyncio
     async def test_remove_send_controls_button_from_message_removes_gear_only(self, audio_service):
         """Ensure only the gear button is removed using raw component payload edits."""
@@ -657,6 +704,40 @@ class TestAudioService:
 
         assert audio_service._get_play_audio_start_preroll_ms(use_short_clip_safety=False) == 0
         assert audio_service._get_play_audio_start_preroll_ms(use_short_clip_safety=True) == 0
+
+    def test_build_play_after_timing_debug_flags_slow_callback(self, audio_service):
+        """Duration diagnostics flag when callback elapsed time exceeds sent frames."""
+        player = Mock()
+        player.played_frames.return_value = 303
+
+        debug = audio_service._build_play_after_timing_debug(
+            elapsed=18.153,
+            source_duration_seconds=5.381224,
+            startup_preroll_ms=650,
+            player=player,
+        )
+
+        assert "expected_audio=6.031s" in debug
+        assert "played_frames=303" in debug
+        assert "frame_audio=6.060s" in debug
+        assert "duration_mismatch=True" in debug
+
+    def test_build_play_after_timing_debug_allows_normal_elapsed(self, audio_service):
+        """Duration diagnostics stay quiet when elapsed time matches frames."""
+        player = Mock()
+        player.played_frames.return_value = 303
+
+        debug = audio_service._build_play_after_timing_debug(
+            elapsed=6.2,
+            source_duration_seconds=5.381224,
+            startup_preroll_ms=650,
+            player=player,
+        )
+
+        assert "expected_audio=6.031s" in debug
+        assert "played_frames=303" in debug
+        assert "frame_audio=6.060s" in debug
+        assert "duration_mismatch=True" not in debug
 
     def test_db_to_volume_multiplier(self, audio_service):
         """Ensure dB conversion produces expected ffmpeg volume multipliers."""
@@ -3914,4 +3995,3 @@ class TestPlaybackEventPublishing:
 
         # No event should be published
         mock_publish.assert_not_called()
-

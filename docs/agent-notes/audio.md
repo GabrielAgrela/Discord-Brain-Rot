@@ -43,11 +43,13 @@ Read this when changing uploads, sound ingest, playback, generated sound cards, 
 - Capture `voice_client._player` before stop and poll `player.is_alive()` with a timeout. This is encapsulated in `AudioService._stop_voice_client_and_wait()`.
 - Also guard the non-interrupt path before starting the next sound after natural completion; a lingering `_player` can drop the new sound.
 - Join/entrance sounds use a warmup delay before playback because the listener may not be ready immediately after `on_voice_state_update`; default `ENTRANCE_PLAYBACK_START_DELAY_SECONDS=1.0`.
+- `personal_greeter.play_audio_for_event()` must pass `is_entrance=True` for join sounds. Without that flag, `AudioService._maybe_apply_entrance_playback_warmup()` is bypassed even though the join path appears to use the normal playback service.
 - `AudioService.play_slap()` must guard both interrupted and not-currently-playing paths for lingering player threads.
 - Slap playback benefits from short ffmpeg pre-roll silence (`adelay=120:all=1`).
 - Short MP3 slap clips can decode as empty output with low-latency ffmpeg startup flags. Use conservative slap `before_options` (`-nostdin`) even when global latency mode is low.
 - Short non-slap MP3s also use low-latency safety: conservative `before_options` plus small pre-roll.
 - Normal MP3 playback in low-latency mode uses a configurable pre-roll floor, `LOW_LATENCY_MP3_START_PREROLL_MS` default `650`.
+- `play_after` debug lines include expected decoded duration, player frame count, frame-derived duration, and `duration_mismatch=True` when callback elapsed time is much larger. If frame duration is normal but elapsed is high, inspect voice connectivity, ffmpeg cleanup, or host stalls instead of assuming the MP3 contains silence.
 - Playback-time ear protection is on by default through `SOUND_PLAYBACK_EAR_PROTECTION_*`; stronger settings apply for filenames matching `SOUND_EARRAPE_KEYWORDS`.
 - Low-fidelity MP3 inputs can develop hiss with compression. The service relaxes ear protection for those sources except earrape-keyword matches.
 - In ffmpeg `acompressor`, `makeup` must stay in `[1, 64]`; `makeup=0` fails filter parsing and can produce near-immediate silent completion.
@@ -100,6 +102,7 @@ Read this when changing uploads, sound ingest, playback, generated sound cards, 
 - Startup auto-join is owned by `BackgroundService._auto_join_channels()`. Do not add a second `on_ready` auto-join in `personal_greeter.py`.
 - Final keyword latency is driven by `KeywordDetectionSink.silence_flush_seconds` / `KEYWORD_SILENCE_FLUSH_SECONDS` plus worker queue timeout. Partials are faster but less stable.
 - After voice moves/reconnects (e.g. `move_to` in `ensure_voice_connected` or AutoFollow), keyword detection start failures schedule a short retry loop via `AudioService.schedule_keyword_detection_restart()` instead of waiting for the 30-second health check in `BackgroundService.keyword_detection_health_check`. The retry loop uses exponential backoff (2 s, 4 s, 8 s cap) for up to 5 attempts. Use `reason="auto_follow_move"` or similar labels to distinguish log origins. Pass `schedule_retry=False` to `start_keyword_detection` to suppress retry nesting (done automatically by the restart loop).
+- py-cord already runs an internal reconnect loop after abnormal voice websocket closes such as code `1006`. `bot/voice_compat.py` stamps `_voicecompat_last_ws_close_at` on the `VoiceClient`; Vosk/background health checks must respect `AudioService.is_voice_library_reconnect_pending()` before forcing their own reconnect, otherwise one Discord voice socket drop can become duplicate visible leave/rejoin cycles.
 
 ## Voice Commands (Wake Word + Groq Whisper)
 
