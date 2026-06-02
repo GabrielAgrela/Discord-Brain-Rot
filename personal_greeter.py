@@ -455,7 +455,12 @@ async def play_audio_for_event(member, member_str, event, channel, afk_redirect=
                 if not voice_client:
                     print(f"[EventSound] Failed to join {channel.name} for default join sound")
                     return
-                await behavior.play_audio(channel, "gay-echo.mp3", "admin")
+                await behavior.play_audio(
+                    channel,
+                    "gay-echo.mp3",
+                    "admin",
+                    is_entrance=True,
+                )
                 # Log action for default join sound
                 similar_sounds = db.get_sounds_by_similarity("gay-echo.mp3", 1, guild_id=member.guild.id)
                 if similar_sounds:
@@ -492,7 +497,12 @@ async def play_audio_for_event(member, member_str, event, channel, afk_redirect=
                 from bot.repositories import SoundRepository
                 exact_match = SoundRepository().get_by_filename(sound_name)
                 if exact_match:
-                    await behavior.play_audio(channel, exact_match.filename, member_str)
+                    await behavior.play_audio(
+                        channel,
+                        exact_match.filename,
+                        member_str,
+                        is_entrance=(event == "join"),
+                    )
                     db.insert_action(member_str, event, exact_match.id, guild_id=member.guild.id)
                 else:
                     # Fall back to fuzzy search
@@ -509,7 +519,12 @@ async def play_audio_for_event(member, member_str, event, channel, afk_redirect=
                         else:
                             filename = sound_row[2]
                             sound_id = sound_row[0]
-                        await behavior.play_audio(channel, filename, member_str)
+                        await behavior.play_audio(
+                            channel,
+                            filename,
+                            member_str,
+                            is_entrance=(event == "join"),
+                        )
                         db.insert_action(member_str, event, sound_id, guild_id=member.guild.id)
                     else:
                         print(f"Sound {sound_name} not found for user event")
