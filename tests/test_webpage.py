@@ -1736,7 +1736,7 @@ def test_web_static_stylesheet_is_served(web_client):
     assert "--soundboard-table-height" in stylesheet
     assert ".pagination-page-input" in stylesheet
     assert "body.page-soundboard .tables-grid > .card" in stylesheet
-    assert "border: 1px solid var(--ink)" in stylesheet
+    assert "border: 2px solid var(--ink)" in stylesheet
     assert ".play-button.login-required" in stylesheet
     assert "tableLoadingWave" in stylesheet
     assert ".table-container.is-loading" in stylesheet
