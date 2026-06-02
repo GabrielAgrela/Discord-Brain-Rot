@@ -5764,10 +5764,12 @@ body.page-soundboard .tables-grid > .card:nth-child(3) {
     }
 
     .control-room {
+        position: -webkit-sticky;
         position: sticky;
-        top: calc(0.5rem + env(safe-area-inset-top, 0px));
+        top: max(0.75rem, env(safe-area-inset-top, 0px));
         z-index: 35;
-        grid-template-columns: minmax(0, 1fr) auto 2rem;
+        transform: none;
+        grid-template-columns: minmax(0, 1fr) minmax(0, auto) 2.35rem;
         grid-template-areas:
             "status status actions"
             "voice system actions";
@@ -5824,19 +5826,27 @@ body.page-soundboard .tables-grid > .card:nth-child(3) {
     }
 
     .control-room-action-dock .control-room-actions-trigger {
-        width: 2rem;
-        height: 2rem;
+        width: 2.25rem;
+        height: 2.25rem;
         font-size: 0.9rem;
+    }
+
+    /* Prevent sticky hover from collapsing the trigger on touch devices */
+    .control-room-action-dock:hover .control-room-actions-trigger {
+        width: 2.25rem;
+        max-width: 2.25rem;
+        opacity: 1;
+        pointer-events: auto;
     }
 
     .control-room-action-menu {
         position: absolute;
-        right: auto;
-        left: 0;
-        top: auto;
-        bottom: calc(100% + 0.5rem);
+        right: 0;
+        left: auto;
+        top: calc(100% + 0.35rem);
+        bottom: auto;
         transform: translateY(0) scale(0.92);
-        transform-origin: bottom left;
+        transform-origin: top right;
         gap: 0.32rem;
         padding: 0.32rem 0.36rem;
         padding-inline: 0.36rem;
@@ -5849,7 +5859,6 @@ body.page-soundboard .tables-grid > .card:nth-child(3) {
             visibility 0s 0.18s;
     }
 
-    .control-room-action-dock:hover .control-room-action-menu,
     .control-room-action-dock:focus-within .control-room-action-menu,
     .control-room-action-dock.open .control-room-action-menu {
         transform: translateY(0) scale(1);
@@ -6851,7 +6860,6 @@ html.theme-dark .web-upload-queue-item {
 }
 
 @media (max-width: 640px) {
-    .control-room,
     .card,
     .stat-card {
         transform: none;
@@ -6860,6 +6868,12 @@ html.theme-dark .web-upload-queue-item {
     .page-heading .page-title,
     .page-title {
         font-size: clamp(2rem, 10vw, 3rem);
+    }
+
+    /* Re-assert mobile sticky styles after later scribble transforms */
+    .control-room {
+        transform: none;
+        z-index: 35;
     }
 }
 

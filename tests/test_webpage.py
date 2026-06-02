@@ -1771,7 +1771,7 @@ def test_web_static_stylesheet_is_served(web_client):
     assert "min-height: 2.62rem" in stylesheet
     assert ".sound-options-button" in stylesheet
     assert ".result-meta" in stylesheet
-    assert "top: calc(0.5rem + env(safe-area-inset-top, 0px))" in stylesheet
+    assert "top: max(0.75rem, env(safe-area-inset-top, 0px))" in stylesheet
     assert ".control-room .card-kicker" in stylesheet
     assert ".play-button.sent" in stylesheet
     assert ".play-button.warn" in stylesheet
