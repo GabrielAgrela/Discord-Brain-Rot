@@ -35,8 +35,16 @@
                     </button>
                     <div id="systemMonitorDropdown" class="system-monitor-dropdown" aria-hidden="true">
                         <div class="system-monitor-dropdown-header">
-                            <p class="card-kicker">System Resources</p>
-                            <h3 class="system-monitor-dropdown-title">Host CPU, Disk &amp; RAM</h3>
+                            <div class="system-monitor-dropdown-heading">
+                                <div>
+                                    <p class="card-kicker">System Resources</p>
+                                    <h3 class="system-monitor-dropdown-title">Host CPU, Disk &amp; RAM</h3>
+                                </div>
+                                <span id="systemMonitorBattery" class="system-monitor-battery" hidden>
+                                    <span class="system-monitor-battery-icon" aria-hidden="true"></span>
+                                    <span id="systemMonitorBatteryValue">--</span>
+                                </span>
+                            </div>
                         </div>
                         <div id="systemMonitorTotals" class="system-monitor-totals">
                             <div class="system-monitor-total-row" data-monitor-graph-target="cpu" tabindex="0">

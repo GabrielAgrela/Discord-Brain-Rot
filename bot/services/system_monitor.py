@@ -178,6 +178,7 @@ class HostSystemMonitorService:
             - ``sample_interval_seconds`` (*float*)
             - ``updated_at_unix`` (*float*)
             - ``top_processes`` (*list* of *dict*)
+            - ``battery_percent`` (*float* | *None*)
             - ``disk_active_percent`` (*float* | *None*)
             - ``disk_read_bytes_per_second`` (*float*)
             - ``disk_write_bytes_per_second`` (*float*)
@@ -233,6 +234,7 @@ class HostSystemMonitorService:
                 "top_processes": processes,
                 "cpu_temperature_celsius": self._read_cpu_temperature(),
                 "cpu_fan_rpm": self._read_cpu_fan_rpm(),
+                "battery_percent": self._read_battery_percent(),
                 **disk,
             }
 
@@ -252,6 +254,7 @@ class HostSystemMonitorService:
                 "top_processes": [],
                 "cpu_temperature_celsius": None,
                 "cpu_fan_rpm": None,
+                "battery_percent": None,
                 "disk_active_percent": None,
                 "disk_read_bytes_per_second": 0.0,
                 "disk_write_bytes_per_second": 0.0,
@@ -375,6 +378,57 @@ class HostSystemMonitorService:
             pass
 
         return None
+
+    # ------------------------------------------------------------------
+    # sysfs readers (battery)
+    # ------------------------------------------------------------------
+
+    def _read_battery_percent(self) -> float | None:
+        """Read laptop battery charge from sysfs, return percent or ``None``.
+
+        Scans ``/sys/class/power_supply/*`` entries whose ``type`` is
+        ``Battery`` and reads their ``capacity`` value. Multiple batteries are
+        averaged because Linux exposes some laptops as BAT0/BAT1.
+
+        Returns:
+            Battery charge percentage rounded to 1 decimal place, or ``None``
+            when no battery is available or readable.
+        """
+        power_dir = f"{self._sys_root}/class/power_supply"
+        values: list[float] = []
+
+        try:
+            if not os.path.isdir(power_dir):
+                return None
+
+            for entry in sorted(os.listdir(power_dir)):
+                supply_path = f"{power_dir}/{entry}"
+                if not os.path.isdir(supply_path):
+                    continue
+
+                supply_type = ""
+                try:
+                    with open(f"{supply_path}/type", encoding="utf-8") as f:
+                        supply_type = f.read().strip().lower()
+                except OSError:
+                    pass
+
+                if supply_type != "battery" and not entry.upper().startswith("BAT"):
+                    continue
+
+                try:
+                    with open(f"{supply_path}/capacity", encoding="utf-8") as f:
+                        value = float(f.read().strip())
+                    if 0.0 <= value <= 100.0:
+                        values.append(value)
+                except (OSError, ValueError):
+                    continue
+        except OSError:
+            return None
+
+        if not values:
+            return None
+        return _r(sum(values) / len(values))
 
     # ------------------------------------------------------------------
     # sysfs readers (CPU fan)

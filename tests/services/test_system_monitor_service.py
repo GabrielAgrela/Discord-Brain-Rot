@@ -77,6 +77,14 @@ def _make_proc_tree(
             )
 
 
+def _make_power_supply(root: Path, name: str, supply_type: str, capacity: str) -> None:
+    """Create a fake sysfs power-supply entry."""
+    supply_root = root / "class" / "power_supply" / name
+    supply_root.mkdir(parents=True, exist_ok=True)
+    (supply_root / "type").write_text(supply_type, encoding="utf-8")
+    (supply_root / "capacity").write_text(capacity, encoding="utf-8")
+
+
 # ======================================================================
 # HostSystemMonitorService — RAM
 # ======================================================================
@@ -825,6 +833,58 @@ def test_cpu_fan_json_safe(tmp_path):
 
 
 # ======================================================================
+# HostSystemMonitorService — battery from sysfs
+# ======================================================================
+
+
+def test_battery_percent_from_power_supply(tmp_path):
+    """Battery capacity from sysfs is returned as a percentage."""
+    _make_proc_tree(tmp_path)
+    _make_power_supply(tmp_path, "BAT0", "Battery", "87")
+
+    svc = HostSystemMonitorService(proc_root=str(tmp_path), sys_root=str(tmp_path))
+    snap = svc.get_snapshot()
+
+    assert snap["battery_percent"] == 87.0
+
+
+def test_battery_percent_averages_multiple_batteries(tmp_path):
+    """Multiple battery capacities are averaged when present."""
+    _make_proc_tree(tmp_path)
+    _make_power_supply(tmp_path, "BAT0", "Battery", "80")
+    _make_power_supply(tmp_path, "BAT1", "Battery", "60")
+
+    svc = HostSystemMonitorService(proc_root=str(tmp_path), sys_root=str(tmp_path))
+    snap = svc.get_snapshot()
+
+    assert snap["battery_percent"] == 70.0
+
+
+def test_battery_percent_missing_or_invalid_returns_none(tmp_path):
+    """Missing and invalid battery values do not break host snapshots."""
+    _make_proc_tree(tmp_path)
+    _make_power_supply(tmp_path, "AC", "Mains", "100")
+    _make_power_supply(tmp_path, "BAT0", "Battery", "not-a-number")
+    _make_power_supply(tmp_path, "BAT1", "Battery", "101")
+
+    svc = HostSystemMonitorService(proc_root=str(tmp_path), sys_root=str(tmp_path))
+    snap = svc.get_snapshot()
+
+    assert snap["battery_percent"] is None
+
+
+def test_battery_percent_json_safe(tmp_path):
+    """Battery percent must survive JSON serialisation."""
+    _make_proc_tree(tmp_path)
+    _make_power_supply(tmp_path, "BAT0", "Battery", "52.5")
+
+    svc = HostSystemMonitorService(proc_root=str(tmp_path), sys_root=str(tmp_path))
+    snap = svc.get_snapshot()
+
+    json.dumps(snap)
+
+
+# ======================================================================
 # WebSystemMonitorService — DB-backed mode
 # ======================================================================
 
@@ -847,6 +907,7 @@ def test_web_service_returns_snapshot_from_repo(tmp_path):
         "sample_interval_seconds": 1.0,
         "updated_at_unix": 1234567890.0,
         "cpu_fan_rpm": 1200,
+        "battery_percent": 64.0,
     }
     repo.upsert_snapshot(snapshot)
 
@@ -858,6 +919,7 @@ def test_web_service_returns_snapshot_from_repo(tmp_path):
     assert len(result["top_processes"]) == 1
     assert result["top_processes"][0]["display_name"] == "web_page.py"
     assert result["cpu_fan_rpm"] == 1200
+    assert result["battery_percent"] == 64.0
 
 
 def test_web_service_returns_unavailable_when_no_snapshot(tmp_path):

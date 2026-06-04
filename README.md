@@ -14,7 +14,7 @@ Discord bot for soundboard playback, live voice keyword triggers, TTS/STS, sound
 - **Analytics & wrapped** — `/top` leaderboards (users, sounds, voice users, voice channels), `/weeklywrapped` and `/yearreview` as Remotion-rendered GIF digests, `/sendyearreview` admin DM flow. Voice session analytics from `voice_activity` rows.
 - **On This Day** — `/onthisday` shows sounds popular on this day 1 month or 1 year ago.
 - **Rocket League store** — `/rlstore` shows the daily Rocket League item shop with paginated image cards and a configurable notification.
-- **Web dashboard (optional)** — Flask-based web soundboard, analytics dashboard, control room (live bot status, CPU/RAM/disk with hover history graphs and sample readouts, playback progress), and upload moderation. Requires Discord OAuth login. See [Web Dashboard & API](#web-dashboard--api) below.
+- **Web dashboard (optional)** — Flask-based web soundboard, analytics dashboard, control room (live bot status, CPU/RAM/disk and laptop battery with hover history graphs and sample readouts, playback progress), and upload moderation. Requires Discord OAuth login. See [Web Dashboard & API](#web-dashboard--api) below.
 - **Voice connection resilience** — Per-guild locks, zombie detection/recovery, DAVE compatibility patch, auto-follow (never into AFK), auto-disconnect, configurable auto-join.
 - **Background automations** — Periodic sound playback loop, MyInstants scraping, TikTok favorite watcher, weekly wrapped/guild digest scheduler, weekly backup scheduler, daily RL store notification, keyword health check, self-heal watchdog, performance telemetry.
 
@@ -277,7 +277,7 @@ The optional web dashboard is served by a separate `web` container (Docker profi
 | `GET /api/tts/enhancer-settings` | Read enhancer model/provider (admin) |
 | `POST /api/tts/enhancer-settings` | Update enhancer model/provider (admin) |
 | `GET /api/control_room/status` | Live bot status, progress, CPU/RAM summary |
-| `GET /api/system_monitor/status` | Host CPU, RAM, disk I/O, and process resource data |
+| `GET /api/system_monitor/status` | Host CPU, RAM, disk I/O, battery, and process resource data |
 | `POST /api/upload_sound` | Queue a sound upload |
 | `GET /api/upload_sound/<job_id>` | Poll upload progress |
 | `GET /api/uploads` | Upload inbox (admin/mod) |

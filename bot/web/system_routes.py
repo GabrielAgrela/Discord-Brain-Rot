@@ -58,6 +58,7 @@ def register_system_routes(app: Flask) -> None:
                     "process_cpu_history": [],
                     "cpu_temperature_celsius": None,
                     "cpu_fan_rpm": None,
+                    "battery_percent": None,
                     "disk_active_percent": None,
                     "disk_read_bytes_per_second": 0.0,
                     "disk_write_bytes_per_second": 0.0,

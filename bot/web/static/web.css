@@ -1802,7 +1802,7 @@ html.theme-dark .control-room-actions-trigger:active {
     padding: 0.75rem;
     border-radius: var(--radius-lg);
     border: 1px solid var(--border-strong);
-    background: linear-gradient(180deg, #fffaf2 0%, #f0e1cd 100%);
+    background: linear-gradient(180deg, var(--paper-soft) 0%, var(--paper-muted) 100%);
     box-shadow: 0 18px 42px rgba(23, 18, 13, 0.22);
     pointer-events: none;
     opacity: 0;
@@ -1827,10 +1827,66 @@ html.theme-dark .system-monitor-dropdown {
     margin-bottom: 0.45rem;
 }
 
+.system-monitor-dropdown-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
 .system-monitor-dropdown-title {
     margin: 0.1rem 0 0;
     font-size: 1rem;
     line-height: 1.1;
+}
+
+.system-monitor-battery {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 0.25rem;
+    margin-top: 0.05rem;
+    padding: 0.16rem 0.34rem 0.15rem;
+    border: 1px solid color-mix(in oklch, var(--border-strong) 74%, transparent);
+    border-radius: 0.35rem;
+    background: color-mix(in oklch, var(--paper-soft) 82%, var(--accent) 18%);
+    color: var(--ink);
+    font-size: 0.72rem;
+    font-weight: 800;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.system-monitor-battery[hidden] {
+    display: none;
+}
+
+.system-monitor-battery-icon {
+    position: relative;
+    width: 0.82rem;
+    height: 0.42rem;
+    border: 1.5px solid currentColor;
+    border-radius: 0.13rem;
+}
+
+.system-monitor-battery-icon::after {
+    content: "";
+    position: absolute;
+    top: 0.09rem;
+    right: -0.22rem;
+    width: 0.12rem;
+    height: 0.18rem;
+    border-radius: 0 0.06rem 0.06rem 0;
+    background: currentColor;
+}
+
+.system-monitor-battery-icon::before {
+    content: "";
+    position: absolute;
+    inset: 0.08rem;
+    border-radius: 0.04rem;
+    background: currentColor;
 }
 
 .system-monitor-totals {
@@ -2066,7 +2122,7 @@ html.theme-dark .system-monitor-chart-grid {
     height: 0.42rem;
     border: 2px solid var(--accent-deep);
     border-radius: 999px;
-    background: oklch(98% 0.024 95);
+    background: var(--paper-soft);
     transform: translate(-50%, -50%);
 }
 
@@ -4607,7 +4663,7 @@ html.theme-dark .heatmap-cell[data-level="5"] {
     padding: 1.6rem;
     border-radius: var(--radius-xl);
     border: 1px solid var(--border-strong);
-    background: linear-gradient(180deg, #fffaf2 0%, #f0e1cd 100%);
+    background: linear-gradient(180deg, var(--paper-soft) 0%, var(--paper-muted) 100%);
     box-shadow: 0 28px 48px rgba(68, 42, 18, 0.18);
 }
 
@@ -4693,7 +4749,7 @@ html.theme-dark .login-modal-card {
     padding: 1.25rem;
     border-radius: var(--radius-lg);
     border: 1px solid var(--border-strong);
-    background: linear-gradient(180deg, #fffaf2 0%, #f0e1cd 100%);
+    background: linear-gradient(180deg, var(--paper-soft) 0%, var(--paper-muted) 100%);
     box-shadow: 0 28px 48px rgba(68, 42, 18, 0.18);
 }
 
@@ -4812,7 +4868,7 @@ html.theme-dark .voice-member-row {
     padding: 0.85rem;
     border-radius: var(--radius-lg);
     border: 1px solid var(--border-strong);
-    background: linear-gradient(180deg, #fffaf2 0%, #f0e1cd 100%);
+    background: linear-gradient(180deg, var(--paper-soft) 0%, var(--paper-muted) 100%);
     box-shadow: 0 18px 42px rgba(23, 18, 13, 0.22);
     pointer-events: none;
     opacity: 0;
@@ -4883,7 +4939,7 @@ html.theme-dark .voice-members-dropdown {
     padding: 0.85rem;
     border-radius: var(--radius-lg);
     border: 1px solid var(--border-strong);
-    background: linear-gradient(180deg, #fffaf2 0%, #f0e1cd 100%);
+    background: linear-gradient(180deg, var(--paper-soft) 0%, var(--paper-muted) 100%);
     box-shadow: 0 18px 42px rgba(23, 18, 13, 0.22);
     pointer-events: none;
     opacity: 0;
@@ -6335,10 +6391,10 @@ body.page-dataset .dataset-clips:not(.dataset-no-reveal) .dataset-empty {
 /* ── Scribbly Cartoon Redesign Layer ─────────────────────────────── */
 
 :root {
-    --paper: oklch(98.8% 0.006 95);
-    --paper-strong: oklch(96.4% 0.012 92);
-    --paper-soft: oklch(99.4% 0.004 95 / 0.98);
-    --paper-muted: oklch(97.2% 0.01 92 / 0.92);
+    --paper: oklch(99.4% 0.002 270);
+    --paper-strong: oklch(97.6% 0.004 270);
+    --paper-soft: oklch(99.8% 0.001 270 / 0.98);
+    --paper-muted: oklch(98.2% 0.003 270 / 0.92);
     --ink: oklch(20% 0.045 255);
     --ink-soft: oklch(28% 0.04 255 / 0.84);
     --ink-muted: oklch(41% 0.045 248);
@@ -6370,20 +6426,32 @@ body.page-dataset .dataset-clips:not(.dataset-no-reveal) .dataset-empty {
 }
 
 html.theme-dark {
-    --paper: oklch(18% 0.04 255);
-    --paper-strong: oklch(14.5% 0.038 255);
-    --paper-soft: oklch(22% 0.04 255 / 0.97);
-    --paper-muted: oklch(25% 0.045 255 / 0.9);
-    --ink: oklch(94% 0.025 92);
-    --ink-soft: oklch(88% 0.025 92 / 0.84);
-    --ink-muted: oklch(76% 0.04 92);
-    --ink-faint: oklch(94% 0.025 92 / 0.16);
-    --border: oklch(94% 0.025 92 / 0.2);
-    --border-strong: oklch(94% 0.025 92 / 0.36);
-    --shadow: 0.42rem 0.42rem 0 oklch(5% 0.02 255 / 0.45);
-    --shadow-sm: 0.24rem 0.24rem 0 oklch(5% 0.02 255 / 0.38);
-    --scribble-line: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='22' viewBox='0 0 140 22'%3E%3Cpath d='M2 13 C18 4 28 19 42 10 S72 4 85 12 111 19 138 8' fill='none' stroke='%23f3ead4' stroke-opacity='.24' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E");
-    --scribble-paper: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180' viewBox='0 0 180 180'%3E%3Cg fill='none' stroke='%23f3ead4' stroke-opacity='.09' stroke-linecap='round'%3E%3Cpath d='M14 31c21-5 35-4 58 0M8 98c34 6 56 4 82-2M105 48c18 7 38 8 58 2M115 135c15-5 30-4 48 3'/%3E%3Cpath d='M34 151c-9 3-17 5-25 1M148 18c7 7 12 9 20 7M77 119c5-3 10-3 15 0'/%3E%3C/g%3E%3C/svg%3E");
+    --paper: oklch(11.5% 0.006 270);
+    --paper-strong: oklch(7.8% 0.005 270);
+    --paper-soft: oklch(15.5% 0.008 270 / 0.98);
+    --paper-muted: oklch(19% 0.01 270 / 0.92);
+    --ink: oklch(96% 0.01 96);
+    --ink-soft: oklch(90% 0.012 96 / 0.86);
+    --ink-muted: oklch(76% 0.018 96);
+    --ink-faint: oklch(96% 0.01 96 / 0.17);
+    --accent: oklch(72% 0.22 352);
+    --accent-deep: oklch(84% 0.16 352);
+    --accent-soft: oklch(72% 0.22 352 / 0.22);
+    --accent-olive: oklch(80% 0.18 138);
+    --accent-olive-soft: oklch(80% 0.18 138 / 0.2);
+    --accent-amber: oklch(88% 0.17 92);
+    --accent-amber-soft: oklch(88% 0.17 92 / 0.2);
+    --panel-dark: oklch(8.8% 0.005 270);
+    --panel-dark-soft: oklch(14% 0.008 270);
+    --border: oklch(96% 0.01 96 / 0.22);
+    --border-strong: oklch(96% 0.01 96 / 0.42);
+    --shadow: 0.42rem 0.42rem 0 oklch(3% 0.003 270 / 0.56);
+    --shadow-sm: 0.24rem 0.24rem 0 oklch(3% 0.003 270 / 0.48);
+    --scribble-blue: oklch(88% 0.17 92);
+    --scribble-pink: oklch(72% 0.22 352);
+    --scribble-lime: oklch(80% 0.18 138);
+    --scribble-line: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='22' viewBox='0 0 140 22'%3E%3Cpath d='M2 13 C18 4 28 19 42 10 S72 4 85 12 111 19 138 8' fill='none' stroke='%23f5f2e8' stroke-opacity='.28' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E");
+    --scribble-paper: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180' viewBox='0 0 180 180'%3E%3Cg fill='none' stroke='%23f5f2e8' stroke-opacity='.1' stroke-linecap='round'%3E%3Cpath d='M14 31c21-5 35-4 58 0M8 98c34 6 56 4 82-2M105 48c18 7 38 8 58 2M115 135c15-5 30-4 48 3'/%3E%3Cpath d='M34 151c-9 3-17 5-25 1M148 18c7 7 12 9 20 7M77 119c5-3 10-3 15 0'/%3E%3C/g%3E%3C/svg%3E");
 }
 
 html,
@@ -6404,8 +6472,8 @@ body {
 html.theme-dark body {
     background:
         var(--scribble-paper),
-        radial-gradient(circle at 7% 8%, oklch(78% 0.16 82 / 0.13), transparent 18rem),
-        radial-gradient(circle at 94% 10%, oklch(69% 0.17 355 / 0.16), transparent 18rem),
+        radial-gradient(circle at 7% 8%, oklch(80% 0.18 138 / 0.12), transparent 18rem),
+        radial-gradient(circle at 94% 10%, oklch(72% 0.22 352 / 0.18), transparent 18rem),
         linear-gradient(180deg, var(--paper) 0%, var(--paper-strong) 100%);
 }
 
@@ -6419,9 +6487,11 @@ body::before {
 
 body::after {
     height: 28vh;
-    background:
-        var(--scribble-line) 4% 82% / 170px 28px repeat-x,
-        linear-gradient(180deg, transparent, oklch(60% 0.17 244 / 0.045));
+    background: linear-gradient(180deg, transparent, oklch(60% 0.17 244 / 0.035));
+}
+
+html.theme-dark body::after {
+    background: linear-gradient(180deg, transparent, oklch(72% 0.22 352 / 0.07));
 }
 
 .soundboard-ambient::before,
@@ -6430,6 +6500,15 @@ body::after {
         radial-gradient(circle at 18% 22%, oklch(60% 0.17 244 / 0.12) 0 0.32rem, transparent 0.38rem),
         radial-gradient(circle at 82% 28%, oklch(78% 0.16 82 / 0.15) 0 0.26rem, transparent 0.34rem),
         radial-gradient(circle at 55% 82%, oklch(69% 0.17 355 / 0.14) 0 0.28rem, transparent 0.36rem);
+    background-size: 11rem 8rem, 14rem 10rem, 13rem 9rem;
+}
+
+html.theme-dark .soundboard-ambient::before,
+html.theme-dark .soundboard-ambient::after {
+    background:
+        radial-gradient(circle at 18% 22%, var(--accent-amber-soft) 0 0.32rem, transparent 0.38rem),
+        radial-gradient(circle at 82% 28%, var(--accent-olive-soft) 0 0.26rem, transparent 0.34rem),
+        radial-gradient(circle at 55% 82%, var(--accent-soft) 0 0.28rem, transparent 0.36rem);
     background-size: 11rem 8rem, 14rem 10rem, 13rem 9rem;
 }
 
@@ -6456,9 +6535,7 @@ body::after {
 }
 
 .nav {
-    background:
-        var(--scribble-line) 0 100% / 150px 24px repeat-x,
-        linear-gradient(180deg, var(--paper-soft), var(--paper-muted));
+    background: linear-gradient(180deg, var(--paper-soft), var(--paper-muted));
     border-width: 0 0 3px;
 }
 
@@ -6540,9 +6617,9 @@ body::after {
 .nav-link.active,
 .auth-button {
     background:
-        radial-gradient(circle at 28% 22%, oklch(98% 0.024 95 / 0.22), transparent 36%),
+        radial-gradient(circle at 28% 22%, oklch(99.8% 0.001 270 / 0.22), transparent 36%),
         var(--discord);
-    color: oklch(98% 0.018 95);
+    color: oklch(99.8% 0.001 270);
 }
 
 .nav-link.active {
@@ -6552,7 +6629,7 @@ body::after {
 }
 
 .nav-link.active::after {
-    background: var(--scribble-line) center / 110px 20px repeat-x;
+    background: linear-gradient(90deg, transparent, var(--ink-faint), transparent);
     opacity: 0.32;
     animation: none;
 }
@@ -6616,9 +6693,7 @@ html.theme-dark .dataset-main::after {
 .card::before,
 .stat-card::before {
     height: 9px;
-    background:
-        var(--scribble-line) center / 140px 22px repeat-x,
-        var(--card-accent, var(--accent));
+    background: var(--card-accent, var(--accent));
 }
 
 .page-analytics .card::before,
@@ -6658,11 +6733,11 @@ html.theme-dark .dataset-main::after {
 .system-monitor-dropdown {
     background:
         var(--scribble-paper),
-        oklch(98% 0.024 95 / 0.94);
+        var(--paper-soft);
     border: 2px solid var(--border-strong);
     border-radius: 11px 15px 12px 17px;
     color: var(--ink);
-    box-shadow: inset 0 0 0 2px oklch(98% 0.024 95 / 0.28);
+    box-shadow: inset 0 0 0 2px oklch(99.8% 0.001 270 / 0.32);
 }
 
 html.theme-dark .search-input,
@@ -6676,22 +6751,22 @@ html.theme-dark .voice-members-dropdown,
 html.theme-dark .system-monitor-dropdown {
     background:
         var(--scribble-paper),
-        oklch(24% 0.04 255 / 0.96);
+        var(--panel-dark-soft);
     color: var(--ink);
 }
 
 .system-monitor-dropdown {
     background:
         var(--scribble-paper),
-        oklch(98% 0.024 95);
-    background-color: #fffaf2;
+        var(--paper-soft);
+    background-color: oklch(99.8% 0.001 270);
 }
 
 html.theme-dark .system-monitor-dropdown {
     background:
         var(--scribble-paper),
-        oklch(24% 0.04 255);
-    background-color: #1f2521;
+        var(--panel-dark-soft);
+    background-color: oklch(14% 0.008 270);
 }
 
 .select-shell::before {
@@ -6717,7 +6792,6 @@ html.theme-dark .system-monitor-dropdown {
 
 th {
     background:
-        var(--scribble-line) center / 130px 20px repeat-x,
         var(--accent-amber-soft),
         var(--paper-soft);
     color: var(--ink);
@@ -6734,9 +6808,7 @@ tbody tr:nth-child(even) {
 }
 
 tbody tr:hover {
-    background:
-        var(--scribble-line) 50% 50% / 150px 24px repeat-x,
-        var(--accent-soft);
+    background: var(--accent-soft);
 }
 
 .play-button,
@@ -6745,7 +6817,7 @@ tbody tr:hover {
 .web-control-button,
 .web-upload-control-button {
     background:
-        radial-gradient(circle at 25% 25%, oklch(98% 0.024 95 / 0.18), transparent 40%),
+        radial-gradient(circle at 25% 25%, oklch(99.8% 0.001 270 / 0.18), transparent 40%),
         var(--ink);
     color: var(--paper);
 }
@@ -6828,7 +6900,7 @@ tbody tr:hover {
     border-radius: 12px 16px 13px 15px;
     background:
         var(--scribble-paper),
-        oklch(98% 0.024 95 / 0.72);
+        var(--paper-soft);
 }
 
 html.theme-dark .leaderboard-item,
@@ -6838,7 +6910,7 @@ html.theme-dark .web-upload-item,
 html.theme-dark .web-upload-queue-item {
     background:
         var(--scribble-paper),
-        oklch(24% 0.04 255 / 0.72);
+        var(--panel-dark-soft);
 }
 
 .web-upload-dialog,
@@ -7919,7 +7991,7 @@ html.theme-dark .dataset-label-filter-select option {
             oklch(20% 0.045 255 / 0.09) 0 5px,
             transparent 5px 10px
         ),
-        oklch(99.4% 0.004 95 / 0.65);
+        oklch(99.8% 0.001 270 / 0.76);
 }
 
 .control-room-progress-fill {
@@ -7933,7 +8005,7 @@ html.theme-dark .dataset-label-filter-select option {
 }
 
 .control-room-progress-fill::after {
-    background: var(--scribble-line) center / 90px 18px repeat-x;
+    background: linear-gradient(90deg, oklch(99% 0.002 270 / 0.28), transparent, oklch(99% 0.002 270 / 0.22));
     opacity: 0.45;
 }
 
@@ -7951,10 +8023,21 @@ html.theme-dark .dataset-label-filter-select option {
 .dataset-bulk-label-select option,
 .dataset-quick-label-select option,
 .dataset-scan-select option {
-    background-color: oklch(99.4% 0.004 95);
+    background-color: oklch(99.8% 0.001 270);
     color: var(--ink);
     font-family: "Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif;
     font-weight: 700;
+}
+
+html.theme-dark .filter-select option,
+html.theme-dark .guild-selector option,
+html.theme-dark .dataset-label-filter-select option,
+html.theme-dark .dataset-sort-select option,
+html.theme-dark .dataset-bulk-label-select option,
+html.theme-dark .dataset-quick-label-select option,
+html.theme-dark .dataset-scan-select option {
+    background-color: var(--panel-dark);
+    color: var(--ink);
 }
 
 .web-upload-dialog,
@@ -7969,7 +8052,7 @@ html.theme-dark .dataset-label-filter-select option {
     border-radius: 20px 16px 26px 18px;
     background:
         var(--scribble-paper),
-        linear-gradient(180deg, oklch(99.5% 0.004 95), oklch(97.4% 0.01 92));
+        linear-gradient(180deg, var(--paper-soft), var(--paper-muted));
     box-shadow: 0.5rem 0.5rem 0 var(--ink-faint);
 }
 
@@ -7992,7 +8075,7 @@ html.theme-dark .dataset-label-filter-select option {
     border-radius: 10px 14px 11px 15px;
     background:
         var(--scribble-paper),
-        oklch(99.4% 0.004 95 / 0.92);
+        var(--paper-soft);
     box-shadow: inset 0 0 0 2px oklch(60% 0.17 244 / 0.04);
 }
 
@@ -8025,7 +8108,7 @@ body.page-dataset {
 .dataset-clip {
     background:
         var(--scribble-paper),
-        linear-gradient(180deg, oklch(99.4% 0.004 95), oklch(97.4% 0.01 92));
+        linear-gradient(180deg, var(--paper-soft), var(--paper-muted));
 }
 
 .dataset-main {
@@ -8103,7 +8186,7 @@ body.page-dataset {
 .dataset-search {
     background:
         var(--scribble-paper),
-        oklch(99.4% 0.004 95);
+        var(--paper-soft);
     border: 2px solid var(--border-strong);
     border-radius: 10px 14px 11px 15px;
 }
@@ -8124,7 +8207,7 @@ body.page-dataset {
 }
 
 .dataset-scan-btn {
-    background: oklch(99.4% 0.004 95);
+    background: var(--paper-soft);
     color: var(--accent-deep);
 }
 
@@ -8141,6 +8224,60 @@ body.page-dataset {
 .dataset-user-item.active {
     background: oklch(69% 0.17 355 / 0.15);
     border-color: var(--accent);
+}
+
+html.theme-dark .dataset-sidebar,
+html.theme-dark .dataset-main,
+html.theme-dark .dataset-action-toolbar,
+html.theme-dark .dataset-clip,
+html.theme-dark .dataset-empty,
+html.theme-dark .dataset-pagination {
+    background:
+        var(--scribble-paper),
+        linear-gradient(180deg, var(--paper-soft), var(--paper-muted));
+}
+
+html.theme-dark .dataset-label-filter-select,
+html.theme-dark .dataset-sort-select,
+html.theme-dark .dataset-bulk-label-select,
+html.theme-dark .dataset-quick-label-select,
+html.theme-dark .dataset-scan-select,
+html.theme-dark .dataset-search,
+html.theme-dark .dataset-clip-label-select,
+html.theme-dark .dataset-clip-transcript,
+html.theme-dark .dataset-clip-notes,
+html.theme-dark .dataset-clip-custom-label,
+html.theme-dark .dataset-quick-play,
+html.theme-dark .dataset-quick-label-apply,
+html.theme-dark .dataset-quick-delete,
+html.theme-dark .dataset-quick-more,
+html.theme-dark .dataset-quick-trim,
+html.theme-dark .pagination-btn {
+    background:
+        var(--scribble-paper),
+        var(--panel-dark-soft);
+    color: var(--ink);
+}
+
+html.theme-dark .dataset-scan-btn {
+    background:
+        var(--scribble-paper),
+        var(--panel-dark-soft);
+    color: var(--accent-amber);
+}
+
+html.theme-dark .dataset-scan-btn:hover:not(:disabled) {
+    background: var(--accent-amber);
+    color: var(--panel-dark);
+}
+
+html.theme-dark .dataset-user-item.active {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+}
+
+html.theme-dark .dataset-clip.selected {
+    background: var(--accent-soft);
 }
 
 html.theme-dark .action-badge {

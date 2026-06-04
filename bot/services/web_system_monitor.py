@@ -202,6 +202,7 @@ class WebSystemMonitorService:
             - ``disk_history`` (*list*)
             - ``temp_history`` (*list*)
             - ``process_cpu_history`` (*list*)
+            - ``battery_percent`` (*float* | *None*)
             - ``disk_active_percent`` (*float* | *None*)
             - ``disk_read_bytes_per_second`` (*float*)
             - ``disk_write_bytes_per_second`` (*float*)
@@ -255,6 +256,7 @@ class WebSystemMonitorService:
                 "process_cpu_history": [],
                 "cpu_temperature_celsius": None,
                 "cpu_fan_rpm": None,
+                "battery_percent": None,
                 "disk_active_percent": None,
                 "disk_read_bytes_per_second": 0.0,
                 "disk_write_bytes_per_second": 0.0,
@@ -284,6 +286,7 @@ class WebSystemMonitorService:
             "process_cpu_history": [],
             "cpu_temperature_celsius": None,
             "cpu_fan_rpm": None,
+            "battery_percent": None,
             "disk_active_percent": None,
             "disk_read_bytes_per_second": 0.0,
             "disk_write_bytes_per_second": 0.0,
@@ -351,6 +354,7 @@ class WebSystemMonitorService:
                 "process_cpu_history": [],
                 "cpu_temperature_celsius": None,
                 "cpu_fan_rpm": None,
+                "battery_percent": None,
                 **disk,
             }
         except Exception as exc:
@@ -375,6 +379,7 @@ class WebSystemMonitorService:
                 "process_cpu_history": [],
                 "cpu_temperature_celsius": None,
                 "cpu_fan_rpm": None,
+                "battery_percent": None,
                 "disk_active_percent": None,
                 "disk_read_bytes_per_second": 0.0,
                 "disk_write_bytes_per_second": 0.0,

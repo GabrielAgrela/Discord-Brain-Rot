@@ -825,6 +825,11 @@
             return Math.round(rpm).toLocaleString() + ' RPM';
         }
 
+        function formatBatteryPercentForSystem(value) {
+            if (value === null || value === undefined || !Number.isFinite(value)) return '--';
+            return Math.round(Math.max(0, Math.min(100, value))) + '%';
+        }
+
         function formatSystemMonitorSampleTime(unixSecond) {
             if (!Number.isFinite(unixSecond)) return '--';
             return new Date(unixSecond * 1000).toLocaleTimeString([], {
@@ -1253,6 +1258,8 @@
             const totalTemp = document.getElementById('systemMonitorTotalTemp');
             const processList = document.getElementById('systemMonitorProcessList');
             const footnote = document.getElementById('systemMonitorFootnote');
+            const battery = document.getElementById('systemMonitorBattery');
+            const batteryValue = document.getElementById('systemMonitorBatteryValue');
 
             const button = document.getElementById('systemMonitorButton');
 
@@ -1263,6 +1270,7 @@
                 if (totalRam) totalRam.textContent = '--';
                 if (totalDisk) totalDisk.textContent = '--';
                 if (totalTemp) totalTemp.textContent = '--';
+                if (battery) battery.hidden = true;
                 if (processList) processList.innerHTML = '<p class="system-monitor-empty">' + (payload.status_label || 'Unavailable') + '</p>';
                 if (footnote) footnote.textContent = '';
                 hideSystemMonitorHoverChart();
@@ -1280,6 +1288,7 @@
                 : '';
             const tempText = formatTemperatureForSystem(payload.cpu_temperature_celsius);
             const fanText = formatFanSpeedForSystem(payload.cpu_fan_rpm);
+            const batteryText = formatBatteryPercentForSystem(payload.battery_percent);
             const diskActiveText = formatPercentForSystem(payload.disk_active_percent);
             const diskReadText = formatBytesPerSecondForSystem(payload.disk_read_bytes_per_second);
             const diskWriteText = formatBytesPerSecondForSystem(payload.disk_write_bytes_per_second);
@@ -1297,6 +1306,9 @@
                 if (fanText !== '--') {
                     ariaLabel += ' \u00B7 Fan ' + fanText;
                 }
+                if (batteryText !== '--') {
+                    ariaLabel += ' \u00B7 Battery ' + batteryText;
+                }
                 ariaLabel += ' \u2014 click or tap for details';
                 button.setAttribute('aria-label', ariaLabel);
             }
@@ -1313,6 +1325,18 @@
             }
             if (totalTemp) {
                 totalTemp.textContent = tempText;
+            }
+            if (battery && batteryValue) {
+                if (batteryText === '--') {
+                    battery.hidden = true;
+                    battery.removeAttribute('title');
+                    battery.removeAttribute('aria-label');
+                } else {
+                    batteryValue.textContent = batteryText;
+                    battery.hidden = false;
+                    battery.title = 'Battery ' + batteryText;
+                    battery.setAttribute('aria-label', 'Battery ' + batteryText);
+                }
             }
 
             if (processList) {
