@@ -181,7 +181,7 @@ polling/fallback behaviour in that case.
 | `WEB_TTS_ENHANCER_REASONING_ENABLED` | `true` | Enable reasoning for web TTS enhancer |
 | `SPEECH_TRAINING_KEYWORD_SCAN_ENABLED` | `true` | Enable daily (24h) scheduled keyword scan of unlabeled speech training clips via the bot (labels non-matches as ``none``, labels matches as ``potential``) |
 | `SPEECH_TRAINING_KEYWORD_SCAN_INTERVAL_SECONDS` | `86400` | Interval for the scheduled keyword scan, default 24h (range `300`–`86400`) |
-| `SPEECH_TRAINING_KEYWORD_SCAN_WORKERS` | `1` | Worker count for the automatic bot-side keyword scan (range `1`–`4`; manual web scans keep their own worker setting) |
+| `SPEECH_TRAINING_KEYWORD_SCAN_WORKERS` | `4` | Worker count for the automatic bot-side keyword scan (range `1`–`8`; manual web scans keep their own worker setting) |
 
 ## Slash Commands
 

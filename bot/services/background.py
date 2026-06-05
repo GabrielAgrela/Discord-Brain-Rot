@@ -122,7 +122,7 @@ class BackgroundService:
             "SPEECH_TRAINING_KEYWORD_SCAN_INTERVAL_SECONDS", 86400, 300, 86400
         )
         self._keyword_scan_workers = self._env_int(
-            "SPEECH_TRAINING_KEYWORD_SCAN_WORKERS", 1, 1, 4
+            "SPEECH_TRAINING_KEYWORD_SCAN_WORKERS", 4, 1, 8
         )
         self._keyword_scan_in_progress = False
 

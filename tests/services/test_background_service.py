@@ -95,6 +95,32 @@ class TestBackgroundService:
             {"time": 1000, "cpu": 7.5}
         ]
 
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    def test_keyword_scan_worker_default_and_clamp(
+        self, _mock_sound_repo, _mock_action_repo, monkeypatch
+    ):
+        """Automatic keyword scans default to parallel workers and clamp high env values."""
+        from bot.services.background import BackgroundService
+
+        monkeypatch.delenv("SPEECH_TRAINING_KEYWORD_SCAN_WORKERS", raising=False)
+        service = BackgroundService(
+            bot=Mock(),
+            audio_service=Mock(),
+            sound_service=Mock(),
+            behavior=Mock(),
+        )
+        assert service._keyword_scan_workers == 4
+
+        monkeypatch.setenv("SPEECH_TRAINING_KEYWORD_SCAN_WORKERS", "99")
+        service = BackgroundService(
+            bot=Mock(),
+            audio_service=Mock(),
+            sound_service=Mock(),
+            behavior=Mock(),
+        )
+        assert service._keyword_scan_workers == 8
+
     @pytest.mark.asyncio
     @patch("bot.services.background.ActionRepository")
     @patch("bot.services.background.SoundRepository")

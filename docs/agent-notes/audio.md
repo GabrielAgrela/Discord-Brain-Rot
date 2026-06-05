@@ -90,7 +90,7 @@ Read this when changing uploads, sound ingest, playback, generated sound cards, 
 - Directory layout: `<data_dir>/<guild_id>/<sanitised_username>_<user_id>/<timestamp>_<dur-ms>ms.mp3`.
 - Raw captured PCM is preserved as-is; no loudness normalization for training data.
 - **Web auto-transcript throttling**: The web auto-transcript job (`transcribe_empty_clips()`) sends Groq Whisper requests sequentially with a configurable delay (`WEB_TRANSCRIPT_REQUEST_DELAY_SECONDS`, default 1.0 s). On HTTP 429, it retries up to `WEB_TRANSCRIPT_429_MAX_RETRIES` times (default 3) with exponential backoff, respecting the `Retry-After` header. Persistent 429 stops the job early with an error in the UI. These env vars are in `web_speech_training.py` as module-level constants parsed from environment.
-- The automatic bot-side speech training keyword scan defaults to `SPEECH_TRAINING_KEYWORD_SCAN_WORKERS=1` because it runs inside the bot container and spawns FFmpeg/Vosk work. Manual web keyword scans still use `WebSpeechTrainingService.KEYWORD_SCAN_WORKERS` unless changed separately.
+- The automatic bot-side speech training keyword scan defaults to `SPEECH_TRAINING_KEYWORD_SCAN_WORKERS=4` and is bounded to 1–8 workers. The scan service parallelizes per-clip decode/Vosk work while repository writes remain in the collecting thread. Manual web keyword scans still use `WebSpeechTrainingService.KEYWORD_SCAN_WORKERS` unless changed separately.
 
 ## Vosk Keyword Detection
 
