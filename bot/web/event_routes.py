@@ -222,6 +222,16 @@ def publish_soundboard_event(
         return
 
     try:
-        _publish(db_path, event_type, data)
+        started = time.monotonic()
+        published = _publish(db_path, event_type, data)
+        elapsed = time.monotonic() - started
+        if elapsed > 0.2 or not published:
+            logger.warning(
+                "[SSE] publish event=%s published=%s duration=%.3fs data=%s",
+                event_type,
+                published,
+                elapsed,
+                data,
+            )
     except Exception:
-        logger.debug("[SSE] Failed to publish event %s", event_type)
+        logger.warning("[SSE] Failed to publish event %s", event_type, exc_info=True)

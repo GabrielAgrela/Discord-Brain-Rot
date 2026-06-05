@@ -4,9 +4,13 @@ Action repository for action-related database operations.
 
 from typing import Optional, List, Tuple
 import sqlite3
+import logging
+import time
 from datetime import datetime, timedelta
 
 from bot.repositories.base import BaseRepository
+
+logger = logging.getLogger(__name__)
 
 # Optional Honker soundboard event publishing for live web UI updates.
 try:
@@ -51,6 +55,7 @@ class ActionRepository(BaseRepository):
         Returns:
             ID of the inserted action
         """
+        started = time.monotonic()
         result = self._execute_write(
             "INSERT INTO actions (username, action, target, timestamp, guild_id) VALUES (?, ?, ?, ?, ?)",
             (
@@ -61,10 +66,22 @@ class ActionRepository(BaseRepository):
                 str(guild_id) if guild_id is not None else None,
             ),
         )
+        insert_elapsed = time.monotonic() - started
+        if insert_elapsed > 0.2:
+            logger.warning(
+                "[ActionRepository] Slow action insert id=%s action=%s target=%s "
+                "guild_id=%s duration=%.3fs",
+                result,
+                action,
+                target,
+                guild_id,
+                insert_elapsed,
+            )
         # Publish soundboard event for live web UI updates.
         if _publish_soundboard_event is not None:
             try:
-                _publish_soundboard_event(
+                publish_started = time.monotonic()
+                published = _publish_soundboard_event(
                     self._db_path,
                     "actions_changed",
                     {
@@ -73,8 +90,29 @@ class ActionRepository(BaseRepository):
                         "guild_id": str(guild_id) if guild_id is not None else None,
                     },
                 )
+                publish_elapsed = time.monotonic() - publish_started
+                if publish_elapsed > 0.2 or not published:
+                    logger.warning(
+                        "[ActionRepository] actions_changed publish id=%s "
+                        "action=%s target=%s guild_id=%s published=%s "
+                        "duration=%.3fs",
+                        result,
+                        action,
+                        target,
+                        guild_id,
+                        published,
+                        publish_elapsed,
+                    )
             except Exception:
-                pass  # Non-critical; polling fallback covers this.
+                logger.warning(
+                    "[ActionRepository] actions_changed publish failed id=%s "
+                    "action=%s target=%s guild_id=%s",
+                    result,
+                    action,
+                    target,
+                    guild_id,
+                    exc_info=True,
+                )
         return result
 
     def has_action_for_target(

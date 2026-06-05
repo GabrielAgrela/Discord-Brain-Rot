@@ -20,8 +20,16 @@ import sqlite3
 import os
 import datetime
 import time
+import logging
 import config
 from rapidfuzz import fuzz
+
+logger = logging.getLogger(__name__)
+
+try:
+    from bot.services.honker_integration import publish_soundboard_event as _publish_soundboard_event
+except ImportError:
+    _publish_soundboard_event = None
 
 
 class Database:
@@ -494,30 +502,82 @@ class Database:
     
     def insert_action(self, username, action, target, guild_id=None):
         username = username.split("#")[0]
+        started = time.monotonic()
         try:
             self.cursor.execute(
                 "INSERT INTO actions (username, action, target, guild_id) VALUES (?, ?, ?, ?);",
                 (username, action, target, str(guild_id) if guild_id is not None else None),
             )
             self.conn.commit()
+            action_id = self.cursor.lastrowid
         except sqlite3.Error as e:
-            print(f"An error occurred: {e}")
+            logger.warning(
+                "[Database] action insert failed username=%s action=%s target=%s guild_id=%s",
+                username,
+                action,
+                target,
+                guild_id,
+                exc_info=True,
+            )
             return
+        insert_elapsed = time.monotonic() - started
+        if insert_elapsed > 0.2:
+            logger.warning(
+                "[Database] Slow action insert id=%s action=%s target=%s "
+                "guild_id=%s duration=%.3fs",
+                action_id,
+                action,
+                target,
+                guild_id,
+                insert_elapsed,
+            )
 
         # Publish soundboard event for live web UI updates.
-        try:
-            from bot.services.honker_integration import publish_soundboard_event
-            publish_soundboard_event(
-                self.db_path,
-                "actions_changed",
-                {
-                    "action": action,
-                    "target": str(target),
-                    "guild_id": str(guild_id) if guild_id is not None else None,
-                },
-            )
-        except Exception:
-            pass  # Non-critical; polling fallback covers this.
+        if _publish_soundboard_event is not None:
+            try:
+                publish_started = time.monotonic()
+                published = _publish_soundboard_event(
+                    self.db_path,
+                    "actions_changed",
+                    {
+                        "action": action,
+                        "target": str(target),
+                        "guild_id": str(guild_id) if guild_id is not None else None,
+                    },
+                )
+                publish_elapsed = time.monotonic() - publish_started
+                if action in {"join", "leave"}:
+                    logger.info(
+                        "[Database] actions_changed publish id=%s action=%s "
+                        "target=%s guild_id=%s published=%s duration=%.3fs",
+                        action_id,
+                        action,
+                        target,
+                        guild_id,
+                        published,
+                        publish_elapsed,
+                    )
+                elif publish_elapsed > 0.2 or not published:
+                    logger.warning(
+                        "[Database] actions_changed publish id=%s action=%s "
+                        "target=%s guild_id=%s published=%s duration=%.3fs",
+                        action_id,
+                        action,
+                        target,
+                        guild_id,
+                        published,
+                        publish_elapsed,
+                    )
+            except Exception:
+                logger.warning(
+                    "[Database] actions_changed publish failed id=%s action=%s "
+                    "target=%s guild_id=%s",
+                    action_id,
+                    action,
+                    target,
+                    guild_id,
+                    exc_info=True,
+                )
 
     def insert_sound(self, originalfilename, filename, favorite=0, date=None, is_elevenlabs=0, guild_id=None):
         if date is None:

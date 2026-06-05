@@ -152,6 +152,10 @@ class HostSystemMonitorService:
         # Previous aggregate disk counters.
         self._prev_disk_stats: dict[str, int] | None = None
         self._prev_timestamp: float | None = None
+        self._slow_log_seconds = max(
+            0.0, float(os.getenv("HOST_SYSTEM_MONITOR_SLOW_LOG_SECONDS", "2.0"))
+        )
+        self._last_process_scan_count = 0
 
     # ------------------------------------------------------------------
     # Public API
@@ -186,10 +190,20 @@ class HostSystemMonitorService:
         """
         top_limit = max(1, min(8, top_limit))
 
+        timings: dict[str, float] = {}
+        total_started = time.monotonic()
+
+        def _mark(section: str, started: float) -> None:
+            timings[section] = time.monotonic() - started
+
         try:
             ts = time.time()
+            section_started = time.monotonic()
             mem = self._read_meminfo()
+            _mark("meminfo", section_started)
+            section_started = time.monotonic()
             cur_cpu = self._read_cpu_stats()
+            _mark("cpu_stats", section_started)
 
             ram_total = mem.get("MemTotal", 0)
             ram_avail = mem.get("MemAvailable", ram_total)
@@ -218,8 +232,37 @@ class HostSystemMonitorService:
                     warming = False
 
             # -- per-process CPU -----------------------------------------------
+            section_started = time.monotonic()
             processes = self._read_processes(cur_cpu, prev_cpu, top_limit)
+            _mark("processes", section_started)
+            section_started = time.monotonic()
             disk = self._read_disk_io(interval)
+            _mark("disk_io", section_started)
+            section_started = time.monotonic()
+            cpu_temperature_celsius = self._read_cpu_temperature()
+            _mark("cpu_temperature", section_started)
+            section_started = time.monotonic()
+            cpu_fan_rpm = self._read_cpu_fan_rpm()
+            _mark("cpu_fan", section_started)
+            section_started = time.monotonic()
+            battery_percent = self._read_battery_percent()
+            _mark("battery", section_started)
+
+            total_elapsed = time.monotonic() - total_started
+            if self._slow_log_seconds and total_elapsed >= self._slow_log_seconds:
+                logger.warning(
+                    "Host system monitor slow snapshot total=%.2fs sections=%s "
+                    "proc_count=%d top_count=%d",
+                    total_elapsed,
+                    ", ".join(
+                        f"{name}={duration:.3f}s"
+                        for name, duration in sorted(
+                            timings.items(), key=lambda item: item[1], reverse=True
+                        )
+                    ),
+                    self._last_process_scan_count,
+                    len(processes),
+                )
 
             return {
                 "available": True,
@@ -232,9 +275,9 @@ class HostSystemMonitorService:
                 "sample_interval_seconds": _r(interval),
                 "updated_at_unix": ts,
                 "top_processes": processes,
-                "cpu_temperature_celsius": self._read_cpu_temperature(),
-                "cpu_fan_rpm": self._read_cpu_fan_rpm(),
-                "battery_percent": self._read_battery_percent(),
+                "cpu_temperature_celsius": cpu_temperature_celsius,
+                "cpu_fan_rpm": cpu_fan_rpm,
+                "battery_percent": battery_percent,
                 **disk,
             }
 
@@ -731,8 +774,10 @@ class HostSystemMonitorService:
                 if name is None:
                     continue
                 cur_proc[pid] = (name, utime + stime)
+            self._last_process_scan_count = len(cur_proc)
         except OSError as exc:
             logger.debug("Can't enumerate /proc: %s", exc)
+            self._last_process_scan_count = 0
             return []
 
         # First call – store as baseline and return nothing.

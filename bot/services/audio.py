@@ -2316,11 +2316,13 @@ class AudioService:
                 self._release_guild_play_request(guild_id)
                 return False
 
+            source_setup_start = time.time()
             short_clip_duration_seconds: Optional[float] = None
             mp3_duration_seconds: Optional[float] = None
             playback_sample_rate_hz: Optional[int] = None
             playback_bitrate_bps: Optional[int] = None
             if audio_file_path.lower().endswith(".mp3"):
+                mp3_info_start = time.time()
                 (
                     mp3_duration_seconds,
                     playback_sample_rate_hz,
@@ -2328,6 +2330,15 @@ class AudioService:
                 ) = await asyncio.to_thread(
                     self._read_mp3_playback_info, audio_file_path
                 )
+                mp3_info_duration = time.time() - mp3_info_start
+                if mp3_info_duration > 0.2:
+                    print(
+                        "[AudioService] [PERF] mp3_playback_info "
+                        f"guild_id={guild_id} file={audio_file} "
+                        f"duration={mp3_info_duration:.4f}s "
+                        f"audio_duration={mp3_duration_seconds} "
+                        f"sample_rate={playback_sample_rate_hz} bitrate={playback_bitrate_bps}"
+                    )
                 if self.audio_latency_mode == "low_latency":
                     short_clip_duration_seconds = mp3_duration_seconds
 
@@ -2403,6 +2414,15 @@ class AudioService:
                 print(
                     "[AudioService] [DEBUG] playback ear protection enabled "
                     f"for {audio_file} filters={ear_protection_filters}"
+                )
+            source_setup_duration = time.time() - source_setup_start
+            if source_setup_duration > 0.2:
+                print(
+                    "[AudioService] [PERF] pre_ffmpeg_source_setup "
+                    f"guild_id={guild_id} file={audio_file} "
+                    f"duration={source_setup_duration:.4f}s "
+                    f"mp3_duration={mp3_duration_seconds} "
+                    f"sample_rate={playback_sample_rate_hz} bitrate={playback_bitrate_bps}"
                 )
 
             # START PLAYBACK IMMEDIATELY
@@ -2542,7 +2562,15 @@ class AudioService:
                     is_slap_sound = sound_info and sound_info[6] == 1
                     
                     bot_channel = self.message_service.get_bot_channel(channel.guild)
-                    if not bot_channel or is_entrance: return
+                    if not bot_channel:
+                        logger.warning(
+                            "[AudioService] handle_ui skipped because bot channel was not found "
+                            "guild_id=%s file=%s is_entrance=%s",
+                            guild_id,
+                            audio_file,
+                            is_entrance,
+                        )
+                        return
 
                     sound_message = None
                     view = None

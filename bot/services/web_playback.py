@@ -8,16 +8,20 @@ from collections.abc import Callable, Mapping
 from datetime import datetime, timedelta
 import io
 import json
+import logging
 import os
 from pathlib import Path
 import random
 import sqlite3
+import time
 from types import SimpleNamespace
 from typing import Any
 
 from config import TTS_PROFILES
 from bot.models.web import DiscordWebUser
 from bot.repositories.sound import SoundRepository
+
+logger = logging.getLogger(__name__)
 
 # Optional Honker notification for fast cross-process wake-ups.
 try:
@@ -257,6 +261,7 @@ def queue_playback_request(
         env=env,
     )
 
+    started = time.monotonic()
     conn = sqlite3.connect(db_path)
     try:
         cursor = conn.cursor()
@@ -284,10 +289,22 @@ def queue_playback_request(
         )
         conn.commit()
         row_id = int(cursor.lastrowid)
+        insert_elapsed = time.monotonic() - started
+        if insert_elapsed > 0.2:
+            logger.warning(
+                "[WebPlayback] Slow playback_queue insert id=%s guild_id=%s "
+                "sound=%s action=%s duration=%.3fs",
+                row_id,
+                guild_id,
+                sound_filename,
+                normalized_play_action,
+                insert_elapsed,
+            )
         # Publish Honker notification for fast cross-process wake-up.
         if _publish_honker is not None:
             try:
-                _publish_honker(
+                publish_started = time.monotonic()
+                published = _publish_honker(
                     db_path,
                     "playback_queue",
                     {
@@ -297,8 +314,26 @@ def queue_playback_request(
                         "play_action": normalized_play_action,
                     },
                 )
+                publish_elapsed = time.monotonic() - publish_started
+                if publish_elapsed > 0.2 or not published:
+                    logger.warning(
+                        "[WebPlayback] playback_queue notify id=%s guild_id=%s "
+                        "sound=%s published=%s duration=%.3fs",
+                        row_id,
+                        guild_id,
+                        sound_filename,
+                        published,
+                        publish_elapsed,
+                    )
             except Exception:
-                pass  # Non-critical; polling fallback covers this.
+                logger.warning(
+                    "[WebPlayback] playback_queue notify failed id=%s "
+                    "guild_id=%s sound=%s",
+                    row_id,
+                    guild_id,
+                    sound_filename,
+                    exc_info=True,
+                )
         return row_id
     finally:
         conn.close()
@@ -537,6 +572,7 @@ async def process_playback_queue_request(
         f"[Playback Queue] Processing request ID {request_id}: "
         f"{request_type} '{sound_filename}' in guild {guild_id}"
     )
+    request_started = time.monotonic()
 
     def mark_played() -> None:
         db.cursor.execute(
@@ -616,7 +652,14 @@ async def process_playback_queue_request(
             else:
                 playback_user = "webpage"
             await behavior.play_audio(channel, playback_filename, playback_user)
+            playback_elapsed = time.monotonic() - request_started
+            if playback_elapsed > 1.0:
+                logger(
+                    f"[Playback Queue] Playback startup completed for request ID {request_id} "
+                    f"in {playback_elapsed:.3f}s"
+                )
             if action_logger_factory is not None:
+                action_started = time.monotonic()
                 action_logger = action_logger_factory()
                 if hasattr(action_logger, "insert"):
                     action_logger.insert(
@@ -632,7 +675,18 @@ async def process_playback_queue_request(
                         sound_data[0],
                         guild_id=guild_id,
                     )
+                action_elapsed = time.monotonic() - action_started
+                if action_elapsed > 0.2:
+                    logger(
+                        f"[Playback Queue] Action logging for request ID {request_id} "
+                        f"completed in {action_elapsed:.3f}s"
+                    )
 
+        total_elapsed = time.monotonic() - request_started
+        if total_elapsed > 1.0:
+            logger(
+                f"[Playback Queue] Request ID {request_id} finished in {total_elapsed:.3f}s"
+            )
         mark_played()
         return channel is not None
     except Exception as exc:

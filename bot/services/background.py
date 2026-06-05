@@ -83,6 +83,10 @@ class BackgroundService:
         self._perf_prev_process_cpu_ticks: Optional[int] = None
         self._perf_prev_network_totals: Optional[Tuple[int, int]] = None
         self._perf_prev_network_sample_monotonic: Optional[float] = None
+        self._perf_loop_lag_warning_ms = max(
+            0.0, float(os.getenv("PERFORMANCE_LOOP_LAG_WARNING_MS", "1000"))
+        )
+        self._perf_last_loop_lag_warning_monotonic = 0.0
         self._clock_ticks_per_second = self._resolve_clock_ticks_per_second()
         self._cpu_core_count = max(1, os.cpu_count() or 1)
         self._weekly_wrapped_enabled = self._env_flag("WEEKLY_WRAPPED_ENABLED", True)
@@ -1324,6 +1328,28 @@ class BackgroundService:
         try:
             sample_monotonic = time.monotonic()
             payload = self._build_performance_snapshot(sample_monotonic)
+            loop_lag_ms = payload.get("loop_lag_ms")
+            if (
+                self._perf_loop_lag_warning_ms
+                and isinstance(loop_lag_ms, (int, float))
+                and loop_lag_ms >= self._perf_loop_lag_warning_ms
+                and sample_monotonic - self._perf_last_loop_lag_warning_monotonic >= 5.0
+            ):
+                self._perf_last_loop_lag_warning_monotonic = sample_monotonic
+                logger.warning(
+                    "[PerformanceMonitor] Event loop lag %.1fms | "
+                    "process_cpu=%.1f%% host_cpu=%.1f%% rss=%s "
+                    "threads=%s tasks=%s pending=%s load1=%s bot_latency=%.1fms",
+                    loop_lag_ms,
+                    payload.get("process_cpu_percent_of_one_core") or 0.0,
+                    payload.get("cpu_total_percent") or 0.0,
+                    payload.get("process_memory_rss_bytes"),
+                    payload.get("process_threads"),
+                    payload.get("asyncio_task_total"),
+                    payload.get("asyncio_task_pending"),
+                    payload.get("load_avg_1m"),
+                    payload.get("bot_latency_ms") or 0.0,
+                )
             #logger.info("[PerformanceMonitor] %s", json.dumps(payload, sort_keys=True))
         except Exception as e:
             logger.error(

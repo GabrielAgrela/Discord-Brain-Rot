@@ -4501,7 +4501,7 @@
                         // pick it up.  Web sound plays carry play_action,
                         // controls carry action.
                         if (detail && (detail.action || detail.play_action)) {
-                            _scheduleActionsFallbackRefresh(800);
+                            _scheduleActionsFallbackRefresh(6000);
                         }
                     } catch (_) {}
                 });
@@ -4548,7 +4548,7 @@
                         // compatibility with test-only / legacy payloads.
                         var detail = (data && data.data && typeof data.data === 'object') ? data.data : data;
                         if (detail && detail.reason === 'playback_started') {
-                            _scheduleActionsFallbackRefresh(1200);
+                            _scheduleActionsFallbackRefresh(2500);
                         }
                     } catch (_) {}
                 });

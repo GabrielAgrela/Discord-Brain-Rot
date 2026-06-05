@@ -33,7 +33,7 @@ Read this when changing uploads, sound ingest, playback, generated sound cards, 
 - The method never blocks or fails playback: all exceptions (missing Honker, unavailable db_path, Honker publish failures) are caught and logged at `DEBUG` level.
 - `db_path` is obtained from `self.sound_repo.db_path` (inherited from `BaseRepository`).
 - Event payload includes `guild_id`, `audio_file`, `user`, `play_id`, `duration_seconds`, and a `reason` flag (`playback_started` / `playback_finished`).
-- Only `control_room_changed` is published — action tables are not refreshed on playback events. Action-driven table updates continue to come from `actions_changed` events in `ActionRepository.insert()` / `Database.log_action()`.
+- Only `control_room_changed` is published — action tables are not refreshed on playback events. Action-driven table updates continue to come from `actions_changed` events in `ActionRepository.insert()` / `Database.insert_action()`.
 
 ## Playback And FFmpeg
 
@@ -44,6 +44,7 @@ Read this when changing uploads, sound ingest, playback, generated sound cards, 
 - Also guard the non-interrupt path before starting the next sound after natural completion; a lingering `_player` can drop the new sound.
 - Join/entrance sounds use a warmup delay before playback because the listener may not be ready immediately after `on_voice_state_update`; default `ENTRANCE_PLAYBACK_START_DELAY_SECONDS=1.0`.
 - `personal_greeter.play_audio_for_event()` must pass `is_entrance=True` for join sounds. Without that flag, `AudioService._maybe_apply_entrance_playback_warmup()` is bypassed even though the join path appears to use the normal playback service.
+- Entrance sounds should still run `AudioService.handle_ui()` and send the bot-channel sound card. Suppress similar-sound suggestions for `is_entrance=True`, but do not return before card/progress UI is created.
 - `AudioService.play_slap()` must guard both interrupted and not-currently-playing paths for lingering player threads.
 - Slap playback benefits from short ffmpeg pre-roll silence (`adelay=120:all=1`).
 - Short MP3 slap clips can decode as empty output with low-latency ffmpeg startup flags. Use conservative slap `before_options` (`-nostdin`) even when global latency mode is low.

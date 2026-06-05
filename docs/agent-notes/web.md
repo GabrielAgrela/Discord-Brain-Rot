@@ -50,12 +50,14 @@ Read this when changing `web_page.py`, `bot/web/`, web repositories/services, te
   - **BackgroundService.web_control_room_status_loop()** — publishes `control_room_changed` when a per-guild signature of significant fields changes (ignoring fast-changing elapsed seconds). Signature includes: voice_connected, voice_channel_id, voice_member_count, is_playing, is_paused, current_sound, current_requester, muted.
   - **BackgroundService.drain_sound_import_notifications_once()** — publishes `sound_imported` and `sounds_changed` after each successful notification send.
 - `publish_soundboard_event()` is safe to call from any Flask route, background thread, or repository; it degrades to no-op when Honker is unavailable.
-- **Actions table refresh** (strictly SSE-driven — no passive polling, no reconnect resync, no local post-play fallback):
-    1. **`actions_changed` event** — published by `ActionRepository.insert()` after every action row is committed. The frontend calls `_scheduleAuthoritativeActionsRefresh()`, which records a timestamp, cancels any pending delayed fallback timers, and calls `fetchActions()` with `showLoading=true`.
-    2. **`playback_queued` event** — published by `playback_routes.py` immediately after queueing. The frontend checks both `data.action` (controls) and `data.play_action` (sound plays) and calls `_scheduleActionsFallbackRefresh(800)`.
-    3. **`control_room_changed` event** — published by `AudioService._mark_playback_started()` for all real playback paths. The frontend parses `data.reason === 'playback_started'` and calls `_scheduleActionsFallbackRefresh(1200)`.
+- **Actions table refresh** (strictly SSE-driven — no passive polling, no reconnect resync, with explicit delayed post-play fallbacks):
+    1. **`actions_changed` event** — published by `ActionRepository.insert()` and legacy `Database.insert_action()` after every action row is committed. The frontend calls `_scheduleAuthoritativeActionsRefresh()`, which records a timestamp, cancels any pending delayed fallback timers, and calls `fetchActions()` with `showLoading=true`.
+    2. **`playback_queued` event** — published by `playback_routes.py` immediately after queueing. The frontend checks both `data.action` (controls) and `data.play_action` (sound plays) and calls `_scheduleActionsFallbackRefresh(6000)`.
+    3. **`control_room_changed` event** — published by `AudioService._mark_playback_started()` for all real playback paths. The frontend parses `data.reason === 'playback_started'` and calls `_scheduleActionsFallbackRefresh(2500)`.
 
     The delayed fallback helpers use a shared timer and `fetchActions()` with `showLoading=false` to avoid forcing a repaint when data is unchanged. If an authoritative `actions_changed` event has arrived since the fallback was scheduled, the fallback is skipped entirely — preventing duplicate table repaints from overlapping web playback events.
+    Slow playback startup can make early fallback refreshes miss the newly inserted action row because the bot logs the action after `behavior.play_audio()` returns. Keep the queued-event fallback long enough to cover slow startup, and use `actions_changed` publish logs plus playback queue timing logs to diagnose missed Recent Actions refreshes.
+    Join/leave entrance actions use legacy `Database.insert_action()`, not `ActionRepository.insert()`, so missed Recent Actions updates for personal-greeter events should be diagnosed with the per-join/per-leave `[Database] actions_changed publish ...` info logs.
 
 ## Playback Queue Transport
 
