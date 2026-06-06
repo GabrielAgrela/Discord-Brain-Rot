@@ -6,7 +6,7 @@ in-vocabulary for the bundled Portuguese Vosk model vosk-model-small-pt-0.3),
 a start prompt clip is played from ``Sounds/`` (no DB lookup), then *fresh*
 post-prompt PCM audio for that user is recorded until silence or max duration.
 The captured audio is sent to Groq Whisper for transcription.  If the
-transcript matches a recognised command verb (e.g. ``toca``), a
+transcript matches a recognised command verb (e.g. ``toca`` or ``play``), a
 done prompt clip is played and the sound is played via SoundService.play_request
 or SoundService.play_random_sound_from_list.
 If the command is ``mute``, no prompt is played and the caller activates the
@@ -18,10 +18,9 @@ The reply is then sent to ElevenLabs Ventura TTS and played back.
 The transcript parser searches for the wake word **anywhere** in the returned
 text (not only at the start), so Portuguese preamble such as
 "Mas que merda? Ventura, toca das páginas." is handled correctly.
-Only Portuguese command verbs (``toca``, ``tocar``, ``toque``, ``mete``,
-``meter``, ``põe``, ``poe``, ``reproduz``, ``reproduzir``) are
-supported and normalised to ``"play"``.  English ``play`` is **not**
-recognised as a Ventura voice command verb.
+Portuguese command verbs (``toca``, ``tocar``, ``toque``, ``mete``,
+``meter``, ``põe``, ``poe``, ``reproduz``, ``reproduzir``) and English
+``play`` are supported and normalised to ``"play"``.
 
 Whisper occasionally transcribes the spoken imperative ``toca`` as
 the formal/conjunctive ``toque``; ``toque`` is therefore included as
@@ -738,14 +737,11 @@ def pcm_to_wav(
 # command name is ``"play"`` for play aliases; ``"mute"`` is also supported
 # and normalised to ``"mute"`` (no trailing argument required).
 #
-# English ``play`` is intentionally **not** included — Ventura voice
-# commands are Portuguese-only.  Users say "toca" or other Portuguese
-# play verbs.
-#
 # Mute aliases include Portuguese commands (``cala-te`` / ``cala te`` /
 # ``calate`` -- variants likely from Whisper, ``silêncio`` / ``silencio``)
 # and English equivalents (``shut up`` / ``shutup`` / ``quiet``).
 _COMMAND_VERBS: dict[str, str] = {
+    "play": "play",
     "toca": "play",
     "tocar": "play",
     "toque": "play",
@@ -868,9 +864,7 @@ def parse_voice_command(
     Supported play command verbs (all normalise to ``"play"``):
 
         ``toca``, ``tocar``, ``toque``, ``mete``, ``meter``,
-        ``põe``, ``poe``, ``reproduz``, ``reproduzir``
-
-    English ``play`` is **not** recognised.
+        ``põe``, ``poe``, ``reproduz``, ``reproduzir``, ``play``
 
     Note: Whisper sometimes transcribes spoken ``toca`` as ``toque``
     (formal/conjunctive form), so ``toque`` is included as an alias.
@@ -892,7 +886,7 @@ def parse_voice_command(
         "ventura cala-te"                  → ("mute", "")
         "ventura silêncio"                 → ("mute", "")
         "ventura shut up"                  → ("mute", "")
-        "ventura play air horn"            → None (English ``play`` is not recognised)
+        "ventura play air horn"            → ("play", "air horn")
         "mute"                             → ("mute", "")
 
     Args:

@@ -133,7 +133,7 @@ polling/fallback behaviour in that case.
 | `VOICE_COMMAND_WAKE_CONFIDENCE_THRESHOLD` | `0.85` | Wake-word confidence (range `0.0`–`1.0`); normal keywords use `0.95` |
 | `VOICE_COMMAND_CAPTURE_SECONDS` | `6` | Max post-prompt recording duration (max `15`) |
 | `VOICE_COMMAND_COOLDOWN_SECONDS` | `5` | Per-user rate limit between commands |
-| `VOICE_COMMAND_QUOTA_COOLDOWN_SECONDS` | `3600` | Per-user cooldown for Ventura chat+ElevenLabs TTS when quota is blocked (does not affect `toca`/`mute` voice commands) |
+| `VOICE_COMMAND_QUOTA_COOLDOWN_SECONDS` | `3600` | Per-user cooldown for Ventura chat+ElevenLabs TTS when quota is blocked (does not affect `play`/`toca`/`mute` voice commands) |
 | `VOICE_COMMAND_SILENCE_SECONDS` | `1.0` | Silence timeout after prompt (range `0.5`–`5.0`) |
 | `VOICE_COMMAND_BEEP_ENABLED` | `true` | Set `false` to disable prompt clips |
 | `GROQ_WHISPER_MODEL` | `whisper-large-v3` | Groq Whisper model |

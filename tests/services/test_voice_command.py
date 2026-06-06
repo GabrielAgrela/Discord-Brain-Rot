@@ -50,15 +50,15 @@ class TestParseVoiceCommand:
         result = self._parse("toca something")
         assert result == ("play", "something")
 
-    def test_english_play_not_recognised(self):
-        """English ``play`` is not recognised as a Ventura voice command verb."""
+    def test_english_play_recognised(self):
+        """English ``play`` is recognised as a Ventura voice command verb."""
         from bot.services.voice_command import parse_voice_command
         # Without wake word
-        assert self._parse("play something") is None
+        assert self._parse("play something") == ("play", "something")
         # With wake word
-        assert parse_voice_command("ventura play air horn", wake_words=["ventura"]) is None
+        assert parse_voice_command("ventura play air horn", wake_words=["ventura"]) == ("play", "air horn")
         # With wake word and comma
-        assert parse_voice_command("ventura, play air horn", wake_words=["ventura"]) is None
+        assert parse_voice_command("ventura, play air horn", wake_words=["ventura"]) == ("play", "air horn")
 
     def test_empty_transcript(self):
         """Empty / whitespace-only → None."""
@@ -341,11 +341,11 @@ class TestParseVoiceCommand:
         result = parse_voice_command("ventura toca silêncio", wake_words=["ventura"])
         assert result == ("play", "silêncio")
 
-    def test_english_play_not_recognised_even_as_verb_context(self):
-        """``ventura play cala-te`` should NOT parse (English play not recognised)."""
+    def test_english_play_works_with_mute_alias_sound_name(self):
+        """``ventura play cala-te`` → (play, cala-te), not mute."""
         from bot.services.voice_command import parse_voice_command
         result = parse_voice_command("ventura play cala-te", wake_words=["ventura"])
-        assert result is None
+        assert result == ("play", "cala-te")
 
     # ------------------------------------------------------------------
     #  toque (Whisper variant of toca)
@@ -381,10 +381,10 @@ class TestParseVoiceCommand:
         result = parse_voice_command("toque something", wake_words=["ventura"])
         assert result == ("play", "something")
 
-    def test_english_play_still_not_recognised_with_toque(self):
-        """English ``play`` remains not recognised alongside ``toque``."""
+    def test_english_play_recognised_with_toque(self):
+        """English ``play`` remains recognised alongside ``toque``."""
         from bot.services.voice_command import parse_voice_command
-        assert parse_voice_command("ventura play air horn", wake_words=["ventura"]) is None
+        assert parse_voice_command("ventura play air horn", wake_words=["ventura"]) == ("play", "air horn")
 
 
 # ====================================================================
