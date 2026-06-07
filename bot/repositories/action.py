@@ -91,7 +91,24 @@ class ActionRepository(BaseRepository):
                     },
                 )
                 publish_elapsed = time.monotonic() - publish_started
-                if publish_elapsed > 0.2 or not published:
+                if action in {
+                    "play_request",
+                    "play_from_list",
+                    "play_similar_sound",
+                    "replay_sound",
+                }:
+                    logger.info(
+                        "[ActionRepository] actions_changed publish id=%s "
+                        "action=%s target=%s guild_id=%s published=%s "
+                        "duration=%.3fs",
+                        result,
+                        action,
+                        target,
+                        guild_id,
+                        published,
+                        publish_elapsed,
+                    )
+                elif publish_elapsed > 0.2 or not published:
                     logger.warning(
                         "[ActionRepository] actions_changed publish id=%s "
                         "action=%s target=%s guild_id=%s published=%s "
