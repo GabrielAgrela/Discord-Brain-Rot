@@ -591,22 +591,12 @@ class BackgroundService:
     def _compute_loop_lag_ms(self, sample_monotonic: float) -> float:
         """Estimate event-loop lag by comparing expected and actual loop wakeup times."""
         if self._perf_expected_tick_monotonic is None:
-            self._perf_expected_tick_monotonic = (
-                sample_monotonic + self._perf_tick_rate_seconds
-            )
+            self._perf_expected_tick_monotonic = sample_monotonic
             return 0.0
 
-        lag = max(
-            0.0, sample_monotonic - self._perf_expected_tick_monotonic
-        )
-        self._perf_expected_tick_monotonic += self._perf_tick_rate_seconds
-        if sample_monotonic - self._perf_expected_tick_monotonic > (
-            self._perf_tick_rate_seconds * 3
-        ):
-            # If we missed multiple intervals, reset expectation to avoid runaway lag.
-            self._perf_expected_tick_monotonic = (
-                sample_monotonic + self._perf_tick_rate_seconds
-            )
+        elapsed = sample_monotonic - self._perf_expected_tick_monotonic
+        self._perf_expected_tick_monotonic = sample_monotonic
+        lag = max(0.0, elapsed - self._perf_tick_rate_seconds)
         return lag * 1000.0
 
     def _collect_audio_service_metrics(self) -> Dict[str, Any]:

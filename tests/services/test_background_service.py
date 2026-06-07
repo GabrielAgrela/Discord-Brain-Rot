@@ -591,7 +591,7 @@ class TestBackgroundService:
         )
         service._perf_start_monotonic = 10.0
         service._perf_tick_rate_seconds = 0.5
-        service._perf_expected_tick_monotonic = 19.9
+        service._perf_expected_tick_monotonic = 19.4
         service._perf_prev_sample_monotonic = 19.5
         service._perf_prev_cpu_counters = {
             "cpu": (1000, 500),
@@ -1409,6 +1409,27 @@ class TestBotStatusCpu:
         from bot.services.background import BackgroundService
 
         assert BackgroundService.web_control_room_status_loop.seconds == 1
+
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    def test_loop_lag_uses_previous_tick_not_accumulated_drift(
+        self, _mock_sound_repo, _mock_action_repo
+    ):
+        """Small scheduler drift should not accumulate into false lag warnings."""
+        from bot.services.background import BackgroundService
+
+        service = BackgroundService(
+            bot=Mock(),
+            audio_service=Mock(),
+            sound_service=Mock(),
+            behavior=Mock(),
+        )
+        service._perf_tick_rate_seconds = 0.5
+
+        assert service._compute_loop_lag_ms(100.0) == 0.0
+        assert service._compute_loop_lag_ms(100.51) == pytest.approx(10.0)
+        assert service._compute_loop_lag_ms(101.02) == pytest.approx(10.0)
+        assert service._compute_loop_lag_ms(103.02) == pytest.approx(1500.0)
 
     @pytest.mark.asyncio
     @patch("bot.services.background.ActionRepository")
