@@ -198,6 +198,46 @@ def test_process_cpu_percent_sorted_descending(tmp_path):
     assert 0.0 < processes[2]["cpu_percent"] <= 0.3
 
 
+def test_process_detail_reads_limited_to_top_candidates(tmp_path, monkeypatch):
+    """RSS/cmdline detail reads are limited after CPU candidates are sorted."""
+    cpu1 = (1000, 0, 0, 9000, 0, 0, 0, 0, 0, 0)
+    cpu2 = (2000, 0, 0, 18000, 0, 0, 0, 0, 0, 0)
+    procs1 = {
+        pid: (f"proc{pid}", 10, 0, 1000)
+        for pid in range(100, 140)
+    }
+    procs2 = {
+        pid: (f"proc{pid}", 10 + (pid - 99), 0, 1000)
+        for pid in range(100, 140)
+    }
+
+    _make_proc_tree(tmp_path, cpu_fields=cpu1, processes=procs1)
+    svc = HostSystemMonitorService(proc_root=str(tmp_path))
+    svc.get_snapshot(top_limit=4)
+
+    _make_proc_tree(tmp_path, cpu_fields=cpu2, processes=procs2)
+    rss_calls = []
+    display_calls = []
+
+    def fake_rss(pid):
+        rss_calls.append(pid)
+        return 1024
+
+    def fake_display(pid, name, cache):
+        display_calls.append(pid)
+        return name, None
+
+    monkeypatch.setattr(svc, "_read_proc_rss", fake_rss)
+    monkeypatch.setattr(svc, "_resolve_display_name", fake_display)
+
+    snap = svc.get_snapshot(top_limit=4)
+
+    assert len(snap["top_processes"]) == 4
+    assert len(rss_calls) == 16
+    assert len(display_calls) == 16
+    assert [proc["pid"] for proc in snap["top_processes"]] == [139, 138, 137, 136]
+
+
 def test_top_limit_clamps(tmp_path):
     cpu1 = (100, 50, 25, 800, 10, 0, 0, 0, 0, 0)
     cpu2 = (200, 100, 50, 1200, 20, 0, 0, 0, 0, 0)

@@ -793,7 +793,7 @@ class HostSystemMonitorService:
             return []
 
         ram_total = self._read_meminfo().get("MemTotal", 0)
-        processes: list[dict[str, Any]] = []
+        candidates: list[tuple[float, int, str]] = []
 
         # Cache for cmdline reads (lazy, per pid).
         # Values are (display_name, detail_or_None) or None for unresolvable.
@@ -810,6 +810,13 @@ class HostSystemMonitorService:
                 continue
 
             cpu_pct = min(100.0, max(0.0, clk_delta / total_delta * 100.0))
+            candidates.append((cpu_pct, pid, cur_name))
+
+        candidates.sort(key=lambda item: item[0], reverse=True)
+        detail_limit = max(top_limit, min(len(candidates), top_limit * 4))
+        processes: list[dict[str, Any]] = []
+
+        for cpu_pct, pid, cur_name in candidates[:detail_limit]:
             rss = self._read_proc_rss(pid)
             mem_pct = _pct(rss, ram_total)
 
@@ -831,7 +838,6 @@ class HostSystemMonitorService:
             )
 
         self._prev_proc_info = cur_proc
-        processes.sort(key=lambda p: p["cpu_percent"], reverse=True)
         return processes[:top_limit]
 
     @staticmethod
