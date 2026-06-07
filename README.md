@@ -59,6 +59,15 @@ Create a `.env` file in the project root. Only `DISCORD_BOT_TOKEN` is strictly r
 |---|---|
 | `DISCORD_BOT_TOKEN` | Discord bot token |
 
+### Audio Playback
+
+| Variable | Default | Description |
+|---|---|---|
+| `AUDIO_SUPPRESS_RECORDING_WHILE_PLAYING` | `true` | Skip inbound voice recording/STT/speech-training work while the bot is actively playing audio, except active voice-command captures |
+| `AUDIO_PLAYBACK_READ_GAP_WARNING_SECONDS` | `0.08` | Log `[PLAY-STUTTER] audio_source_read_gap` when the Discord audio player is delayed between source reads |
+| `AUDIO_PLAYBACK_READ_DURATION_WARNING_SECONDS` | `0.04` | Log `[PLAY-STUTTER] audio_source_read_slow` when a source read blocks |
+| `AUDIO_DEFER_SHORT_CLIP_UI_UNTIL_AFTER_PLAYBACK_SECONDS` | `0.0` | Optional threshold for deferring bot-channel UI/card generation until short clips finish; `0.0` keeps normal immediate messages |
+
 ### Discord OAuth & Web
 
 | Variable | Default | Description |

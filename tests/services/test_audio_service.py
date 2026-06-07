@@ -47,6 +47,23 @@ class _DummyRow:
         self.id = row_id
 
 
+class _FakeAudioSource:
+    """Small duck-typed audio source for playback diagnostics tests."""
+
+    def __init__(self, frames):
+        self.frames = list(frames)
+        self.cleanup_called = False
+
+    def read(self):
+        return self.frames.pop(0) if self.frames else b""
+
+    def is_opus(self):
+        return True
+
+    def cleanup(self):
+        self.cleanup_called = True
+
+
 class TestAudioService:
     """Tests for AudioService utility methods."""
 
@@ -704,6 +721,34 @@ class TestAudioService:
 
         assert audio_service._get_play_audio_start_preroll_ms(use_short_clip_safety=False) == 0
         assert audio_service._get_play_audio_start_preroll_ms(use_short_clip_safety=True) == 0
+
+    def test_playback_diagnostics_audio_source_logs_read_gap(self, monkeypatch, caplog):
+        """Audio source wrapper logs voice-player thread read gaps."""
+        from bot.services.audio import PlaybackDiagnosticsAudioSource
+
+        source = _FakeAudioSource([b"frame1", b"frame2"])
+        times = iter([100.0, 100.0, 100.01, 100.12, 100.121, 100.13])
+        monkeypatch.setattr("bot.services.audio.time.monotonic", lambda: next(times))
+
+        wrapped = PlaybackDiagnosticsAudioSource(
+            source,
+            guild_id=123,
+            audio_file="clip.mp3",
+            play_id="play-1",
+            gap_warning_seconds=0.08,
+            read_warning_seconds=0.04,
+        )
+
+        assert wrapped.read() == b"frame1"
+        assert wrapped.read() == b"frame2"
+
+        assert wrapped.is_opus() is True
+        wrapped.cleanup()
+        assert source.cleanup_called is True
+        assert wrapped.warning_count == 1
+        assert "audio_source_read_gap" in caplog.text
+        assert "file=clip.mp3" in caplog.text
+        assert "max_gap=0.120s" in wrapped.summary()
 
     def test_build_play_after_timing_debug_flags_slow_callback(self, audio_service):
         """Duration diagnostics flag when callback elapsed time exceeds sent frames."""
@@ -2478,6 +2523,74 @@ class TestAudioService:
         with patch("bot.services.audio.time.time", return_value=1000.0):
             # Should not raise even if no capture active
             sink.write(b"some data", 999)
+
+    def test_write_suppresses_receive_processing_while_playing(self):
+        """Inbound receive work is skipped while outbound playback is active."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        sink.running = True
+        sink.worker_thread = Mock()
+        sink.worker_thread.is_alive = Mock(return_value=True)
+        sink.last_audio_time = {}
+        sink.buffer_last_update = {}
+        sink.user_audio_buffers = {}
+        sink._active_captures = {}
+        sink.audio_buffers = {}
+        sink.queue = Mock()
+        sink.queue.put = Mock()
+        sink.audio_service = Mock(suppress_recording_while_playing=True)
+        sink.guild = Mock()
+        sink.guild.voice_client = Mock()
+        sink.guild.voice_client.is_playing = Mock(return_value=True)
+        sink._feed_speech_segmenter = Mock()
+
+        with patch("bot.services.audio.time.time", return_value=1000.0):
+            sink.write(b"some data", 999)
+
+        sink._feed_speech_segmenter.assert_not_called()
+        sink.queue.put.assert_not_called()
+        assert sink.user_audio_buffers == {}
+        assert sink._playback_suppressed_receive_chunks == 1
+
+    def test_write_keeps_active_capture_while_playing(self):
+        """Explicit voice-command captures still receive data during playback."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        sink.running = True
+        sink.worker_thread = Mock()
+        sink.worker_thread.is_alive = Mock(return_value=True)
+        sink.last_audio_time = {}
+        sink.buffer_last_update = {}
+        sink.user_audio_buffers = {}
+        sink._active_captures = {}
+        sink.audio_buffers = {}
+        sink.queue = Mock()
+        sink.queue.qsize = Mock(return_value=5)
+        sink.queue.put = Mock()
+        sink.buffer_lock = Mock()
+        sink.buffer_lock.__enter__ = Mock(return_value=None)
+        sink.buffer_lock.__exit__ = Mock(return_value=None)
+        sink.buffer_seconds = 30
+        sink.stt_enabled = False
+        sink.audio_service = Mock(suppress_recording_while_playing=True)
+        sink.guild = Mock()
+        sink.guild.voice_client = Mock()
+        sink.guild.voice_client.is_playing = Mock(return_value=True)
+        sink._feed_speech_segmenter = Mock()
+
+        user_id = 12345
+        data = b"\xaa\xbb" * 50
+        capture = {"chunks": [], "last_audio_time": 0.0, "total_bytes": 0}
+        sink._active_captures[user_id] = capture
+
+        with patch("bot.services.audio.time.time", return_value=1000.0):
+            sink.write(data, user_id)
+
+        assert capture["chunks"] == [data]
+        assert capture["total_bytes"] == len(data)
+        sink._feed_speech_segmenter.assert_called_once()
 
     # ------------------------------------------------------------------ #
     # Voice-command listening state suppression tests

@@ -34,6 +34,86 @@ from bot.services.speech_training import (
     _compute_rms,
 )
 
+
+class PlaybackDiagnosticsAudioSource(discord.AudioSource):
+    """Wrap an audio source and log voice-player read stalls."""
+
+    def __init__(
+        self,
+        source: discord.AudioSource,
+        *,
+        guild_id: int,
+        audio_file: str,
+        play_id: str,
+        gap_warning_seconds: float,
+        read_warning_seconds: float,
+    ) -> None:
+        self._source = source
+        self.guild_id = guild_id
+        self.audio_file = audio_file
+        self.play_id = play_id
+        self.gap_warning_seconds = gap_warning_seconds
+        self.read_warning_seconds = read_warning_seconds
+        self.read_count = 0
+        self.warning_count = 0
+        self.max_gap_seconds = 0.0
+        self.max_read_seconds = 0.0
+        self.zero_read_count = 0
+        self.started_at = time.monotonic()
+        self._last_read_started_at: Optional[float] = None
+
+    def read(self) -> bytes:
+        read_started = time.monotonic()
+        if self._last_read_started_at is not None:
+            gap = read_started - self._last_read_started_at
+            self.max_gap_seconds = max(self.max_gap_seconds, gap)
+            if self.gap_warning_seconds and gap >= self.gap_warning_seconds:
+                self.warning_count += 1
+                logger.warning(
+                    "[AudioService] [PLAY-STUTTER] audio_source_read_gap "
+                    "play_id=%s guild_id=%s file=%s gap=%.3fs reads=%s",
+                    self.play_id,
+                    self.guild_id,
+                    self.audio_file,
+                    gap,
+                    self.read_count,
+                )
+        data = self._source.read()
+        read_elapsed = time.monotonic() - read_started
+        self.max_read_seconds = max(self.max_read_seconds, read_elapsed)
+        self.read_count += 1
+        if not data:
+            self.zero_read_count += 1
+        if self.read_warning_seconds and read_elapsed >= self.read_warning_seconds:
+            self.warning_count += 1
+            logger.warning(
+                "[AudioService] [PLAY-STUTTER] audio_source_read_slow "
+                "play_id=%s guild_id=%s file=%s duration=%.3fs reads=%s bytes=%s",
+                self.play_id,
+                self.guild_id,
+                self.audio_file,
+                read_elapsed,
+                self.read_count,
+                len(data) if data else 0,
+            )
+        self._last_read_started_at = read_started
+        return data
+
+    def is_opus(self) -> bool:
+        return self._source.is_opus()
+
+    def cleanup(self) -> None:
+        self._source.cleanup()
+
+    def summary(self) -> str:
+        elapsed = time.monotonic() - self.started_at
+        return (
+            f"read_count={self.read_count} warnings={self.warning_count} "
+            f"max_gap={self.max_gap_seconds:.3f}s "
+            f"max_read={self.max_read_seconds:.3f}s "
+            f"zero_reads={self.zero_read_count} source_elapsed={elapsed:.3f}s"
+        )
+
 class AudioService:
     """
     Service for managing voice connections and audio playback.
@@ -249,6 +329,22 @@ class AudioService:
         self.progress_display_delay_seconds = 2.0
         self.short_clip_duration_threshold_seconds = 2.0
         self.short_clip_start_delay_ms = 120
+        self.defer_short_clip_ui_until_after_playback_seconds = max(
+            0.0,
+            float(os.getenv("AUDIO_DEFER_SHORT_CLIP_UI_UNTIL_AFTER_PLAYBACK_SECONDS", "0.0")),
+        )
+        self.suppress_recording_while_playing = (
+            os.getenv("AUDIO_SUPPRESS_RECORDING_WHILE_PLAYING", "true").strip().lower()
+            not in {"0", "false", "off", "no"}
+        )
+        self.playback_read_gap_warning_seconds = max(
+            0.0,
+            float(os.getenv("AUDIO_PLAYBACK_READ_GAP_WARNING_SECONDS", "0.08")),
+        )
+        self.playback_read_duration_warning_seconds = max(
+            0.0,
+            float(os.getenv("AUDIO_PLAYBACK_READ_DURATION_WARNING_SECONDS", "0.04")),
+        )
         self.playback_start_preroll_ms = max(
             0, int(os.getenv("PLAYBACK_START_PREROLL_MS", "180"))
         )
@@ -2442,6 +2538,22 @@ class AudioService:
                         before_options=ffmpeg_before_options,
                         stderr=None,  # inherit stderr so ffmpeg crashes are visible in container logs
                     )
+                    audio_source = PlaybackDiagnosticsAudioSource(
+                        audio_source,
+                        guild_id=guild_id,
+                        audio_file=audio_file,
+                        play_id=play_id,
+                        gap_warning_seconds=getattr(
+                            self,
+                            "playback_read_gap_warning_seconds",
+                            0.08,
+                        ),
+                        read_warning_seconds=getattr(
+                            self,
+                            "playback_read_duration_warning_seconds",
+                            0.04,
+                        ),
+                    )
                     ffmpeg_spawn_duration = time.time() - ffmpeg_spawn_start
                     print(
                         f"[AudioService] [PERF] ffmpeg_spawn guild_id={guild_id} duration={ffmpeg_spawn_duration:.4f}s"
@@ -2463,12 +2575,17 @@ class AudioService:
                             startup_preroll_ms=startup_preroll_ms,
                             player=active_player,
                         )
+                        source_summary = (
+                            f" source=({audio_source.summary()})"
+                            if isinstance(audio_source, PlaybackDiagnosticsAudioSource)
+                            else ""
+                        )
                         if error:
                             print(
                                 "[AudioService] [PLAY-DEBUG] play_after "
                                 f"play_id={play_id} guild_id={guild_id} file={audio_file} "
                                 f"status=error elapsed={elapsed:.3f}s "
-                                f"player_alive={callback_player_alive}{timing_debug} error={error}"
+                                f"player_alive={callback_player_alive}{timing_debug}{source_summary} error={error}"
                             )
                             print(f'[AudioService] Error in playback: {error}')
                         else:
@@ -2476,7 +2593,7 @@ class AudioService:
                                 "[AudioService] [PLAY-DEBUG] play_after "
                                 f"play_id={play_id} guild_id={guild_id} file={audio_file} "
                                 f"status=ok elapsed={elapsed:.3f}s "
-                                f"player_alive={callback_player_alive}{timing_debug}"
+                                f"player_alive={callback_player_alive}{timing_debug}{source_summary}"
                             )
                     finally:
                         guild_event = self._guild_playback_done.get(guild_id)
@@ -2489,6 +2606,10 @@ class AudioService:
                             play_id,
                         )
 
+                guild_event = self._guild_playback_done.get(guild_id)
+                if guild_event is not None:
+                    guild_event.clear()
+                self.playback_done.clear()
                 voice_client.play(audio_source, after=after_playing)
                 self._mark_playback_started(
                     guild_id,
@@ -2503,10 +2624,6 @@ class AudioService:
                     active_player_alive = bool(active_player is not None and active_player.is_alive())
                 except Exception:
                     active_player_alive = False
-                guild_event = self._guild_playback_done.get(guild_id)
-                if guild_event is not None:
-                    guild_event.clear()
-                self.playback_done.clear()
                 print(
                     "[AudioService] [PLAY-DEBUG] play_started "
                     f"play_id={play_id} guild_id={guild_id} file={audio_file} "
@@ -2571,6 +2688,42 @@ class AudioService:
                             is_entrance,
                         )
                         return
+
+                    defer_ui_threshold = getattr(
+                        self,
+                        "defer_short_clip_ui_until_after_playback_seconds",
+                        5.0,
+                    )
+                    if (
+                        defer_ui_threshold > 0
+                        and duration > 0
+                        and duration <= defer_ui_threshold
+                    ):
+                        guild_event = self._guild_playback_done.get(guild_id)
+                        if guild_event is not None and not guild_event.is_set():
+                            wait_started = time.time()
+                            timeout = max(1.0, duration + 2.0)
+                            print(
+                                "[AudioService] [DEBUG] deferring short-clip UI until playback ends "
+                                f"guild_id={guild_id} file={audio_file} duration={duration:.3f}s "
+                                f"threshold={defer_ui_threshold:.3f}s timeout={timeout:.3f}s"
+                            )
+                            try:
+                                await asyncio.wait_for(guild_event.wait(), timeout=timeout)
+                            except asyncio.TimeoutError:
+                                logger.warning(
+                                    "[AudioService] short-clip UI defer timed out "
+                                    "guild_id=%s file=%s duration=%.3fs timeout=%.3fs",
+                                    guild_id,
+                                    audio_file,
+                                    duration,
+                                    timeout,
+                                )
+                            print(
+                                "[AudioService] [PERF] short_clip_ui_defer "
+                                f"guild_id={guild_id} file={audio_file} "
+                                f"duration={time.time() - wait_started:.4f}s"
+                            )
 
                     sound_message = None
                     view = None
@@ -3192,6 +3345,8 @@ class KeywordDetectionSink(sinks.Sink):
         # Active voice-command post-prompt captures: user_id -> capture dict.
         # Set up by _record_voice_command_after_beep, fed by write().
         self._active_captures: Dict[int, dict] = {}
+        self._playback_suppressed_receive_chunks = 0
+        self._last_playback_suppression_log = 0.0
 
         # Quota notification rate limiter: guild_id -> last notification timestamp.
         self._quota_notification_timestamps: Dict[int, float] = {}
@@ -3357,6 +3512,24 @@ class KeywordDetectionSink(sinks.Sink):
         receive_time = time.time()
         self.last_audio_time[user_id] = receive_time
         self.buffer_last_update[user_id] = receive_time
+
+        if self._should_suppress_receive_processing_during_playback(user_id):
+            self._playback_suppressed_receive_chunks = getattr(
+                self,
+                "_playback_suppressed_receive_chunks",
+                0,
+            ) + 1
+            last_log = getattr(self, "_last_playback_suppression_log", 0.0)
+            if receive_time - last_log >= 5.0:
+                self._last_playback_suppression_log = receive_time
+                logger.info(
+                    "[KeywordDetectionSink] Suppressing inbound voice processing during playback "
+                    "guild_id=%s user_id=%s suppressed_chunks=%s",
+                    getattr(self.guild, "id", None),
+                    user_id,
+                    self._playback_suppressed_receive_chunks,
+                )
+            return
         
         # Store audio in per-user timestamped buffer + feed active captures.
         with self.buffer_lock:
@@ -3406,6 +3579,20 @@ class KeywordDetectionSink(sinks.Sink):
                     # Include timestamp in queue entry for latency tracking
                     self.queue.put((bytes(self.audio_buffers[user_id]), user_id, receive_time))
                 self.audio_buffers[user_id] = bytearray()
+
+
+    def _should_suppress_receive_processing_during_playback(self, user_id: int) -> bool:
+        """Return True when inbound receive work should yield to outbound playback."""
+        audio_service = getattr(self, "audio_service", None)
+        if not getattr(audio_service, "suppress_recording_while_playing", True):
+            return False
+        if user_id in getattr(self, "_active_captures", {}):
+            return False
+        try:
+            voice_client = getattr(getattr(self, "guild", None), "voice_client", None)
+            return bool(voice_client and voice_client.is_playing())
+        except Exception:
+            return False
 
 
     def _worker(self):
