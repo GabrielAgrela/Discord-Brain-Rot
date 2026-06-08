@@ -3513,7 +3513,8 @@ class KeywordDetectionSink(sinks.Sink):
         self.last_audio_time[user_id] = receive_time
         self.buffer_last_update[user_id] = receive_time
 
-        if self._should_suppress_receive_processing_during_playback(user_id):
+        suppress_recording = self._should_suppress_recording_during_playback(user_id)
+        if suppress_recording:
             self._playback_suppressed_receive_chunks = getattr(
                 self,
                 "_playback_suppressed_receive_chunks",
@@ -3523,36 +3524,37 @@ class KeywordDetectionSink(sinks.Sink):
             if receive_time - last_log >= 5.0:
                 self._last_playback_suppression_log = receive_time
                 logger.info(
-                    "[KeywordDetectionSink] Suppressing inbound voice processing during playback "
+                    "[KeywordDetectionSink] Suppressing recording/speech-training during playback "
                     "guild_id=%s user_id=%s suppressed_chunks=%s",
                     getattr(self.guild, "id", None),
                     user_id,
                     self._playback_suppressed_receive_chunks,
                 )
-            return
-        
-        # Store audio in per-user timestamped buffer + feed active captures.
-        with self.buffer_lock:
-            if user_id not in self.user_audio_buffers:
-                self.user_audio_buffers[user_id] = []
-            
-            self.user_audio_buffers[user_id].append((receive_time, data))
-            
-            # Prune old chunks
-            cutoff = receive_time - self.buffer_seconds
-            self.user_audio_buffers[user_id] = [
-                (ts, audio) for ts, audio in self.user_audio_buffers[user_id] if ts >= cutoff
-            ]
-            
-            # Feed active voice-command post-beep captures (only the triggering user).
-            if user_id in self._active_captures:
-                cap = self._active_captures[user_id]
-                cap["chunks"].append(data)
-                cap["total_bytes"] = cap.get("total_bytes", 0) + len(data)
-                cap["last_audio_time"] = time.time()
+
+        if not suppress_recording:
+            # Store audio in per-user timestamped buffer + feed active captures.
+            with self.buffer_lock:
+                if user_id not in self.user_audio_buffers:
+                    self.user_audio_buffers[user_id] = []
+
+                self.user_audio_buffers[user_id].append((receive_time, data))
+
+                # Prune old chunks
+                cutoff = receive_time - self.buffer_seconds
+                self.user_audio_buffers[user_id] = [
+                    (ts, audio) for ts, audio in self.user_audio_buffers[user_id] if ts >= cutoff
+                ]
+
+                # Feed active voice-command post-beep captures (only the triggering user).
+                if user_id in self._active_captures:
+                    cap = self._active_captures[user_id]
+                    cap["chunks"].append(data)
+                    cap["total_bytes"] = cap.get("total_bytes", 0) + len(data)
+                    cap["last_audio_time"] = time.time()
 
         # Feed speech training segmenter (runs before Vosk, independent of listening state).
-        self._feed_speech_segmenter(data, user_id, receive_time)
+        if not suppress_recording:
+            self._feed_speech_segmenter(data, user_id, receive_time)
 
         # Skip Vosk keyword detection while a voice-command listening
         # session is active. The triggering user's audio still feeds
@@ -3581,8 +3583,8 @@ class KeywordDetectionSink(sinks.Sink):
                 self.audio_buffers[user_id] = bytearray()
 
 
-    def _should_suppress_receive_processing_during_playback(self, user_id: int) -> bool:
-        """Return True when inbound receive work should yield to outbound playback."""
+    def _should_suppress_recording_during_playback(self, user_id: int) -> bool:
+        """Return True when recording work should yield to outbound playback."""
         audio_service = getattr(self, "audio_service", None)
         if not getattr(audio_service, "suppress_recording_while_playing", True):
             return False
