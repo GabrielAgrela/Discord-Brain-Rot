@@ -151,6 +151,17 @@ class TestJavaScriptSyntax:
         )
 
     @pytest.mark.parametrize("filename", ["soundboard.js"])
+    def test_upload_jobs_have_sse_safety_poll(self, filename):
+        """Verify upload jobs keep polling slowly even when SSE is healthy."""
+        filepath = os.path.join(STATIC_DIR, filename)
+        assert os.path.exists(filepath), f"JS file not found: {filepath}"
+        with open(filepath, "r", encoding="utf-8") as fh:
+            content = fh.read()
+
+        assert "missed event cannot leave the queue stale" in content
+        assert "isSseHealthy() ? 5000 : 1200" in content
+
+    @pytest.mark.parametrize("filename", ["soundboard.js"])
     def test_system_monitor_constant_1s_visible(self, filename):
         """Verify system monitor polls at 1/s when visible."""
         filepath = os.path.join(STATIC_DIR, filename)

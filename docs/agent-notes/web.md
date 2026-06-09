@@ -179,7 +179,7 @@ The control-room page never uses setInterval. Instead it uses staggered setTimeo
 2. **Tables (actions, favorites, all-sounds)** — strictly SSE-driven. No passive polling occurs regardless of SSE health. No reconnect resync happens on SSE connect/reconnect. SSE events (`actions_changed`, `sounds_changed`) trigger immediate targeted fetches. Missed events must be fixed by publishing the correct event server-side.
 3. **Web control state** — SSE-driven with a 5 s health-check fallback. When SSE is healthy, only the health-check timer runs. When SSE is unhealthy, full state polling resumes.
 4. **System monitor** — host telemetry has no event-driven path, so it always polls at 1 s when visible (20 s when hidden), regardless of SSE health.
-5. **Upload jobs** — SSE-driven with 1.2 s network polling fallback when SSE is unhealthy.
+5. **Upload jobs** — SSE-accelerated with a slow 5 s safety poll when SSE is healthy and a 1.2 s poll when SSE is unhealthy.
 
 **When SSE is unhealthy / unavailable**:
 
@@ -199,12 +199,12 @@ The control-room page never uses setInterval. Instead it uses staggered setTimeo
 | Control room status | 1 s network poll + local progress tick | N/A | SSE events provide immediate refresh; 1 s polling ensures correctness even if events are missed |
 | Web control (mute) state | **No fetch** — health check only (~5 s) | N/A | Events (`control_room_changed`, `actions_changed`) drive state; low priority |
 | System monitor | **1 s** (unchanged, no event path) | 20 s | Host telemetry is NOT event-driven |
-| Upload job polling | Event-driven, 1.2 s fallback when SSE unhealthy | Same | `upload_job_changed` event triggers the next poll |
+| Upload job polling | Event-driven plus 5 s safety poll | Same | `upload_job_changed` triggers the next poll; the safety poll catches missed events |
 
 - **Control room local progress tick**: When SSE is healthy, the 1 s `_scheduleStatusPoll` timer runs `_controlRoomProgressTick()` instead of fetching. This function increments a local elapsed counter and re-renders the progress bar. On the next SSE event or visibility change, `refreshControlRoomStatus()` fetches fresh server data and resets the local counter. When SSE becomes unhealthy (detected by the health-check tick), polling resumes with a full network fetch every 1 s.
 - **System monitor 1 s cadence**: Unlike previous behaviour where system monitor slowed down during SSE health (paranoia intervals up to 15 s/60 s), it now always polls at 1 s when the tab is visible and 20 s when hidden. There is no event-driven path for host telemetry.
 - **Health-check tick**: The web-control loop schedules a 5 s health-check tick that calls `isSseHealthy()`. When SSE is healthy, web-control state is not fetched (events drive updates). When SSE is unhealthy, the next tick starts polling web-control state. This ensures automatic recovery without network overhead for the lowest-priority data.
-- **Upload job fallback**: After submitting an upload, the initial `pollUploadJob()` call fetches status once. If the job is still processing and SSE is healthy, no timeout is scheduled — the next `upload_job_changed` SSE event drives the check. When SSE is unhealthy, polling resumes at 1.2 s.
+- **Upload job fallback**: After submitting an upload, the initial `pollUploadJob()` call fetches status once. If the job is still processing and SSE is healthy, `upload_job_changed` SSE events drive fast follow-up checks, but a 5 s safety timeout is still scheduled so a missed event cannot leave an approved/error job showing as processing. When SSE is unhealthy, polling resumes at 1.2 s.
 - **SSE health check**: `isSseHealthy()` returns true when `sseConnected` is true AND the last event/heartbeat was received within `SSE_HEALTHY_TIMEOUT_MS` (45 s). If `sseConnected` is true but no event arrives for >45 s, SSE is considered unhealthy. The health-check tick (5 s) detects this faster.
 - Each loop uses `setTimeout` chains so the next tick is scheduled only after the previous tick fires (``setInterval`` would pile up if a fetch stalls).
 - Table data has no passive polling loop — tables are strictly SSE-driven. Missed events must be fixed by publishing the correct event server-side.

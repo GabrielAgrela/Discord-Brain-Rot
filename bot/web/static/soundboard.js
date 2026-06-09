@@ -3910,12 +3910,12 @@
                 }
                 updateUploadQueueItem(jobId, 'processing', 'Processing');
                 setUploadStatus('Processing audio in the background...', 'loading');
-                // When SSE is healthy, the 'upload_job_changed' event triggers
-                // the next poll — no recurring timeout needed.
-                // Fallback to recurring 1.2 s timeout when SSE is unhealthy.
-                if (!isSseHealthy()) {
-                    window.setTimeout(() => pollUploadJob(jobId), 1200);
-                }
+                // SSE events usually trigger the next check, but keep a slow
+                // safety poll so a missed event cannot leave the queue stale.
+                window.setTimeout(
+                    () => pollUploadJob(jobId),
+                    isSseHealthy() ? 5000 : 1200
+                );
             } catch (error) {
                 console.error('Upload status failed:', error);
                 updateUploadQueueItem(jobId, 'error', 'Status check failed');
