@@ -1961,74 +1961,37 @@ class BackgroundService:
         finally:
             self._keyword_scan_in_progress = False
 
-    # ── Keyword scan image-card helpers ────────────────────────────────────────
+    # ── Keyword scan image-card progress helpers ──────────────────────────────
 
     KEYWORD_SCAN_BORDER_COLOR = "#ED4245"
     KEYWORD_SCAN_REQUESTER = "Keyword Scan"
 
     @staticmethod
-    def _format_keyword_scan_description(
-        *,
-        total: int,
-        scanned: int,
-        matched: int,
-        skipped: int,
-        labeled_non: int = 0,
-        labeled_potential: int = 0,
-        trimmed: int = 0,
-        keywords: Optional[list[str]] = None,
-    ) -> str:
-        """Build a compact description line for keyword scan progress/completion cards.
+    def _format_keyword_scan_progress(total: int, scanned: int) -> str:
+        """Build the Discord keyword scan progress percentage."""
+        if total <= 0:
+            return "0%"
+        percent = max(0, min(100, round((scanned / total) * 100)))
+        return f"{percent}%"
 
-        Args:
-            total: Total number of eligible clips.
-            scanned: Number of clips scanned so far.
-            matched: Number of keyword matches found.
-            skipped: Number of clips skipped.
-            labeled_non: Number of clips labeled as ``none`` (completion only).
-            labeled_potential: Number of clips labeled as ``potential`` (completion only).
-            trimmed: Number of matches auto-trimmed to keyword (completion only).
-            keywords: The keyword list used for the scan (included once at start).
-
-        Returns:
-            Compact summary string, e.g. ``"3 keyword(s) · 12/83 sounds · 4 matches · 2 skipped"``.
-        """
-        parts: list[str] = []
-        if keywords is not None:
-            parts.append(f"{len(keywords)} keyword(s)")
-        if scanned == total:
-            parts.append(f"{scanned} sound{'s' if scanned != 1 else ''} scanned")
-        else:
-            parts.append(f"{scanned}/{total} sounds")
-        if matched:
-            parts.append(f"{matched} match{'es' if matched != 1 else ''}")
-        if skipped:
-            parts.append(f"{skipped} skipped")
-        if labeled_non:
-            parts.append(f"{labeled_non} labeled as none")
-        if labeled_potential:
-            parts.append(f"{labeled_potential} labeled potential")
-        if trimmed:
-            parts.append(f"{trimmed} trimmed")
-        return " · ".join(parts)
+    @staticmethod
+    def _format_keyword_scan_complete(matched: int) -> str:
+        """Build the Discord keyword scan completion message."""
+        suffix = "keyword" if matched == 1 else "keywords"
+        return f"{matched} {suffix} detected"
 
     async def _send_keyword_scan_card(
         self,
         channel: discord.TextChannel,
         guild: discord.Guild,
-        title: str,
-        description: str,
+        content: str,
     ) -> Optional[discord.Message]:
-        """Send an initial keyword scan progress/completion card.
-
-        Uses the standard image-card notification style with fallback to embed,
-        then plain text as a last resort.
-        """
+        """Send the initial keyword scan progress card with minimal content."""
         if self.behavior:
             try:
                 msg = await self.behavior.send_message(
-                    title=title,
-                    description=description,
+                    title=content,
+                    description="",
                     channel=channel,
                     guild=guild,
                     message_format="image",
@@ -2046,8 +2009,8 @@ class BackgroundService:
         # Fallback: embed
         try:
             embed = discord.Embed(
-                title=title,
-                description=description,
+                title=content,
+                description="",
                 color=discord.Color(0xED4245),
             )
             return await channel.send(embed=embed)
@@ -2056,27 +2019,22 @@ class BackgroundService:
 
         # Last resort: plain text
         try:
-            return await channel.send(f"**{title}**\n{description}")
+            return await channel.send(content)
         except Exception:
             return None
 
     async def _edit_keyword_scan_card(
         self,
         message: discord.Message,
-        title: str,
-        description: str,
+        content: str,
         message_service,
     ) -> None:
-        """Edit an existing keyword scan message with a new image card.
-
-        Generates a fresh image card and replaces the attachment in-place.
-        Falls back to embed edit, then plain-text content edit.
-        """
+        """Edit an existing keyword scan card with minimal content."""
         # Preferred path: regenerate image card and replace attachment
         try:
             image_bytes = await message_service._generate_message_image(
-                title=title,
-                description=description,
+                title=content,
+                description="",
                 thumbnail=None,
                 requester=self.KEYWORD_SCAN_REQUESTER,
                 show_footer=False,
@@ -2100,8 +2058,8 @@ class BackgroundService:
         # Fallback: embed edit
         try:
             embed = discord.Embed(
-                title=title,
-                description=description,
+                title=content,
+                description="",
                 color=discord.Color(0xED4245),
             )
             await message.edit(content=None, embed=embed, attachments=[])
@@ -2111,11 +2069,7 @@ class BackgroundService:
 
         # Last resort: plain-text edit
         try:
-            await message.edit(
-                content=f"**{title}**\n{description}",
-                embed=None,
-                attachments=[],
-            )
+            await message.edit(content=content, embed=None, attachments=[])
         except Exception:
             pass
 
@@ -2127,8 +2081,7 @@ class BackgroundService:
     ) -> None:
         """Run keyword scan for one guild and send progress to bot channel.
 
-        Progress is reported with standard image-card notifications (editable
-        in-place), not plain text.
+        Progress is reported as a minimal image card edited in-place.
         """
         message_service = getattr(self.audio_service, "message_service", None)
         if message_service is None:
@@ -2165,14 +2118,10 @@ class BackgroundService:
         )
 
         # Send initial progress card
-        initial_desc = self._format_keyword_scan_description(
-            total=total, scanned=0, matched=0, skipped=0, keywords=keywords,
-        )
         progress_msg = await self._send_keyword_scan_card(
             channel=channel,
             guild=guild,
-            title="🔎 Keyword scan running",
-            description=initial_desc,
+            content=self._format_keyword_scan_progress(total=total, scanned=0),
         )
         if progress_msg is None:
             logger.error(
@@ -2191,20 +2140,13 @@ class BackgroundService:
         progress_lock = threading.Lock()
 
         async def _update_progress_message() -> None:
-            """Edit the progress card with current state (throttled)."""
+            """Edit the progress card with current percentage (throttled)."""
             with progress_lock:
                 scanned = progress_state["scanned"]
-                matched = progress_state["matched"]
-                skipped = progress_state["skipped"]
                 total = progress_state["total"]
-            description = self._format_keyword_scan_description(
-                total=total, scanned=scanned, matched=matched, skipped=skipped,
-                keywords=keywords,
-            )
             await self._edit_keyword_scan_card(
                 message=progress_msg,
-                title="🔎 Keyword scan running",
-                description=description,
+                content=self._format_keyword_scan_progress(total=total, scanned=scanned),
                 message_service=message_service,
             )
 
@@ -2253,11 +2195,9 @@ class BackgroundService:
             )
             await self._edit_keyword_scan_card(
                 message=progress_msg,
-                title="⚠️ Keyword scan timed out",
-                description=self._format_keyword_scan_description(
-                    total=total, scanned=progress_state["scanned"],
-                    matched=progress_state["matched"],
-                    skipped=progress_state["skipped"],
+                content=self._format_keyword_scan_progress(
+                    total=total,
+                    scanned=progress_state["scanned"],
                 ),
                 message_service=message_service,
             )
@@ -2282,12 +2222,7 @@ class BackgroundService:
 
         await self._edit_keyword_scan_card(
             message=progress_msg,
-            title="✅ Keyword scan complete",
-            description=self._format_keyword_scan_description(
-                total=total, scanned=scanned, matched=matched, skipped=skipped,
-                labeled_non=labeled_non, labeled_potential=labeled_potential,
-                trimmed=trimmed,
-            ),
+            content=self._format_keyword_scan_complete(matched),
             message_service=message_service,
         )
 
