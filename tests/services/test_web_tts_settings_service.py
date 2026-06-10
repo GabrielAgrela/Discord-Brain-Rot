@@ -190,7 +190,7 @@ def test_ventura_chat_defaults_fallback(service, monkeypatch):
     monkeypatch.delenv("VENTURA_CHAT_MODEL", raising=False)
     monkeypatch.delenv("VENTURA_CHAT_PROVIDER", raising=False)
     settings = service.get_ventura_chat_settings()
-    assert settings["model"] == "deepseek/deepseek-v4-flash"
+    assert settings["model"] == "deepseek-v4-flash"
     assert settings["provider"] == ""
 
 

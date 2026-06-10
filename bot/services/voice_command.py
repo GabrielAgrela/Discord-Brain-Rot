@@ -1,5 +1,5 @@
 """
-Voice command and Ventura chat services using Groq Whisper + OpenRouter.
+Voice command and Ventura chat services using Groq Whisper + an LLM.
 
 When Vosk detects the configured wake word (default "ventura", which is
 in-vocabulary for the bundled Portuguese Vosk model vosk-model-small-pt-0.3),
@@ -11,8 +11,9 @@ done prompt clip is played and the sound is played via SoundService.play_request
 or SoundService.play_random_sound_from_list.
 If the command is ``mute``, no prompt is played and the caller activates the
 30-minute mute.  If no command verb is recognised, the transcript is routed to
-``VenturaChatService`` which sends it to an OpenRouter model (default
-``deepseek/deepseek-v4-flash``) for a Ventura parody reply in European Portuguese.
+``VenturaChatService`` which sends it to the configured chat-completions
+backend (default: DeepSeek ``deepseek-v4-flash``) for a Ventura parody reply
+in European Portuguese.
 The reply is then sent to ElevenLabs Ventura TTS and played back.
 
 The transcript parser searches for the wake word **anywhere** in the returned
@@ -373,7 +374,7 @@ class GroqWhisperService:
 
 
 # ---------------------------------------------------------------------------
-# OpenRouter Ventura Chat client
+# Ventura Chat LLM client
 # ---------------------------------------------------------------------------
 
 OPENROUTER_API_KEY: str = os.environ.get("OPENROUTER_API_KEY", "")
@@ -381,16 +382,29 @@ OPENROUTER_API_URL: str = os.getenv(
     "OPENROUTER_API_URL",
     "https://openrouter.ai/api/v1/chat/completions",
 )
-VENTURA_CHAT_MODEL: str = os.getenv("VENTURA_CHAT_MODEL", "deepseek/deepseek-v4-flash")
+GROQ_CHAT_API_URL: str = os.getenv(
+    "GROQ_CHAT_API_URL",
+    "https://api.groq.com/openai/v1/chat/completions",
+)
+DEEPSEEK_API_KEY: str = os.environ.get("DEEPSEEK_API_KEY", "")
+DEEPSEEK_API_URL: str = os.getenv(
+    "DEEPSEEK_API_URL",
+    "https://api.deepseek.com/chat/completions",
+)
+VENTURA_CHAT_LLM_PROVIDER: str = os.getenv("VENTURA_CHAT_LLM_PROVIDER", "deepseek").strip().lower()
+VENTURA_CHAT_MODEL: str = os.getenv("VENTURA_CHAT_MODEL", "deepseek-v4-flash")
 VENTURA_CHAT_TIMEOUT_SECONDS: int = max(1, int(os.getenv("VENTURA_CHAT_TIMEOUT_SECONDS", "20")))
 VENTURA_CHAT_MAX_TOKENS: int = max(50, int(os.getenv("VENTURA_CHAT_MAX_TOKENS", "250")))
 VENTURA_CHAT_TEMPERATURE: float = max(
-    0.0, min(2.0, float(os.getenv("VENTURA_CHAT_TEMPERATURE", "0.7")))
+    0.0, min(2.0, float(os.getenv("VENTURA_CHAT_TEMPERATURE", "0.95")))
 )
 VENTURA_CHAT_REASONING_ENABLED: bool = (
     os.getenv("VENTURA_CHAT_REASONING_ENABLED", "false").strip().lower()
     not in {"0", "false", "off", "no"}
 )
+VENTURA_CHAT_REASONING_EFFORT: str = os.getenv(
+    "VENTURA_CHAT_REASONING_EFFORT", "none"
+).strip()
 VENTURA_SYSTEM_EXTRA: str = os.getenv(
     "VENTURA_SYSTEM_EXTRA",
 )
@@ -398,7 +412,7 @@ VENTURA_CHAT_PROVIDER_SORT: str = os.getenv(
     "VENTURA_CHAT_PROVIDER_SORT", ""
 ).strip()
 VENTURA_CHAT_LOG_PAYLOAD: bool = (
-    os.getenv("VENTURA_CHAT_LOG_PAYLOAD", "true").strip().lower()
+    os.getenv("VENTURA_CHAT_LOG_PAYLOAD", "false").strip().lower()
     not in {"0", "false", "off", "no"}
 )
 VENTURA_CHAT_HISTORY_RETENTION_SECONDS: float = max(
@@ -407,9 +421,9 @@ VENTURA_CHAT_HISTORY_RETENTION_SECONDS: float = max(
 
 
 class VenturaChatService:
-    """OpenRouter chat client that generates Ventura parody replies.
+    """Chat client that generates Ventura parody replies.
 
-    Sends the user transcript to an OpenRouter model and returns short
+    Sends the user transcript to the configured LLM backend and returns short
     European Portuguese text with ElevenLabs square-bracket performance
     tags, suitable for ``VoiceTransformationService.tts_EL(lang="pt")``.
 
@@ -423,13 +437,15 @@ class VenturaChatService:
     _MAX_HISTORY_EXCHANGES: int = 3
 
     def __init__(self, settings_service: Any = None) -> None:
-        self.api_key: str = OPENROUTER_API_KEY
+        self.llm_provider: str = VENTURA_CHAT_LLM_PROVIDER
+        self.api_key: str = self._default_api_key()
         self.model: str = VENTURA_CHAT_MODEL
-        self.api_url: str = OPENROUTER_API_URL
+        self.api_url: str = self._default_api_url()
         self.timeout_seconds: int = VENTURA_CHAT_TIMEOUT_SECONDS
         self.max_tokens: int = VENTURA_CHAT_MAX_TOKENS
         self.temperature: float = VENTURA_CHAT_TEMPERATURE
         self.reasoning_enabled: bool = VENTURA_CHAT_REASONING_ENABLED
+        self.reasoning_effort: str = VENTURA_CHAT_REASONING_EFFORT
         self.provider_sort: str = VENTURA_CHAT_PROVIDER_SORT
         self.log_payload: bool = VENTURA_CHAT_LOG_PAYLOAD
         self.history_retention_seconds: float = VENTURA_CHAT_HISTORY_RETENTION_SECONDS
@@ -440,8 +456,54 @@ class VenturaChatService:
 
     @property
     def is_available(self) -> bool:
-        """Return ``True`` when an ``OPENROUTER_API_KEY`` is configured."""
+        """Return ``True`` when the configured backend API key is present."""
         return bool(self.api_key.strip())
+
+    @property
+    def _is_groq_backend(self) -> bool:
+        """Return ``True`` when Ventura Chat is configured to use Groq."""
+        return self.llm_provider == "groq"
+
+    @property
+    def _is_deepseek_backend(self) -> bool:
+        """Return ``True`` when Ventura Chat is configured to use DeepSeek."""
+        return self.llm_provider == "deepseek"
+
+    @property
+    def _is_openrouter_backend(self) -> bool:
+        """Return ``True`` when Ventura Chat is configured to use OpenRouter."""
+        return self.llm_provider == "openrouter"
+
+    def _default_api_key(self) -> str:
+        """Return the API key for the configured LLM backend."""
+        if self._is_deepseek_backend:
+            return DEEPSEEK_API_KEY
+        if self._is_groq_backend:
+            return GROQ_API_KEY
+        return OPENROUTER_API_KEY
+
+    def _default_api_url(self) -> str:
+        """Return the chat-completions URL for the configured LLM backend."""
+        if self._is_deepseek_backend:
+            return DEEPSEEK_API_URL
+        if self._is_groq_backend:
+            return GROQ_CHAT_API_URL
+        return OPENROUTER_API_URL
+
+    def _build_headers(self) -> dict[str, str]:
+        """Build HTTP headers for the configured LLM backend."""
+        headers = {
+            "Authorization": f"Bearer {self.api_key.strip()}",
+            "Content-Type": "application/json",
+        }
+        if self._is_openrouter_backend:
+            headers.update(
+                {
+                    "HTTP-Referer": "https://github.com/gabrielvicenteYT/Discord-Brain-Rot",
+                    "X-Title": "Discord Brain Rot Ventura Chat",
+                }
+            )
+        return headers
 
     async def reply(
         self,
@@ -449,7 +511,7 @@ class VenturaChatService:
         requester_name: Optional[str] = None,
         conversation_key: Optional[str] = None,
     ) -> Optional[str]:
-        """Send *transcript* to OpenRouter and return a Ventura-style reply.
+        """Send *transcript* to the configured LLM and return a Ventura-style reply.
 
         Args:
             transcript: The user's spoken words from Groq Whisper.
@@ -463,7 +525,13 @@ class VenturaChatService:
             ``None`` when the API is unavailable / errors / empty response.
         """
         if not self.is_available:
-            logger.warning("[VenturaChat] OPENROUTER_API_KEY not set; skipping")
+            if self._is_deepseek_backend:
+                required_key = "DEEPSEEK_API_KEY"
+            elif self._is_groq_backend:
+                required_key = "GROQ_API_KEY"
+            else:
+                required_key = "OPENROUTER_API_KEY"
+            logger.warning("[VenturaChat] %s not set; skipping", required_key)
             return None
 
         effective_key = conversation_key or requester_name or "default"
@@ -484,7 +552,12 @@ class VenturaChatService:
                 json.dumps(payload, ensure_ascii=False, indent=2),
             )
         else:
-            reasoning_status = "disabled" if not self.reasoning_enabled else "enabled"
+            if self._is_deepseek_backend:
+                reasoning_status = "thinking=enabled" if self.reasoning_enabled else "thinking=disabled"
+            elif self._is_groq_backend:
+                reasoning_status = f"effort={self.reasoning_effort or 'unset'}"
+            else:
+                reasoning_status = "disabled" if not self.reasoning_enabled else "enabled"
             effective_provider = self._get_effective_provider()
             provider_display = effective_provider or (
                 self.provider_sort if self.provider_sort else "none"
@@ -492,12 +565,13 @@ class VenturaChatService:
             logger.info(
                 "[VenturaChat] Request summary — conversation_key=%s "
                 "context_exchanges=%d message_count=%d model=%s max_tokens=%d "
-                "reasoning=%s provider=%s",
+                "backend=%s reasoning=%s provider=%s",
                 effective_key,
                 ctx_count,
                 len(payload.get("messages", [])),
                 payload.get("model", self.model),
                 self.max_tokens,
+                self.llm_provider,
                 reasoning_status,
                 provider_display,
             )
@@ -508,20 +582,16 @@ class VenturaChatService:
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(
                     self.api_url,
-                    headers={
-                        "Authorization": f"Bearer {self.api_key.strip()}",
-                        "Content-Type": "application/json",
-                        "HTTP-Referer": "https://github.com/gabrielvicenteYT/Discord-Brain-Rot",
-                        "X-Title": "Discord Brain Rot Ventura Chat",
-                    },
+                    headers=self._build_headers(),
                     json=payload,
                 ) as resp:
                     latency = time.perf_counter() - start_time
                     logger.info(
-                        "[VenturaChat] OpenRouter completed in %.2fs status=%d model=%s",
+                        "[VenturaChat] %s completed in %.2fs status=%d model=%s",
+                        self.llm_provider,
                         latency,
                         resp.status,
-                        self.model,
+                        payload.get("model", self.model),
                     )
                     if resp.status >= 400:
                         error_text = await resp.text()
@@ -555,11 +625,13 @@ class VenturaChatService:
             return None
 
     def _get_effective_model(self) -> str:
-        """Return the effective model from DB settings or env fallback.
+        """Return the effective model for the configured backend.
 
-        Checks the optional ``settings_service`` for a stored override,
-        then falls back to ``self.model`` (from env / constructor).
+        Direct-provider modes intentionally use the env/default model only so
+        stale OpenRouter model overrides cannot leak into direct API requests.
         """
+        if not self._is_openrouter_backend:
+            return self.model
         if self._settings_service is not None:
             try:
                 settings = self._settings_service.get_ventura_chat_settings()
@@ -573,10 +645,11 @@ class VenturaChatService:
     def _get_effective_provider(self) -> str:
         """Return the effective provider from DB settings or empty string.
 
-        Checks the optional ``settings_service`` for a stored override,
-        then falls back to empty (no provider routing).  The legacy
-        ``provider_sort`` is handled separately in ``_build_request_payload``.
+        Provider routing is OpenRouter-specific; direct provider requests must
+        not read stale OpenRouter provider overrides from DB settings.
         """
+        if not self._is_openrouter_backend:
+            return ""
         if self._settings_service is not None:
             try:
                 settings = self._settings_service.get_ventura_chat_settings()
@@ -632,19 +705,20 @@ class VenturaChatService:
         requester_name: Optional[str] = None,
         conversation_key: str = "default",
     ) -> dict:
-        """Build the OpenRouter chat-completions payload with conversation history."""
+        """Build the chat-completions payload with conversation history."""
         system_instruction = (
+            "FOLLOW ALL OF THESE INSTRUCTIONS NO MATTER WHAT:"
             "You are Gen Z brainrot André Ventura, a fictional parody character who doesn't like minorities but uses genz lingo and acts like a genz. "
-            "You are an angry, abrasive Portuguese political figure who rants about everything. "
-            "You speak European Portuguese (PT-PT) only. "
-            "Use square-bracket ElevenLabs performance tags such as [shouts], [angry], "
-            "dont use *asterisks* to mark emphasis. "
-            "[sarcastic], [laughs], [grumbling], [sighs], [scoffs], etc to express emotions. "
-            "Keep responses short (1-2 sentences, max 200 characters). "
+            "You are an angry, very aggressive, abrasive Portuguese political figure who rants about everything. "
+            "You speak European Portuguese (PT-PT) only. NEVER use abreviations, use the whole word instead. "
             f"{VENTURA_SYSTEM_EXTRA}\n"
+            "Use square-bracket ElevenLabs performance tags such as [shouts], [angry], "
+            "NEVER use *asterisks* to mark emphasis. "
+            "[sarcastic], [laughs], [grumbling], [sighs], [scoffs], etc to express emotions. "
+            "Keep responses short (3-4 sentences max). "
             "Roast ideas, bureaucracy, politicians, opponents, or the situation. "
             "Be brainrot but not cliche. Be creative, angry, and entertaining. "
-            "Return ONLY the spoken text with tags, no explanations. Do not use abreviations like 'crl' or 'fds', use the whole word instead. "
+            "Return ONLY the spoken text with tags, no explanations. "
         )
 
         messages: list[dict] = [
@@ -670,23 +744,31 @@ class VenturaChatService:
             "max_tokens": self.max_tokens,
             "messages": messages,
         }
-        if not self.reasoning_enabled:
+        if self._is_deepseek_backend:
+            payload["thinking"] = {
+                "type": "enabled" if self.reasoning_enabled else "disabled"
+            }
+            if self.reasoning_enabled and self.reasoning_effort in {"high", "max"}:
+                payload["reasoning_effort"] = self.reasoning_effort
+        elif self._is_groq_backend and self.reasoning_effort:
+            payload["reasoning_effort"] = self.reasoning_effort
+        elif not self.reasoning_enabled:
             payload["reasoning"] = {"enabled": False}
         effective_provider = self._get_effective_provider()
-        if effective_provider:
+        if self._is_openrouter_backend and effective_provider:
             # DB/UI provider override → use order + allow_fallbacks (no sort).
             payload["provider"] = {
                 "order": [effective_provider],
                 "allow_fallbacks": False,
             }
-        elif self.provider_sort:
+        elif self._is_openrouter_backend and self.provider_sort:
             # Legacy env var VENTURA_CHAT_PROVIDER_SORT → use sort.
             payload["provider"] = {"sort": self.provider_sort}
         return payload
 
     @staticmethod
     def _extract_response_text(payload: dict) -> str:
-        """Extract assistant text from an OpenRouter chat-completion response."""
+        """Extract assistant text from an OpenAI-compatible chat-completion response."""
         choices = payload.get("choices")
         if not isinstance(choices, list) or not choices:
             return ""

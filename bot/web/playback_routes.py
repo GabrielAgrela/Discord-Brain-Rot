@@ -140,10 +140,10 @@ def register_playback_routes(app: Flask) -> None:
     @_require_discord_login_api
     @_require_web_admin_api
     def get_tts_enhancer_settings() -> Any:
-        """Return the current Ventura Chat (and web enhancer) LLM model and provider."""
+        """Return the current web TTS enhancer LLM model and provider."""
 
         try:
-            settings = _get_web_tts_settings_service().get_ventura_chat_settings()
+            settings = _get_web_tts_settings_service().get_enhancer_settings()
             return jsonify(settings), 200
         except sqlite3.Error:
             logger.exception("Database error reading LLM settings")
@@ -156,7 +156,7 @@ def register_playback_routes(app: Flask) -> None:
     @_require_discord_login_api
     @_require_web_admin_api
     def set_tts_enhancer_settings() -> Any:
-        """Set or clear the Ventura Chat (and web enhancer) LLM model/provider overrides.
+        """Set or clear the web TTS enhancer LLM model/provider overrides.
 
         JSON body:
             ``model`` (str): Model ID to store.  Empty string clears the
@@ -178,7 +178,7 @@ def register_playback_routes(app: Flask) -> None:
             model = str(data["model"]).strip() if "model" in data else None
             provider = str(data["provider"]).strip() if "provider" in data else None
 
-            settings = settings_service.set_ventura_chat_settings(
+            settings = settings_service.set_enhancer_settings(
                 model=model,
                 provider=provider,
                 updated_by=updated_by,

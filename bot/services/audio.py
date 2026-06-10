@@ -241,7 +241,7 @@ class AudioService:
         # Per-user quota cooldown tracking: stores absolute deadlines.
         # Key = f"{guild_id}:{user_id}" -> absolute expiry timestamp.
         self._voice_command_quota_cooldowns: Dict[str, float] = {}
-        # Cooldown for quota-blocked Ventura wake words to avoid wasting STT/OpenRouter.
+        # Cooldown for quota-blocked Ventura wake words to avoid wasting STT/LLM calls.
         # Defaults to the same value as EL_TTS_QUOTA_COOLDOWN_SECONDS (3600s).
         try:
             self.voice_command_quota_cooldown_seconds = int(os.getenv("VOICE_COMMAND_QUOTA_COOLDOWN_SECONDS", "3600"))
@@ -4357,7 +4357,7 @@ class KeywordDetectionSink(sinks.Sink):
                 "temporarily disabled.\n\n"
                 "Wake commands will be ignored for up to "
                 f"{remaining_minutes} minutes to avoid wasting "
-                "STT and OpenRouter tokens."
+                "STT and LLM tokens."
             ),
             message_format="image",
             image_show_sound_icon=False,
@@ -4474,7 +4474,7 @@ class KeywordDetectionSink(sinks.Sink):
         Flow: rate limit → play start prompt → record fresh post-prompt PCM
         until user stops talking → transcribe via Groq Whisper → parse.
           - If ``play`` command: play done prompt → SoundService.play_request.
-          - Otherwise: VenturaChat (OpenRouter Qwen) → ElevenLabs Ventura
+          - Otherwise: VenturaChat (Groq Qwen by default) → ElevenLabs Ventura
             TTS → play via VoiceTransformationService.tts_EL.
         """
         guild_id = self.guild.id
@@ -4669,10 +4669,10 @@ class KeywordDetectionSink(sinks.Sink):
                 # Expired — clean up
                 del quota_cooldowns[quota_key]
 
-        # Check ElevenLabs quota block early so we don't waste OpenRouter
+        # Check ElevenLabs quota block early so we don't waste LLM calls.
         # tokens when TTS is not available.
         if vt_service.is_elevenlabs_quota_blocked(guild_id=self.guild.id):
-            print("[VoiceCommand] ElevenLabs TTS quota blocked; skipping Ventura chat to avoid wasting OpenRouter tokens")
+            print("[VoiceCommand] ElevenLabs TTS quota blocked; skipping Ventura chat to avoid wasting LLM tokens")
             # Set per-user quota cooldown + send notification.
             cooldown_seconds = getattr(
                 self.audio_service, "voice_command_quota_cooldown_seconds", 3600
@@ -4687,7 +4687,7 @@ class KeywordDetectionSink(sinks.Sink):
 
         ventura_service = self.audio_service._get_ventura_chat_service()
         if not ventura_service.is_available:
-            print("[VoiceCommand] VenturaChat not available (OPENROUTER_API_KEY missing); skipping")
+            print("[VoiceCommand] VenturaChat not available (LLM API key missing); skipping")
             return
 
         # Build a request_note from the transcript so the TTS sound card

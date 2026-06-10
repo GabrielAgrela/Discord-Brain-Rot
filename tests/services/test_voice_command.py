@@ -962,28 +962,32 @@ class TestGroqWhisperServiceDebugSave:
 # ====================================================================
 
 class TestVenturaChatService:
-    """Tests for the OpenRouter Ventura chat client with mocked HTTP."""
+    """Tests for the Ventura chat LLM client with mocked HTTP."""
 
     @pytest.fixture
     def service(self):
         from bot.services.voice_command import VenturaChatService
 
         srv = VenturaChatService()
-        srv.api_key = "test-openrouter-key"
+        srv.api_key = "test-llm-key"
         return srv
 
     def test_default_model_is_deepseek_v4_flash(self, service):
-        """Default model is deepseek/deepseek-v4-flash."""
-        assert service.model == "deepseek/deepseek-v4-flash"
+        """Default model is DeepSeek V4 Flash through DeepSeek's API."""
+        assert service.llm_provider == "deepseek"
+        assert service.model == "deepseek-v4-flash"
+        assert service.temperature == 0.95
+        assert service.reasoning_effort == "none"
 
     def test_default_speed_settings(self, service):
         """Verify new defaults tailored for fast responses."""
         assert service.max_tokens == 250
         assert service.provider_sort == ""
-        assert service.log_payload is True
+        assert service.log_payload is False
 
-    def test_payload_includes_provider_sort_when_no_db_settings(self, service):
-        """Payload includes sort when provider_sort is set but no DB settings."""
+    def test_openrouter_payload_includes_provider_sort_when_no_db_settings(self, service):
+        """OpenRouter payload includes sort when provider_sort is set but no DB settings."""
+        service.llm_provider = "openrouter"
         service.provider_sort = "throughput"
         payload = service._build_request_payload("hello", None)
         assert "provider" in payload
@@ -995,6 +999,12 @@ class TestVenturaChatService:
         payload = service._build_request_payload("hello", None)
         assert "provider" not in payload
 
+    def test_deepseek_payload_ignores_openrouter_provider_sort(self, service):
+        """DeepSeek payload does not include OpenRouter provider routing."""
+        service.provider_sort = "throughput"
+        payload = service._build_request_payload("hello", None)
+        assert "provider" not in payload
+
     def test_payload_includes_provider_order_from_settings_service(self):
         """When settings_service provides a provider, use order + allow_fallbacks."""
         from bot.services.voice_command import VenturaChatService
@@ -1002,21 +1012,22 @@ class TestVenturaChatService:
         class FakeSettingsService:
             def get_ventura_chat_settings(self):
                 return {
-                    "model": "deepseek/deepseek-v4-flash",
+                    "model": "deepseek-v4-flash",
                     "provider": "crucible",
                     "stored_model": None,
                     "stored_provider": "crucible",
-                    "default_model": "deepseek/deepseek-v4-flash",
+                    "default_model": "deepseek-v4-flash",
                     "default_provider": "",
                 }
 
         srv = VenturaChatService(settings_service=FakeSettingsService())
+        srv.llm_provider = "openrouter"
         srv.api_key = "test-openrouter-key"
         payload = srv._build_request_payload("hello", None)
         assert payload["provider"] == {"order": ["crucible"], "allow_fallbacks": False}
 
     def test_payload_includes_model_from_settings_service(self):
-        """When settings_service provides a model override, it is used."""
+        """OpenRouter uses the model override from settings_service."""
         from bot.services.voice_command import VenturaChatService
 
         class FakeSettingsService:
@@ -1026,14 +1037,38 @@ class TestVenturaChatService:
                     "provider": "",
                     "stored_model": "override-model",
                     "stored_provider": None,
-                    "default_model": "deepseek/deepseek-v4-flash",
+                    "default_model": "deepseek-v4-flash",
                     "default_provider": "",
                 }
 
         srv = VenturaChatService(settings_service=FakeSettingsService())
-        srv.api_key = "test-openrouter-key"
+        srv.llm_provider = "openrouter"
+        srv.api_key = "test-llm-key"
         payload = srv._build_request_payload("hello", None)
         assert payload["model"] == "override-model"
+        assert "provider" not in payload
+
+    def test_deepseek_payload_ignores_stale_openrouter_model_from_settings_service(self):
+        """DeepSeek keeps its configured model even when DB settings contain OpenRouter data."""
+        from bot.services.voice_command import VenturaChatService
+
+        class FakeSettingsService:
+            def get_ventura_chat_settings(self):
+                return {
+                    "model": "qwen/qwen3-32b",
+                    "provider": "deepinfra",
+                    "stored_model": "qwen/qwen3-32b",
+                    "stored_provider": "deepinfra",
+                    "default_model": "deepseek-v4-flash",
+                    "default_provider": "",
+                }
+
+        srv = VenturaChatService(settings_service=FakeSettingsService())
+        srv.api_key = "test-llm-key"
+        payload = srv._build_request_payload("hello", None)
+        assert payload["model"] == "deepseek-v4-flash"
+        assert payload["thinking"] == {"type": "disabled"}
+        assert "reasoning_effort" not in payload
         assert "provider" not in payload
 
     def test_payload_settings_service_provider_takes_precedence_over_sort(self):
@@ -1047,11 +1082,12 @@ class TestVenturaChatService:
                     "provider": "deepinfra",
                     "stored_model": None,
                     "stored_provider": "deepinfra",
-                    "default_model": "deepseek/deepseek-v4-flash",
+                    "default_model": "deepseek-v4-flash",
                     "default_provider": "",
                 }
 
         srv = VenturaChatService(settings_service=FakeSettingsService())
+        srv.llm_provider = "openrouter"
         srv.api_key = "test-openrouter-key"
         srv.provider_sort = "throughput"  # legacy sort also set
         payload = srv._build_request_payload("hello", None)
@@ -1067,7 +1103,7 @@ class TestVenturaChatService:
 
         from bot.services.voice_command import VenturaChatService
         srv = VenturaChatService(settings_service=BrokenSettingsService())
-        srv.api_key = "test-openrouter-key"
+        srv.api_key = "test-llm-key"
         # No sort by default (provider_sort is "")
         payload = srv._build_request_payload("hello", None)
         assert "provider" not in payload
@@ -1102,17 +1138,49 @@ class TestVenturaChatService:
                 assert "provider_sort" not in log_fmt
 
     def test_payload_includes_no_reasoning_when_disabled(self, service):
-        """Payload includes reasoning={"enabled": False} when reasoning is disabled (default)."""
+        """OpenRouter payload includes reasoning={"enabled": False} when disabled."""
+        service.llm_provider = "openrouter"
         service.reasoning_enabled = False
         payload = service._build_request_payload("hello", None)
         assert "reasoning" in payload
         assert payload["reasoning"] == {"enabled": False}
 
     def test_payload_excludes_no_reasoning_when_enabled(self, service):
-        """Payload does not contain reasoning field when reasoning is enabled."""
+        """OpenRouter payload does not contain reasoning field when reasoning is enabled."""
+        service.llm_provider = "openrouter"
         service.reasoning_enabled = True
         payload = service._build_request_payload("hello", None)
         assert "reasoning" not in payload
+
+    def test_deepseek_payload_disables_thinking_by_default(self, service):
+        """DeepSeek payload disables thinking by default."""
+        payload = service._build_request_payload("hello", None)
+        assert payload["thinking"] == {"type": "disabled"}
+        assert "reasoning_effort" not in payload
+        assert "reasoning" not in payload
+
+    def test_deepseek_payload_includes_reasoning_effort_when_enabled(self, service):
+        """DeepSeek payload can enable thinking with supported effort values."""
+        service.reasoning_enabled = True
+        service.reasoning_effort = "high"
+        payload = service._build_request_payload("hello", None)
+        assert payload["thinking"] == {"type": "enabled"}
+        assert payload["reasoning_effort"] == "high"
+
+    def test_openrouter_headers_include_app_metadata(self, service):
+        """OpenRouter requests include app metadata headers."""
+        service.llm_provider = "openrouter"
+        headers = service._build_headers()
+        assert headers["Authorization"] == "Bearer test-llm-key"
+        assert "HTTP-Referer" in headers
+        assert "X-Title" in headers
+
+    def test_deepseek_headers_omit_openrouter_metadata(self, service):
+        """DeepSeek requests only include generic OpenAI-compatible headers."""
+        headers = service._build_headers()
+        assert headers["Authorization"] == "Bearer test-llm-key"
+        assert "HTTP-Referer" not in headers
+        assert "X-Title" not in headers
 
     # ------------------------------------------------------------------
     # Payload construction with history
@@ -1361,7 +1429,7 @@ class TestVenturaChatService:
 
     @pytest.mark.asyncio
     async def test_reply_logs_full_payload(self, service):
-        """reply logs the full OpenRouter payload JSON at INFO level,
+        """reply logs the full LLM payload JSON at INFO level,
         including messages content, prior history, and no auth secrets."""
         # Seed some history to verify it appears in the log.
         service.log_payload = True
@@ -1414,7 +1482,7 @@ class TestVenturaChatService:
                 assert "OPENROUTER_API_KEY" not in payload_str
                 assert "Authorization" not in payload_str
                 assert "Bearer" not in payload_str
-                assert "test-openrouter-key" not in payload_str
+                assert "test-llm-key" not in payload_str
                 # Verify metadata is also in the log format string.
                 log_fmt = call_pos_args[0]
                 assert "conversation_key" in log_fmt

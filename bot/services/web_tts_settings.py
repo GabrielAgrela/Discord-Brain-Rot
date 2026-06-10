@@ -36,7 +36,7 @@ VENTURA_CHAT_PROVIDER_ENV = "VENTURA_CHAT_PROVIDER"
 # Fallback defaults when no env var is set.
 FALLBACK_ENHANCER_MODEL = "deepseek/deepseek-v4-flash"
 FALLBACK_ENHANCER_PROVIDER = ""
-FALLBACK_VENTURA_MODEL = "deepseek/deepseek-v4-flash"
+FALLBACK_VENTURA_MODEL = "deepseek-v4-flash"
 FALLBACK_VENTURA_PROVIDER = ""
 
 
