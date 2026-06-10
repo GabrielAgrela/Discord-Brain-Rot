@@ -17,6 +17,55 @@ class TestVoiceTransformationService:
     """Tests for action logging around STS and isolation flows."""
 
     @pytest.mark.asyncio
+    async def test_tts_el_forwards_allow_tts_interrupt(self):
+        """ElevenLabs TTS forwards the interrupt flag to the TTS engine."""
+        with patch("bot.services.voice_transformation.TTS") as mock_tts_cls, patch(
+            "bot.services.voice_transformation.ActionRepository"
+        ) as mock_action_repo_cls, patch(
+            "bot.services.voice_transformation.SoundRepository"
+        ):
+            action_repo = Mock()
+            tts_engine = Mock()
+            tts_engine.save_as_mp3_EL = AsyncMock(return_value=None)
+
+            mock_action_repo_cls.return_value = action_repo
+            mock_tts_cls.return_value = tts_engine
+
+            from bot.services.voice_transformation import VoiceTransformationService
+
+            service = VoiceTransformationService(
+                bot=Mock(), audio_service=Mock(), message_service=Mock()
+            )
+            user = SimpleNamespace(
+                name="gabi", display_name="Gabi", guild=SimpleNamespace(id=123)
+            )
+
+            await service.tts_EL(
+                user,
+                "olá",
+                lang="pt",
+                request_note="heard text",
+                allow_tts_interrupt=True,
+            )
+
+            action_repo.insert.assert_called_once_with(
+                "gabi", "tts_EL", "olá", guild_id=123
+            )
+            tts_engine.save_as_mp3_EL.assert_awaited_once_with(
+                "olá",
+                "pt",
+                "",
+                send_controls=True,
+                loading_message=None,
+                requester_avatar_url=None,
+                sts_thumbnail_url=None,
+                requester_name="Gabi",
+                guild_id=123,
+                request_note="heard text",
+                allow_tts_interrupt=True,
+            )
+
+    @pytest.mark.asyncio
     async def test_sts_el_logs_resolved_sound_id(self):
         """STS should log a stable sound ID so downstream stats can join against sounds."""
         with patch("bot.services.voice_transformation.TTS") as mock_tts_cls, patch(

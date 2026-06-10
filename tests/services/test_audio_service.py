@@ -110,6 +110,9 @@ class TestAudioService:
             "19-05-26-18-30-25-238017-sarcastic Ok vou fingir que.mp3",
             "19-05-26-18-30-43-231662-frustrated Foda-se sighs .mp3",
         ]
+        service.voice_command_thinking_sound = (
+            "09-06-26-21-14-35-796406-contemplating hmmmmmmmmm.mp3"
+        )
         # Per-guild keyword detection state (normally set in __init__)
         service.keyword_sinks = {}
         service._keyword_detection_restart_tasks = {}
@@ -1053,6 +1056,50 @@ class TestAudioService:
 
     @pytest.mark.asyncio
     @patch("bot.services.audio.discord.FFmpegPCMAudio")
+    async def test_play_tts_live_stream_interrupts_active_audio_when_allowed(
+        self, mock_ffmpeg_pcm, audio_service
+    ):
+        """Live TTS interrupts active audio when explicitly allowed."""
+        from bot.services.audio import AudioService
+
+        audio_service.ffmpeg_path = "/usr/bin/ffmpeg"
+        audio_service.bot = Mock()
+        audio_service.mute_service = Mock()
+        audio_service.mute_service.is_muted = False
+        audio_service.message_service = Mock()
+        audio_service.message_service.get_bot_channel = Mock()
+        audio_service.image_generator = Mock()
+        audio_service.image_generator.generate_sound_card = AsyncMock(return_value=None)
+        audio_service._stop_voice_client_and_wait = AsyncMock()
+        audio_service._notify_tts_busy = AsyncMock()
+
+        voice_client = Mock()
+        voice_client.is_playing.return_value = True
+        voice_client.is_paused = Mock(return_value=False)
+        voice_client.is_connected.return_value = True
+        voice_client._player = None
+
+        audio_service.ensure_voice_connected = AsyncMock(return_value=voice_client)
+
+        channel = Mock()
+        channel.guild.id = 556
+
+        result = await AudioService.play_tts_live_stream(
+            audio_service,
+            fifo_path="/tmp/fake_fifo",
+            audio_file="test_live.mp3",
+            channel=channel,
+            user="tester",
+            allow_tts_interrupt=True,
+        )
+
+        assert result is True
+        audio_service._notify_tts_busy.assert_not_awaited()
+        audio_service._stop_voice_client_and_wait.assert_awaited_once_with(voice_client)
+        voice_client.play.assert_called_once()
+
+    @pytest.mark.asyncio
+    @patch("bot.services.audio.discord.FFmpegPCMAudio")
     async def test_play_tts_live_stream_preroll_ms(self, mock_ffmpeg_pcm, audio_service):
         """Ensure play_tts_live_stream respects el_tts_live_preroll_ms when building ffmpeg filters."""
         from bot.services.audio import AudioService
@@ -1530,7 +1577,74 @@ class TestAudioService:
         assert call_args is not None
         assert call_args.kwargs.get("lang") == "pt"
         assert call_args.kwargs.get("request_note") == "stop doing that"
+        assert call_args.kwargs.get("allow_tts_interrupt") is True
         assert call_args.args[1] == "[shouts] Isto é uma vergonha!"
+
+    @pytest.mark.asyncio
+    async def test_handle_voice_command_non_play_starts_thinking_prompt_in_parallel(self):
+        """Non-play Ventura chat starts the thinking prompt without awaiting it."""
+        from bot.services.audio import KeywordDetectionSink
+
+        sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
+        sink.guild = Mock()
+        sink.guild.id = 223
+        sink.guild.get_member = Mock(return_value=None)
+        sink.voice_command_enabled = True
+        sink.voice_command_wake_words = ["bot"]
+        sink.voice_command_vosk_wake_words = []
+
+        sink.audio_service = Mock()
+        sink.audio_service._voice_command_cooldowns = {}
+        sink.audio_service._voice_command_quota_cooldowns = {}
+        sink.audio_service.voice_command_cooldown_seconds = 5
+        sink.audio_service.voice_command_capture_seconds = 6
+        sink.audio_service.voice_command_thinking_sound = (
+            "09-06-26-21-14-35-796406-contemplating hmmmmmmmmm.mp3"
+        )
+        sink.audio_service.sound_service = AsyncMock()
+        sink.audio_service.sound_service.play_request = AsyncMock()
+
+        thinking_started = asyncio.Event()
+        thinking_release = asyncio.Event()
+
+        async def _prompt(_channel, filename, *, wait=True):
+            if wait is False:
+                assert filename == sink.audio_service.voice_command_thinking_sound
+                thinking_started.set()
+                await thinking_release.wait()
+            return True
+
+        sink.audio_service._play_voice_command_prompt = AsyncMock(side_effect=_prompt)
+
+        mock_ventura = Mock()
+        mock_ventura.is_available = True
+        mock_ventura.reply = AsyncMock(return_value="[thinking] Resposta.")
+        sink.audio_service._get_ventura_chat_service = Mock(return_value=mock_ventura)
+
+        mock_vt = Mock()
+        mock_vt.is_elevenlabs_quota_blocked = Mock(return_value=False)
+        mock_vt.tts_EL = AsyncMock()
+        sink.audio_service.voice_transformation_service = mock_vt
+
+        sink._record_voice_command_after_beep = AsyncMock(return_value=b"\x00\x00" * 100)
+
+        mock_voice_service = Mock()
+        mock_voice_service.is_available = True
+        mock_voice_service.transcribe = AsyncMock(return_value="bot explica isto")
+        sink.audio_service._get_voice_command_service = Mock(return_value=mock_voice_service)
+
+        await asyncio.wait_for(
+            sink._handle_voice_command(889, "ThinkingUser", Mock()),
+            timeout=1.0,
+        )
+        await asyncio.wait_for(thinking_started.wait(), timeout=1.0)
+
+        mock_ventura.reply.assert_awaited_once()
+        mock_vt.tts_EL.assert_awaited_once()
+        assert mock_vt.tts_EL.await_args.kwargs.get("allow_tts_interrupt") is True
+        assert sink.audio_service._play_voice_command_prompt.await_count == 2
+        thinking_release.set()
+        await asyncio.sleep(0)
 
     @pytest.mark.asyncio
     async def test_handle_voice_command_non_play_skips_when_openrouter_unavailable(self):
@@ -1908,6 +2022,13 @@ class TestAudioService:
         ]
         for f in expected:
             assert f in audio_service.voice_command_done_sounds
+
+    def test_voice_command_thinking_sound_default_contents(self, audio_service):
+        """Default thinking prompt is the non-play Ventura waiting clip."""
+        assert (
+            audio_service.voice_command_thinking_sound
+            == "09-06-26-21-14-35-796406-contemplating hmmmmmmmmm.mp3"
+        )
 
     def test_voice_command_start_sound_property_returns_from_pool(self, audio_service):
         """Property returns one of the pool filenames (random or fallback for single)."""

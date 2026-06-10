@@ -297,6 +297,10 @@ class AudioService:
         ]
         if not self.voice_command_done_sounds:
             self.voice_command_done_sounds = ["16-05-26-19-54-41-416014-Ok fica bem.mp3"]
+        self.voice_command_thinking_sound = os.getenv(
+            "VOICE_COMMAND_THINKING_SOUND",
+            "09-06-26-21-14-35-796406-contemplating hmmmmmmmmm.mp3",
+        ).strip()
 
         # Cache: key=(filepath, mtime) -> PCM bytes for prompt clips
         self._voice_command_prompt_pcm_cache: Dict[tuple, bytes] = {}
@@ -1882,6 +1886,7 @@ class AudioService:
         interrupt_event: 'threading.Event' = None,
         request_note: Optional[str] = None,
         input_format: Optional[str] = None,
+        allow_tts_interrupt: bool = False,
     ) -> bool:
         """Play a live-streaming TTS from a POSIX FIFO (named pipe).
 
@@ -1943,7 +1948,7 @@ class AudioService:
                 hasattr(voice_client, "is_paused") and voice_client.is_paused()
             )
 
-            if is_currently_playing:
+            if is_currently_playing and not allow_tts_interrupt:
                 await self._notify_tts_busy(
                     channel=channel,
                     user=user,
@@ -1952,6 +1957,15 @@ class AudioService:
                     loading_message=loading_message,
                 )
                 return False
+
+            if is_currently_playing:
+                self._interrupt_live_tts_stream(
+                    guild_id, reason="interrupted_by_live_tts",
+                )
+                self._guild_stop_progress_update[guild_id] = True
+                self.stop_progress_update = True
+                self._cancel_progress_update_task(guild_id)
+                await self._stop_voice_client_and_wait(voice_client)
 
             # Wait for lingering player thread
             lingering_player = getattr(voice_client, "_player", None)
@@ -4682,6 +4696,14 @@ class KeywordDetectionSink(sinks.Sink):
         request_note = build_voice_request_note(transcript, transcript_wake_words)
 
         conversation_key = f"guild:{self.guild.id}:user:{user_id}"
+        thinking_sound = getattr(self.audio_service, "voice_command_thinking_sound", "")
+        if isinstance(thinking_sound, str) and thinking_sound.strip():
+            asyncio.create_task(
+                self.audio_service._play_voice_command_prompt(
+                    channel, thinking_sound.strip(), wait=False,
+                )
+            )
+
         reply = await ventura_service.reply(
             transcript,
             requester_name=requester_name,
@@ -4712,6 +4734,7 @@ class KeywordDetectionSink(sinks.Sink):
                 requester_avatar_url=avatar_url,
                 sts_thumbnail_url=sts_thumbnail,
                 request_note=request_note,
+                allow_tts_interrupt=True,
             )
         except ElevenLabsQuotaExceededError:
             print("[VoiceCommand] ElevenLabs quota exceeded during Ventura TTS; reply skipped")

@@ -818,13 +818,14 @@ class TTS:
     async def save_as_mp3_EL(self, text, lang="pt", region="", send_controls=True,
                              loading_message=None, requester_avatar_url=None, sts_thumbnail_url=None,
                              requester_name="admin", guild_id: Optional[int] = None,
-                             request_note: Optional[str] = None):
+                             request_note: Optional[str] = None,
+                             allow_tts_interrupt: bool = False):
         ctx = EarlyLiveContext()
         try:
             return await self._save_as_mp3_EL_impl(
                 text, lang, region, send_controls,
                 loading_message, requester_avatar_url, sts_thumbnail_url,
-                requester_name, guild_id, request_note, ctx
+                requester_name, guild_id, request_note, ctx, allow_tts_interrupt
             )
         finally:
             if not ctx.live_playback_started and ctx.live_task is not None:
@@ -848,7 +849,9 @@ class TTS:
     async def _save_as_mp3_EL_impl(self, text, lang="pt", region="", send_controls=True,
                                   loading_message=None, requester_avatar_url=None, sts_thumbnail_url=None,
                                   requester_name="admin", guild_id: Optional[int] = None,
-                                  request_note: Optional[str] = None, ctx: Optional[EarlyLiveContext] = None):
+                                  request_note: Optional[str] = None,
+                                  ctx: Optional[EarlyLiveContext] = None,
+                                  allow_tts_interrupt: bool = False):
         if ctx is None:
             ctx = EarlyLiveContext()
         boost_volume = 0
@@ -979,6 +982,7 @@ class TTS:
                                         interrupt_event=live_interrupt_event,
                                         request_note=request_note,
                                         input_format=live_input_format,
+                                        allow_tts_interrupt=allow_tts_interrupt,
                                     )
                                 )
                                 # Yield to the event loop so the live task starts running immediately
@@ -1227,6 +1231,7 @@ class TTS:
                             requester_avatar_url=requester_avatar_url,
                             sts_thumbnail_url=sts_thumbnail_url,
                             request_note=request_note,
+                            allow_tts_interrupt=allow_tts_interrupt,
                         )
                     self.update_last_request_time(guild_id=guild_id)
                     logger.info(

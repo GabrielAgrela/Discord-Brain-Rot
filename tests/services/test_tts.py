@@ -583,7 +583,7 @@ class TestSaveAsMp3ELLive:
 
         tts.behavior.play_tts_live_stream = _fake_play_live
 
-        await tts.save_as_mp3_EL("hello live", lang="pt")
+        await tts.save_as_mp3_EL("hello live", lang="pt", allow_tts_interrupt=True)
 
         mock_db().insert_sound.assert_called_once()
         tts.behavior.play_audio.assert_not_called()
@@ -591,6 +591,7 @@ class TestSaveAsMp3ELLive:
 
         # request_note should be forwarded through to play_tts_live_stream
         assert play_tts_live_kwargs.get("request_note") is None
+        assert play_tts_live_kwargs.get("allow_tts_interrupt") is True
 
     @pytest.mark.asyncio
     @patch("bot.tts.aiohttp.ClientSession")

@@ -81,12 +81,13 @@ class VoiceTransformationService:
 
     async def tts_EL(self, user, speech: str, lang: str = "en", region: str = "", send_controls=True,
                      loading_message=None, requester_avatar_url=None, sts_thumbnail_url=None,
-                     request_note: Optional[str] = None):
+                     request_note: Optional[str] = None, allow_tts_interrupt: bool = False):
         """ElevenLabs text-to-speech.
 
         Args:
             request_note: Optional text shown as a "TTS:" footer pill on the
                 sound card (e.g. the user's original voice-command transcript).
+            allow_tts_interrupt: Whether this TTS may interrupt active audio.
         """
         guild_id = self._resolve_guild_id(user)
         self.action_repo.insert(user.name, "tts_EL", speech, guild_id=guild_id)
@@ -99,6 +100,7 @@ class VoiceTransformationService:
             requester_name=requester_name,
             guild_id=guild_id,
             request_note=request_note,
+            allow_tts_interrupt=allow_tts_interrupt,
         ))
 
     def is_elevenlabs_quota_blocked(self, guild_id: Optional[int] = None) -> bool:
