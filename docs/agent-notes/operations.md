@@ -29,13 +29,14 @@ Read this when changing deployment, Docker, dependencies, logging, verification 
 
 - The bot runs in Docker, so Python changes do not take effect until the container restarts.
 - `BackgroundService` has a self-heal watchdog enabled by default. It calls `os._exit(70)` after prolonged Discord gateway unready state or repeated unrecoverable zombie voice cleanup failures; Docker `restart: always` brings the bot back up.
-- Normal production flow restarts the bot service:
+- Normal production flow recreates the bot service so `.env`, bind mount,
+  entrypoint, and image/runtime changes are picked up:
 
 ```bash
-docker-compose restart bot
+docker-compose up -d --force-recreate bot
 ```
 
-- `./scripts/verify_and_deploy.sh` uses `docker-compose restart` for default-profile services, then detects an existing web container and recreates it with `--profile web --force-recreate`. This ensures stale bind mounts, entrypoints, and paths from renames (e.g., file/folder lowercase cleanup) do not leave the web service broken.
+- `./scripts/verify_and_deploy.sh` recreates the bot service with `docker-compose up -d --force-recreate bot`, then detects an existing web container and recreates it with `--profile web --force-recreate`. Do not use `docker-compose restart` after changing `.env`; restart keeps the old container environment and will not load new API keys or provider settings.
 - The `web` service is profile-gated (`profiles: ["web"]`). Restart `web` when changing Flask Python code, web runtime configuration, dependencies, or when manual inspection shows templates/assets are not being picked up:
 
 ```bash

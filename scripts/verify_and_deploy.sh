@@ -28,11 +28,11 @@ else
   exit 1
 fi
 
-echo "[verify_and_deploy] Restarting Docker services..."
-if docker-compose restart >"$RESTART_LOG" 2>&1; then
-  echo "[verify_and_deploy] Docker restart completed."
+echo "[verify_and_deploy] Recreating bot Docker service..."
+if docker-compose up -d --force-recreate bot >"$RESTART_LOG" 2>&1; then
+  echo "[verify_and_deploy] Bot container recreation completed."
 else
-  echo "[verify_and_deploy] Docker restart failed. Recent output:"
+  echo "[verify_and_deploy] Bot container recreation failed. Recent output:"
   tail -n 80 "$RESTART_LOG"
   exit 1
 fi
