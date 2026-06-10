@@ -6,7 +6,7 @@ Discord bot for soundboard playback, live voice keyword triggers, TTS/STS, sound
 
 - **Sound playback** — `/toca` with fuzzy matching, speed/volume/reverse effects, image-based sound cards with inline controls (progress, replay, favorite, slap, rename, join/leave events, STS character, similar sounds, add-to-list). Random/random-favorite/random-slap via the controls panel. Slash commands for `/subwaysurfers`, `/familyguy`, `/slice`.
 - **Upload & sound ingestion** — Unified modal for MP3 file upload and URL ingestion (MP3, TikTok, YouTube, Instagram). Automatic loudness normalization on save. Filename sanitization with collision avoidance. Periodic MyInstants scraping.
-- **Voice commands (wake word + Groq Whisper + Ventura chat)** — Vosk detects the configured wake word (default `ventura`), plays a start prompt, records fresh command audio, and sends it to Groq Whisper for transcription. Three-way branching: play a sound, activate 30-minute mute, or route to an OpenRouter LLM (DeepSeek) for an angry André Ventura parody reply with ElevenLabs TTS playback. Wake words, capture duration, silence timeout, cooldown, confidence thresholds, and prompt clips are all configurable via environment variables.
+- **Voice commands (wake word + Groq Whisper + Ventura chat)** — Vosk detects the configured wake word (default `ventura`), plays a start prompt, records fresh command audio, and sends it to Groq Whisper for transcription. Three-way branching: play a sound, activate 30-minute mute, or route to a chat LLM (DeepSeek by default) for an angry André Ventura parody reply with ElevenLabs TTS playback. Wake words, capture duration, silence timeout, cooldown, confidence thresholds, and prompt clips are all configurable via environment variables.
 - **Real-time keyword detection (Vosk)** — Live keyword triggers (slap or list playback) managed via `/keyword add|remove|list`. Voice commands build on top of the same Vosk grammar.
 - **Speech training dataset (opt-in)** — Persistent voice capture for building a labeled speech dataset with Madeiran Portuguese accents. Clips are segmented by silence, saved as MP3, and can be labeled via the web labeling UI. Requires `SPEECH_TRAINING_RECORDING_ENABLED=true`.
 - **TTS / STS / Voice isolation** — `/tts` (Google or ElevenLabs), `/sts` (ElevenLabs speech-to-speech), `/isolate` (ElevenLabs voice isolation). All outputs are loudness-normalized.
@@ -84,7 +84,8 @@ Create a `.env` file in the project root. Only `DISCORD_BOT_TOKEN` is strictly r
 | Variable | Default | Description |
 |---|---|---|
 | `GROQ_API_KEY` | — | Required for voice commands (Groq Whisper) |
-| `OPENROUTER_API_KEY` | — | Required for Ventura chat LLM branch and web TTS enhancer |
+| `DEEPSEEK_API_KEY` | — | Required for the default Ventura chat LLM backend |
+| `OPENROUTER_API_KEY` | — | Required for Ventura chat only when `VENTURA_CHAT_LLM_PROVIDER=openrouter`; always required for web TTS enhancer |
 | `EL_key` | — | ElevenLabs API key |
 | `EL_voice_id_pt` | — | ElevenLabs Portuguese voice ID |
 | `EL_voice_id_en` | — | ElevenLabs English voice ID |
@@ -145,6 +146,7 @@ polling/fallback behaviour in that case.
 | `VOICE_COMMAND_QUOTA_COOLDOWN_SECONDS` | `3600` | Per-user cooldown for Ventura chat+ElevenLabs TTS when quota is blocked (does not affect `play`/`toca`/`mute` voice commands) |
 | `VOICE_COMMAND_SILENCE_SECONDS` | `1.0` | Silence timeout after prompt (range `0.5`–`5.0`) |
 | `VOICE_COMMAND_BEEP_ENABLED` | `true` | Set `false` to disable prompt clips |
+| `VOICE_COMMAND_THINKING_SOUND` | `09-06-26-21-14-35-796406-contemplating hmmmmmmmmm.mp3` | Non-blocking clip played while Ventura chat/TTS is being generated for non-play voice commands |
 | `GROQ_WHISPER_MODEL` | `whisper-large-v3` | Groq Whisper model |
 | `GROQ_WHISPER_LANGUAGE` | `pt` | Language hint for Whisper; empty for auto-detect |
 | `GROQ_WHISPER_TIMEOUT_SECONDS` | `20` | Groq API timeout |
@@ -158,14 +160,16 @@ polling/fallback behaviour in that case.
 
 | Variable | Default | Description |
 |---|---|---|
-| `VENTURA_CHAT_MODEL` | `deepseek/deepseek-v4-flash` | OpenRouter model for Ventura replies |
-| `VENTURA_CHAT_PROVIDER` | — | OpenRouter provider to pin (e.g. `crucible` or `parasail/fp8`); unset = no routing |
-| `VENTURA_CHAT_REASONING_ENABLED` | `false` | Enable model reasoning |
+| `VENTURA_CHAT_LLM_PROVIDER` | `deepseek` | Chat backend for Ventura replies (`deepseek`, `groq`, or `openrouter`) |
+| `VENTURA_CHAT_MODEL` | `deepseek-v4-flash` | Model for Ventura replies |
+| `VENTURA_CHAT_PROVIDER` | — | OpenRouter provider to pin when `VENTURA_CHAT_LLM_PROVIDER=openrouter` (e.g. `crucible` or `parasail/fp8`); unset = no routing |
+| `VENTURA_CHAT_REASONING_ENABLED` | `false` | Enable model reasoning/thinking where supported |
+| `VENTURA_CHAT_REASONING_EFFORT` | `none` | Reasoning effort for supported providers (`high`/`max` for DeepSeek thinking) |
 | `VENTURA_CHAT_TIMEOUT_SECONDS` | `20` | API timeout |
 | `VENTURA_CHAT_MAX_TOKENS` | `250` | Max reply tokens |
-| `VENTURA_CHAT_TEMPERATURE` | `0.7` | Temperature (range `0.0`–`2.0`) |
+| `VENTURA_CHAT_TEMPERATURE` | `0.95` | Temperature (range `0.0`–`2.0`) |
 | `VENTURA_CHAT_HISTORY_RETENTION_SECONDS` | `300` | Per-user context lifetime (`0` disables history) |
-| `VENTURA_CHAT_LOG_PAYLOAD` | `true` | Log full request payload; `false` for compact summary |
+| `VENTURA_CHAT_LOG_PAYLOAD` | `false` | Log full request payload; `false` for compact summary |
 
 ### Audio & Playback
 
