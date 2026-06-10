@@ -775,6 +775,44 @@ class TestBackgroundService:
 
         service._request_self_restart.assert_called_once()
 
+    @pytest.mark.asyncio
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    async def test_keyword_health_skips_zombie_cleanup_while_voice_stabilizes(
+        self, _mock_sound_repo, _mock_action_repo
+    ):
+        """Ensure a fresh voice reconnect is not interrupted by zombie cleanup."""
+        from bot.services.background import BackgroundService
+
+        voice_client = Mock()
+        voice_client.ws = None
+        voice_client.disconnect = AsyncMock()
+
+        guild = Mock(id=123, name="Test Guild", voice_client=voice_client)
+        bot = Mock(guilds=[guild])
+
+        audio_service = Mock()
+        audio_service.is_voice_library_reconnect_pending.return_value = False
+        audio_service.is_reconnection_pending.return_value = False
+        audio_service.is_voice_connection_stabilizing.return_value = True
+        audio_service.get_voice_connection_stabilizing_remaining.return_value = 12.3
+        audio_service.stop_keyword_detection = AsyncMock()
+        audio_service.ensure_voice_connected = AsyncMock()
+
+        service = BackgroundService(
+            bot=bot,
+            audio_service=audio_service,
+            sound_service=Mock(),
+            behavior=Mock(),
+        )
+        service.guild_settings_service = Mock()
+
+        await service.keyword_detection_health_check.coro(service)
+
+        audio_service.stop_keyword_detection.assert_not_awaited()
+        voice_client.disconnect.assert_not_awaited()
+        audio_service.ensure_voice_connected.assert_not_awaited()
+
     @patch("bot.services.background.ActionRepository")
     @patch("bot.services.background.SoundRepository")
     def test_weekly_wrapped_default_schedule_is_friday_18_utc(

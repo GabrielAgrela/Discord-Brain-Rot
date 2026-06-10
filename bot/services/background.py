@@ -2343,6 +2343,11 @@ class BackgroundService:
                             remaining = self.audio_service.get_reconnection_remaining(guild.id)
                             print(f"[BackgroundService] Reconnection in progress ({remaining:.1f}s remaining), skipping zombie cleanup for {guild.name}...")
                             continue  # Skip this guild, let the ongoing reconnection complete
+
+                        if self.audio_service.is_voice_connection_stabilizing(guild.id):
+                            remaining = self.audio_service.get_voice_connection_stabilizing_remaining(guild.id)
+                            print(f"[BackgroundService] Voice connection still stabilizing ({remaining:.1f}s remaining), skipping zombie cleanup for {guild.name}...")
+                            continue
                         
                         print(f"[BackgroundService] Health check: Zombie voice client detected in {guild.name}, forcing cleanup...")
                         try:

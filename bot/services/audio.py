@@ -1577,6 +1577,26 @@ class AudioService:
         grace_seconds = float(getattr(self, "VOICE_LIBRARY_RECONNECT_GRACE_SECONDS", 45.0))
         return max(0.0, grace_seconds - elapsed)
 
+    def is_voice_connection_stabilizing(self, guild_id: int) -> bool:
+        """Return True while a newly created voice connection can still be settling."""
+        connected_at = self._connection_timestamps.get(guild_id)
+        if not connected_at:
+            return False
+
+        elapsed = time.time() - connected_at
+        grace_seconds = float(getattr(self, "VOICE_LIBRARY_RECONNECT_GRACE_SECONDS", 45.0))
+        return 0 <= elapsed < grace_seconds
+
+    def get_voice_connection_stabilizing_remaining(self, guild_id: int) -> float:
+        """Return seconds remaining in the new voice connection stabilization window."""
+        connected_at = self._connection_timestamps.get(guild_id)
+        if not connected_at:
+            return 0.0
+
+        elapsed = time.time() - connected_at
+        grace_seconds = float(getattr(self, "VOICE_LIBRARY_RECONNECT_GRACE_SECONDS", 45.0))
+        return max(0.0, grace_seconds - elapsed)
+
     async def ensure_voice_connected(self, channel: discord.VoiceChannel) -> Optional[discord.VoiceProtocol]:
         """Ensure the bot is connected to the specified voice channel.
         
