@@ -1812,6 +1812,71 @@ class TestKeywordScanHelpers:
 
         assert BackgroundService._format_keyword_scan_complete(0) == "0 keywords detected"
 
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    def test_has_active_voice_session_detects_non_bot_members(
+        self, _mock_sound_repo, _mock_action_repo
+    ):
+        """Keyword scans defer while real users are in bot voice."""
+        from bot.services.background import BackgroundService
+
+        human = Mock(bot=False)
+        bot_member = Mock(bot=True)
+        channel = Mock(members=[bot_member, human])
+        voice_client = Mock(channel=channel)
+        voice_client.is_connected.return_value = True
+        guild = Mock(voice_client=voice_client)
+        service = BackgroundService(
+            bot=Mock(guilds=[guild]),
+            audio_service=Mock(),
+            sound_service=Mock(),
+            behavior=Mock(),
+        )
+
+        assert service._has_active_voice_session() is True
+
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    def test_has_active_voice_session_ignores_empty_or_bot_only_voice(
+        self, _mock_sound_repo, _mock_action_repo
+    ):
+        """Keyword scans may run when only bot users are in voice."""
+        from bot.services.background import BackgroundService
+
+        channel = Mock(members=[Mock(bot=True)])
+        voice_client = Mock(channel=channel)
+        voice_client.is_connected.return_value = True
+        guild = Mock(voice_client=voice_client)
+        service = BackgroundService(
+            bot=Mock(guilds=[guild]),
+            audio_service=Mock(),
+            sound_service=Mock(),
+            behavior=Mock(),
+        )
+
+        assert service._has_active_voice_session() is False
+
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
+    def test_keyword_scan_startup_delay_remaining(
+        self, _mock_sound_repo, _mock_action_repo
+    ):
+        """Scheduled keyword scans wait briefly after startup."""
+        from bot.services.background import BackgroundService
+
+        service = BackgroundService(
+            bot=Mock(guilds=[]),
+            audio_service=Mock(),
+            sound_service=Mock(),
+            behavior=Mock(),
+        )
+        service._keyword_scan_startup_delay_seconds = 120
+        service._keyword_scan_service_started_monotonic = time.monotonic() - 30
+
+        remaining = service._keyword_scan_startup_delay_remaining_seconds()
+
+        assert 80 <= remaining <= 90
+
     @pytest.mark.asyncio
     @patch("bot.services.background.ActionRepository")
     @patch("bot.services.background.SoundRepository")

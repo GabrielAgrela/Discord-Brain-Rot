@@ -195,6 +195,9 @@ polling/fallback behaviour in that case.
 | `SPEECH_TRAINING_KEYWORD_SCAN_ENABLED` | `true` | Enable daily (24h) scheduled keyword scan of unlabeled speech training clips via the bot (labels non-matches as `none`, labels matches as `potential`; Discord image-card progress shows percentage only and completion shows detected count only) |
 | `SPEECH_TRAINING_KEYWORD_SCAN_INTERVAL_SECONDS` | `86400` | Interval for the scheduled keyword scan, default 24h (range `300`–`86400`) |
 | `SPEECH_TRAINING_KEYWORD_SCAN_WORKERS` | `4` | Worker count for the automatic bot-side keyword scan (range `1`–`8`; manual web scans keep their own worker setting) |
+| `SPEECH_TRAINING_KEYWORD_SCAN_STARTUP_DELAY_SECONDS` | `120` | Delay scheduled keyword scans after bot startup so voice autojoin/state can settle (range `0`–`3600`) |
+| `SPEECH_TRAINING_KEYWORD_SCAN_DEFER_WHILE_VOICE_ACTIVE` | `true` | Defer scheduled keyword scans while the bot is connected to an occupied voice channel |
+| `SPEECH_TRAINING_KEYWORD_SCAN_ACTIVE_VOICE_RETRY_SECONDS` | `300` | Retry delay after deferring a scheduled keyword scan because voice is active (range `60`–`3600`) |
 
 ## Slash Commands
 

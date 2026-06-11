@@ -124,6 +124,16 @@ class BackgroundService:
         self._keyword_scan_workers = self._env_int(
             "SPEECH_TRAINING_KEYWORD_SCAN_WORKERS", 4, 1, 8
         )
+        self._keyword_scan_service_started_monotonic = time.monotonic()
+        self._keyword_scan_startup_delay_seconds = self._env_int(
+            "SPEECH_TRAINING_KEYWORD_SCAN_STARTUP_DELAY_SECONDS", 120, 0, 3600
+        )
+        self._keyword_scan_defer_while_voice_active = self._env_flag(
+            "SPEECH_TRAINING_KEYWORD_SCAN_DEFER_WHILE_VOICE_ACTIVE", True
+        )
+        self._keyword_scan_defer_active_voice_seconds = self._env_int(
+            "SPEECH_TRAINING_KEYWORD_SCAN_ACTIVE_VOICE_RETRY_SECONDS", 300, 60, 3600
+        )
         self._keyword_scan_in_progress = False
 
         # Lazy app settings repository (same DB path as the scan loop).
@@ -1812,6 +1822,28 @@ class BackgroundService:
         if not self._keyword_scan_daily_enabled:
             return
 
+        startup_remaining = self._keyword_scan_startup_delay_remaining_seconds()
+        if startup_remaining > 0:
+            retry_seconds = max(1, min(self._keyword_scan_defer_active_voice_seconds, startup_remaining))
+            self._defer_keyword_scan(
+                retry_seconds=retry_seconds,
+                summary="Startup delay; retrying after voice state settles",
+                log_reason="startup delay",
+            )
+            return
+
+        if (
+            self._keyword_scan_defer_while_voice_active
+            and self._has_active_voice_session()
+        ):
+            self._defer_keyword_scan(
+                retry_seconds=self._keyword_scan_defer_active_voice_seconds,
+                summary="Active voice session; retrying later",
+                log_reason="active voice session detected",
+            )
+            return
+
+        self._set_keyword_scan_loop_interval(self._keyword_scan_daily_interval)
         self._keyword_scan_in_progress = True
         now_utc = datetime.now(timezone.utc)
         now_iso = now_utc.isoformat()
@@ -1960,6 +1992,88 @@ class BackgroundService:
                 pass
         finally:
             self._keyword_scan_in_progress = False
+
+    def _keyword_scan_startup_delay_remaining_seconds(self) -> int:
+        """Return remaining startup delay before scheduled keyword scans may run."""
+        delay = max(0, getattr(self, "_keyword_scan_startup_delay_seconds", 0))
+        if delay <= 0:
+            return 0
+        elapsed = time.monotonic() - getattr(
+            self,
+            "_keyword_scan_service_started_monotonic",
+            time.monotonic(),
+        )
+        return max(0, int(delay - elapsed))
+
+    def _defer_keyword_scan(
+        self,
+        *,
+        retry_seconds: int,
+        summary: str,
+        log_reason: str,
+    ) -> None:
+        """Persist and schedule a deferred keyword scan retry."""
+        retry_seconds = max(1, retry_seconds)
+        now_utc = datetime.now(timezone.utc)
+        now_iso = now_utc.isoformat()
+        retry_iso = (now_utc + timedelta(seconds=retry_seconds)).isoformat()
+        self._set_keyword_scan_loop_interval(retry_seconds)
+        try:
+            db_path = self._resolve_db_path()
+            self._init_app_settings_repo(db_path)
+            self._persist_keyword_scan_schedule(
+                enabled=True,
+                interval_seconds=self._keyword_scan_daily_interval,
+                last_finished_at=now_iso,
+                next_run_at=retry_iso,
+                last_status="deferred",
+                last_summary=summary,
+            )
+        except Exception:
+            logger.warning(
+                "[BackgroundService] Failed to persist deferred keyword scan metadata",
+                exc_info=True,
+            )
+        logger.info(
+            "[BackgroundService] Deferring speech training keyword scan: "
+            "%s; retrying in %ss",
+            log_reason,
+            retry_seconds,
+        )
+
+    def _set_keyword_scan_loop_interval(self, seconds: int) -> None:
+        """Set the keyword scan loop interval when the loop is running."""
+        try:
+            loop = self.speech_training_keyword_scan_loop
+            if loop.is_running() and getattr(loop, "seconds", None) != seconds:
+                loop.change_interval(seconds=seconds)
+        except Exception:
+            logger.debug(
+                "[BackgroundService] Failed to change keyword scan loop interval",
+                exc_info=True,
+            )
+
+    def _has_active_voice_session(self) -> bool:
+        """Return True when the bot is connected to voice with non-bot users."""
+        for guild in getattr(self.bot, "guilds", []) or []:
+            if self._guild_has_active_voice_members(guild):
+                return True
+        return False
+
+    @staticmethod
+    def _guild_has_active_voice_members(guild: discord.Guild) -> bool:
+        """Return True when a guild voice client is with non-bot members."""
+        voice_client = getattr(guild, "voice_client", None)
+        if voice_client is None:
+            return False
+        try:
+            if hasattr(voice_client, "is_connected") and not voice_client.is_connected():
+                return False
+        except Exception:
+            return False
+        channel = getattr(voice_client, "channel", None)
+        members = getattr(channel, "members", None) or []
+        return any(not getattr(member, "bot", False) for member in members)
 
     # ── Keyword scan image-card progress helpers ──────────────────────────────
 
