@@ -3608,8 +3608,13 @@ class KeywordDetectionSink(sinks.Sink):
                 # Keep only the most recent audio
                 self.audio_buffers[user_id] = self.audio_buffers[user_id][-max_buffer:]
             
-            # Only queue when we have enough data (~300ms) or if queue is empty
-            if len(self.audio_buffers[user_id]) >= self.min_batch_size or self.queue.qsize() == 0:
+            # Only queue when we have enough data (~300ms) or if queue is empty.
+            # During playback, recording/speech-training work is suppressed but
+            # Vosk keyword detection still runs for slap/list keywords. Avoid
+            # queuing every tiny receive chunk in that mode; the audio player
+            # thread is more sensitive to CPU/GIL pressure than keyword latency.
+            queue_empty_fast_path = not suppress_recording and self.queue.qsize() == 0
+            if len(self.audio_buffers[user_id]) >= self.min_batch_size or queue_empty_fast_path:
                 buf_size = len(self.audio_buffers[user_id])
                 if self.queue.qsize() < self.max_queue_size:
                     # Include timestamp in queue entry for latency tracking

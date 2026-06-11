@@ -2645,8 +2645,8 @@ class TestAudioService:
             # Should not raise even if no capture active
             sink.write(b"some data", 999)
 
-    def test_write_keeps_keyword_detection_while_suppressing_recording_during_playback(self):
-        """Playback suppression skips recording work but still queues Vosk keywords."""
+    def test_write_batches_keyword_detection_while_suppressing_recording_during_playback(self):
+        """Playback suppression keeps Vosk enabled without queuing tiny chunks."""
         from bot.services.audio import KeywordDetectionSink
 
         sink = KeywordDetectionSink.__new__(KeywordDetectionSink)
@@ -2661,7 +2661,7 @@ class TestAudioService:
         sink.queue = Mock()
         sink.queue.qsize = Mock(return_value=0)
         sink.queue.put = Mock()
-        sink.min_batch_size = 28800
+        sink.min_batch_size = 100
         sink.max_queue_size = 100
         sink.stt_enabled = True
         sink.audio_service = Mock(suppress_recording_while_playing=True)
@@ -2670,15 +2670,21 @@ class TestAudioService:
         sink.guild.voice_client.is_playing = Mock(return_value=True)
         sink._feed_speech_segmenter = Mock()
 
-        data = b"\xaa\xbb" * 50
+        data = b"\xaa\xbb" * 25
         with patch("bot.services.audio.time.time", return_value=1000.0):
             sink.write(data, 999)
 
+        sink.queue.put.assert_not_called()
+        assert sink.audio_buffers[999] == bytearray(data)
+
+        with patch("bot.services.audio.time.time", return_value=1000.1):
+            sink.write(data, 999)
+
         sink._feed_speech_segmenter.assert_not_called()
-        sink.queue.put.assert_called_once_with((data, 999, 1000.0))
+        sink.queue.put.assert_called_once_with((data + data, 999, 1000.1))
         assert sink.user_audio_buffers == {}
         assert sink.audio_buffers[999] == bytearray()
-        assert sink._playback_suppressed_receive_chunks == 1
+        assert sink._playback_suppressed_receive_chunks == 2
 
     def test_write_keeps_active_capture_while_playing(self):
         """Explicit voice-command captures still receive data during playback."""
