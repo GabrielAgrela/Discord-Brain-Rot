@@ -274,6 +274,27 @@ def test_top_limit_zero_skips_process_scan(tmp_path):
     assert snap["available"] is True
 
 
+def test_include_sensors_false_skips_sensor_reads(tmp_path):
+    """include_sensors=False avoids slower sysfs sensor probes."""
+    _make_proc_tree(tmp_path)
+
+    svc = HostSystemMonitorService(proc_root=str(tmp_path), sys_root=str(tmp_path))
+    with (
+        patch.object(svc, "_read_cpu_temperature") as read_temp,
+        patch.object(svc, "_read_cpu_fan_rpm") as read_fan,
+        patch.object(svc, "_read_battery_percent") as read_battery,
+    ):
+        snap = svc.get_snapshot(include_sensors=False)
+
+    read_temp.assert_not_called()
+    read_fan.assert_not_called()
+    read_battery.assert_not_called()
+    assert snap["cpu_temperature_celsius"] is None
+    assert snap["cpu_fan_rpm"] is None
+    assert snap["battery_percent"] is None
+    assert snap["available"] is True
+
+
 def test_disappearing_pid_does_not_crash(tmp_path):
     import shutil
 

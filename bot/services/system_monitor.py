@@ -161,13 +161,20 @@ class HostSystemMonitorService:
     # Public API
     # ------------------------------------------------------------------
 
-    def get_snapshot(self, top_limit: int = 4) -> dict[str, Any]:
+    def get_snapshot(
+        self,
+        top_limit: int = 4,
+        *,
+        include_sensors: bool = True,
+    ) -> dict[str, Any]:
         """
         Return a JSON-safe host system-resource snapshot.
 
         Args:
             top_limit: Number of top CPU-consuming processes to include
                 (clamped 0–8). Use 0 to skip the expensive per-process scan.
+            include_sensors: Whether to read slower sysfs sensors such as CPU
+                temperature, fan RPM, and battery percentage.
 
         Returns:
             Dict with keys:
@@ -243,21 +250,27 @@ class HostSystemMonitorService:
             section_started = time.monotonic()
             disk = self._read_disk_io(interval)
             _mark("disk_io", section_started)
-            section_started = time.monotonic()
-            cpu_temperature_celsius = self._read_cpu_temperature()
-            _mark("cpu_temperature", section_started)
-            section_started = time.monotonic()
-            cpu_fan_rpm = self._read_cpu_fan_rpm()
-            _mark("cpu_fan", section_started)
-            section_started = time.monotonic()
-            battery_percent = self._read_battery_percent()
-            _mark("battery", section_started)
+            if include_sensors:
+                section_started = time.monotonic()
+                cpu_temperature_celsius = self._read_cpu_temperature()
+                _mark("cpu_temperature", section_started)
+                section_started = time.monotonic()
+                cpu_fan_rpm = self._read_cpu_fan_rpm()
+                _mark("cpu_fan", section_started)
+                section_started = time.monotonic()
+                battery_percent = self._read_battery_percent()
+                _mark("battery", section_started)
+            else:
+                cpu_temperature_celsius = None
+                cpu_fan_rpm = None
+                battery_percent = None
+                timings["sensors_skipped"] = 0.0
 
             total_elapsed = time.monotonic() - total_started
             if self._slow_log_seconds and total_elapsed >= self._slow_log_seconds:
                 logger.warning(
                     "Host system monitor slow snapshot total=%.2fs sections=%s "
-                    "proc_count=%d top_count=%d",
+                    "proc_count=%d top_count=%d top_limit=%d include_sensors=%s",
                     total_elapsed,
                     ", ".join(
                         f"{name}={duration:.3f}s"
@@ -267,6 +280,8 @@ class HostSystemMonitorService:
                     ),
                     self._last_process_scan_count,
                     len(processes),
+                    top_limit,
+                    include_sensors,
                 )
 
             return {
