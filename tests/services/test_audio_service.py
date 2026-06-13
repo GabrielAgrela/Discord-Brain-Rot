@@ -228,6 +228,52 @@ class TestAudioService:
             assert audio_service._message_has_send_controls_button(message) is True
 
     @pytest.mark.asyncio
+    async def test_create_ffmpeg_opus_audio_source_splits_probe_and_constructor(
+        self, audio_service, tmp_path
+    ):
+        """FFmpeg source diagnostics time probe separately from source construction."""
+        from bot.services.audio import AudioService
+
+        audio_path = tmp_path / "clip.mp3"
+        audio_path.write_bytes(b"fake mp3")
+        audio_service.ffmpeg_path = "/usr/bin/ffmpeg"
+
+        fake_process = Mock(pid=1234)
+        fake_process.poll.return_value = None
+        fake_source = Mock(_process=fake_process)
+
+        with (
+            patch(
+                "bot.services.audio.discord.FFmpegOpusAudio.probe",
+                new=AsyncMock(return_value=("mp3", 64)),
+            ) as probe,
+            patch(
+                "bot.services.audio.asyncio.to_thread",
+                new=AsyncMock(return_value=fake_source),
+            ) as to_thread,
+        ):
+            result = await AudioService._create_ffmpeg_opus_audio_source(
+                audio_service,
+                audio_file_path=str(audio_path),
+                audio_file="clip.mp3",
+                guild_id=123,
+                play_id="play-1",
+                ffmpeg_options='-filter:a "volume=1"',
+                ffmpeg_before_options="-nostdin",
+            )
+
+        assert result is fake_source
+        probe.assert_awaited_once_with(str(audio_path), executable="/usr/bin/ffmpeg")
+        to_thread.assert_awaited_once()
+        call_args = to_thread.await_args
+        assert call_args.args[0].__name__ == "FFmpegOpusAudio"
+        assert call_args.args[1] == str(audio_path)
+        assert call_args.kwargs["executable"] == "/usr/bin/ffmpeg"
+        assert call_args.kwargs["bitrate"] == 64
+        assert call_args.kwargs["codec"] == "libopus"
+        assert call_args.kwargs["before_options"] == "-nostdin"
+
+    @pytest.mark.asyncio
     async def test_play_audio_does_not_block_rapid_requests_with_cooldown_message(self, audio_service):
         """Ensure rapid non-TTS play requests continue into normal playback handling."""
         from bot.services.audio import AudioService

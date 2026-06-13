@@ -62,6 +62,19 @@ class PlaybackDiagnosticsAudioSource(discord.AudioSource):
         self.started_at = time.monotonic()
         self._last_read_started_at: Optional[float] = None
 
+    def _source_process_state(self) -> str:
+        """Return compact FFmpeg process state for read-stall diagnostics."""
+        process = getattr(self._source, "_process", None)
+        if process is None:
+            return "ffmpeg_pid=None ffmpeg_returncode=None"
+        try:
+            return (
+                f"ffmpeg_pid={getattr(process, 'pid', None)} "
+                f"ffmpeg_returncode={process.poll()}"
+            )
+        except Exception:
+            return f"ffmpeg_pid={getattr(process, 'pid', None)} ffmpeg_returncode=unknown"
+
     def read(self) -> bytes:
         read_started = time.monotonic()
         if self._last_read_started_at is not None:
@@ -71,12 +84,16 @@ class PlaybackDiagnosticsAudioSource(discord.AudioSource):
                 self.warning_count += 1
                 logger.warning(
                     "[AudioService] [PLAY-STUTTER] audio_source_read_gap "
-                    "play_id=%s guild_id=%s file=%s gap=%.3fs reads=%s",
+                    "play_id=%s guild_id=%s file=%s gap=%.3fs reads=%s "
+                    "source_elapsed=%.3fs thread=%s %s",
                     self.play_id,
                     self.guild_id,
                     self.audio_file,
                     gap,
                     self.read_count,
+                    read_started - self.started_at,
+                    threading.current_thread().name,
+                    self._source_process_state(),
                 )
         data = self._source.read()
         read_elapsed = time.monotonic() - read_started
@@ -88,13 +105,17 @@ class PlaybackDiagnosticsAudioSource(discord.AudioSource):
             self.warning_count += 1
             logger.warning(
                 "[AudioService] [PLAY-STUTTER] audio_source_read_slow "
-                "play_id=%s guild_id=%s file=%s duration=%.3fs reads=%s bytes=%s",
+                "play_id=%s guild_id=%s file=%s duration=%.3fs reads=%s "
+                "bytes=%s source_elapsed=%.3fs thread=%s %s",
                 self.play_id,
                 self.guild_id,
                 self.audio_file,
                 read_elapsed,
                 self.read_count,
                 len(data) if data else 0,
+                read_started - self.started_at,
+                threading.current_thread().name,
+                self._source_process_state(),
             )
         self._last_read_started_at = read_started
         return data
@@ -428,6 +449,87 @@ class AudioService:
         """Log performance metrics for an operation."""
         duration = time.time() - start_time
         print(f"[AudioService] [PERF] {operation} finished in {duration:.4f}s {extra}")
+
+    async def _create_ffmpeg_opus_audio_source(
+        self,
+        *,
+        audio_file_path: str,
+        audio_file: str,
+        guild_id: int,
+        play_id: str,
+        ffmpeg_options: str,
+        ffmpeg_before_options: str,
+    ) -> discord.AudioSource:
+        """Create a Discord FFmpeg opus source with probe/constructor timing logs."""
+        try:
+            stat_result = os.stat(audio_file_path)
+            file_size = stat_result.st_size
+            file_mtime = round(stat_result.st_mtime, 3)
+        except OSError:
+            file_size = None
+            file_mtime = None
+
+        logger.info(
+            "[AudioService] [FFMPEG-TRACE] source_create_begin "
+            "play_id=%s guild_id=%s file=%s path=%s size=%s mtime=%s "
+            "before_options=%r options=%r",
+            play_id,
+            guild_id,
+            audio_file,
+            audio_file_path,
+            file_size,
+            file_mtime,
+            ffmpeg_before_options,
+            ffmpeg_options,
+        )
+
+        probe_start = time.monotonic()
+        codec, bitrate = await discord.FFmpegOpusAudio.probe(
+            audio_file_path,
+            executable=self.ffmpeg_path,
+        )
+        probe_duration = time.monotonic() - probe_start
+        selected_codec = "copy" if codec in ("opus", "libopus") else "libopus"
+        selected_bitrate = bitrate if bitrate is not None else 128
+        logger.info(
+            "[AudioService] [FFMPEG-TRACE] probe_end "
+            "play_id=%s guild_id=%s file=%s duration=%.4fs "
+            "codec=%s bitrate=%s selected_codec=%s selected_bitrate=%s",
+            play_id,
+            guild_id,
+            audio_file,
+            probe_duration,
+            codec,
+            bitrate,
+            selected_codec,
+            selected_bitrate,
+        )
+
+        ctor_start = time.monotonic()
+        audio_source = await asyncio.to_thread(
+            discord.FFmpegOpusAudio,
+            audio_file_path,
+            executable=self.ffmpeg_path,
+            bitrate=selected_bitrate,
+            codec=selected_codec,
+            options=ffmpeg_options,
+            before_options=ffmpeg_before_options,
+            stderr=None,
+        )
+        ctor_duration = time.monotonic() - ctor_start
+        process = getattr(audio_source, "_process", None)
+        logger.info(
+            "[AudioService] [FFMPEG-TRACE] ctor_end "
+            "play_id=%s guild_id=%s file=%s duration=%.4fs "
+            "ffmpeg_pid=%s ffmpeg_returncode=%s",
+            play_id,
+            guild_id,
+            audio_file,
+            ctor_duration,
+            getattr(process, "pid", None),
+            process.poll() if process is not None else None,
+        )
+        return audio_source
 
     def _ensure_guild_playback_state(self, guild_id: int) -> None:
         """Ensure playback state dictionaries are initialized for a guild."""
@@ -2564,13 +2666,13 @@ class AudioService:
                         f"[AudioService] [PERF] ffmpeg_queue_wait guild_id={guild_id} wait={ffmpeg_queue_wait:.4f}s"
                     )
                     ffmpeg_spawn_start = time.time()
-                    # Use FFmpegOpusAudio for stability
-                    audio_source = await discord.FFmpegOpusAudio.from_probe(
-                        audio_file_path,
-                        executable=self.ffmpeg_path,
-                        options=ffmpeg_options,
-                        before_options=ffmpeg_before_options,
-                        stderr=None,  # inherit stderr so ffmpeg crashes are visible in container logs
+                    audio_source = await self._create_ffmpeg_opus_audio_source(
+                        audio_file_path=audio_file_path,
+                        audio_file=audio_file,
+                        guild_id=guild_id,
+                        play_id=play_id,
+                        ffmpeg_options=ffmpeg_options,
+                        ffmpeg_before_options=ffmpeg_before_options,
                     )
                     audio_source = PlaybackDiagnosticsAudioSource(
                         audio_source,
@@ -2696,23 +2798,51 @@ class AudioService:
                 try:
                     # Metadata and UI work starts AFTER audio is playing
                     handle_ui_start = time.time()
-                    print(f"[AudioService] [DEBUG] handle_ui background task started for {audio_file}")
+                    print(
+                        "[AudioService] [UI-TRACE] handle_ui_start "
+                        f"play_id={play_id} guild_id={guild_id} file={audio_file} "
+                        f"player_alive={active_player.is_alive() if active_player is not None else None}"
+                    )
+
+                    def _log_ui_stage(stage: str, started_at: float) -> None:
+                        player_alive = None
+                        try:
+                            player_alive = (
+                                active_player.is_alive()
+                                if active_player is not None
+                                else None
+                            )
+                        except Exception:
+                            player_alive = None
+                        print(
+                            "[AudioService] [UI-TRACE] "
+                            f"stage={stage} play_id={play_id} guild_id={guild_id} "
+                            f"file={audio_file} duration={time.time() - started_at:.4f}s "
+                            f"player_alive={player_alive} "
+                            f"playback_done={self._guild_playback_done.get(guild_id).is_set() if self._guild_playback_done.get(guild_id) else None}"
+                        )
 
                     # 1. Fetch sound info and metadata in background
+                    stage_start = time.time()
                     sound_info = await asyncio.to_thread(self.sound_repo.get_sound, audio_file, False, guild_id)
+                    _log_ui_stage("sound_lookup", stage_start)
                     
                     duration = 0
                     duration_str = "Unknown"
                     try:
+                        stage_start = time.time()
                         audio = await asyncio.to_thread(MP3, audio_file_path)
                         duration = audio.info.length
                         duration_str = f"{int(duration // 60)}:{int(duration % 60):02d}"
+                        _log_ui_stage("duration_lookup", stage_start)
                     except Exception as e:
                         print(f"[AudioService] Error getting audio duration in background: {e}")
 
                     is_slap_sound = sound_info and sound_info[6] == 1
                     
+                    stage_start = time.time()
                     bot_channel = self.message_service.get_bot_channel(channel.guild)
+                    _log_ui_stage("bot_channel_lookup", stage_start)
                     if not bot_channel:
                         logger.warning(
                             "[AudioService] handle_ui skipped because bot channel was not found "
@@ -2868,7 +2998,11 @@ class AudioService:
                         
                         quote_text = original_message if (is_tts or sts_char) and original_message else None
                         
-                        self._log_perf("handle_ui DB operations", db_start_time)
+                        self._log_perf(
+                            "handle_ui DB operations",
+                            db_start_time,
+                            extra=f"guild_id={guild_id} play_id={play_id} file={audio_file}",
+                        )
                         # print(f"[AudioService] [DEBUG] DB operations finished in {time.time() - db_start_time:.4f}s")
 
                         img_start_time = time.time()
@@ -2882,10 +3016,18 @@ class AudioService:
                             sts_thumbnail_url=sts_thumbnail_url,
                             request_note=request_note,
                         )
-                        self._log_perf("Image Generation", img_start_time)
+                        self._log_perf(
+                            "Image Generation",
+                            img_start_time,
+                            extra=f"guild_id={guild_id} play_id={play_id} file={audio_file}",
+                        )
                         # print(f"[AudioService] [DEBUG] Image generation finished in {time.time() - handle_ui_start:.4f}s")
                         
-                        self._log_perf("Total handle_ui", handle_ui_start)
+                        self._log_perf(
+                            "Total handle_ui",
+                            handle_ui_start,
+                            extra=f"guild_id={guild_id} play_id={play_id} file={audio_file}",
+                        )
                         
                         from bot.ui import SoundBeingPlayedView
                         behavior_ref = self._behavior if hasattr(self, '_behavior') else None
@@ -2922,7 +3064,9 @@ class AudioService:
                                     await loading_message.delete()
                                 except Exception:
                                     pass
+                            stage_start = time.time()
                             sound_message = await bot_channel.send(file=file, view=view)
+                            _log_ui_stage("bot_channel_send_file", stage_start)
                         else:
                             embed = discord.Embed(color=discord.Color.red())
                             if duration > 0:
@@ -2945,7 +3089,9 @@ class AudioService:
                                     await loading_message.delete()
                                 except Exception:
                                     pass
+                            stage_start = time.time()
                             sound_message = await bot_channel.send(embed=embed, view=view)
+                            _log_ui_stage("bot_channel_send_embed", stage_start)
                         
                         self._guild_current_sound_message[guild_id] = sound_message
                         self._guild_current_view[guild_id] = view
@@ -2958,7 +3104,9 @@ class AudioService:
                         #     await self.message_service.send_controls(self._behavior, guild=channel.guild)
                     else:
                         embed = discord.Embed(title="👋 Slap!", color=discord.Color.orange())
+                        stage_start = time.time()
                         sound_message = await bot_channel.send(embed=embed)
+                        _log_ui_stage("bot_channel_send_slap", stage_start)
                         self._guild_current_sound_message[guild_id] = sound_message
                         self.current_sound_message = sound_message
                         # if send_controls and hasattr(self, '_behavior') and self._behavior:
@@ -2980,10 +3128,15 @@ class AudioService:
                         )
                         self._guild_progress_update_task[guild_id] = progress_task
                         self._progress_update_task = progress_task
+                    _log_ui_stage("handle_ui_end", handle_ui_start)
                 except Exception as ui_error:
                     print(f"[AudioService] Error in background UI task: {ui_error}")
                     traceback.print_exc()
 
+            print(
+                "[AudioService] [UI-TRACE] handle_ui_scheduled "
+                f"play_id={play_id} guild_id={guild_id} file={audio_file}"
+            )
             asyncio.create_task(handle_ui())
             self._release_guild_play_request(guild_id)
             return True
