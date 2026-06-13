@@ -1514,6 +1514,40 @@ class TestBotStatusCpu:
     @pytest.mark.asyncio
     @patch("bot.services.background.ActionRepository")
     @patch("bot.services.background.SoundRepository")
+    async def test_web_system_monitor_skips_process_scan_during_active_voice(
+        self, _mock_sound_repo, _mock_action_repo
+    ):
+        """Avoid expensive host process scans while users are in voice."""
+        from bot.services.background import BackgroundService
+
+        human = Mock(bot=False)
+        channel = Mock(members=[human])
+        voice_client = Mock(channel=channel)
+        voice_client.is_connected.return_value = True
+        guild = Mock(voice_client=voice_client)
+        service = BackgroundService(
+            bot=Mock(guilds=[guild]),
+            audio_service=Mock(),
+            sound_service=Mock(),
+            behavior=Mock(),
+        )
+        service.web_system_status_repo.upsert_snapshot = Mock()
+
+        snapshot = {"available": True, "total_cpu_percent": 42.0}
+        with patch(
+            "bot.services.background.asyncio.to_thread",
+            new=AsyncMock(return_value=snapshot),
+        ) as to_thread:
+            await type(service).web_system_monitor_status_loop.coro(service)
+
+        to_thread.assert_awaited_once_with(
+            service._host_system_monitor.get_snapshot,
+            top_limit=0,
+        )
+
+    @pytest.mark.asyncio
+    @patch("bot.services.background.ActionRepository")
+    @patch("bot.services.background.SoundRepository")
     async def test_format_cpu_for_status_returns_string_when_valid(
         self, _mock_sound_repo, _mock_action_repo
     ):

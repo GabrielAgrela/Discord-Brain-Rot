@@ -255,6 +255,25 @@ def test_top_limit_clamps(tmp_path):
     assert len(snap3["top_processes"]) <= 3
 
 
+def test_top_limit_zero_skips_process_scan(tmp_path):
+    """top_limit=0 avoids the expensive per-process /proc scan."""
+    cpu1 = (100, 50, 25, 800, 10, 0, 0, 0, 0, 0)
+    cpu2 = (200, 100, 50, 1200, 20, 0, 0, 0, 0, 0)
+    procs = {101: ("python", 10, 5, 1024)}
+    _make_proc_tree(tmp_path, cpu_fields=cpu1, processes=procs)
+
+    svc = HostSystemMonitorService(proc_root=str(tmp_path))
+    svc.get_snapshot(top_limit=4)
+
+    _make_proc_tree(tmp_path, cpu_fields=cpu2, processes=procs)
+    with patch.object(svc, "_read_processes") as read_processes:
+        snap = svc.get_snapshot(top_limit=0)
+
+    read_processes.assert_not_called()
+    assert snap["top_processes"] == []
+    assert snap["available"] is True
+
+
 def test_disappearing_pid_does_not_crash(tmp_path):
     import shutil
 

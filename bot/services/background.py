@@ -1416,9 +1416,10 @@ class BackgroundService:
         """Collect host CPU/RAM/top processes and persist to DB every 1 s."""
         try:
             started = time.monotonic()
+            top_limit = 0 if self._has_active_voice_session() else 8
             snapshot = await asyncio.to_thread(
                 self._host_system_monitor.get_snapshot,
-                top_limit=8,
+                top_limit=top_limit,
             )
             elapsed = time.monotonic() - started
             if elapsed > 2.0:
@@ -2055,9 +2056,12 @@ class BackgroundService:
 
     def _has_active_voice_session(self) -> bool:
         """Return True when the bot is connected to voice with non-bot users."""
-        for guild in getattr(self.bot, "guilds", []) or []:
-            if self._guild_has_active_voice_members(guild):
-                return True
+        try:
+            for guild in getattr(self.bot, "guilds", []) or []:
+                if self._guild_has_active_voice_members(guild):
+                    return True
+        except TypeError:
+            return False
         return False
 
     @staticmethod

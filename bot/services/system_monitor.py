@@ -167,7 +167,7 @@ class HostSystemMonitorService:
 
         Args:
             top_limit: Number of top CPU-consuming processes to include
-                (clamped 1–8).
+                (clamped 0–8). Use 0 to skip the expensive per-process scan.
 
         Returns:
             Dict with keys:
@@ -188,7 +188,7 @@ class HostSystemMonitorService:
             - ``disk_write_bytes_per_second`` (*float*)
             - ``error`` (*str*, only when ``available`` is *False*)
         """
-        top_limit = max(1, min(8, top_limit))
+        top_limit = max(0, min(8, top_limit))
 
         timings: dict[str, float] = {}
         total_started = time.monotonic()
@@ -233,7 +233,12 @@ class HostSystemMonitorService:
 
             # -- per-process CPU -----------------------------------------------
             section_started = time.monotonic()
-            processes = self._read_processes(cur_cpu, prev_cpu, top_limit)
+            if top_limit > 0:
+                processes = self._read_processes(cur_cpu, prev_cpu, top_limit)
+            else:
+                processes = []
+                self._last_process_scan_count = 0
+                self._prev_proc_info = {}
             _mark("processes", section_started)
             section_started = time.monotonic()
             disk = self._read_disk_io(interval)
