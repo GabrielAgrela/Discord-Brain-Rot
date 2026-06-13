@@ -1496,6 +1496,7 @@ class TestBotStatusCpu:
         to_thread.assert_awaited_once_with(
             service._host_system_monitor.get_snapshot,
             top_limit=8,
+            include_sensors=True,
         )
         persisted_snapshot = service.web_system_status_repo.upsert_snapshot.call_args.args[0]
         assert persisted_snapshot["available"] is True
@@ -1543,6 +1544,7 @@ class TestBotStatusCpu:
         to_thread.assert_awaited_once_with(
             service._host_system_monitor.get_snapshot,
             top_limit=0,
+            include_sensors=False,
         )
 
     @pytest.mark.asyncio

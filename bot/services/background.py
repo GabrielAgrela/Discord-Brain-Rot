@@ -636,7 +636,104 @@ class BackgroundService:
         except Exception:
             metrics["audio_active_progress_task_count"] = None
 
+        try:
+            active_playbacks = self._collect_active_audio_playbacks()
+            metrics["audio_active_playback_count"] = len(active_playbacks)
+            metrics["audio_active_playbacks"] = self._format_active_audio_playbacks(
+                active_playbacks
+            )
+        except Exception:
+            metrics["audio_active_playback_count"] = None
+            metrics["audio_active_playbacks"] = "unavailable"
+
+        try:
+            loop = asyncio.get_running_loop()
+            executor = getattr(loop, "_default_executor", None)
+            if executor is not None:
+                work_queue = getattr(executor, "_work_queue", None)
+                threads = getattr(executor, "_threads", None)
+                metrics["asyncio_executor_pending"] = (
+                    work_queue.qsize() if work_queue is not None else None
+                )
+                metrics["asyncio_executor_threads"] = (
+                    len(threads) if threads is not None else None
+                )
+            else:
+                metrics["asyncio_executor_pending"] = 0
+                metrics["asyncio_executor_threads"] = 0
+        except Exception:
+            metrics["asyncio_executor_pending"] = None
+            metrics["asyncio_executor_threads"] = None
+
         return metrics
+
+    def _collect_active_audio_playbacks(self) -> list[dict[str, Any]]:
+        """Return compact playback state from AudioService for diagnostics."""
+        audio_service = getattr(self, "audio_service", None)
+        if audio_service is None:
+            return []
+
+        play_ids = getattr(audio_service, "_guild_current_play_id", {}) or {}
+        audio_files = getattr(audio_service, "_guild_current_audio_file", {}) or {}
+        requesters = getattr(audio_service, "_guild_current_requester", {}) or {}
+        started_at_by_guild = getattr(
+            audio_service,
+            "_guild_current_play_started_at",
+            {},
+        ) or {}
+        durations = getattr(audio_service, "_guild_current_duration_seconds", {}) or {}
+
+        now = datetime.now()
+        active: list[dict[str, Any]] = []
+        for guild_id, play_id in play_ids.items():
+            if not play_id:
+                continue
+            started_at = started_at_by_guild.get(guild_id)
+            age_seconds = None
+            if isinstance(started_at, datetime):
+                age_seconds = max(0.0, (now - started_at).total_seconds())
+            active.append(
+                {
+                    "guild_id": guild_id,
+                    "play_id": play_id,
+                    "audio_file": audio_files.get(guild_id),
+                    "requester": requesters.get(guild_id),
+                    "age_seconds": age_seconds,
+                    "duration_seconds": durations.get(guild_id),
+                }
+            )
+        return active
+
+    @staticmethod
+    def _format_active_audio_playbacks(playbacks: list[dict[str, Any]]) -> str:
+        """Format active playback state for one-line warnings."""
+        if not playbacks:
+            return "none"
+        parts = []
+        for playback in playbacks[:4]:
+            age = playback.get("age_seconds")
+            duration = playback.get("duration_seconds")
+            if isinstance(age, (int, float)):
+                age_text = f"{age:.1f}s"
+            else:
+                age_text = "unknown"
+            if isinstance(duration, (int, float)):
+                duration_text = f"{duration:.1f}s"
+            else:
+                duration_text = "unknown"
+            parts.append(
+                "guild={guild_id} play_id={play_id} file={audio_file} "
+                "age={age}/{duration}".format(
+                    guild_id=playback.get("guild_id"),
+                    play_id=playback.get("play_id"),
+                    audio_file=playback.get("audio_file"),
+                    age=age_text,
+                    duration=duration_text,
+                )
+            )
+        if len(playbacks) > len(parts):
+            parts.append(f"+{len(playbacks) - len(parts)} more")
+        return "; ".join(parts)
 
     def _build_performance_snapshot(self, sample_monotonic: float) -> Dict[str, Any]:
         """Build a high-detail telemetry payload for performance logging."""
@@ -1339,7 +1436,9 @@ class BackgroundService:
                 logger.warning(
                     "[PerformanceMonitor] Event loop lag %.1fms | "
                     "process_cpu=%.1f%% host_cpu=%.1f%% rss=%s "
-                    "threads=%s tasks=%s pending=%s load1=%s bot_latency=%.1fms",
+                    "threads=%s tasks=%s pending=%s executor_pending=%s "
+                    "executor_threads=%s load1=%s bot_latency=%.1fms "
+                    "audio_playbacks=%s progress_tasks=%s pending_connections=%s",
                     loop_lag_ms,
                     payload.get("process_cpu_percent_of_one_core") or 0.0,
                     payload.get("cpu_total_percent") or 0.0,
@@ -1347,8 +1446,13 @@ class BackgroundService:
                     payload.get("process_threads"),
                     payload.get("asyncio_task_total"),
                     payload.get("asyncio_task_pending"),
+                    payload.get("asyncio_executor_pending"),
+                    payload.get("asyncio_executor_threads"),
                     payload.get("load_avg_1m"),
                     payload.get("bot_latency_ms") or 0.0,
+                    payload.get("audio_active_playbacks"),
+                    payload.get("audio_active_progress_task_count"),
+                    payload.get("audio_pending_connection_count"),
                 )
             #logger.info("[PerformanceMonitor] %s", json.dumps(payload, sort_keys=True))
         except Exception as e:
@@ -1416,16 +1520,27 @@ class BackgroundService:
         """Collect host CPU/RAM/top processes and persist to DB every 1 s."""
         try:
             started = time.monotonic()
-            top_limit = 0 if self._has_active_voice_session() else 8
+            active_voice = self._has_active_voice_session()
+            top_limit = 0 if active_voice else 8
+            include_sensors = not active_voice
             snapshot = await asyncio.to_thread(
                 self._host_system_monitor.get_snapshot,
                 top_limit=top_limit,
+                include_sensors=include_sensors,
             )
             elapsed = time.monotonic() - started
             if elapsed > 2.0:
                 logger.warning(
-                    "[BackgroundService] Host system monitor collection took %.2fs",
+                    "[BackgroundService] Host system monitor collection took %.2fs "
+                    "active_voice=%s top_limit=%s include_sensors=%s "
+                    "active_playbacks=%s",
                     elapsed,
+                    active_voice,
+                    top_limit,
+                    include_sensors,
+                    self._format_active_audio_playbacks(
+                        self._collect_active_audio_playbacks()
+                    ),
                 )
             if snapshot.get("available"):
                 self._host_monitor_warmed = True
