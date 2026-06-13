@@ -2457,6 +2457,13 @@ html.theme-dark .web-upload-close {
     animation: doodlePress 0.2s ease-out;
 }
 
+html.theme-dark .web-upload-file-button {
+    border-color: var(--border-strong);
+    background:
+        linear-gradient(180deg, oklch(25% 0.025 164), oklch(18% 0.018 164));
+    color: var(--ink);
+}
+
 .web-upload-file-name {
     min-width: 0;
     padding: 0.72rem 0.78rem;
@@ -2642,6 +2649,13 @@ html.theme-dark .web-upload-secondary {
         var(--button-cartoon-shadow-hover),
         var(--button-cartoon-highlight);
     animation: doodleWobble 0.5s ease-in-out;
+}
+
+html.theme-dark .web-upload-submit {
+    border-color: var(--border-strong);
+    background:
+        linear-gradient(180deg, oklch(25% 0.025 164), oklch(18% 0.018 164));
+    color: var(--ink);
 }
 
 .web-upload-submit:disabled {
@@ -5366,6 +5380,27 @@ body.page-soundboard .tables-grid > .card:nth-child(3) {
             var(--button-cartoon-highlight);
     }
 
+    .action-badge.play,
+    .action-badge.favorite,
+    .time-btn.active,
+    .dataset-action-btn.primary {
+        border-color: rgb(23, 18, 13);
+        background: rgb(239, 190, 92);
+        color: rgb(23, 18, 13);
+    }
+
+    .action-badge.join {
+        border-color: rgb(23, 18, 13);
+        background: rgb(72, 160, 110);
+        color: rgb(23, 18, 13);
+    }
+
+    .action-badge.keyword {
+        border-color: rgb(23, 18, 13);
+        background: rgb(170, 143, 103);
+        color: rgb(23, 18, 13);
+    }
+
     html.theme-dark .theme-toggle,
     html.theme-dark .play-button,
     html.theme-dark .play-btn,
@@ -5394,6 +5429,27 @@ body.page-soundboard .tables-grid > .card:nth-child(3) {
     html.theme-dark .web-control-button.error {
         border-color: rgb(228, 95, 73);
         background: linear-gradient(180deg, rgb(237, 121, 97), rgb(190, 59, 43));
+    }
+
+    html.theme-dark .action-badge.play,
+    html.theme-dark .action-badge.favorite,
+    html.theme-dark .time-btn.active,
+    html.theme-dark .dataset-action-btn.primary {
+        border-color: rgb(18, 22, 20);
+        background: rgb(248, 202, 55);
+        color: rgb(18, 22, 20);
+    }
+
+    html.theme-dark .action-badge.join {
+        border-color: rgb(18, 22, 20);
+        background: rgb(102, 212, 137);
+        color: rgb(18, 22, 20);
+    }
+
+    html.theme-dark .action-badge.keyword {
+        border-color: rgb(18, 22, 20);
+        background: rgb(198, 169, 116);
+        color: rgb(18, 22, 20);
     }
 }
 
@@ -8282,6 +8338,18 @@ html.theme-dark .dataset-clip.selected {
 
 html.theme-dark .action-badge {
     box-shadow: 2px 2px 0 oklch(5% 0.01 164 / 0.48), var(--button-cartoon-highlight);
+}
+
+html.theme-dark .action-badge.play,
+html.theme-dark .action-badge.favorite,
+html.theme-dark .action-badge.join,
+html.theme-dark .action-badge.keyword,
+html.theme-dark .time-btn.active,
+html.theme-dark .dataset-action-btn.primary {
+    border-color: rgb(18, 22, 20);
+    color: rgb(18, 22, 20);
+    border-color: oklch(11.5% 0.006 270);
+    color: oklch(11.5% 0.006 270);
 }
 
 html.theme-dark .action-badge.keyword {
